@@ -3,17 +3,19 @@ import type { SankeyChartData } from './types';
 import { api } from '../../lib/api';
 import { colors, fonts } from '../../styles/theme';
 
-// Stage color palette — cycles across stages
-const STAGE_COLORS = ['#6366f1', '#8b5cf6', '#0ea5e9', '#f59e0b', '#22c55e', '#ec4899', '#14b8a6'];
+// Stage color palette
+const STAGE_COLORS = ['#818cf8', '#34d399', '#fbbf24', '#f472b6', '#60a5fa', '#a78bfa', '#2dd4bf'];
+const LOST_COLOR = '#7f1d1d';
+const LOST_BAR_COLOR = '#991b1b';
 
-// SVG layout constants
-const CARD_W = 130;
-const CARD_H_MAX = 200;
-const CARD_H_MIN = 60;
-const GAP = 90;
-const SVG_PAD_X = 30;
-const SVG_PAD_Y = 24;
-const BADGE_ROW_H = 28;
+// Layout constants
+const NODE_W = 28;
+const MAX_H = 220;
+const MIN_H = 20;
+const LABEL_TOP = 60;   // space above chart area for name/count labels
+const BOTTOM_H = 56;    // space below baseline for lost/value labels
+const SIDE_PAD = 28;
+const GAP = 80;
 
 type FilterKey = string;
 
@@ -47,7 +49,7 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
   const initialData = (data ?? chartDataProp) ?? null;
   const [chartData, setChartData] = useState<SankeyChartData | null>(initialData);
   const [loading, setLoading] = useState(false);
-  const [hoveredFlow, setHoveredFlow] = useState<string | null>(null);
+  const [hoveredFlow, setHoveredFlow] = useState<number | null>(null);
 
   React.useEffect(() => {
     const next = (data ?? chartDataProp) ?? null;
@@ -90,24 +92,68 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
     [activeFilterKey, loading]
   );
 
-  // SVG Layout
+  // ── SVG Layout ──────────────────────────────────────────────────────────────
   const n = stages.length;
   if (n === 0) return null;
 
-  const maxDeals = Math.max(...stages.map(s => Math.max(s.deals, 1)));
-  const cardHeights = stages.map(s =>
-    CARD_H_MIN + Math.round(((s.deals / maxDeals) * (CARD_H_MAX - CARD_H_MIN)))
+  const maxDeals = Math.max(...stages.map(s => s.deals), 1);
+
+  const nodeH = stages.map(s => Math.max(MIN_H, (s.deals / maxDeals) * MAX_H));
+  const nodeX = stages.map((_, i) => SIDE_PAD + i * (NODE_W + GAP));
+  // bottom-align all bars to a common baseline
+  const baseline = LABEL_TOP + MAX_H;
+  const nodeY = nodeH.map(h => baseline - h);
+  // lost segment at bottom of each bar
+  const lostH = stages.map((s, i) =>
+    s.lostCount > 0 ? Math.max(2, (s.lostCount / Math.max(s.deals, 1)) * nodeH[i]) : 0
   );
-  const maxCardH = Math.max(...cardHeights);
+  // flow segment = top of bar (flows onward)
+  const flowH = nodeH.map((h, i) => h - lostH[i]);
 
-  const cardXs = stages.map((_, i) => SVG_PAD_X + i * (CARD_W + GAP));
-  const cardYs = cardHeights.map(h => SVG_PAD_Y + (maxCardH - h) / 2);
+  const svgW = SIDE_PAD * 2 + n * NODE_W + (n - 1) * GAP;
+  const svgH = LABEL_TOP + MAX_H + BOTTOM_H;
 
-  const svgW = SVG_PAD_X * 2 + n * CARD_W + (n - 1) * GAP;
-  const svgH = SVG_PAD_Y * 2 + maxCardH + BADGE_ROW_H;
+  // Helper: flow band path between stage i and i+1
+  function flowBandPath(i: number): string {
+    const x1 = nodeX[i] + NODE_W;
+    const x2 = nodeX[i + 1];
+    const midX = (x1 + x2) / 2;
+    const y1t = nodeY[i];
+    const y1b = nodeY[i] + flowH[i];
+    const y2t = nodeY[i + 1];
+    const y2b = nodeY[i + 1] + nodeH[i + 1];
+    return [
+      `M ${x1} ${y1t}`,
+      `C ${midX} ${y1t} ${midX} ${y2t} ${x2} ${y2t}`,
+      `L ${x2} ${y2b}`,
+      `C ${midX} ${y2b} ${midX} ${y1b} ${x1} ${y1b}`,
+      'Z',
+    ].join(' ');
+  }
 
-  const flowMap = new Map(flows.map(f => [`${f.fromId}→${f.toId}`, f]));
-  const maxFlow = Math.max(...flows.map(f => f.deals), 1);
+  // Funnel silhouette envelope path (traces tops of all bars + baseline back)
+  function funnelPath(): string {
+    const parts: string[] = [];
+    // start at top-left of first bar
+    parts.push(`M ${nodeX[0]} ${nodeY[0]}`);
+    // bezier curves along tops
+    for (let i = 0; i < n - 1; i++) {
+      const x1 = nodeX[i] + NODE_W;
+      const x2 = nodeX[i + 1];
+      const midX = (x1 + x2) / 2;
+      const y1 = nodeY[i];
+      const y2 = nodeY[i + 1];
+      parts.push(`L ${x1} ${y1}`);
+      parts.push(`C ${midX} ${y1} ${midX} ${y2} ${x2} ${y2}`);
+    }
+    // right side of last bar (top to bottom)
+    parts.push(`L ${nodeX[n - 1] + NODE_W} ${nodeY[n - 1]}`);
+    parts.push(`L ${nodeX[n - 1] + NODE_W} ${baseline}`);
+    // along baseline back to start
+    parts.push(`L ${nodeX[0]} ${baseline}`);
+    parts.push('Z');
+    return parts.join(' ');
+  }
 
   return (
     <div
@@ -118,7 +164,7 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
         overflow: 'hidden',
       }}
     >
-      {/* Keyframes for loading spinner */}
+      {/* Keyframes */}
       <style>{`@keyframes pandora-sankey-spin { to { transform: rotate(360deg); } }`}</style>
 
       {/* Header */}
@@ -253,155 +299,187 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
         <svg
           viewBox={`0 0 ${svgW} ${svgH}`}
           width="100%"
-          style={{ display: 'block', opacity: loading ? 0.35 : 1, transition: 'opacity 0.2s' }}
+          style={{ display: 'block', opacity: loading ? 0.35 : 1, transition: 'opacity 0.2s', overflow: 'visible' }}
         >
-          {/* Flow curves */}
-          {stages.slice(0, -1).map((fromStage, i) => {
-            const toStage = stages[i + 1];
-            const flow = flowMap.get(`${fromStage.id}→${toStage.id}`);
-            if (!flow || flow.deals === 0) return null;
+          {/* 1. Funnel silhouette */}
+          <path
+            d={funnelPath()}
+            fill={STAGE_COLORS[0]}
+            fillOpacity={0.06}
+            stroke="none"
+          />
 
-            const fromX = cardXs[i] + CARD_W;
-            const toX = cardXs[i + 1];
-            const fromY = cardYs[i] + cardHeights[i] / 2;
-            const toY = cardYs[i + 1] + cardHeights[i + 1] / 2;
-            const midX = (fromX + toX) / 2;
-            const strokeW = Math.max(2, Math.round((flow.deals / maxFlow) * 36));
+          {/* 2. Flow bands */}
+          {stages.slice(0, -1).map((_, i) => {
+            const x1 = nodeX[i] + NODE_W;
+            const x2 = nodeX[i + 1];
+            const midX = (x1 + x2) / 2;
+            const tooltipY = nodeY[i] + flowH[i] / 2;
             const color = STAGE_COLORS[i % STAGE_COLORS.length];
-            const flowKey = `${fromStage.id}→${toStage.id}`;
-            const isHovered = hoveredFlow === flowKey;
+            const isHovered = hoveredFlow === i;
+            const flow = flows.find(f => f.fromId === stages[i].id && f.toId === stages[i + 1].id);
 
             return (
-              <g key={flowKey}>
+              <g key={i}>
                 <path
-                  d={`M ${fromX} ${fromY} C ${midX} ${fromY} ${midX} ${toY} ${toX} ${toY}`}
-                  fill="none"
-                  stroke={color}
-                  strokeWidth={strokeW}
-                  strokeOpacity={isHovered ? 0.7 : 0.25}
-                  style={{ transition: 'stroke-opacity 0.15s', cursor: 'default' }}
-                  onMouseEnter={() => setHoveredFlow(flowKey)}
+                  d={flowBandPath(i)}
+                  fill={color}
+                  fillOpacity={isHovered ? 0.52 : 0.28}
+                  stroke="none"
+                  style={{ cursor: 'default', transition: 'fill-opacity 0.15s' }}
+                  onMouseEnter={() => setHoveredFlow(i)}
                   onMouseLeave={() => setHoveredFlow(null)}
                 />
-                {isHovered && (
-                  <text
-                    x={midX}
-                    y={Math.min(fromY, toY) - 10}
-                    textAnchor="middle"
-                    fontSize={11}
-                    fill={colors.text as string}
-                    fontFamily={fonts.sans}
-                  >
-                    {flow.deals} deals · {formatCurrency(flow.value)}
-                  </text>
+                {isHovered && flow && (
+                  <g>
+                    <rect
+                      x={midX - 52}
+                      y={tooltipY - 14}
+                      width={104}
+                      height={22}
+                      rx={5}
+                      fill={colors.surface as string}
+                      stroke={colors.border as string}
+                      strokeWidth={1}
+                    />
+                    <text
+                      x={midX}
+                      y={tooltipY + 1}
+                      textAnchor="middle"
+                      fontSize={11}
+                      fill={colors.text as string}
+                      fontFamily={fonts.sans}
+                      style={{ pointerEvents: 'none' }}
+                    >
+                      {flow.deals} deals · {formatCurrency(flow.value)}
+                    </text>
+                  </g>
                 )}
               </g>
             );
           })}
 
-          {/* Stage cards */}
+          {/* 3 & 4. Bar segments + labels */}
           {stages.map((stage, i) => {
-            const x = cardXs[i];
-            const y = cardYs[i];
-            const h = cardHeights[i];
             const color = STAGE_COLORS[i % STAGE_COLORS.length];
+            const stageName = showRaw && stage.rawLabel ? stage.rawLabel : stage.label;
+            const cx = nodeX[i] + NODE_W / 2;
 
             return (
               <g key={stage.id}>
-                {/* Card background */}
-                <rect
-                  x={x}
-                  y={y}
-                  width={CARD_W}
-                  height={h}
-                  rx={8}
-                  fill={color}
-                  fillOpacity={0.1}
-                  stroke={color}
-                  strokeOpacity={0.35}
-                  strokeWidth={1}
-                />
+                {/* Flow segment (top) */}
+                {flowH[i] > 0 && (
+                  <rect
+                    x={nodeX[i]}
+                    y={nodeY[i]}
+                    width={NODE_W}
+                    height={flowH[i]}
+                    fill={color}
+                    rx={flowH[i] > 4 ? 2 : 0}
+                  />
+                )}
 
-                {/* Stage name */}
+                {/* Lost segment (bottom) */}
+                {lostH[i] > 0 && (
+                  <rect
+                    x={nodeX[i]}
+                    y={nodeY[i] + flowH[i]}
+                    width={NODE_W}
+                    height={lostH[i]}
+                    fill={LOST_BAR_COLOR}
+                    rx={lostH[i] > 4 ? 2 : 0}
+                  />
+                )}
+
+                {/* Stage name — bold, above bar */}
                 <text
-                  x={x + CARD_W / 2}
-                  y={y + 16}
+                  x={cx}
+                  y={nodeY[i] - 28}
+                  textAnchor="middle"
+                  fontSize={11}
+                  fontWeight="700"
+                  fill={color}
+                  fontFamily={fonts.sans}
+                >
+                  {truncate(stageName, 14)}
+                </text>
+
+                {/* Deal count — below name */}
+                <text
+                  x={cx}
+                  y={nodeY[i] - 14}
                   textAnchor="middle"
                   fontSize={10}
-                  fontWeight="600"
-                  fill={color}
+                  fill={colors.textMuted as string}
                   fontFamily={fonts.sans}
                 >
-                  {truncate(showRaw && stage.rawLabel ? stage.rawLabel : stage.label, 16)}
+                  {stage.deals} deal{stage.deals !== 1 ? 's' : ''}
                 </text>
 
-                {/* Deal count */}
-                <text
-                  x={x + CARD_W / 2}
-                  y={y + h / 2 + (h > 90 ? 6 : 4)}
-                  textAnchor="middle"
-                  fontSize={h > 90 ? 26 : 20}
-                  fontWeight="700"
-                  fill={colors.text as string}
-                  fontFamily={fonts.sans}
-                >
-                  {stage.deals}
-                </text>
-
-                {/* ARR value */}
-                {h > 80 && (
+                {/* ARR value — inside or just below bar, only if bar tall enough */}
+                {nodeH[i] >= 30 && (
                   <text
-                    x={x + CARD_W / 2}
-                    y={y + h / 2 + (h > 90 ? 24 : 20)}
+                    x={cx}
+                    y={baseline + 14}
                     textAnchor="middle"
-                    fontSize={11}
-                    fill={colors.textSecondary as string}
+                    fontSize={10}
+                    fill={color}
                     fontFamily={fonts.sans}
+                    fontWeight="600"
                   >
                     {formatCurrency(stage.value)}
                   </text>
                 )}
 
-                {/* Won / Lost badges below card */}
-                {(stage.won > 0 || stage.lostCount > 0) && (
-                  <>
-                    {stage.won > 0 && (
-                      <text
-                        x={x + CARD_W / 2 - (stage.lostCount > 0 ? 22 : 0)}
-                        y={y + h + 18}
-                        textAnchor="middle"
-                        fontSize={10}
-                        fill="#22c55e"
-                        fontFamily={fonts.sans}
-                      >
-                        ↑{stage.won}w
-                      </text>
-                    )}
-                    {stage.lostCount > 0 && (
-                      <text
-                        x={x + CARD_W / 2 + (stage.won > 0 ? 22 : 0)}
-                        y={y + h + 18}
-                        textAnchor="middle"
-                        fontSize={10}
-                        fill="#ef4444"
-                        fontFamily={fonts.sans}
-                      >
-                        ↓{stage.lostCount}l
-                      </text>
-                    )}
-                  </>
+                {/* Lost count + value — below ARR */}
+                {stage.lostCount > 0 && (
+                  <text
+                    x={cx}
+                    y={baseline + 30}
+                    textAnchor="middle"
+                    fontSize={9}
+                    fill={LOST_COLOR}
+                    fontFamily={fonts.sans}
+                  >
+                    -{stage.lostCount} lost {formatCurrency(stage.lostValue)}
+                  </text>
                 )}
               </g>
             );
           })}
         </svg>
+
+        {/* Legend */}
+        <div
+          style={{
+            display: 'flex',
+            gap: 18,
+            alignItems: 'center',
+            padding: '4px 2px 10px',
+            fontFamily: fonts.sans,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <div style={{ width: 10, height: 10, borderRadius: 2, background: STAGE_COLORS[0], opacity: 0.85 }} />
+            <span style={{ fontSize: 11, color: colors.textMuted }}>Flow to next stage</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <div style={{ width: 10, height: 10, borderRadius: 2, background: LOST_BAR_COLOR }} />
+            <span style={{ fontSize: 11, color: colors.textMuted }}>Closed lost</span>
+          </div>
+          <div style={{ flex: 1, textAlign: 'right' }}>
+            <span style={{ fontSize: 10, color: colors.textMuted }}>
+              Node width = ARR value · Hover flows for detail
+            </span>
+          </div>
+        </div>
       </div>
 
       {/* Conversion rate grid */}
       {conversionRates.length > 0 && (
         <div
           style={{
-            padding: '12px 20px 18px',
+            padding: '0 20px 18px',
             display: 'grid',
             gridTemplateColumns: `repeat(${Math.min(conversionRates.length, 5)}, 1fr)`,
             gap: 8,
@@ -410,61 +488,57 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
           {conversionRates.map((cr, i) => {
             const fromStage = stages[i];
             const toStage = stages[i + 1];
-            const displayFrom = showRaw && fromStage?.rawLabel
-              ? fromStage.rawLabel
-              : cr.fromLabel;
-            const displayTo = showRaw && toStage?.rawLabel
-              ? toStage.rawLabel
-              : cr.toLabel;
+            const displayFrom = showRaw && fromStage?.rawLabel ? fromStage.rawLabel : cr.fromLabel;
+            const displayTo = showRaw && toStage?.rawLabel ? toStage.rawLabel : cr.toLabel;
             return (
-            <div
-              key={i}
-              style={{
-                background: colors.surface,
-                borderRadius: 6,
-                padding: '7px 10px',
-                border: `1px solid ${colors.border}`,
-              }}
-            >
               <div
+                key={i}
                 style={{
-                  fontSize: 10,
-                  color: colors.textMuted,
-                  fontFamily: fonts.sans,
-                  marginBottom: 3,
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
+                  background: colors.surface,
+                  borderRadius: 6,
+                  padding: '7px 10px',
+                  border: `1px solid ${colors.border}`,
                 }}
               >
-                {truncate(displayFrom, 9)} → {truncate(displayTo, 9)}
-              </div>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 5 }}>
-                <span
+                <div
                   style={{
-                    fontSize: 18,
-                    fontWeight: 700,
-                    color: colors.text,
+                    fontSize: 10,
+                    color: colors.textMuted,
                     fontFamily: fonts.sans,
+                    marginBottom: 3,
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
                   }}
                 >
-                  {cr.rate}%
-                </span>
-                {cr.delta !== undefined && cr.delta !== 0 && (
+                  {truncate(displayFrom, 9)} → {truncate(displayTo, 9)}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 5 }}>
                   <span
                     style={{
-                      fontSize: 11,
-                      fontWeight: 600,
-                      color: cr.delta > 0 ? '#22c55e' : '#ef4444',
+                      fontSize: 18,
+                      fontWeight: 700,
+                      color: colors.text,
                       fontFamily: fonts.sans,
                     }}
                   >
-                    {cr.delta > 0 ? '▲' : '▼'}
-                    {Math.abs(cr.delta)}pp
+                    {cr.rate}%
                   </span>
-                )}
+                  {cr.delta !== undefined && cr.delta !== 0 && (
+                    <span
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 600,
+                        color: cr.delta > 0 ? '#22c55e' : '#ef4444',
+                        fontFamily: fonts.sans,
+                      }}
+                    >
+                      {cr.delta > 0 ? '▲' : '▼'}
+                      {Math.abs(cr.delta)}pp
+                    </span>
+                  )}
+                </div>
               </div>
-            </div>
             );
           })}
         </div>
