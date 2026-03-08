@@ -74,67 +74,38 @@ async function getStageOrdering(workspaceId: string): Promise<string[]> {
   } catch {
   }
 
-  // Fallback: infer order from deal progression patterns
-  // stage_normalized is a column; from_stage_normalized must be computed via LAG in a subquery
-  const transitionResult = await query<{ from_stage_normalized: string; to_stage_normalized: string; count: number }>(
-    `SELECT from_stage_normalized, to_stage_normalized, COUNT(*) as count
+  // Fallback: infer order by computing average sequence position of each stage across all deals.
+  // Stages that appear earlier in deal timelines (lower avg position) sort first.
+  const TERMINAL = new Set([
+    'closed_won', 'closedwon', 'closed won',
+    'closed_lost', 'closedlost', 'closed lost',
+  ]);
+
+  const positionResult = await query<{ norm_stage: string; avg_position: number }>(
+    `SELECT
+       norm_stage,
+       AVG(position) AS avg_position
      FROM (
        SELECT
-         LAG(COALESCE(stage_normalized, stage)) OVER (PARTITION BY deal_id ORDER BY entered_at) AS from_stage_normalized,
-         COALESCE(stage_normalized, stage) AS to_stage_normalized
+         deal_id,
+         COALESCE(stage_normalized, stage) AS norm_stage,
+         ROW_NUMBER() OVER (PARTITION BY deal_id ORDER BY entered_at) AS position
        FROM deal_stage_history
        WHERE workspace_id = $1
      ) sub
-     WHERE from_stage_normalized IS NOT NULL
-       AND to_stage_normalized IS NOT NULL
-       AND to_stage_normalized NOT IN ('closed_won', 'closedwon', 'closed won', 'closed_lost', 'closedlost', 'closed lost')
-     GROUP BY from_stage_normalized, to_stage_normalized
-     ORDER BY count DESC`,
+     WHERE norm_stage NOT IN (
+       'closed_won','closed_lost','closedwon','closedlost','closed won','closed lost'
+     )
+     GROUP BY norm_stage
+     HAVING COUNT(DISTINCT deal_id) >= 2
+     ORDER BY avg_position`,
     [workspaceId]
   );
 
-  // Build a stage graph and topologically sort
-  const stageGraph = new Map<string, Set<string>>();
-  const allStages = new Set<string>();
-
-  for (const row of transitionResult.rows) {
-    allStages.add(row.from_stage_normalized);
-    allStages.add(row.to_stage_normalized);
-
-    if (!stageGraph.has(row.from_stage_normalized)) {
-      stageGraph.set(row.from_stage_normalized, new Set());
-    }
-    stageGraph.get(row.from_stage_normalized)!.add(row.to_stage_normalized);
-  }
-
-  // Topological sort (simple approach: stages with no outbound edges go last)
-  const ordered: string[] = [];
-  const remaining = new Set(allStages);
-
-  while (remaining.size > 0) {
-    let found = false;
-    for (const stage of remaining) {
-      const outbound = stageGraph.get(stage) || new Set();
-      const hasUnprocessedOutbound = Array.from(outbound).some(s => remaining.has(s));
-
-      if (!hasUnprocessedOutbound) {
-        ordered.push(stage);
-        remaining.delete(stage);
-        found = true;
-        break;
-      }
-    }
-
-    if (!found) {
-      // Cycle detected or no more stages - add remaining alphabetically
-      const rest = Array.from(remaining).sort();
-      ordered.push(...rest);
-      break;
-    }
-  }
-
-  // Reverse to get early stages first
-  return ordered.reverse();
+  // Filter out terminal and numeric-only IDs, return ordered list
+  return positionResult.rows
+    .map(r => r.norm_stage)
+    .filter(s => !TERMINAL.has(s));
 }
 
 /**
@@ -383,17 +354,48 @@ export async function waterfallAnalysis(
 
       if (fromFlow) {
         if (toIndex > fromIndex) {
-          // Advanced to later stage — track pairwise flow
+          // Advanced to a later stage.
           fromFlow.advanced++;
           fromFlow.advancedValue += amount;
 
-          const flowKey = `${fromStage}→${toStage}`;
-          const existing = pairwiseFlows.get(flowKey);
-          if (existing) {
-            existing.count++;
-            existing.value += amount;
+          if (toIndex === fromIndex + 1) {
+            // Direct sequential advance — single pairwise flow
+            const flowKey = `${fromStage}→${toStage}`;
+            const existing = pairwiseFlows.get(flowKey);
+            if (existing) {
+              existing.count++;
+              existing.value += amount;
+            } else {
+              pairwiseFlows.set(flowKey, { fromStage, toStage: toStage!, count: 1, value: amount });
+            }
           } else {
-            pairwiseFlows.set(flowKey, { fromStage, toStage: toStage!, count: 1, value: amount });
+            // Skipped stages — backfill each intermediate stage sequentially
+            for (let k = fromIndex; k < toIndex; k++) {
+              const segFrom = orderedStages[k];
+              const segTo = orderedStages[k + 1];
+              if (!segFrom || !segTo) continue;
+
+              // Credit intermediate stages (not the origin) as entered + advanced
+              if (k > fromIndex) {
+                const intermediateFlow = stageFlows.get(segFrom);
+                if (intermediateFlow) {
+                  intermediateFlow.entered++;
+                  intermediateFlow.advanced++;
+                  intermediateFlow.enteredValue += amount;
+                  intermediateFlow.advancedValue += amount;
+                }
+              }
+
+              // Add sequential pairwise flow for each hop
+              const flowKey = `${segFrom}→${segTo}`;
+              const existing = pairwiseFlows.get(flowKey);
+              if (existing) {
+                existing.count++;
+                existing.value += amount;
+              } else {
+                pairwiseFlows.set(flowKey, { fromStage: segFrom, toStage: segTo, count: 1, value: amount });
+              }
+            }
           }
         } else {
           // Fell back to earlier stage

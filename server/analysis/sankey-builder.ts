@@ -43,10 +43,16 @@ export async function buildSankeyChartData(
     .map(s => {
       const formattedLabel = formatStageName(s.stage);
       const rawSet = rawByNormalized.get(s.stage);
-      // Only set rawLabel when it differs from the formatted label
-      const rawNames = rawSet ? [...rawSet] : [];
-      const rawLabel = rawNames.length > 0 && rawNames.join(' / ') !== formattedLabel
-        ? rawNames.join(' / ')
+      // Only set rawLabel when it is readable and differs from the normalized label.
+      // Filter out purely numeric IDs (e.g. HubSpot stage IDs like 1027734847).
+      const rawNames = rawSet
+        ? [...rawSet].filter(r => /[a-zA-Z]/.test(r))
+        : [];
+      // Format the raw names the same way so the comparison is apples-to-apples
+      const formattedRawNames = rawNames.map(r => formatStageName(r));
+      const rawLabelStr = [...new Set(formattedRawNames)].join(' / ');
+      const rawLabel = rawLabelStr && rawLabelStr !== formattedLabel
+        ? rawLabelStr
         : undefined;
       return {
         id: s.stage,
@@ -149,7 +155,13 @@ export async function buildSankeyChartData(
 
 function formatStageName(stage: string): string {
   return stage
+    // Split camelCase: 'contractSent' → 'contract Sent'
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    // Split PascalCase starts: 'ContractSent' → 'Contract Sent'
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
     .replace(/_/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
     .replace(/\b\w/g, c => c.toUpperCase());
 }
 

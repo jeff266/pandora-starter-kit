@@ -12,7 +12,7 @@ const LOST_BAR_COLOR = '#991b1b';
 const NODE_W = 28;
 const MAX_H = 220;
 const MIN_H = 20;
-const LABEL_TOP = 60;   // space above chart area for name/count labels
+const LABEL_TOP = 48;   // space above chart area for name/count labels
 const BOTTOM_H = 56;    // space below baseline for lost/value labels
 const SIDE_PAD = 28;
 const GAP = 80;
@@ -301,12 +301,14 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
           width="100%"
           style={{ display: 'block', opacity: loading ? 0.35 : 1, transition: 'opacity 0.2s', overflow: 'visible' }}
         >
-          {/* 1. Funnel silhouette */}
+          {/* 1. Funnel silhouette — subtle filled area tracing bar tops to baseline */}
           <path
             d={funnelPath()}
-            fill={STAGE_COLORS[0]}
-            fillOpacity={0.06}
-            stroke="none"
+            fill="#0f172a"
+            fillOpacity={0.5}
+            stroke={STAGE_COLORS[0]}
+            strokeOpacity={0.08}
+            strokeWidth={1}
           />
 
           {/* 2. Flow bands */}
@@ -391,23 +393,23 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
                   />
                 )}
 
-                {/* Stage name — bold, above bar */}
+                {/* Stage name — fixed at top of label area */}
                 <text
                   x={cx}
-                  y={nodeY[i] - 28}
+                  y={14}
                   textAnchor="middle"
                   fontSize={11}
                   fontWeight="700"
-                  fill={color}
+                  fill={colors.text as string}
                   fontFamily={fonts.sans}
                 >
                   {truncate(stageName, 14)}
                 </text>
 
-                {/* Deal count — below name */}
+                {/* Deal count — one line below name */}
                 <text
                   x={cx}
-                  y={nodeY[i] - 14}
+                  y={28}
                   textAnchor="middle"
                   fontSize={10}
                   fill={colors.textMuted as string}
