@@ -117,7 +117,6 @@ function PipelineHistoryTab() {
   const fetchSankey = useCallback(async (
     period: number | 'ytd',
     pipeline: string | null = null,
-    raw = false,
   ) => {
     setLoading(true);
     setError(null);
@@ -125,7 +124,6 @@ function PipelineHistoryTab() {
       const days = resolveDays(period);
       let url = `/analysis/sankey?periodDays=${days}`;
       if (pipeline) url += `&pipeline=${encodeURIComponent(pipeline)}`;
-      if (raw) url += `&raw=true`;
       const data = await api.get(url) as SankeyChartData;
       setSankeyData(data);
     } catch (err: any) {
@@ -136,22 +134,21 @@ function PipelineHistoryTab() {
   }, []);
 
   useEffect(() => {
-    fetchSankey(activePeriod, null, false);
+    fetchSankey(activePeriod, null);
   }, []);
 
   function handlePeriod(preset: number | 'ytd') {
     setActivePeriod(preset);
-    fetchSankey(preset, activePipeline, showRaw);
+    fetchSankey(preset, activePipeline);
   }
 
   function handlePipeline(pipeline: string | null) {
     setActivePipeline(pipeline);
-    fetchSankey(activePeriod, pipeline, showRaw);
+    fetchSankey(activePeriod, pipeline);
   }
 
   function handleRawToggle(isRaw: boolean) {
     setShowRaw(isRaw);
-    fetchSankey(activePeriod, activePipeline, isRaw);
   }
 
   const availablePipelines = sankeyData?.availableFilters?.pipelines ?? [];

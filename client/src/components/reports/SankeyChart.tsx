@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import type { SankeyChartData } from './types';
 import { api } from '../../lib/api';
 import { colors, fonts } from '../../styles/theme';
@@ -51,8 +51,22 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
   const [chartData, setChartData] = useState<SankeyChartData | null>(initialData);
   const [loading, setLoading] = useState(false);
   const [hoveredFlow, setHoveredFlow] = useState<number | null>(null);
+  const [containerW, setContainerW] = useState(700);
+  const svgContainerRef = useRef<HTMLDivElement>(null);
 
-  React.useEffect(() => {
+  useEffect(() => {
+    const el = svgContainerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(entries => {
+      const w = entries[0]?.contentRect.width;
+      if (w && w > 0) setContainerW(w);
+    });
+    ro.observe(el);
+    setContainerW(el.clientWidth || 700);
+    return () => ro.disconnect();
+  }, []);
+
+  useEffect(() => {
     const next = (data ?? chartDataProp) ?? null;
     if (next) setChartData(next);
   }, [data, chartDataProp]);
@@ -108,7 +122,14 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
   const maxEntered = Math.max(...stages.map(s => getEntered(s)), 1);
 
   const nodeH = stages.map(s => Math.max(MIN_H, (getEntered(s) / maxEntered) * MAX_H));
-  const nodeX = stages.map((_, i) => SIDE_PAD + i * (NODE_W + GAP));
+
+  // Dynamic gap: spread bars to fill the container width, but cap at GAP so dense
+  // charts stay compact. This prevents giant text when only 2-4 stages are returned.
+  const effectiveGap = n > 1
+    ? Math.min(GAP, Math.max(40, (containerW - 2 * SIDE_PAD - n * NODE_W) / (n - 1)))
+    : GAP;
+
+  const nodeX = stages.map((_, i) => SIDE_PAD + i * (NODE_W + effectiveGap));
   // bottom-align all bars to a common baseline
   const baseline = LABEL_TOP + MAX_H;
   const nodeY = nodeH.map(h => baseline - h);
@@ -119,7 +140,8 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
     s.lostCount > 0 ? Math.max(3, (s.lostCount / maxEntered) * MAX_LOST_H) : 0
   );
 
-  const svgW = SIDE_PAD * 2 + n * NODE_W + (n - 1) * GAP;
+  // svgW is now always the measured container width — no viewBox scaling.
+  const svgW = containerW;
   const svgH = LABEL_TOP + MAX_H + BOTTOM_H;
 
   // Helper: flow band path between stage i and i+1.
@@ -295,7 +317,7 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
       )}
 
       {/* SVG Sankey */}
-      <div style={{ padding: '14px 20px 0', position: 'relative' }}>
+      <div ref={svgContainerRef} style={{ padding: '14px 20px 0', position: 'relative' }}>
         {loading && (
           <div
             style={{
@@ -322,8 +344,8 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
         )}
 
         <svg
-          viewBox={`0 0 ${svgW} ${svgH}`}
-          width="100%"
+          width={svgW}
+          height={svgH}
           style={{ display: 'block', opacity: loading ? 0.35 : 1, transition: 'opacity 0.2s' }}
         >
           {/* 1. Funnel silhouette — subtle filled area tracing bar tops to baseline */}
