@@ -115,15 +115,24 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
   const svgH = LABEL_TOP + MAX_H + BOTTOM_H;
 
   // Helper: flow band path between stage i and i+1
-  // Connects flow portions only (excluding lost segments) for smooth funnel taper
+  // Bands taper to the narrower of the two connected stages to prevent butterfly shapes
   function flowBandPath(i: number): string {
     const x1 = nodeX[i] + NODE_W;
     const x2 = nodeX[i + 1];
     const midX = (x1 + x2) / 2;
-    const y1t = nodeY[i];
-    const y1b = nodeY[i] + flowH[i];
-    const y2t = nodeY[i + 1];
-    const y2b = nodeY[i + 1] + flowH[i + 1];  // Connect to flow portion, not entire bar
+
+    // Cap band height at the smaller of source/dest to prevent expansion
+    const bandHeight = Math.min(flowH[i], flowH[i + 1]);
+
+    // Center the band vertically on each bar's flow segment
+    const y1Center = nodeY[i] + flowH[i] / 2;
+    const y2Center = nodeY[i + 1] + flowH[i + 1] / 2;
+
+    const y1t = y1Center - bandHeight / 2;
+    const y1b = y1Center + bandHeight / 2;
+    const y2t = y2Center - bandHeight / 2;
+    const y2b = y2Center + bandHeight / 2;
+
     return [
       `M ${x1} ${y1t}`,
       `C ${midX} ${y1t} ${midX} ${y2t} ${x2} ${y2t}`,
