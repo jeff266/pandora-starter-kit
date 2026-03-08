@@ -105,8 +105,10 @@ async function getStageOrdering(workspaceId: string, raw = false): Promise<strin
   if (raw) {
     // In raw mode, use empirical ordering only — no canonical map since raw CRM
     // stage names are workspace-specific and don't align to a canonical vocabulary.
+    // Filter out purely numeric stage IDs (e.g. HubSpot internal IDs like 1027734847).
     return positionResult.rows
       .filter(r => !TERMINAL_RAW.has(r.norm_stage.toLowerCase()))
+      .filter(r => /[a-zA-Z]/.test(r.norm_stage))
       .sort((a, b) => a.avg_first_position - b.avg_first_position)
       .map(r => r.norm_stage);
   }

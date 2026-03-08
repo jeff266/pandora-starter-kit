@@ -123,10 +123,11 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
 
   const nodeH = stages.map(s => Math.max(MIN_H, (getEntered(s) / maxEntered) * MAX_H));
 
-  // Dynamic gap: spread bars to fill the container width, but cap at GAP so dense
-  // charts stay compact. This prevents giant text when only 2-4 stages are returned.
+  // Dynamic gap: always spread bars to fill the full container width.
+  // No upper cap — bars stretch edge-to-edge regardless of stage count.
+  // Minimum of 20px prevents bars from touching on very dense charts.
   const effectiveGap = n > 1
-    ? Math.min(GAP, Math.max(40, (containerW - 2 * SIDE_PAD - n * NODE_W) / (n - 1)))
+    ? Math.max(20, (containerW - 2 * SIDE_PAD - n * NODE_W) / (n - 1))
     : GAP;
 
   const nodeX = stages.map((_, i) => SIDE_PAD + i * (NODE_W + effectiveGap));
