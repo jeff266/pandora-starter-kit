@@ -3,10 +3,13 @@
  *
  * A single DeepSeek 'classify' call that receives compressed evidence
  * and returns a routing decision + working hypothesis. Target: <2K tokens.
+ *
+ * EC-01: Detects Conversation-Led Close before quadrant assignment.
+ * EC-02: Applies history tier context and confidence reduction for Tier 2.
  */
 
 import { callLLM } from '../utils/llm-router.js';
-import type { HarvestedEvidence } from './evidence-harvester.js';
+import type { HarvestedEvidence, WhaleDealSignal, HistoryAssessment } from './evidence-harvester.js';
 import { buildHypothesisPrompt } from './synthesis-prompts.js';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -19,6 +22,14 @@ export type AgentRoute =
   | 'pipeline-health-agent'
   | 'full-retro-agent';
 
+export interface ConversationLedCloseResult {
+  detected: boolean;
+  confidence?: number;
+  deals?: string[];
+  ci_confirmed?: boolean;
+  implication?: 'forecast_visibility_gap';
+}
+
 export interface HypothesisResult {
   primary_layer: 'variance_decomposition' | 'win_loss_pattern' | 'process_vs_luck' | 'forward_pipeline_health';
   quadrant?: 'REPLICABLE' | 'UNLUCKY' | 'LUCKY' | 'STRUCTURAL' | null;
@@ -29,6 +40,35 @@ export interface HypothesisResult {
   data_gaps: string[];
   recommended_route: AgentRoute;
   skip_phase_2: boolean;
+  conversation_led_close?: ConversationLedCloseResult;
+  history_tier?: 1 | 2 | 3;
+}
+
+// ─── EC-01: Conversation-Led Close Detection ──────────────────────────────────
+
+export function detectConversationLedClose(
+  whaleSignals: WhaleDealSignal[],
+): ConversationLedCloseResult {
+  const whales = whaleSignals.filter(d =>
+    d.pct_of_bookings >= 0.20 &&
+    d.stages_jumped >= 2 &&
+    d.forecast_category_30d_prior !== 'commit'
+  );
+
+  if (whales.length === 0) return { detected: false };
+
+  const withCISignals = whales.filter(d =>
+    d.ci_signals_30d !== null &&
+    d.ci_signals_30d.positive_sentiment_count >= 2
+  );
+
+  return {
+    detected: true,
+    confidence: withCISignals.length > 0 ? 0.85 : 0.60,
+    deals: whales.map(d => d.deal_name),
+    ci_confirmed: withCISignals.length > 0,
+    implication: 'forecast_visibility_gap',
+  };
 }
 
 // ─── Fallback when evidence is insufficient ───────────────────────────────────
@@ -50,17 +90,14 @@ export function insufficientEvidenceResult(missingSkills: string[]): HypothesisR
 // ─── JSON parsing helper ──────────────────────────────────────────────────────
 
 function parseHypothesisJSON(raw: string): HypothesisResult | null {
-  // Strip markdown code fences if present
   let cleaned = raw.trim();
   const fenceMatch = cleaned.match(/```(?:json)?\s*([\s\S]+?)```/);
   if (fenceMatch) cleaned = fenceMatch[1].trim();
 
-  // Try direct parse first
   try {
     const parsed = JSON.parse(cleaned);
     return validateAndNormalize(parsed);
   } catch {
-    // Try extracting the first { ... } block
     const jsonMatch = cleaned.match(/\{[\s\S]+\}/);
     if (jsonMatch) {
       try {
@@ -113,6 +150,26 @@ function validateAndNormalize(parsed: any): HypothesisResult {
   };
 }
 
+// ─── EC-02: Confidence reduction for Tier 2 benchmark-dependent layers ────────
+
+const BENCHMARK_DEPENDENT_LAYERS = new Set(['variance_decomposition', 'process_vs_luck']);
+
+function applyTier2ConfidenceReduction(result: HypothesisResult, tier: 1 | 2 | 3): HypothesisResult {
+  if (tier !== 2) return result;
+  if (!BENCHMARK_DEPENDENT_LAYERS.has(result.primary_layer)) return result;
+
+  const reduced = Math.max(0, result.confidence - 0.15);
+  return {
+    ...result,
+    confidence: reduced,
+    skip_phase_2: reduced >= 0.80, // re-evaluate skip threshold after reduction
+    supporting_signals: [
+      ...result.supporting_signals,
+      'Note: benchmark comparisons use industry proxy values (limited workspace history)',
+    ],
+  };
+}
+
 // ─── Main hypothesis formation ────────────────────────────────────────────────
 
 export async function formHypothesis(
@@ -120,16 +177,18 @@ export async function formHypothesis(
   evidence: HarvestedEvidence[],
   userQuestion: string,
   workspaceName: string,
-  quarterLabel: string
+  quarterLabel: string,
+  whaleSignals: WhaleDealSignal[] = [],
+  historyAssessment?: HistoryAssessment
 ): Promise<HypothesisResult> {
-  // Check for completely empty evidence
   const nonMissing = evidence.filter((e) => e.freshness !== 'missing');
   if (nonMissing.length === 0) {
     const missingSkills = evidence.map((e) => e.skill_id);
     return insufficientEvidenceResult(missingSkills);
   }
 
-  const prompt = buildHypothesisPrompt(evidence, userQuestion, workspaceName, quarterLabel);
+  const tier = historyAssessment?.tier ?? 3;
+  const prompt = buildHypothesisPrompt(evidence, userQuestion, workspaceName, quarterLabel, historyAssessment);
 
   try {
     const response = await callLLM(workspaceId, 'classify', {
@@ -137,11 +196,11 @@ export async function formHypothesis(
     });
 
     const raw = response.content || '';
-    const parsed = parseHypothesisJSON(raw);
+    let parsed = parseHypothesisJSON(raw);
 
     if (!parsed) {
       console.warn('[retro/hypothesis] Failed to parse DeepSeek JSON response, using fallback');
-      return {
+      parsed = {
         primary_layer: 'variance_decomposition',
         quadrant: null,
         hypothesis: 'Unable to classify — using full retrospective analysis.',
@@ -154,10 +213,30 @@ export async function formHypothesis(
       };
     }
 
+    // EC-02: Apply Tier 2 confidence reduction for benchmark-dependent layers
+    parsed = applyTier2ConfidenceReduction(parsed, tier);
+    parsed.history_tier = tier;
+
+    // EC-01: Check for Conversation-Led Close before returning quadrant classification
+    if (parsed.quadrant === 'LUCKY' && whaleSignals.length > 0) {
+      const clcResult = detectConversationLedClose(whaleSignals);
+      if (clcResult.detected) {
+        parsed.conversation_led_close = clcResult;
+        // Override the LUCKY quadrant with the named pattern
+        parsed.quadrant = null;
+        parsed.hypothesis = `${parsed.hypothesis} However, a Conversation-Led Close pattern was detected — this may be a forecast visibility gap rather than a process failure.`;
+      }
+    } else if (whaleSignals.length > 0) {
+      // Always run detection; attach result even if not LUCKY (informational)
+      const clcResult = detectConversationLedClose(whaleSignals);
+      if (clcResult.detected) {
+        parsed.conversation_led_close = clcResult;
+      }
+    }
+
     return parsed;
   } catch (err) {
     console.error('[retro/hypothesis] LLM call failed:', err);
-    // Soft fallback — route to full-retro-agent
     return {
       primary_layer: 'variance_decomposition',
       quadrant: null,
@@ -168,6 +247,7 @@ export async function formHypothesis(
       data_gaps: [],
       recommended_route: 'full-retro-agent',
       skip_phase_2: false,
+      history_tier: tier,
     };
   }
 }

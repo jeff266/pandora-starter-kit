@@ -761,3 +761,18 @@ Three-phase architecture that diagnoses quarterly performance questions at 5-6x 
 
 ### Route Agent Templates (agent-templates.ts)
 5 new analysis-category templates added: `coverage-agent`, `conversion-agent`, `win-loss-agent`, `process-luck-agent`, `pipeline-health-agent` — all `trigger_mode: on_demand`, `schedule: manual`.
+
+### EC-01 — Whale Deal / Conversation-Led Close (Addendum A)
+Prevents misclassifying a large deal that closed ahead of CRM stage as LUCKY.
+
+- **`evidence-harvester.ts`**: `harvestWhaleDealSignals(workspaceId, start, end)` — SQL queries top 5 closed-won deals by amount, fetches stage at 30d-before-close from `deal_stage_history`, counts stages jumped, and attempts deal-level CI signal extraction from `conversation-intelligence` skill cache. Returns `WhaleDealSignal[]`.
+- **`hypothesis-engine.ts`**: `detectConversationLedClose(whaleSignals)` — checks: pct_of_bookings ≥ 20%, stages_jumped ≥ 2, forecast_category ≠ commit. Returns `ConversationLedCloseResult` with confidence 0.85 (CI confirmed) or 0.60 (no CI data). Runs before quadrant assignment; overrides LUCKY classification when detected. `HypothesisResult` gains `conversation_led_close?` field.
+- **`synthesis-prompts.ts`**: `buildCLCBlock()` — injects named pattern into synthesis prompt. LUCKY → "CONVERSATION-LED CLOSE — forecast visibility gap, not process failure" (CI confirmed) or "PROBABLE CONVERSATION-LED CLOSE — CI data missing" (no CI). Pipeline output gains `🔍 Conversation-Led Close pattern detected` badge.
+
+### EC-02 — Limited Operating History (Addendum A)
+Prevents false-confidence analysis for new workspaces without reliable benchmarks.
+
+- **`evidence-harvester.ts`**: `assessHistoryTier(workspaceId)` — queries `deals` table for closed deal count, days of data, and quarters with closes. Assigns **Tier 1** (<90d or <20 deals: no benchmarks), **Tier 2** (90-270d or 20-60 deals: proxy benchmarks), **Tier 3** (>270d and >60 deals: workspace benchmarks).
+- **`pipeline.ts`**: Tier 1 — skips Phase 1 hypothesis engine entirely, routes directly to `buildTier1EarlyStagePrompt()`, returns `'tier1_early_stage'` route. History assessment, evidence harvest, and whale signals run in parallel via `Promise.all()`.
+- **`hypothesis-engine.ts`**: Tier 2 — passes `HISTORY_TIER: 2` context block into DeepSeek prompt; applies −0.15 confidence reduction for `variance_decomposition` and `process_vs_luck` layers; adds proxy benchmark note to supporting signals.
+- **`synthesis-prompts.ts`**: `buildTier1EarlyStagePrompt()` — no anomaly language, observations only, answers win/loss patterns + forward pipeline. `buildEarlyStageBanner()` — user-facing banner naming closed deals, months of data, and estimated unlock milestone. Tier 2 forces Option A/B framing regardless of confidence score.
