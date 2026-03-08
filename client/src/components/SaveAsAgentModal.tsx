@@ -115,10 +115,38 @@ export default function SaveAsAgentModal({ extraction, threadId, onSave, onClose
         color: colors.text,
         fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
-          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>Save as Agent</h2>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: extraction.confidence === 'high' ? 8 : 24 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>Save as Agent</h2>
+            {extraction.confidence === 'high' && (
+              <span style={{
+                fontSize: 11, fontWeight: 600, padding: '2px 8px',
+                background: 'rgba(74, 222, 128, 0.12)', border: '1px solid rgba(74, 222, 128, 0.25)',
+                borderRadius: 20, color: colors.green,
+              }}>
+                ✓ Auto-detected
+              </span>
+            )}
+          </div>
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: colors.muted, cursor: 'pointer', fontSize: 18, lineHeight: 1 }}>×</button>
         </div>
+
+        {extraction.confidence === 'low' && (
+          <div style={{
+            marginBottom: 20,
+            padding: '8px 12px',
+            background: 'rgba(234, 179, 8, 0.08)',
+            border: '1px solid rgba(234, 179, 8, 0.2)',
+            borderRadius: 6,
+            fontSize: 12,
+            color: '#ca8a04',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+          }}>
+            ⚠ Low confidence extraction — review fields before saving.
+          </div>
+        )}
 
         {/* Name */}
         <label style={{ display: 'block', fontSize: 12, color: colors.muted, marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Name</label>
