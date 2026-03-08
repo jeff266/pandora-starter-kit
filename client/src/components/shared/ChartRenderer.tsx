@@ -294,7 +294,15 @@ function DonutChartRenderer({ spec, height }: { spec: ChartSpec; height: number 
           {spec.data.map((entry, index) => (
             <Cell
               key={`cell-${index}`}
-              fill={getSegmentColor(entry.segment, spec.colorMap) || CHART_COLORS[index % CHART_COLORS.length]}
+              fill={
+                spec.colorMap?.[entry.label] ||
+                spec.colorMap?.[entry.segment ?? ''] ||
+                (entry.segment === 'positive' || entry.segment === 'good' || entry.segment === 'won'
+                  ? 'var(--color-accent)'
+                  : entry.segment === 'negative' || entry.segment === 'risk' || entry.segment === 'lost'
+                  ? 'var(--color-coral)'
+                  : CHART_COLORS[index % CHART_COLORS.length])
+              }
             />
           ))}
         </Pie>
