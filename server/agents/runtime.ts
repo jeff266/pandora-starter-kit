@@ -47,9 +47,40 @@ export class AgentRuntime {
     options?: { dryRun?: boolean }
   ): Promise<AgentRunResult> {
     const registry = getAgentRegistry();
-    const agent = registry.get(agentId);
+    let agent: AgentDefinition | undefined = registry.get(agentId);
+
     if (!agent) {
-      throw new AgentExecutionError(`Agent '${agentId}' not found`);
+      const dbAgent = await getAgent(agentId, workspaceId);
+      if (!dbAgent) {
+        throw new AgentExecutionError(`Agent '${agentId}' not found`);
+      }
+      agent = {
+        id: dbAgent.id,
+        name: dbAgent.name,
+        description: dbAgent.description || '',
+        skills: (dbAgent.skill_ids || []).map(skillId => ({
+          skillId,
+          required: true,
+          outputKey: skillId,
+          cacheTtlMinutes: 30,
+        })),
+        synthesis: {
+          enabled: true,
+          provider: 'claude',
+          systemPrompt: '',
+          userPromptTemplate: '',
+          maxTokens: 2000,
+        },
+        trigger: { type: 'manual' },
+        delivery: { channel: 'api', format: 'markdown' },
+        workspaceIds: [workspaceId],
+        createdBy: 'user',
+        createdAt: new Date(dbAgent.created_at),
+        updatedAt: new Date(dbAgent.updated_at),
+        enabled: dbAgent.is_active,
+        ...(dbAgent.goal ? { goal: dbAgent.goal } : {}),
+        ...(dbAgent.standing_questions?.length ? { standing_questions: dbAgent.standing_questions } : {}),
+      };
     }
 
     if (!agent.enabled) {
