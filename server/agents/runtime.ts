@@ -77,7 +77,7 @@ export class AgentRuntime {
         createdBy: 'user',
         createdAt: new Date(dbAgent.created_at),
         updatedAt: new Date(dbAgent.updated_at),
-        enabled: dbAgent.is_active,
+        enabled: true,
         ...(dbAgent.goal ? { goal: dbAgent.goal } : {}),
         ...(dbAgent.standing_questions?.length ? { standing_questions: dbAgent.standing_questions } : {}),
       };
