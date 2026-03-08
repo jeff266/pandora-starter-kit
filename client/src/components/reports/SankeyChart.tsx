@@ -115,20 +115,35 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
   const svgH = LABEL_TOP + MAX_H + BOTTOM_H;
 
   // Helper: flow band path between stage i and i+1.
-  // True edge-to-edge Sankey path — top curve runs from the top of the source
-  // bar to the top of the dest bar; bottom curve runs from the bottom of the
-  // source flow-portion to the bottom of the dest flow-portion.
-  // Mathematically butterfly-free for bottom-aligned bars: the top Bezier
-  // always stays above the bottom Bezier because flowH ≥ 0 at every point.
+  //
+  // Uses a constant-width ribbon: both the source side and dest side have the
+  // same height (bandH). Because top and bottom Bezier curves share identical
+  // control-point Y offsets, they are always exactly bandH apart — they cannot
+  // converge, cross, or create a butterfly regardless of bar height differences.
+  //
+  // Band height is sized by pairwise deal flow: what fraction of the source's
+  // deals advance to the next stage, applied to the source bar's flow height,
+  // then capped at the dest bar's flow height. This prevents balloon expansion
+  // when a small bar connects to a large bar.
   function flowBandPath(i: number): string {
     const x1 = nodeX[i] + NODE_W;
     const x2 = nodeX[i + 1];
     const midX = (x1 + x2) / 2;
 
-    const y1t = nodeY[i];                  // top of source bar
-    const y1b = nodeY[i] + flowH[i];       // bottom of source flow portion
-    const y2t = nodeY[i + 1];              // top of dest bar
-    const y2b = nodeY[i + 1] + flowH[i + 1]; // bottom of dest flow portion
+    // Use pairwise flow data when available, fall back to min of adjacent stages
+    const flow = flows.find(f => f.fromId === stages[i].id && f.toId === stages[i + 1].id);
+    const flowDeals = flow?.deals ?? Math.min(stages[i].deals, stages[i + 1].deals);
+    const srcDeals = Math.max(stages[i].deals, 1);
+    const proportion = Math.min(flowDeals / srcDeals, 1);
+
+    // Constant bandH on both sides — the only butterfly-free guarantee
+    const bandH = Math.max(2, Math.min(proportion * flowH[i], flowH[i + 1]));
+
+    // Top-align the ribbon on both bars
+    const y1t = nodeY[i];
+    const y1b = nodeY[i] + bandH;
+    const y2t = nodeY[i + 1];
+    const y2b = nodeY[i + 1] + bandH;
 
     return [
       `M ${x1} ${y1t}`,
