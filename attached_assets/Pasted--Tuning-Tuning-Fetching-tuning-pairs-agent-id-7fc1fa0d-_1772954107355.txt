@@ -1,0 +1,24 @@
+[Tuning] [Tuning] Fetching tuning pairs {"agent_id":"7fc1fa0d-2337-4fe9-908e-d3293cf522af","workspace_id":"4160191d-73bc-414b-97dd-5a1853190378"}
+[Tuning] [Tuning] Tuning table not available, returning empty pairs {"agent_id":"7fc1fa0d-2337-4fe9-908e-d3293cf522af","error":"relation \"agent_tuning_pairs\" does not exist"}
+[Tuning] [Tuning] Tuning pairs loaded {"agent_id":"7fc1fa0d-2337-4fe9-908e-d3293cf522af","workspace_id":"4160191d-73bc-414b-97dd-5a1853190378","pair_count":0}
+[Tuning] [Tuning] Fetching tuning pairs {"agent_id":"7fc1fa0d-2337-4fe9-908e-d3293cf522af","workspace_id":"4160191d-73bc-414b-97dd-5a1853190378"}
+[Tuning] [Tuning] Tuning table not available, returning empty pairs {"agent_id":"7fc1fa0d-2337-4fe9-908e-d3293cf522af","error":"relation \"agent_tuning_pairs\" does not exist"}
+[Tuning] [Tuning] Tuning pairs loaded {"agent_id":"7fc1fa0d-2337-4fe9-908e-d3293cf522af","workspace_id":"4160191d-73bc-414b-97dd-5a1853190378","pair_count":0}
+[Agent Route] Agent 7fc1fa0d-2337-4fe9-908e-d3293cf522af failed: Agent '7fc1fa0d-2337-4fe9-908e-d3293cf522af' not found
+[Scheduler] CRM heartbeat: 1 connector(s) due for sync
+[JobQueue] Created job daaaadff-3c55-451d-b8fb-b761f0c11eba (sync) for workspace 4160191d-73bc-414b-97dd-5a1853190378
+[Scheduler] Queued hubspot sync for workspace 4160191d-73bc-414b-97dd-5a1853190378 (interval: 60min, job: daaaadff-3c55-451d-b8fb-b761f0c11eba)
+[JobQueue] Executing job daaaadff-3c55-451d-b8fb-b761f0c11eba (sync, attempt 1/3, timeout: 600000ms)
+[HubSpot Job] Starting incremental sync for workspace 4160191d-73bc-414b-97dd-5a1853190378 since 2026-03-08T06:00:04.301Z
+[HubSpot Client] Proactive token refresh before sync
+[HubSpot Client] No refresh token available
+[HubSpot Sync] Starting incremental sync for workspace 4160191d-73bc-414b-97dd-5a1853190378 since 2026-03-08T06:00:04.301Z
+[HubSpot Sync] Built owner map: 21 owners
+[HubSpot Sync] Built stage map: 52 stages across 5 pipelines
+[HubSpot Sync] Incremental: 1 deals, 0 contacts, 0 companies modified since 2026-03-08T06:00:04.301Z
+[HubSpot Sync] Owner backfill failed for contacts: column "owner" does not exist
+[HubSpot Sync] Populated 0 deal_contacts from associations
+[HubSpot] Failed to fetch emails: HubSpot API error: 403 - {"status":"error","message":"This app hasn't been granted all required scopes to make this call. Read more about required scopes here: https://developers.hubspot.com/scopes.","correlationId":"019ccc4c-ae97-7215-a3a9-4c729dc79009","errors":[{"message":"One or more of the following scopes are required.","context":{"requiredGranularScopes":["sales-email-read"]}}],"links":{"scopes":"https://developers.hubspot.com/scopes"},"category":"MISSING_SCOPES"}
+[HubSpot] Fetched 0 calls
+[HubSpot] Fetched 0 meetings
+[HubSpot] Fetched 0
