@@ -32,7 +32,7 @@ export interface DeliverySuggestion {
 }
 
 export interface ConversationExtractionResult {
-  suggested_name: string;
+  suggested_name: string | null;
   goal: string;
   standing_questions: string[];
   detected_skills: string[];
@@ -235,7 +235,7 @@ export function generateAgentName(
   goal: string,
   schedule: ScheduleSuggestion,
   messages: ChatMessage[]
-): string {
+): string | null {
   const cadence = CADENCE_LABELS[schedule.cron] ?? 'Weekly';
 
   const textToSearch =
@@ -253,8 +253,7 @@ export function generateAgentName(
     }
   }
 
-  const fallback = cadence ? `${cadence} Business Review` : 'GTM Review';
-  return fallback.slice(0, 40);
+  return null;
 }
 
 // ─── Task 6: Goal + Standing Questions via DeepSeek ───────────────────────────
@@ -508,7 +507,9 @@ export async function extractAgentFromConversation(
     extracted.questions
   );
 
-  const suggestedName = generateAgentName(extracted.goal, suggestedSchedule, messages);
+  const suggestedName = confidence === 'low'
+    ? null
+    : generateAgentName(extracted.goal, suggestedSchedule, messages);
 
   return {
     suggested_name: suggestedName,

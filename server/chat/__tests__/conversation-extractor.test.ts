@@ -233,7 +233,7 @@ describe('generateAgentName', () => {
     expect(name.length).toBeLessThanOrEqual(40);
   });
 
-  it('falls back to Business Review when no topic is detected', () => {
+  it('returns null when no topic keyword matches', () => {
     const schedule: ScheduleSuggestion = {
       cron: '0 8 * * 1',
       label: 'Every Monday at 8 AM',
@@ -241,8 +241,7 @@ describe('generateAgentName', () => {
     };
     const msgs: ChatMessage[] = [{ role: 'user', content: 'just give me a summary' }];
     const name = generateAgentName('general overview', schedule, msgs);
-    expect(name).toContain('Business Review');
-    expect(name.length).toBeLessThanOrEqual(40);
+    expect(name).toBeNull();
   });
 });
 
@@ -292,8 +291,7 @@ describe('extractAgentFromConversation', () => {
       conversation_id: 'conv-test',
     });
 
-    expect(result.suggested_name).toBeTruthy();
-    expect(result.suggested_name.length).toBeLessThanOrEqual(40);
+    expect(result.suggested_name == null || result.suggested_name.length <= 40).toBe(true);
     expect(result.goal).toBeTruthy();
     expect(Array.isArray(result.standing_questions)).toBe(true);
     expect(Array.isArray(result.detected_skills)).toBe(true);
