@@ -139,6 +139,7 @@ export type IntentCategory =
   | 'advisory_stateless'        // No tools needed — "what's the difference between MEDDIC and MEDDPICC?"
   | 'advisory_with_data_option' // Better with data, but answerable without — "what closed-lost reasons should I use?"
   | 'document_request'          // User wants a downloadable document — "create a framework", "build a report"
+  | 'retrospective'             // Quarterly/period retrospective analysis — "why did we miss?", "how did Q1 go?"
   | 'ambiguous';                // Unclear — fall through to existing path
 
 export interface IntentClassification {
@@ -150,6 +151,24 @@ export interface IntentClassification {
   tokens_used: number;          // 0 for fast path
   is_followup_doc?: boolean;    // true when user wants previous response converted to a doc
 }
+
+// Retrospective intent patterns — route to 3-phase evidence-harvest architecture
+const RETROSPECTIVE_PATTERNS = [
+  /why did we (miss|make|hit|beat)\b/i,
+  /how did (we|the team) (do|perform) (this|last) quarter/i,
+  /what (happened|went wrong|drove) (this|last) quarter/i,
+  /q[1-4]\s*(retro|retrospective|review|analysis|debrief|post.?mortem)/i,
+  /look back (at|on) (the quarter|q[1-4])/i,
+  /quarterly (retro|retrospective|review|debrief|post.?mortem)/i,
+  /did we (make|hit|beat|miss|achieve) (our\s+)?(number|quota|target|goal)\b/i,
+  /how (did|do) we explain (the|this) (miss|beat|gap|shortfall|result)/i,
+  /(were we|did we get) (lucky|unlucky)\b/i,
+  /process vs\.?\s*luck/i,
+  /did we execute well (or|vs) get lucky/i,
+  /why (did|do) we (win|lose|won|lost) (so many|more|fewer|last|this) quarter/i,
+  /diagnose (the|this|our|last) quarter/i,
+  /(replicable|structural|lucky|unlucky) (quarter|result|performance)/i,
+];
 
 // Fast-path pattern matchers (no LLM, ~0ms)
 const DATA_QUERY_PATTERNS = [
@@ -236,10 +255,11 @@ Categories:
 - advisory_stateless: Answerable from general RevOps knowledge, no data needed. Examples: "what's MEDDIC?", "what's a good sales process?", "how does bowtie attribution work?"
 - advisory_with_data_option: Could be answered generically, but would be MUCH better if we first mined the user's actual CRM data or call transcripts. Examples: "what closed-lost reason values should I use?", "how should I structure my pipeline stages?", "why do our customers churn?"
 - document_request: User wants a formatted deliverable — a framework, report, briefing, or strategic document. Keywords: "create a framework", "build a report", "put together a briefing", "draft a plan for", "generate a capacity plan". This category always requires data mining first, then document synthesis. Different from data_query (which returns a chat answer) because the user explicitly wants a downloadable document.
+- retrospective: User is asking a retrospective revenue question about a past quarter or period — why did we miss/beat quota, how did Q1 go, what drove results, were we lucky or process-driven. These require correlating pipeline, activity, conversion, and rep performance data across a period. Examples: "why did we miss last quarter?", "how did we do in Q1?", "was our Q3 result replicable?", "what went wrong this quarter?"
 
 Respond with ONLY valid JSON, no other text:
 {
-  "category": "data_query" | "advisory_stateless" | "advisory_with_data_option" | "document_request",
+  "category": "data_query" | "advisory_stateless" | "advisory_with_data_option" | "document_request" | "retrospective",
   "confidence": 0.0-1.0,
   "reasoning": "one sentence"
 }`;
@@ -346,6 +366,19 @@ export async function classifyIntent(
         category: 'document_request',
         confidence: 0.85,
         reasoning: 'Document request pattern match',
+        fast_path: true,
+        tokens_used: 0,
+      };
+    }
+  }
+
+  // Fast path — retrospective questions (check before data_query; more specific)
+  for (const pattern of RETROSPECTIVE_PATTERNS) {
+    if (pattern.test(message)) {
+      return {
+        category: 'retrospective',
+        confidence: 0.88,
+        reasoning: 'Retrospective intent pattern match — will run 3-phase evidence-harvest pipeline',
         fast_path: true,
         tokens_used: 0,
       };

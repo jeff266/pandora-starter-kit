@@ -32,6 +32,7 @@ import { callLLM } from '../utils/llm-router.js';
 import { getWorkspaceContext, type WorkspaceContext } from './workspace-context.js';
 import { synthesizeDocuments, formatDocumentResponse } from './document-synthesizer.js';
 import { formatCurrency } from '../utils/format-currency.js';
+import { runRetroPipeline } from '../retro/pipeline.js';
 
 export interface ConversationTurnInput {
   surface: 'slack_thread' | 'slack_dm' | 'in_app';
@@ -427,6 +428,41 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
           repEmail,
           conversationHistory
         );
+      }
+
+      // Handle retrospective: 3-phase Evidence Harvest → Hypothesis → Targeted Synthesis
+      if (
+        intentClassification.category === 'retrospective' &&
+        intentClassification.confidence >= 0.70
+      ) {
+        try {
+          routerDecision = 'retrospective';
+          const workspaceRow = await query<{ name: string }>(
+            'SELECT name FROM workspaces WHERE id = $1',
+            [workspaceId]
+          );
+          const workspaceName = workspaceRow.rows[0]?.name ?? 'Your Workspace';
+          const retroResult = await runRetroPipeline(workspaceId, message, workspaceName);
+
+          const assistantMsg = await appendMessage(workspaceId, channelId, threadId, {
+            role: 'assistant',
+            content: retroResult.answer,
+          });
+
+          return {
+            answer: retroResult.answer,
+            thread_id: threadId,
+            scope: { type: scopeType, entity_id: entityId },
+            router_decision: `retrospective_${retroResult.route}`,
+            data_strategy: `phase_${retroResult.phase_reached}`,
+            tokens_used: retroResult.tokens_used,
+            feedback_enabled: true,
+            response_id: assistantMsg?.id,
+          };
+        } catch (err) {
+          console.error('[orchestrator] Retrospective pipeline failed, falling through:', err);
+          // Fall through to pandora_agent on error
+        }
       }
 
       // Handle user responding "best practice" to a gating question

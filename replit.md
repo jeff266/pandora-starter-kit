@@ -725,3 +725,39 @@ After: `User request → fingerprint check → if changed: live query pass + syn
 - **`server/routes/data-dictionary.ts`**: `GET /:workspaceId/dictionary` (paginated + search + source filter), `POST`, `PUT /:id`, `DELETE /:id` (soft), `GET /:workspaceId/dictionary/context` (compact term→definition map, top 50 by reference count for AI injection). Mounted via `workspaceApiRouter`.
 - **AI injection**: `conversation-stream.ts` fetches `/dictionary/context` and injects as `WORKSPACE TERMINOLOGY:` block in system prompt — Pandora uses workspace's own definitions for "qualified", "coverage ratio", etc.
 - **`client/src/pages/DataDictionary.tsx`**: Searchable/filterable table; source badge pills (system=gray, user=accent, filter=purple, metric=blue, stage=teal, pipeline=orange); inline definition editing; "Add Term" modal. Registered at `/dictionary` route; "Dictionary" added to sidebar under DATA section.
+
+## Quarterly Retrospective Intelligence (March 2026)
+
+Three-phase architecture that diagnoses quarterly performance questions at 5-6x lower token cost than a naive loop. Integrated into Ask Pandora via intent classification → orchestrator routing.
+
+### Architecture: 3 Phases
+
+**Phase 0 — Evidence Harvest** (`server/retro/evidence-harvester.ts`)
+- Zero-cost SQL reads from `skill_runs` output JSONB for 7 diagnostic skills: `forecast-rollup`, `pipeline-coverage`, `pipeline-waterfall`, `rep-scorecard`, `icp-discovery`, `conversation-intelligence`, `pipeline-hygiene`
+- Freshness buckets: fresh (≤7d), recent (≤30d), stale (≤45d), missing (>45d or no run)
+- Exports `HarvestedEvidence` interface, `harvestEvidence(workspaceId, start?, end?)`, `inferCurrentQuarter()` → `{ label, start, end }`
+
+**Phase 1 — Hypothesis Formation** (`server/retro/hypothesis-engine.ts`)
+- Single DeepSeek `classify` call (~1.5K tokens) receiving compressed evidence summaries
+- Returns `HypothesisResult`: `primary_layer`, `quadrant` (Layer 3 only), `hypothesis`, `confidence`, `supporting_signals`, `contradicting_signals`, `data_gaps`, `recommended_route`, `skip_phase_2`
+- `skip_phase_2 = true` when confidence ≥ 0.80 (sufficient cached data for direct answer)
+- `AgentRoute` type: `'coverage-agent' | 'conversion-agent' | 'win-loss-agent' | 'process-luck-agent' | 'pipeline-health-agent' | 'full-retro-agent'`
+
+**Phase 2 — Targeted Synthesis** (`server/retro/synthesis-prompts.ts` + `server/retro/pipeline.ts`)
+- Skipped when `skip_phase_2 = true` (saves 8-15K tokens)
+- Each route synthesizes the 2-3 skills whose cached outputs are most relevant to the hypothesis
+- Claude synthesis uses hypothesis as prior context; embeds 4-layer diagnostic framework as scaffold
+- Prompt templates: `buildPhase2SynthesisPrompt()`, `buildSkipPhase2Prompt()`, `compressEvidence()`
+
+**Main orchestrator** (`server/retro/pipeline.ts`)
+- `runRetroPipeline(workspaceId, question, workspaceName)` → `RetroPipelineResult`
+- Route→skills map: `coverage-agent` (coverage+rollup), `conversion-agent` (waterfall), `win-loss-agent` (icp+scorecard), `process-luck-agent` (scorecard+conv-intel), `pipeline-health-agent` (coverage+hygiene)
+- Early exit if <3 skills have data — returns message listing which skills need to run
+
+### Intent Classification & Routing
+- `'retrospective'` added to `IntentCategory` union and LLM classifier system prompt
+- `RETROSPECTIVE_PATTERNS` regex array in `intent-classifier.ts` (fast-path before LLM)
+- Orchestrator block: `if category === 'retrospective' && confidence >= 0.70` → `runRetroPipeline()` → wrapped `ConversationTurnResult`; falls through to pandora_agent on error
+
+### Route Agent Templates (agent-templates.ts)
+5 new analysis-category templates added: `coverage-agent`, `conversion-agent`, `win-loss-agent`, `process-luck-agent`, `pipeline-health-agent` — all `trigger_mode: on_demand`, `schedule: manual`.
