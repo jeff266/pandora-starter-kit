@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { api, getWorkspaceId } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
 import Skeleton from '../components/Skeleton';
-import { ChevronLeft, Plus, X, GripVertical, Save, Zap, Play, Loader2, FileText } from 'lucide-react';
+import { ChevronLeft, Plus, X, GripVertical, Save, Zap, Play, Loader2 } from 'lucide-react';
 import LearnedPreferences from '../components/agents/LearnedPreferences';
 import RunHistoryPanel from '../components/agents/RunHistoryPanel';
 import GuidedAgentChat from '../components/agents/GuidedAgentChat';
@@ -140,7 +140,6 @@ export default function AgentBuilder() {
   const [availableFilters, setAvailableFilters] = useState<NamedFilterOption[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [lastRunStatus, setLastRunStatus] = useState<string | null>(null);
-  const [latestGeneration, setLatestGeneration] = useState<any>(null);
   const [pendingCount, setPendingCount] = useState(0);
   const [allSkills, setAllSkills] = useState<Array<{ id: string; name: string }>>([]);
   const [skillsLoading, setSkillsLoading] = useState(true);
@@ -182,13 +181,6 @@ export default function AgentBuilder() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  useEffect(() => {
-    if (editingAgentId) {
-      loadLatestGeneration();
-    } else {
-      setLatestGeneration(null);
-    }
-  }, [editingAgentId]);
 
   function populateFromTemplate(t: AgentTemplate) {
     setSelectedTemplate(t);
@@ -324,29 +316,13 @@ export default function AgentBuilder() {
     setIsGenerating(true);
     setLastRunStatus(null);
     try {
-      const res = await api.post(`/agents/${editingAgentId}/generate`, {
-        triggered_by: 'manual',
-      });
-      setLastRunStatus(`Generation started (ID: ${res.generation_id || res.id})`);
-      setTimeout(() => {
-        loadLatestGeneration();
-        setRunHistoryKey(k => k + 1);
-      }, 2000);
+      const res = await api.post(`/agents/${editingAgentId}/run`, {});
+      setLastRunStatus(`Run complete (ID: ${res.runId || res.run_id || ''})`);
+      setRunHistoryKey(k => k + 1);
     } catch (err: any) {
-      setLastRunStatus(`Error: ${err.message || 'Generation failed'}`);
+      setLastRunStatus(`Error: ${err.message || 'Run failed'}`);
     } finally {
       setIsGenerating(false);
-    }
-  }
-
-  async function loadLatestGeneration() {
-    if (!editingAgentId) return;
-    try {
-      const data = await api.get(`/agents/${editingAgentId}/generations?limit=1`);
-      const gen = data.generations?.[0] || data[0];
-      if (gen) setLatestGeneration(gen);
-    } catch (err) {
-      console.error('Failed to load latest generation:', err);
     }
   }
 
@@ -810,38 +786,6 @@ export default function AgentBuilder() {
         </div>
       )}
 
-      {/* Latest Briefing Card */}
-      {latestGeneration && editingAgentId && (
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-          padding: 12,
-          background: colors.surfaceRaised,
-          borderRadius: 8,
-          marginBottom: 24,
-        }}>
-          <FileText style={{ width: 20, height: 20, color: colors.textMuted, flexShrink: 0 }} />
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 14, fontWeight: 500, color: colors.text, fontFamily: fonts.sans }}>
-              Latest Briefing
-            </div>
-            <div style={{ fontSize: 12, color: colors.textMuted, fontFamily: fonts.sans }}>
-              {latestGeneration.status || 'Completed'} · {new Date(latestGeneration.created_at).toLocaleString()}
-            </div>
-          </div>
-          <button
-            onClick={() => window.open(`/workspace/${getWorkspaceId()}/briefing/${latestGeneration.id}`, '_blank')}
-            style={{
-              ...btnSecondary,
-              padding: '6px 12px',
-              fontSize: 13,
-            }}
-          >
-            View Briefing
-          </button>
-        </div>
-      )}
 
       {/* Run History Panel */}
       {editingAgentId && (
