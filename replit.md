@@ -3,6 +3,18 @@
 ## Overview
 Pandora is a multi-tenant, agent-based Go-To-Market (GTM) intelligence platform designed for RevOps teams. It integrates and normalizes GTM data from various sources such as CRM, call intelligence, task management, and document repositories into eight core entities. The platform leverages AI to generate actionable insights, aiming to enhance decision-making, refine GTM strategies, and improve overall business vision and market potential.
 
+## Demo Workspace
+
+A pre-seeded "TechScale Demo" workspace (ID: `00000000-0000-0000-0000-000000000002`, slug: `demo`) is auto-created on server startup if absent (`server/seed-demo-workspace.ts`, called from `initializeAfterStart` in `server/index.ts`).
+
+**Contents:** 6 accounts, 18 deals, 75 stage history entries, stage_configs for 2 pipelines.
+
+**Design intent — shows normalization in two states:**
+- **New Business pipeline** (12 deals): standard HubSpot camelCase stage keys (`appointmentscheduled`, `qualifiedtobuy`, etc.) with `stage_normalized` fully populated. The Sankey normalized view works out of the box.
+- **Customer Expansion pipeline** (6 deals): custom numeric stage IDs (`2110000001`–`2110000004`) with `stage_normalized = NULL` on active stages — these are the **"changes that still need to be normalized."** `stage_configs` provides display labels so the Deal Stages raw view still works, but the normalized funnel won't show them until mappings are added.
+
+All demo users (any user in the `users` table) are auto-granted `admin` access to the demo workspace.
+
 ## Security Architecture
 
 ### Authentication Model

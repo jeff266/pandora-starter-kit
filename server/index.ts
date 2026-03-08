@@ -567,6 +567,13 @@ async function initializeAfterStart(t0: number, tDb: number): Promise<void> {
   }
 
   try {
+    const { seedDemoWorkspace } = await import('./seed-demo-workspace.js');
+    await seedDemoWorkspace();
+  } catch (err) {
+    console.warn("[server] Demo workspace seed failed (non-fatal):", err instanceof Error ? err.message : err);
+  }
+
+  try {
     const { migrateAllBowtiesToFunnel } = await import('./funnel/migration.js');
     await migrateAllBowtiesToFunnel();
   } catch (err) {
