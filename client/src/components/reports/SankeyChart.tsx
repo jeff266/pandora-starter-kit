@@ -12,7 +12,7 @@ const LOST_BAR_COLOR = '#991b1b';
 const NODE_W = 28;
 const MAX_H = 220;
 const MIN_H = 20;
-const LABEL_TOP = 60;   // space above chart area for name/count labels
+const LABEL_TOP = 80;   // space above chart area for name/count labels
 const BOTTOM_H = 56;    // space below baseline for lost/value labels
 const SIDE_PAD = 28;
 const GAP = 80;
@@ -96,9 +96,10 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
   const n = stages.length;
   if (n === 0) return null;
 
-  const maxDeals = Math.max(...stages.map(s => s.deals), 1);
+  // Size bars by ARR value, not deal count, to create smooth funnel shape
+  const maxValue = Math.max(...stages.map(s => s.value), 1);
 
-  const nodeH = stages.map(s => Math.max(MIN_H, (s.deals / maxDeals) * MAX_H));
+  const nodeH = stages.map(s => Math.max(MIN_H, (s.value / maxValue) * MAX_H));
   const nodeX = stages.map((_, i) => SIDE_PAD + i * (NODE_W + GAP));
   // bottom-align all bars to a common baseline
   const baseline = LABEL_TOP + MAX_H;
@@ -114,6 +115,7 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
   const svgH = LABEL_TOP + MAX_H + BOTTOM_H;
 
   // Helper: flow band path between stage i and i+1
+  // Connects flow portions only (excluding lost segments) for smooth funnel taper
   function flowBandPath(i: number): string {
     const x1 = nodeX[i] + NODE_W;
     const x2 = nodeX[i + 1];
@@ -121,7 +123,7 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
     const y1t = nodeY[i];
     const y1b = nodeY[i] + flowH[i];
     const y2t = nodeY[i + 1];
-    const y2b = nodeY[i + 1] + nodeH[i + 1];
+    const y2b = nodeY[i + 1] + flowH[i + 1];  // Connect to flow portion, not entire bar
     return [
       `M ${x1} ${y1t}`,
       `C ${midX} ${y1t} ${midX} ${y2t} ${x2} ${y2t}`,
@@ -292,7 +294,7 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
         <svg
           viewBox={`0 0 ${svgW} ${svgH}`}
           width="100%"
-          style={{ display: 'block', opacity: loading ? 0.35 : 1, transition: 'opacity 0.2s', overflow: 'visible' }}
+          style={{ display: 'block', opacity: loading ? 0.35 : 1, transition: 'opacity 0.2s' }}
         >
           {/* 1. Funnel silhouette — subtle filled area tracing bar tops to baseline */}
           <path
