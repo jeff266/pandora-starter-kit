@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { api, getWorkspaceId } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
 import Skeleton from '../components/Skeleton';
@@ -12,6 +12,7 @@ import AvatarPicker from '../components/avatars/AvatarPicker';
 import AvatarDisplay from '../components/avatars/AvatarDisplay';
 import { AVATAR_GALLERY } from '../components/avatars/avatar-data';
 import IntelligenceNav from '../components/IntelligenceNav';
+import { suggestSkills as staticSuggestSkills } from '../components/copilot/copilot-steps';
 
 interface AudienceConfig {
   role: string;
@@ -145,6 +146,10 @@ export default function AgentBuilder() {
   const [skillsLoading, setSkillsLoading] = useState(true);
   const [runHistoryKey, setRunHistoryKey] = useState(0);
 
+  const [suggestedSkills, setSuggestedSkills] = useState<{ skill_id: string; reason: string }[]>([]);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const lastSuggestionKey = useRef<string>('');
+
   const [pickerOpen, setPickerOpen] = useState(false);
   const [guidedChatOpen, setGuidedChatOpen] = useState(false);
   const [agentModalOpen, setAgentModalOpen] = useState(false);
@@ -181,6 +186,29 @@ export default function AgentBuilder() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
+  useEffect(() => {
+    if (activeTab !== 'skills') return;
+    const key = `${goal}||${standingQuestions.join('|')}`;
+    if (!goal && standingQuestions.length === 0) {
+      setSuggestedSkills([]);
+      return;
+    }
+    if (key === lastSuggestionKey.current) return;
+    lastSuggestionKey.current = key;
+
+    const staticIds = staticSuggestSkills(standingQuestions.length > 0 ? standingQuestions : goal ? [goal] : []);
+    setSuggestedSkills(staticIds.map(id => ({ skill_id: id, reason: '' })));
+    setSuggestionsLoading(true);
+
+    api.post('/agents/suggest-skills', { goal, standing_questions: standingQuestions })
+      .then((res: any) => {
+        if (res.suggested?.length > 0) {
+          setSuggestedSkills(res.suggested);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setSuggestionsLoading(false));
+  }, [activeTab, goal, standingQuestions]);
 
   function populateFromTemplate(t: AgentTemplate) {
     setSelectedTemplate(t);
@@ -913,18 +941,63 @@ export default function AgentBuilder() {
       {/* ─── Skills Tab ──────────────────────────────── */}
       {activeTab === 'skills' && (
         <div>
-          <SectionLabel>Skills to run ({skills.length})</SectionLabel>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
+            <span style={{ font: `500 12px ${fonts.sans}`, letterSpacing: '0.05em', textTransform: 'uppercase', color: colors.textSecondary }}>
+              Skills to run ({skills.length})
+            </span>
+            {suggestionsLoading && (
+              <span style={{ display: 'flex', alignItems: 'center', gap: 4, font: `400 11px ${fonts.sans}`, color: colors.textMuted }}>
+                <Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> Suggesting…
+              </span>
+            )}
+          </div>
+          {suggestedSkills.length > 0 && !suggestionsLoading && (
+            <p style={{ margin: '0 0 10px', font: `400 11px ${fonts.sans}`, color: colors.textMuted }}>
+              Highlighted skills are suggested based on your goal and questions.
+            </p>
+          )}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
             {skillsLoading ? (
               <span style={{ fontSize: 12, color: colors.textMuted }}>Loading skills…</span>
-            ) : allSkills.map(s => (
-              <button key={s.id} onClick={() => setSkills(prev => prev.includes(s.id) ? prev.filter(x => x !== s.id) : [...prev, s.id])} style={{
-                ...chipBtn,
-                ...(skills.includes(s.id) ? chipBtnActive : {}),
-              }}>
-                {skills.includes(s.id) ? '✓ ' : ''}{s.name}
-              </button>
-            ))}
+            ) : allSkills.map(s => {
+              const suggestion = suggestedSkills.find(sg => sg.skill_id === s.id);
+              const isSelected = skills.includes(s.id);
+              return (
+                <div key={s.id} style={{ position: 'relative' }} className="skill-chip-wrap">
+                  <button
+                    onClick={() => setSkills(prev => prev.includes(s.id) ? prev.filter(x => x !== s.id) : [...prev, s.id])}
+                    title={suggestion?.reason || undefined}
+                    style={{
+                      ...chipBtn,
+                      ...(isSelected ? chipBtnActive : {}),
+                      ...(suggestion && !isSelected ? {
+                        borderColor: '#d97706',
+                        color: '#d97706',
+                        background: 'rgba(217,119,6,0.06)',
+                      } : {}),
+                    }}
+                  >
+                    {isSelected ? '✓ ' : ''}{s.name}
+                    {suggestion && !isSelected && (
+                      <span style={{
+                        marginLeft: 6,
+                        fontSize: 9,
+                        fontWeight: 600,
+                        letterSpacing: '0.04em',
+                        textTransform: 'uppercase',
+                        background: '#d97706',
+                        color: '#fff',
+                        borderRadius: 3,
+                        padding: '1px 4px',
+                        verticalAlign: 'middle',
+                      }}>
+                        Suggested
+                      </span>
+                    )}
+                  </button>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}

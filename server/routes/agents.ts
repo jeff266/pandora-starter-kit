@@ -291,4 +291,63 @@ agentsWorkspaceRouter.get('/:workspaceId/agents/:agentId/runs/:runId/export', as
   }
 });
 
+agentsWorkspaceRouter.post('/agents/suggest-skills', requirePermission('agents.view'), async (req: Request, res: Response) => {
+  const workspaceId = req.params.workspaceId as string;
+  const { goal = '', standing_questions = [] } = req.body as { goal?: string; standing_questions?: string[] };
+
+  if (!goal && standing_questions.length === 0) {
+    return res.json({ suggested: [] });
+  }
+
+  const skillRegistry = getSkillRegistry();
+  const catalog = skillRegistry.getAll().map((s: any) => ({
+    id: s.id,
+    name: s.name,
+    description: s.description || s.name,
+  }));
+
+  const catalogText = catalog
+    .map((s: { id: string; name: string; description: string }) => `- ${s.id}: ${s.name} — ${s.description}`)
+    .join('\n');
+
+  const questionsText = standing_questions.length > 0
+    ? `Standing questions:\n${(standing_questions as string[]).map((q: string, i: number) => `${i + 1}. ${q}`).join('\n')}`
+    : '';
+
+  const systemPrompt = `You are a RevOps analyst helping configure a revenue intelligence agent. Given an agent goal and standing questions, select the most relevant skills from the available catalog. Return ONLY valid JSON matching this schema exactly: { "suggested": [{ "skill_id": string, "reason": string }] }. Include 2–4 skills maximum. Reason should be one short sentence (≤15 words) explaining why this skill answers the goal/questions.`;
+
+  const userPrompt = `Agent goal: ${goal || '(not set)'}
+${questionsText}
+
+Available skills:
+${catalogText}
+
+Return JSON: { "suggested": [{ "skill_id": "...", "reason": "..." }] }`;
+
+  try {
+    const { callLLM } = await import('../utils/llm-router.js');
+    const llmResponse = await callLLM(workspaceId, 'classify', {
+      systemPrompt,
+      messages: [{ role: 'user', content: userPrompt }],
+    });
+
+    const raw = llmResponse.content || '';
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      return res.json({ suggested: [] });
+    }
+
+    const parsed = JSON.parse(jsonMatch[0]);
+    const validSkillIds = new Set(catalog.map((s: { id: string }) => s.id));
+    const suggested = (parsed.suggested || []).filter(
+      (s: { skill_id: string; reason: string }) => s.skill_id && validSkillIds.has(s.skill_id) && s.reason
+    );
+
+    return res.json({ suggested });
+  } catch (err) {
+    console.warn('[agents] suggest-skills LLM call failed, returning empty:', (err as Error).message);
+    return res.json({ suggested: [] });
+  }
+});
+
 export { agentsGlobalRouter, agentsWorkspaceRouter };
