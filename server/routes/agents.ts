@@ -118,20 +118,79 @@ agentsWorkspaceRouter.post('/:workspaceId/agents/:agentId/run', async (req: Requ
 agentsWorkspaceRouter.get('/:workspaceId/agents/:agentId/runs', async (req: Request, res: Response) => {
   const workspaceId = req.params.workspaceId as string;
   const agentId = req.params.agentId as string;
-  const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
+  const limit = Math.min(parseInt(req.query.limit as string) || 20, 50);
+  const before = req.query.before as string | undefined;
+
+  const params: any[] = [workspaceId, agentId, limit];
+  let cursorClause = '';
+  if (before) {
+    params.push(before);
+    cursorClause = `AND started_at < $${params.length}`;
+  }
 
   const result = await query(
     `SELECT id, agent_id, workspace_id, status,
             started_at, completed_at, duration_ms,
-            skill_results, token_usage, error
+            skill_results, skill_evidence, token_usage, error,
+            synthesis_mode,
+            CASE WHEN synthesis_mode = 'goal_aware' THEN synthesized_output ELSE NULL END AS synthesis_output
      FROM agent_runs
-     WHERE workspace_id = $1 AND agent_id = $2
+     WHERE workspace_id = $1 AND agent_id = $2 ${cursorClause}
      ORDER BY started_at DESC
      LIMIT $3`,
-    [workspaceId, agentId, limit]
+    params
   );
 
-  res.json({ runs: result.rows });
+  const rows = result.rows.map((run: any) => {
+    const skillResults: any[] = Array.isArray(run.skill_results) ? run.skill_results
+      : (typeof run.skill_results === 'string' ? JSON.parse(run.skill_results || '[]') : []);
+    const skillEvidence: Record<string, any> = run.skill_evidence || {};
+    const tokenUsage: any = typeof run.token_usage === 'string'
+      ? JSON.parse(run.token_usage || '{}') : (run.token_usage || {});
+
+    let findingsCount = 0;
+    for (const ev of Object.values(skillEvidence)) {
+      findingsCount += (ev as any)?.evidence?.claims?.length || 0;
+    }
+    if (findingsCount === 0 && skillResults.length > 0) {
+      findingsCount = skillResults.filter((s: any) => s.status === 'success').length;
+    }
+
+    const totalTokens: number | null =
+      (tokenUsage.total != null ? tokenUsage.total :
+        ((tokenUsage.input || 0) + (tokenUsage.output || 0))) || null;
+
+    const skillsRun: string[] = skillResults
+      .map((s: any) => s.skillId || s.skill_id || '')
+      .filter(Boolean);
+
+    return {
+      id: run.id,
+      status: run.status,
+      synthesis_mode: run.synthesis_mode || null,
+      started_at: run.started_at,
+      completed_at: run.completed_at,
+      duration_ms: run.duration_ms,
+      findings_count: findingsCount || null,
+      skills_run: skillsRun,
+      total_tokens: totalTokens,
+      synthesis_output: run.synthesis_output || null,
+      error_message: run.error || null,
+      trend: null as 'improving' | 'worsening' | 'stable' | null,
+    };
+  });
+
+  for (let i = 0; i < rows.length - 1; i++) {
+    const cur = rows[i];
+    const prev = rows[i + 1];
+    if (cur.findings_count != null && prev.findings_count != null) {
+      if (cur.findings_count < prev.findings_count) cur.trend = 'improving';
+      else if (cur.findings_count > prev.findings_count) cur.trend = 'worsening';
+      else cur.trend = 'stable';
+    }
+  }
+
+  res.json({ runs: rows, has_more: rows.length === limit });
 });
 
 agentsWorkspaceRouter.get('/:workspaceId/agents/runs/all', async (req: Request, res: Response) => {

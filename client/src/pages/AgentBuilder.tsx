@@ -4,6 +4,7 @@ import { colors, fonts } from '../styles/theme';
 import Skeleton from '../components/Skeleton';
 import { ChevronLeft, Plus, X, GripVertical, Save, Zap, Play, Loader2, FileText } from 'lucide-react';
 import LearnedPreferences from '../components/agents/LearnedPreferences';
+import RunHistoryPanel from '../components/agents/RunHistoryPanel';
 import AgentCopilot from '../components/copilot/AgentCopilot';
 import AvatarPicker from '../components/avatars/AvatarPicker';
 import AvatarDisplay from '../components/avatars/AvatarDisplay';
@@ -141,6 +142,7 @@ export default function AgentBuilder() {
   const [pendingCount, setPendingCount] = useState(0);
   const [allSkills, setAllSkills] = useState<Array<{ id: string; name: string }>>([]);
   const [skillsLoading, setSkillsLoading] = useState(true);
+  const [runHistoryKey, setRunHistoryKey] = useState(0);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -318,8 +320,10 @@ export default function AgentBuilder() {
         triggered_by: 'manual',
       });
       setLastRunStatus(`Generation started (ID: ${res.generation_id || res.id})`);
-      // Reload latest generation after successful trigger
-      setTimeout(() => loadLatestGeneration(), 2000);
+      setTimeout(() => {
+        loadLatestGeneration();
+        setRunHistoryKey(k => k + 1);
+      }, 2000);
     } catch (err: any) {
       setLastRunStatus(`Error: ${err.message || 'Generation failed'}`);
     } finally {
@@ -708,6 +712,17 @@ export default function AgentBuilder() {
           >
             View Briefing
           </button>
+        </div>
+      )}
+
+      {/* Run History Panel */}
+      {editingAgentId && (
+        <div style={{ marginBottom: 24 }}>
+          <RunHistoryPanel
+            key={`${editingAgentId}-${runHistoryKey}`}
+            agentId={editingAgentId}
+            onRetry={() => handleRunNow()}
+          />
         </div>
       )}
 
