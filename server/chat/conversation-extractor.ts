@@ -511,7 +511,7 @@ export async function extractAgentFromConversation(
     ? null
     : generateAgentName(extracted.goal, suggestedSchedule, messages);
 
-  return {
+  const rawResult: ConversationExtractionResult = {
     suggested_name: suggestedName,
     goal: extracted.goal,
     standing_questions: extracted.questions,
@@ -523,4 +523,117 @@ export async function extractAgentFromConversation(
     _user_message_count: userMessageCount,
     _deepseek_tokens_used: tokensUsed,
   };
+
+  return applyIntentDefaults(rawResult, messages, messages.length <= 6);
+}
+
+// ─── Intent-to-Defaults Map ───────────────────────────────────────────────────
+
+interface AgentDefaultsEntry {
+  suggested_name: string;
+  skills: string[];
+  suggested_schedule: ScheduleSuggestion;
+  standing_questions: string[];
+}
+
+const INTENT_DEFAULTS: Array<{
+  patterns: RegExp[];
+  defaults: AgentDefaultsEntry;
+}> = [
+  {
+    patterns: [/\bweekly\s+(pipeline|business)\s+review\b/i, /\bpipeline\s+review\b/i],
+    defaults: {
+      suggested_name: 'Weekly Pipeline Review',
+      skills: ['pipeline-hygiene', 'rep-scorecard', 'forecast-rollup'],
+      suggested_schedule: { cron: '0 8 * * 1', label: 'Every Monday at 8 AM', timezone: 'America/New_York' },
+      standing_questions: [
+        'Which deals advanced or regressed in stage this week?',
+        'Which reps are below 3x coverage?',
+        'What is the gap to quota and is the run rate sufficient?',
+      ],
+    },
+  },
+  {
+    patterns: [/\bforecast\b/i, /\bcommit\b/i, /\blanding zone\b/i],
+    defaults: {
+      suggested_name: 'Weekly Forecast Brief',
+      skills: ['forecast-rollup', 'pipeline-hygiene'],
+      suggested_schedule: { cron: '0 16 * * 5', label: 'Every Friday at 4 PM', timezone: 'America/New_York' },
+      standing_questions: [
+        'What is the current base case and gap to quota?',
+        'Which deals changed forecast category since last week?',
+        'Which commit deals have risk signals?',
+      ],
+    },
+  },
+  {
+    patterns: [/\brep\s+(performance|scorecard|attainment)\b/i, /\breps.*behind\b/i, /\bcoaching\b/i],
+    defaults: {
+      suggested_name: 'Weekly Rep Scorecard',
+      skills: ['rep-scorecard', 'pipeline-coverage'],
+      suggested_schedule: { cron: '0 8 * * 1', label: 'Every Monday at 8 AM', timezone: 'America/New_York' },
+      standing_questions: [
+        'Which reps are on track vs. at risk this quarter?',
+        'Who needs coaching and on what specifically?',
+        'Which reps have coverage below 3x?',
+      ],
+    },
+  },
+  {
+    patterns: [/\bdata\s+quality\b/i, /\bhygiene\b/i, /\bmissing\s+fields\b/i],
+    defaults: {
+      suggested_name: 'Weekly Data Quality Audit',
+      skills: ['data-quality-audit', 'pipeline-hygiene'],
+      suggested_schedule: { cron: '0 8 * * 1', label: 'Every Monday at 8 AM', timezone: 'America/New_York' },
+      standing_questions: [
+        'What percentage of deals are missing required fields?',
+        'Which reps have the most data hygiene issues?',
+        'What are the most impactful fields to fix this week?',
+      ],
+    },
+  },
+];
+
+/**
+ * Apply intent-based defaults when extraction confidence is low or the
+ * conversation is short (guided creation, <= 6 messages).
+ *
+ * Scans all user messages for intent patterns.
+ * If a match is found:
+ *  - Keeps DeepSeek goal if non-empty, otherwise uses default
+ *  - Keeps DeepSeek questions if >= 2, otherwise uses defaults
+ *  - Always replaces skills when extraction found none
+ *  - For guided conversations, always uses the default schedule
+ *  - Upgrades 'low' confidence to 'medium'
+ */
+export function applyIntentDefaults(
+  result: ConversationExtractionResult,
+  messages: ChatMessage[],
+  isGuidedConversation: boolean,
+): ConversationExtractionResult {
+  const userText = messages
+    .filter(m => m.role === 'user')
+    .map(m => (typeof m.content === 'string' ? m.content : ''))
+    .join(' ');
+
+  for (const { patterns, defaults } of INTENT_DEFAULTS) {
+    if (patterns.some(p => p.test(userText))) {
+      return {
+        ...result,
+        suggested_name: result.suggested_name ?? defaults.suggested_name,
+        detected_skills: result.detected_skills.length > 0
+          ? result.detected_skills
+          : defaults.skills,
+        suggested_schedule: isGuidedConversation
+          ? defaults.suggested_schedule
+          : result.suggested_schedule,
+        standing_questions: result.standing_questions.length >= 2
+          ? result.standing_questions
+          : defaults.standing_questions,
+        confidence: result.confidence === 'low' ? 'medium' : result.confidence,
+      };
+    }
+  }
+
+  return result;
 }

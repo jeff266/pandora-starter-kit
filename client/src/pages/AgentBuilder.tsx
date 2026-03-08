@@ -5,6 +5,8 @@ import Skeleton from '../components/Skeleton';
 import { ChevronLeft, Plus, X, GripVertical, Save, Zap, Play, Loader2, FileText } from 'lucide-react';
 import LearnedPreferences from '../components/agents/LearnedPreferences';
 import RunHistoryPanel from '../components/agents/RunHistoryPanel';
+import GuidedAgentChat from '../components/agents/GuidedAgentChat';
+import SaveAsAgentModal from '../components/SaveAsAgentModal';
 import AgentCopilot from '../components/copilot/AgentCopilot';
 import AvatarPicker from '../components/avatars/AvatarPicker';
 import AvatarDisplay from '../components/avatars/AvatarDisplay';
@@ -143,6 +145,12 @@ export default function AgentBuilder() {
   const [allSkills, setAllSkills] = useState<Array<{ id: string; name: string }>>([]);
   const [skillsLoading, setSkillsLoading] = useState(true);
   const [runHistoryKey, setRunHistoryKey] = useState(0);
+
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [guidedChatOpen, setGuidedChatOpen] = useState(false);
+  const [agentModalOpen, setAgentModalOpen] = useState(false);
+  const [modalExtraction, setModalExtraction] = useState<any>(null);
+  const [modalConversationId, setModalConversationId] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -410,7 +418,7 @@ export default function AgentBuilder() {
               Configure AI agents that produce editorial briefings for your team
             </p>
           </div>
-          <button onClick={() => setView('copilot')} style={btnPrimary}>
+          <button onClick={() => setPickerOpen(true)} style={btnPrimary}>
             <Plus size={16} /> New Agent
           </button>
         </div>
@@ -422,7 +430,7 @@ export default function AgentBuilder() {
             <p style={{ font: `400 14px ${fonts.sans}`, color: colors.textSecondary, margin: '0 0 20px' }}>
               Create your first agent from a template or start from scratch
             </p>
-            <button onClick={() => setView('copilot')} style={btnPrimary}>
+            <button onClick={() => setPickerOpen(true)} style={btnPrimary}>
               <Plus size={16} /> Create Agent
             </button>
           </div>
@@ -473,7 +481,127 @@ export default function AgentBuilder() {
             ))}
           </div>
         )}
-      </div>
+
+        {/* ─── Creation Path Picker Modal ─── */}
+      {pickerOpen && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 1050,
+          background: 'rgba(0,0,0,0.55)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: 24,
+        }} onClick={e => { if (e.target === e.currentTarget) setPickerOpen(false); }}>
+          <div style={{
+            background: colors.surface,
+            border: `1px solid ${colors.border}`,
+            borderRadius: 14,
+            padding: 28,
+            width: '100%', maxWidth: 540,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+              <div style={{ font: `600 16px ${fonts.sans}`, color: colors.text }}>
+                How do you want to build this Agent?
+              </div>
+              <button onClick={() => setPickerOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: colors.textMuted, padding: 2 }}>
+                <X size={16} />
+              </button>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              {/* Conversation path */}
+              <div
+                onClick={() => { setPickerOpen(false); setGuidedChatOpen(true); }}
+                onMouseEnter={e => {
+                  (e.currentTarget as HTMLElement).style.borderColor = colors.accent;
+                  (e.currentTarget as HTMLElement).style.background = 'rgba(20,184,166,0.05)';
+                }}
+                onMouseLeave={e => {
+                  (e.currentTarget as HTMLElement).style.borderColor = colors.border;
+                  (e.currentTarget as HTMLElement).style.background = colors.surfaceRaised;
+                }}
+                style={{
+                  background: colors.surfaceRaised,
+                  border: `1.5px solid ${colors.border}`,
+                  borderRadius: 10, padding: 18, cursor: 'pointer',
+                  transition: 'border-color 0.15s, background 0.15s',
+                  display: 'flex', flexDirection: 'column', gap: 10,
+                }}
+              >
+                <div style={{ fontSize: 28 }}>💬</div>
+                <div>
+                  <div style={{ font: `600 14px ${fonts.sans}`, color: colors.text, marginBottom: 4 }}>
+                    Start from conversation
+                  </div>
+                  <div style={{ font: `400 12px ${fonts.sans}`, color: colors.textSecondary, lineHeight: 1.5 }}>
+                    Tell Pandora what you want. It figures out the rest.
+                  </div>
+                </div>
+                <div style={{ font: `400 11px ${fonts.sans}`, color: colors.textMuted, marginTop: 'auto' }}>
+                  Best for: "I want a weekly pipeline review"
+                </div>
+              </div>
+
+              {/* Manual path */}
+              <div
+                onClick={() => { setPickerOpen(false); setView('copilot'); }}
+                onMouseEnter={e => {
+                  (e.currentTarget as HTMLElement).style.borderColor = colors.textMuted;
+                }}
+                onMouseLeave={e => {
+                  (e.currentTarget as HTMLElement).style.borderColor = colors.border;
+                }}
+                style={{
+                  background: colors.surfaceRaised,
+                  border: `1.5px solid ${colors.border}`,
+                  borderRadius: 10, padding: 18, cursor: 'pointer',
+                  transition: 'border-color 0.15s',
+                  display: 'flex', flexDirection: 'column', gap: 10,
+                }}
+              >
+                <div style={{ fontSize: 28 }}>⚙️</div>
+                <div>
+                  <div style={{ font: `600 14px ${fonts.sans}`, color: colors.text, marginBottom: 4 }}>
+                    Build manually
+                  </div>
+                  <div style={{ font: `400 12px ${fonts.sans}`, color: colors.textSecondary, lineHeight: 1.5 }}>
+                    Pick skills, set schedule, configure delivery yourself.
+                  </div>
+                </div>
+                <div style={{ font: `400 11px ${fonts.sans}`, color: colors.textMuted, marginTop: 'auto' }}>
+                  Best for: power users who know exactly what they need.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Guided Agent Chat ─── */}
+      {guidedChatOpen && (
+        <GuidedAgentChat
+          workspaceId={getWorkspaceId()}
+          onReadyToSave={(result, convId) => {
+            setGuidedChatOpen(false);
+            setModalExtraction(result);
+            setModalConversationId(convId);
+            setAgentModalOpen(true);
+          }}
+          onClose={() => setGuidedChatOpen(false)}
+        />
+      )}
+
+      {/* ─── Save as Agent Modal (from guided flow) ─── */}
+      {agentModalOpen && modalExtraction && (
+        <SaveAsAgentModal
+          extraction={modalExtraction}
+          threadId={modalConversationId || ''}
+          onSave={(_agentId: string, _agentName: string) => {
+            setAgentModalOpen(false);
+            loadData();
+          }}
+          onClose={() => setAgentModalOpen(false)}
+        />
+      )}
+    </div>
     );
   }
 

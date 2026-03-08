@@ -14,6 +14,7 @@ import {
 import { query } from '../db.js';
 import { processFeedback, type AgentFeedback } from '../agents/feedback-processor.js';
 import { extractAgentFromConversation, loadChatMessages } from '../chat/conversation-extractor.js';
+import { callLLM } from '../utils/llm-router.js';
 
 const router = Router();
 
@@ -447,7 +448,7 @@ router.post('/:workspaceId/chat/extract-agent', async (req: Request, res: Respon
     }
 
     const userMessageCount = messages.filter(m => m.role === 'user').length;
-    if (userMessageCount < 2) {
+    if (userMessageCount < 1) {
       res.status(400).json({
         error: 'Conversation too short to extract an Agent',
         confidence: 'low',
@@ -475,6 +476,124 @@ router.post('/:workspaceId/chat/extract-agent', async (req: Request, res: Respon
   } catch (err) {
     console.error('[chat] extract-agent error:', err);
     res.status(500).json({ error: 'Failed to extract agent from conversation' });
+  }
+});
+
+// ─── Guided Agent Creation Chat ───────────────────────────────────────────────
+
+const GUIDED_AGENT_SYSTEM_PROMPT = `You are helping a RevOps professional create a recurring automated Agent in Pandora.
+
+Your job is to understand what business outcome they want to track and propose a configuration. You have exactly 3 turns to gather what you need.
+
+TURN 1 (first response):
+Ask one focused question about the business outcome they want to stay on top of.
+Keep it short — one sentence. Example:
+"What business outcome do you want to stay on top of week over week?"
+
+TURN 2 (after their first answer):
+You now know their goal. Ask one focused follow-up about cadence or context.
+This is the last question before you build. Example:
+"Got it — [restate their goal in 5 words]. Any particular cadence or meeting this should prep you for?"
+
+TURN 3 (after their second answer):
+You have everything you need. Do NOT ask another question.
+Respond with exactly:
+"Perfect. Let me build your Agent configuration based on what you've told me."
+
+RULES:
+- Never ask more than one question per turn.
+- Never ask about specific skills or technical configuration — that's Pandora's job.
+- Never say "I'll need to" or "I'll try to" — be confident.
+- If the user gives you everything in their first message (goal + cadence), skip turn 2 and go straight to turn 3.
+- Keep every response under 40 words.`;
+
+const CADENCE_SIGNALS = /\b(daily|weekly|monday|friday|monthly|every\s+\w+)\b/i;
+const GOAL_SIGNALS = /\b(pipeline|forecast|rep|quota|coverage|review|report|brief)\b/i;
+
+function shouldSkipToExtract(messages: Array<{ role: string; content: string }>): boolean {
+  const userMessages = messages.filter(m => m.role === 'user');
+  if (userMessages.length >= 3) return true;
+  if (userMessages.length >= 2) return true;
+  // Early exit: first message has both goal and cadence signals
+  const firstUserMessage = userMessages[0]?.content ?? '';
+  if (
+    userMessages.length >= 1 &&
+    GOAL_SIGNALS.test(firstUserMessage) &&
+    CADENCE_SIGNALS.test(firstUserMessage)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * POST /api/workspaces/:workspaceId/chat/guided-agent
+ *
+ * Single turn in the guided Agent creation conversation.
+ * Uses a focused system prompt with a hard exit after 2 user turns (or early
+ * exit when first message contains both goal + cadence signals).
+ *
+ * Body: { messages: {role, content}[], conversation_id?: string }
+ * Response: { message: string, shouldExtract: boolean, conversation_id: string }
+ */
+router.post('/:workspaceId/chat/guided-agent', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const workspaceId = req.params.workspaceId as string;
+    const userId = (req as any).user?.id ?? 'anonymous';
+    const { messages = [], conversation_id: incomingConvId } = req.body;
+
+    if (!Array.isArray(messages) || messages.length === 0) {
+      res.status(400).json({ error: 'messages array required' });
+      return;
+    }
+
+    // Determine or create conversation session
+    let conversationId: string = incomingConvId ?? '';
+    const lastUserMessage = [...messages].reverse().find(m => m.role === 'user');
+    const firstUserMessage = messages.find(m => m.role === 'user');
+
+    if (!conversationId) {
+      const session = await createChatSession(
+        workspaceId,
+        userId,
+        firstUserMessage?.content ?? 'Guided agent creation'
+      );
+      conversationId = session.id;
+    }
+
+    // Persist the latest user message
+    if (lastUserMessage) {
+      await appendChatMessage(conversationId, workspaceId, userId, 'user', lastUserMessage.content);
+    }
+
+    const extract = shouldSkipToExtract(messages);
+    const assistantMessage = extract
+      ? 'Perfect. Let me build your Agent configuration based on what you\'ve told me.'
+      : await (async () => {
+          const llmMessages = messages.map((m: any) => ({
+            role: m.role as 'user' | 'assistant',
+            content: m.content,
+          }));
+          const result = await callLLM(workspaceId, 'generate', {
+            messages: llmMessages,
+            systemPrompt: GUIDED_AGENT_SYSTEM_PROMPT,
+            max_tokens: 150,
+            temperature: 0.7,
+          });
+          return typeof result === 'string' ? result : (result as any).content ?? 'Got it. Tell me more.';
+        })();
+
+    // Persist assistant response
+    await appendChatMessage(conversationId, workspaceId, userId, 'assistant', assistantMessage);
+
+    res.json({
+      message: assistantMessage,
+      shouldExtract: extract,
+      conversation_id: conversationId,
+    });
+  } catch (err) {
+    console.error('[chat] guided-agent error:', err);
+    res.status(500).json({ error: 'Failed to process guided agent message' });
   }
 });
 

@@ -205,7 +205,8 @@ describe('generateAgentName', () => {
     };
     const msgs: ChatMessage[] = [{ role: 'user', content: 'I want to review my forecast commit' }];
     const name = generateAgentName('keep forecast accurate', schedule, msgs);
-    expect(name.length).toBeLessThanOrEqual(40);
+    expect(name).not.toBeNull();
+    expect(name!.length).toBeLessThanOrEqual(40);
     expect(name).toContain('Forecast');
   });
 
@@ -217,8 +218,9 @@ describe('generateAgentName', () => {
     };
     const msgs: ChatMessage[] = [{ role: 'user', content: 'show me pipeline health' }];
     const name = generateAgentName('monitor pipeline health', schedule, msgs);
+    expect(name).not.toBeNull();
     expect(name).toContain('Pipeline');
-    expect(name.length).toBeLessThanOrEqual(40);
+    expect(name!.length).toBeLessThanOrEqual(40);
   });
 
   it('generates a daily name for daily schedule', () => {
@@ -229,8 +231,9 @@ describe('generateAgentName', () => {
     };
     const msgs: ChatMessage[] = [{ role: 'user', content: 'show me rep scorecard' }];
     const name = generateAgentName('track rep attainment', schedule, msgs);
+    expect(name).not.toBeNull();
     expect(name).toMatch(/^Daily/);
-    expect(name.length).toBeLessThanOrEqual(40);
+    expect(name!.length).toBeLessThanOrEqual(40);
   });
 
   it('returns null when no topic keyword matches', () => {
