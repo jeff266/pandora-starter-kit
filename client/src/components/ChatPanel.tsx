@@ -5,6 +5,7 @@ import { useDemoMode } from '../contexts/DemoModeContext';
 import { Icon } from './icons';
 import ChartRenderer from './shared/ChartRenderer';
 import type { ChartSpec } from './shared/ChartRenderer';
+import ChatDocBar from './ChatDocBar';
 
 interface ToolCall {
   tool: string;
@@ -647,6 +648,8 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
             </>
           )}
         </div>
+
+        {!isHistoryView && <ChatDocBar threadId={threadId} />}
 
         {!isHistoryView && (
           <div style={{ ...styles.inputContainer, ...(isMobile ? { padding: '10px 10px 14px' } : {}) }}>
