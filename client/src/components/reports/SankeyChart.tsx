@@ -51,6 +51,7 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
   const [chartData, setChartData] = useState<SankeyChartData | null>(initialData);
   const [loading, setLoading] = useState(false);
   const [hoveredFlow, setHoveredFlow] = useState<number | null>(null);
+  const [openMathCard, setOpenMathCard] = useState<number | null>(null);
   const [containerW, setContainerW] = useState(700);
   const svgContainerRef = useRef<HTMLDivElement>(null);
 
@@ -551,14 +552,20 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
             const toStage = stages[i + 1];
             const displayFrom = showRaw && fromStage?.rawLabel ? fromStage.rawLabel : cr.fromLabel;
             const displayTo = showRaw && toStage?.rawLabel ? toStage.rawLabel : cr.toLabel;
+            const isOpen = openMathCard === i;
             return (
               <div
                 key={i}
+                onClick={() => setOpenMathCard(isOpen ? null : i)}
+                onMouseEnter={() => setOpenMathCard(i)}
+                onMouseLeave={() => setOpenMathCard(null)}
                 style={{
                   background: colors.surface,
                   borderRadius: 6,
                   padding: '7px 10px',
-                  border: `1px solid ${colors.border}`,
+                  border: `1px solid ${isOpen ? colors.accent : colors.border}`,
+                  cursor: 'pointer',
+                  transition: 'border-color 0.15s',
                 }}
               >
                 <div
@@ -598,7 +605,22 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
                       {Math.abs(cr.delta)}pp
                     </span>
                   )}
+                  <span style={{ fontSize: 9, color: colors.textMuted, marginLeft: 'auto', fontFamily: fonts.sans }}>ⓘ</span>
                 </div>
+                {isOpen && cr.denominator > 0 && (
+                  <div style={{ marginTop: 6, paddingTop: 6, borderTop: `1px solid ${colors.border}` }}>
+                    <div style={{ fontSize: 10, color: colors.textMuted, fontFamily: fonts.mono, lineHeight: 1.6 }}>
+                      {cr.numerator} advanced<br />
+                      ÷ {cr.denominator} eligible<br />
+                      = {cr.rate}%
+                    </div>
+                    {cr.startOfPeriod > 0 && (
+                      <div style={{ fontSize: 9, color: colors.textMuted, fontFamily: fonts.sans, marginTop: 3 }}>
+                        {cr.entered} entered + {cr.startOfPeriod} at period start
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })}

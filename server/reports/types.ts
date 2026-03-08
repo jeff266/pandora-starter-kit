@@ -152,6 +152,10 @@ export interface SankeyConversionRate {
   toLabel: string;
   rate: number;
   delta?: number;
+  numerator: number;
+  denominator: number;
+  startOfPeriod: number;
+  entered: number;
 }
 
 export interface WinningPath {

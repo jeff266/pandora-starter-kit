@@ -148,6 +148,10 @@ export async function buildSankeyChartData(
       toLabel: toStage.label,
       rate,
       ...(delta !== undefined ? { delta } : {}),
+      numerator: curr?.advanced ?? 0,
+      denominator,
+      startOfPeriod: curr?.startOfPeriod ?? 0,
+      entered: curr?.entered ?? 0,
     };
   });
 
