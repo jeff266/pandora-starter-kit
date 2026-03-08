@@ -1,208 +1,525 @@
 import { callLLM } from '../utils/llm-router.js';
+import { query } from '../db.js';
+
+// ─── Input ────────────────────────────────────────────────────────────────────
+
+export interface ChatMessage {
+  role: 'user' | 'assistant' | 'tool' | 'system';
+  content: string;
+  skill_id?: string;
+  metadata?: Record<string, any>;
+  tool_trace?: Array<{ tool: string; input?: Record<string, any>; [key: string]: any }>;
+  created_at?: string;
+}
+
+export interface ExtractionInput {
+  messages: ChatMessage[];
+  workspace_id: string;
+  conversation_id: string;
+}
+
+// ─── Output ───────────────────────────────────────────────────────────────────
+
+export interface ScheduleSuggestion {
+  cron: string;
+  label: string;
+  timezone: string;
+}
+
+export interface DeliverySuggestion {
+  format: 'slack' | 'email' | 'command_center';
+  channel?: string;
+}
 
 export interface ConversationExtractionResult {
   suggested_name: string;
   goal: string;
   standing_questions: string[];
   detected_skills: string[];
-  suggested_schedule: {
-    cron: string;
-    label: string;
-  };
-  suggested_delivery: {
-    format: 'slack' | 'email' | 'command_center';
-    channel?: string;
-  };
+  suggested_schedule: ScheduleSuggestion;
+  suggested_delivery: DeliverySuggestion;
   confidence: 'high' | 'medium' | 'low';
-  reasoning: string;
+  _reasoning: string;
+  _user_message_count: number;
+  _deepseek_tokens_used: number;
 }
 
-interface ChatMessage {
-  role: string;
-  content: any;
-  metadata?: Record<string, any>;
-}
+// ─── Task 2: Skill Detection (deterministic) ─────────────────────────────────
 
-// ── Step 1: deterministic skill detection from tool call metadata ──
-function detectSkills(messages: ChatMessage[]): string[] {
-  const skills = new Set<string>();
-  for (const m of messages) {
-    if (m.metadata?.skill_id) skills.add(m.metadata.skill_id);
-    if (m.metadata?.skills_used) {
-      for (const s of m.metadata.skills_used) skills.add(s.skill_id || s);
+/**
+ * Scan messages for skill invocations.
+ * Sources checked:
+ *  a) direct skill_id field on any message
+ *  b) metadata.skill_id, metadata.skills_used, metadata.skill_evidence_used
+ *  c) tool_trace on assistant messages — look for get_skill_evidence calls
+ *  d) tool messages with name 'get_skill_evidence' in content (Anthropic format)
+ *
+ * Deduplicates and preserves first-appearance order.
+ */
+export function detectInvokedSkills(messages: ChatMessage[]): string[] {
+  const seen = new Set<string>();
+  const skills: string[] = [];
+
+  function addSkill(s: string | null | undefined) {
+    if (s && typeof s === 'string' && !seen.has(s)) {
+      seen.add(s);
+      skills.push(s);
     }
-    if (m.metadata?.skill_evidence_used) {
-      for (const s of m.metadata.skill_evidence_used) {
-        if (s.skill_id) skills.add(s.skill_id);
+  }
+
+  for (const msg of messages) {
+    addSkill(msg.skill_id);
+
+    const meta = msg.metadata ?? {};
+    addSkill(meta.skill_id);
+
+    if (Array.isArray(meta.skills_used)) {
+      for (const s of meta.skills_used) addSkill(s?.skill_id || s);
+    }
+    if (Array.isArray(meta.skill_evidence_used)) {
+      for (const s of meta.skill_evidence_used) addSkill(s?.skill_id);
+    }
+
+    if (Array.isArray(msg.tool_trace)) {
+      for (const trace of msg.tool_trace) {
+        if (trace.tool === 'get_skill_evidence' && trace.input?.skill_id) {
+          addSkill(trace.input.skill_id);
+        }
+      }
+    }
+
+    // Anthropic-format: assistant content blocks
+    if (msg.role === 'assistant' && Array.isArray((msg as any).content)) {
+      for (const block of (msg as any).content) {
+        if (
+          block?.type === 'tool_use' &&
+          block?.name === 'get_skill_evidence' &&
+          block?.input?.skill_id
+        ) {
+          addSkill(block.input.skill_id);
+        }
       }
     }
   }
-  return Array.from(skills);
+
+  return skills;
 }
 
-// ── Step 2: DeepSeek extraction of goal + questions ──
-async function extractGoalAndQuestions(
-  messages: ChatMessage[],
-  workspaceId: string
-): Promise<{ goal: string; questions: string[] }> {
-  const userMessages = messages
-    .filter(m => m.role === 'user')
-    .map(m => (typeof m.content === 'string' ? m.content : JSON.stringify(m.content)))
-    .join('\n\n');
+// ─── Task 3: Schedule Inference (heuristic) ───────────────────────────────────
 
-  if (!userMessages.trim()) {
-    return { goal: 'Monitor revenue operations performance', questions: [] };
-  }
-
-  try {
-    const result = await callLLM(workspaceId, 'extract', {
-      messages: [
-        {
-          role: 'user',
-          content: `You are analyzing a RevOps analyst's conversation with an AI assistant.
-
-Extract:
-1. goal: The single business goal motivating this conversation (1 sentence, max 120 chars)
-2. questions: The 3-5 most substantive questions the user asked. Rephrase as recurring standing questions — things that should be answered every time this report runs, not just today.
-
-User messages:
-${userMessages.slice(0, 2000)}
-
-Respond ONLY with JSON: { "goal": "...", "questions": ["...", "..."] }`,
-        },
-      ],
-      maxTokens: 400,
-      temperature: 0.2,
-    });
-
-    const text = result.content?.[0]?.text || result.content || '';
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]);
-      return {
-        goal: parsed.goal || 'Monitor revenue operations performance',
-        questions: (parsed.questions || []).slice(0, 5),
-      };
-    }
-  } catch (e) {
-    console.error('[ConversationExtractor] LLM extraction failed:', e);
-  }
-
-  return { goal: 'Monitor revenue operations performance', questions: [] };
-}
-
-// ── Step 3: schedule heuristic ──
-interface Schedule {
+interface ScheduleRule {
+  patterns: RegExp[];
   cron: string;
   label: string;
 }
 
-function inferSchedule(messages: ChatMessage[]): Schedule {
-  const text = messages
-    .map(m => (typeof m.content === 'string' ? m.content : JSON.stringify(m.content)))
-    .join(' ')
-    .toLowerCase();
+const SCHEDULE_RULES: ScheduleRule[] = [
+  {
+    patterns: [/\b(daily|every day|each day|each morning|every morning)\b/i],
+    cron: '0 7 * * 1-5',
+    label: 'Weekdays at 7 AM',
+  },
+  {
+    patterns: [
+      /\b(monday|monday morning|start of week|beginning of week|weekly pipeline)\b/i,
+      /\b(pipeline review|pipeline brief)\b/i,
+    ],
+    cron: '0 8 * * 1',
+    label: 'Every Monday at 8 AM',
+  },
+  {
+    patterns: [/\b(friday|end of week|weekly forecast|forecast call|forecast prep)\b/i],
+    cron: '0 16 * * 5',
+    label: 'Every Friday at 4 PM',
+  },
+  {
+    patterns: [/\b(weekly|each week|every week|week over week|wow)\b/i],
+    cron: '0 8 * * 1',
+    label: 'Every Monday at 8 AM',
+  },
+  {
+    patterns: [/\b(monthly|each month|every month|month over month|mom|end of month)\b/i],
+    cron: '0 8 1 * *',
+    label: '1st of every month at 8 AM',
+  },
+  {
+    patterns: [/\b(quarterly|qbr|quarter end|end of quarter|eoq)\b/i],
+    cron: '',
+    label: 'On demand (quarterly)',
+  },
+];
 
-  if (/daily|every day|each day|this morning/.test(text)) {
-    return { cron: '0 7 * * 1-5', label: 'Every weekday at 7 AM' };
+const DEFAULT_SCHEDULE: ScheduleSuggestion = {
+  cron: '0 8 * * 1',
+  label: 'Every Monday at 8 AM',
+  timezone: 'America/New_York',
+};
+
+export function inferSchedule(messages: ChatMessage[]): ScheduleSuggestion {
+  const userText = messages
+    .filter(m => m.role === 'user')
+    .map(m => (typeof m.content === 'string' ? m.content : ''))
+    .join(' ');
+
+  for (const rule of SCHEDULE_RULES) {
+    if (rule.patterns.some(p => p.test(userText))) {
+      return { cron: rule.cron, label: rule.label, timezone: 'America/New_York' };
+    }
   }
-  if (/monthly|end of month|month over month/.test(text)) {
-    return { cron: '0 8 1 * *', label: '1st of every month at 8 AM' };
-  }
-  if (/quarterly|qbr|end of quarter/.test(text)) {
-    return { cron: '', label: 'On demand' };
-  }
-  if (/forecast|monday morning|call prep/.test(text)) {
-    return { cron: '0 7 * * 1', label: 'Every Monday at 7 AM' };
-  }
-  if (/weekly|this week|last week|week over week/.test(text)) {
-    return { cron: '0 8 * * 1', label: 'Every Monday at 8 AM' };
-  }
-  // default
-  return { cron: '0 8 * * 1', label: 'Every Monday at 8 AM' };
+
+  return DEFAULT_SCHEDULE;
 }
 
-// ── Step 4: name generation ──
-function generateName(goal: string, schedule: Schedule): string {
-  const g = goal.toLowerCase();
-  const isMonday = schedule.label.includes('Monday');
-  const isWeekly = schedule.label.includes('Monday') || schedule.label.includes('Weekly');
-  const isDaily = schedule.label.includes('weekday') || schedule.label.includes('Daily');
-  const isMonthly = schedule.label.includes('month');
-  const isOnDemand = schedule.label === 'On demand';
+// ─── Task 4: Delivery Inference (heuristic) ───────────────────────────────────
 
-  const prefix = isMonday && !isDaily
-    ? 'Monday'
-    : isWeekly ? 'Weekly'
-    : isDaily ? 'Daily'
-    : isMonthly ? 'Monthly'
-    : isOnDemand ? 'On-Demand'
-    : 'Weekly';
+export function inferDelivery(messages: ChatMessage[]): DeliverySuggestion {
+  const userText = messages
+    .filter(m => m.role === 'user')
+    .map(m => (typeof m.content === 'string' ? m.content : ''))
+    .join(' ');
 
-  if (/pipeline.*health|health.*pipeline/.test(g)) return `${prefix} Pipeline Health`.slice(0, 40);
-  if (/forecast/.test(g)) return `${prefix} Forecast Brief`.slice(0, 40);
-  if (/rep.*perform|perform.*rep|scorecard/.test(g)) return `${prefix} Rep Scorecard`.slice(0, 40);
-  if (/pipeline.*coverage|coverage.*pipeline/.test(g)) return `${prefix} Coverage Check`.slice(0, 40);
-  if (/hygiene|data.*quality/.test(g)) return `${prefix} Hygiene Review`.slice(0, 40);
-  if (/pipeline/.test(g)) return `${prefix} Pipeline Review`.slice(0, 40);
-  if (/attainment|quota/.test(g)) return `${prefix} Quota Review`.slice(0, 40);
-  if (/risk/.test(g)) return `${prefix} Risk Briefing`.slice(0, 40);
-
-  // Fallback: take first 3 meaningful words from goal
-  const words = goal.replace(/[^a-zA-Z ]/g, '').split(/\s+/).filter(w => w.length > 3).slice(0, 3);
-  const suffix = words.length > 0 ? words.map(w => w[0].toUpperCase() + w.slice(1)).join(' ') : 'Briefing';
-  return `${prefix} ${suffix}`.slice(0, 40);
-}
-
-// ── Step 5: delivery inference ──
-function inferDelivery(messages: ChatMessage[]): ConversationExtractionResult['suggested_delivery'] {
-  const text = messages
-    .map(m => (typeof m.content === 'string' ? m.content : JSON.stringify(m.content)))
-    .join(' ')
-    .toLowerCase();
-
-  const slackChannelMatch = text.match(/#([a-z0-9_-]+)/);
-  if (slackChannelMatch) {
-    return { format: 'slack', channel: `#${slackChannelMatch[1]}` };
+  const channelMatch = userText.match(/#([a-z0-9_-]+)/i);
+  if (channelMatch) {
+    return { format: 'slack', channel: `#${channelMatch[1]}` };
   }
-  if (/email/.test(text)) return { format: 'email' };
+
+  if (/\b(email|send to|mailto|inbox)\b/i.test(userText)) {
+    return { format: 'email' };
+  }
+
   return { format: 'slack' };
 }
 
-// ── Step 6: confidence ──
-function computeConfidence(
-  messages: ChatMessage[],
-  skills: string[]
-): ConversationExtractionResult['confidence'] {
-  const turns = messages.filter(m => m.role === 'user').length;
-  if (turns >= 5 && skills.length >= 2) return 'high';
-  if (turns >= 3 || skills.length >= 1) return 'medium';
-  return 'low';
+// ─── Task 5: Name Generation (deterministic) ──────────────────────────────────
+
+const CADENCE_LABELS: Record<string, string> = {
+  '0 7 * * 1-5': 'Daily',
+  '0 8 * * 1': 'Weekly',
+  '0 16 * * 5': 'Friday',
+  '0 8 1 * *': 'Monthly',
+  '': '',
+};
+
+const TOPIC_KEYWORDS: Array<{ patterns: RegExp[]; label: string }> = [
+  {
+    patterns: [/pipeline\s+(hygiene|health|review|coverage)/i, /stale\s+deal/i],
+    label: 'Pipeline Review',
+  },
+  {
+    patterns: [/forecast/i, /landing\s+zone/i, /commit/i],
+    label: 'Forecast Brief',
+  },
+  {
+    patterns: [/rep\s+(scorecard|performance|attainment)/i, /reps.*behind/i],
+    label: 'Rep Scorecard',
+  },
+  {
+    patterns: [/data\s+quality/i, /hygiene\s+audit/i],
+    label: 'Data Quality Audit',
+  },
+  {
+    patterns: [/icp|ideal\s+customer|win\s+pattern/i],
+    label: 'ICP Audit',
+  },
+  {
+    patterns: [/single.thread|multi.thread|contact\s+role/i],
+    label: 'Coverage Alert',
+  },
+  {
+    patterns: [/competitive|competitor/i],
+    label: 'Competitive Brief',
+  },
+];
+
+export function generateAgentName(
+  goal: string,
+  schedule: ScheduleSuggestion,
+  messages: ChatMessage[]
+): string {
+  const cadence = CADENCE_LABELS[schedule.cron] ?? 'Weekly';
+
+  const textToSearch =
+    goal +
+    ' ' +
+    messages
+      .filter(m => m.role === 'user')
+      .map(m => (typeof m.content === 'string' ? m.content : ''))
+      .join(' ');
+
+  for (const { patterns, label } of TOPIC_KEYWORDS) {
+    if (patterns.some(p => p.test(textToSearch))) {
+      const name = cadence ? `${cadence} ${label}` : label;
+      return name.slice(0, 40);
+    }
+  }
+
+  const fallback = cadence ? `${cadence} Business Review` : 'GTM Review';
+  return fallback.slice(0, 40);
 }
 
-// ── Main export ──
-export async function extractAgentFromConversation(
+// ─── Task 6: Goal + Standing Questions via DeepSeek ───────────────────────────
+
+interface DeepSeekExtractionOutput {
+  goal: string;
+  questions: string[];
+  confidence: 'high' | 'medium' | 'low';
+}
+
+const EXTRACTION_SYSTEM_PROMPT = `You are analyzing a RevOps analyst's conversation with an AI assistant.
+Your job is to extract the business intent so it can be saved as a recurring automated report.
+
+Extract:
+1. goal — The single business outcome motivating this conversation. One sentence, max 200 chars.
+   Frame it as a standing mandate, not a one-time question.
+   BAD:  "Find out why we're missing forecast this week"
+   GOOD: "Ensure forecast accuracy and surface deals at risk before each leadership call"
+
+2. questions — The 3 to 5 most substantive questions the analyst asked.
+   Rephrase as recurring standing questions — things that should be answered
+   every time this report runs, not just today.
+   BAD:  "What happened to the Acme deal?"
+   GOOD: "Which deals changed forecast category since the last run?"
+   Each question max 120 chars.
+
+3. confidence — Your confidence in the extraction:
+   "high"   — clear business focus, 5+ substantive user messages
+   "medium" — reasonable focus, some ambiguity
+   "low"    — conversation too short, too scattered, or too exploratory
+
+Respond ONLY with a JSON object. No preamble, no markdown, no explanation:
+{
+  "goal": "...",
+  "questions": ["...", "...", "..."],
+  "confidence": "high" | "medium" | "low"
+}`;
+
+export async function extractGoalAndQuestions(
   messages: ChatMessage[],
   workspaceId: string
-): Promise<ConversationExtractionResult> {
-  const [detectedSkills, { goal, questions }, schedule] = await Promise.all([
-    Promise.resolve(detectSkills(messages)),
-    extractGoalAndQuestions(messages, workspaceId),
-    Promise.resolve(inferSchedule(messages)),
-  ]);
+): Promise<{ result: DeepSeekExtractionOutput; tokensUsed: number }> {
+  const userMessages = messages.filter(m => m.role === 'user');
 
-  const delivery = inferDelivery(messages);
-  const confidence = computeConfidence(messages, detectedSkills);
-  const suggested_name = generateName(goal, schedule);
+  if (userMessages.length === 0) {
+    return {
+      result: { goal: '', questions: [], confidence: 'low' },
+      tokensUsed: 0,
+    };
+  }
+
+  const MAX_CHARS = 2400;
+  let userContent = userMessages
+    .map((m, i) => `[${i + 1}] ${(typeof m.content === 'string' ? m.content : '').trim()}`)
+    .join('\n\n');
+
+  if (userContent.length > MAX_CHARS) {
+    const first3 = userMessages.slice(0, 3);
+    const last3 = userMessages.slice(-3);
+    const combined = [...first3, ...last3].filter(
+      (m, i, arr) => arr.findIndex(x => x === m) === i
+    );
+    userContent = combined
+      .map((m, i) => `[${i + 1}] ${(typeof m.content === 'string' ? m.content : '').trim()}`)
+      .join('\n\n')
+      .slice(0, MAX_CHARS);
+  }
+
+  try {
+    const llmResponse = await callLLM(workspaceId, 'classify', {
+      systemPrompt: EXTRACTION_SYSTEM_PROMPT,
+      messages: [
+        {
+          role: 'user',
+          content: `Analyst conversation messages:\n\n${userContent}`,
+        },
+      ],
+      maxTokens: 300,
+      temperature: 0.1,
+    });
+
+    const tokensUsed = (llmResponse.usage?.input ?? 0) + (llmResponse.usage?.output ?? 0);
+
+    const raw = typeof llmResponse.content === 'string'
+      ? llmResponse.content
+      : '';
+
+    const clean = raw
+      .replace(/```json\n?/g, '')
+      .replace(/```\n?/g, '')
+      .trim();
+
+    let parsed: DeepSeekExtractionOutput;
+    try {
+      const jsonMatch = clean.match(/\{[\s\S]*\}/);
+      parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : { goal: '', questions: [], confidence: 'low' };
+    } catch {
+      parsed = { goal: '', questions: [], confidence: 'low' };
+    }
+
+    const goal = (parsed.goal ?? '').slice(0, 200).trim();
+    const questions = (Array.isArray(parsed.questions) ? parsed.questions : [])
+      .filter((q): q is string => typeof q === 'string' && q.trim().length > 0)
+      .map(q => q.slice(0, 120).trim())
+      .slice(0, 5);
+    const confidence = (['high', 'medium', 'low'] as const).includes(
+      parsed.confidence as any
+    )
+      ? (parsed.confidence as 'high' | 'medium' | 'low')
+      : 'low';
+
+    return { result: { goal, questions, confidence }, tokensUsed };
+  } catch (err) {
+    console.error('[ConversationExtractor] LLM extraction failed:', err);
+    return {
+      result: { goal: '', questions: [], confidence: 'low' },
+      tokensUsed: 0,
+    };
+  }
+}
+
+// ─── Task 7: Confidence Override Logic ───────────────────────────────────────
+
+export function computeFinalConfidence(
+  deepseekConfidence: 'high' | 'medium' | 'low',
+  userMessageCount: number,
+  detectedSkills: string[],
+  goal: string,
+  questions: string[]
+): 'high' | 'medium' | 'low' {
+  if (userMessageCount < 3) return 'low';
+  if (detectedSkills.length === 0) return 'low';
+  if (!goal || goal.length < 20) return 'low';
+  if (questions.length < 2) return 'low';
+
+  if (
+    deepseekConfidence === 'medium' &&
+    userMessageCount >= 7 &&
+    detectedSkills.length >= 2 &&
+    questions.length >= 3
+  ) {
+    return 'high';
+  }
+
+  return deepseekConfidence;
+}
+
+// ─── Task 10: loadChatMessages helper ─────────────────────────────────────────
+
+/**
+ * Load messages for a chat session from conversation_state (primary) or
+ * chat_session_messages (fallback).
+ *
+ * The frontend sends conversation_id = threadId (the thread_ts stored in
+ * conversation_state). If not found there, we also try chat_session_messages
+ * using the conversation_id as a session UUID.
+ *
+ * Throws with code 'NOT_FOUND' if the conversation doesn't belong to this workspace.
+ */
+export async function loadChatMessages(
+  workspaceId: string,
+  conversationId: string
+): Promise<ChatMessage[]> {
+  // Primary: conversation_state (stores full tool traces as JSONB)
+  try {
+    const stateResult = await query<{ messages: any; workspace_id: string }>(
+      `SELECT messages, workspace_id
+       FROM conversation_state
+       WHERE workspace_id = $1 AND channel_id = 'web' AND thread_ts = $2
+       LIMIT 1`,
+      [workspaceId, conversationId]
+    );
+
+    if (stateResult.rows.length > 0) {
+      const rawMessages: any[] = stateResult.rows[0].messages || [];
+      return rawMessages.map(m => ({
+        role: m.role as ChatMessage['role'],
+        content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
+        skill_id: m.skill_id,
+        metadata: m.metadata,
+        tool_trace: m.tool_trace,
+        created_at: m.created_at,
+      }));
+    }
+  } catch {
+    // Fall through to chat_session_messages
+  }
+
+  // Fallback: chat_session_messages (persistent storage, no tool traces)
+  const sessionCheck = await query<{ workspace_id: string }>(
+    `SELECT workspace_id FROM chat_sessions WHERE id = $1 LIMIT 1`,
+    [conversationId]
+  );
+
+  if (sessionCheck.rows.length === 0) {
+    const err: any = new Error('Conversation not found');
+    err.code = 'NOT_FOUND';
+    throw err;
+  }
+
+  if (sessionCheck.rows[0].workspace_id !== workspaceId) {
+    const err: any = new Error('Conversation not found');
+    err.code = 'FORBIDDEN';
+    throw err;
+  }
+
+  const messagesResult = await query<{
+    role: string;
+    content: string;
+    metadata: any;
+    created_at: string;
+  }>(
+    `SELECT role, content, metadata, created_at
+     FROM chat_session_messages
+     WHERE session_id = $1
+     ORDER BY created_at ASC`,
+    [conversationId]
+  );
+
+  return messagesResult.rows.map(row => ({
+    role: row.role as ChatMessage['role'],
+    content: row.content,
+    metadata: row.metadata,
+    created_at: row.created_at,
+  }));
+}
+
+// ─── Task 8: Main Orchestrator ────────────────────────────────────────────────
+
+export async function extractAgentFromConversation(
+  input: ExtractionInput
+): Promise<ConversationExtractionResult> {
+  const { messages, workspace_id, conversation_id } = input;
+
+  const detectedSkills = detectInvokedSkills(messages);
+  const suggestedSchedule = inferSchedule(messages);
+  const suggestedDelivery = inferDelivery(messages);
+
+  const userMessageCount = messages.filter(m => m.role === 'user').length;
+
+  const { result: extracted, tokensUsed } = await extractGoalAndQuestions(
+    messages,
+    workspace_id
+  );
+
+  const confidence = computeFinalConfidence(
+    extracted.confidence,
+    userMessageCount,
+    detectedSkills,
+    extracted.goal,
+    extracted.questions
+  );
+
+  const suggestedName = generateAgentName(extracted.goal, suggestedSchedule, messages);
 
   return {
-    suggested_name,
-    goal,
-    standing_questions: questions,
+    suggested_name: suggestedName,
+    goal: extracted.goal,
+    standing_questions: extracted.questions,
     detected_skills: detectedSkills,
-    suggested_schedule: schedule,
-    suggested_delivery: delivery,
+    suggested_schedule: suggestedSchedule,
+    suggested_delivery: suggestedDelivery,
     confidence,
-    reasoning: `Detected ${detectedSkills.length} skill(s), ${messages.filter(m => m.role === 'user').length} user turns. Schedule inferred from conversation content.`,
+    _reasoning: `skills=${detectedSkills.join(',')}, userMsgs=${userMessageCount}, confidence=${confidence}`,
+    _user_message_count: userMessageCount,
+    _deepseek_tokens_used: tokensUsed,
   };
 }

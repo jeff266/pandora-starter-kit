@@ -13,7 +13,7 @@ import {
 } from '../chat/session-service.js';
 import { query } from '../db.js';
 import { processFeedback, type AgentFeedback } from '../agents/feedback-processor.js';
-import { extractAgentFromConversation } from '../chat/conversation-extractor.js';
+import { extractAgentFromConversation, loadChatMessages } from '../chat/conversation-extractor.js';
 
 const router = Router();
 
@@ -417,25 +417,61 @@ router.post('/:workspaceId/chat/repeated-question', async (req: Request, res: Re
   }
 });
 
-// Extract agent config from an existing conversation
+/**
+ * POST /api/workspaces/:workspaceId/chat/extract-agent
+ *
+ * Runs extraction on an existing chat session.
+ * Returns pre-filled modal data. Does NOT create an Agent.
+ *
+ * Body: { conversation_id: string }
+ */
 router.post('/:workspaceId/chat/extract-agent', async (req: Request, res: Response): Promise<void> => {
   try {
     const workspaceId = req.params.workspaceId as string;
     const { conversation_id } = req.body;
 
     if (!conversation_id) {
-      res.status(400).json({ error: 'conversation_id is required' });
+      res.status(400).json({ error: 'conversation_id required' });
       return;
     }
 
-    const state = await getConversationState(workspaceId, 'web', conversation_id);
-    if (!state || !state.messages || state.messages.length === 0) {
-      res.status(400).json({ error: 'No conversation found for this id' });
+    let messages;
+    try {
+      messages = await loadChatMessages(workspaceId, conversation_id);
+    } catch (err: any) {
+      if (err.code === 'NOT_FOUND' || err.code === 'FORBIDDEN') {
+        res.status(404).json({ error: 'Conversation not found' });
+        return;
+      }
+      throw err;
+    }
+
+    const userMessageCount = messages.filter(m => m.role === 'user').length;
+    if (userMessageCount < 2) {
+      res.status(400).json({
+        error: 'Conversation too short to extract an Agent',
+        confidence: 'low',
+      });
       return;
     }
 
-    const result = await extractAgentFromConversation(state.messages as any, workspaceId);
-    res.json(result);
+    const result = await extractAgentFromConversation({
+      messages,
+      workspace_id: workspaceId,
+      conversation_id,
+    });
+
+    console.log('[extract-agent]', {
+      workspace_id: workspaceId,
+      conversation_id,
+      confidence: result.confidence,
+      skills: result.detected_skills,
+      tokens: result._deepseek_tokens_used,
+      reasoning: result._reasoning,
+    });
+
+    const { _reasoning, _user_message_count, _deepseek_tokens_used, ...publicResult } = result;
+    res.json(publicResult);
   } catch (err) {
     console.error('[chat] extract-agent error:', err);
     res.status(500).json({ error: 'Failed to extract agent from conversation' });
