@@ -133,7 +133,7 @@ agentsWorkspaceRouter.get('/:workspaceId/agents/:agentId/runs', async (req: Requ
             started_at, completed_at, duration_ms,
             skill_results, skill_evidence, token_usage, error,
             synthesis_mode,
-            CASE WHEN synthesis_mode = 'goal_aware' THEN synthesized_output ELSE NULL END AS synthesis_output
+            synthesized_output AS synthesis_output
      FROM agent_runs
      WHERE workspace_id = $1 AND agent_id = $2 ${cursorClause}
      ORDER BY started_at DESC
