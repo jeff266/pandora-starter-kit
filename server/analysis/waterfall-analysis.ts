@@ -51,6 +51,7 @@ export interface WaterfallResult {
 export interface WaterfallFilterParams {
   scopeId?: string;
   pipeline?: string;
+  raw?: boolean;   // When true, use raw (unnormalized) CRM stage names throughout
 }
 
 /**
@@ -60,24 +61,24 @@ export interface WaterfallFilterParams {
  * incorrect HubSpot metadata. Uses MIN position per deal to avoid inflation from
  * duplicate stage IDs that normalize to the same value.
  */
-async function getStageOrdering(workspaceId: string): Promise<string[]> {
+async function getStageOrdering(workspaceId: string, raw = false): Promise<string[]> {
   // Infer order by computing average sequence position of each stage across all deals.
   // Stages that appear earlier in deal timelines (lower avg position) sort first.
-  const TERMINAL = new Set([
+  // When raw=true, use the literal CRM stage name; otherwise use the normalized name.
+  const TERMINAL_RAW = new Set([
     'closed_won', 'closedwon', 'closed won',
     'closed_lost', 'closedlost', 'closed lost',
   ]);
 
-  // Use first-occurrence-per-deal to compute avg position.
-  // Raw HubSpot data has many numeric IDs that all normalize to the same stage
-  // (e.g. 7 IDs → 'qualification'), so a naive AVG(ROW_NUMBER) over all rows
-  // inflates that stage's position. Using MIN(rn) per deal per normalized stage
-  // gives a clean "when does this stage first appear in this deal's journey".
+  const stageExpr = raw
+    ? 'stage'
+    : 'COALESCE(stage_normalized, stage)';
+
   const positionResult = await query<{ norm_stage: string; avg_first_position: number }>(
     `WITH positioned AS (
        SELECT
          deal_id,
-         COALESCE(stage_normalized, stage) AS norm_stage,
+         ${stageExpr} AS norm_stage,
          ROW_NUMBER() OVER (PARTITION BY deal_id ORDER BY entered_at) AS rn
        FROM deal_stage_history
        WHERE workspace_id = $1
@@ -92,7 +93,7 @@ async function getStageOrdering(workspaceId: string): Promise<string[]> {
        AVG(first_position) AS avg_first_position,
        COUNT(DISTINCT deal_id) AS deal_count
      FROM first_per_deal
-     WHERE norm_stage NOT IN (
+     WHERE LOWER(norm_stage) NOT IN (
        'closed_won','closed_lost','closedwon','closedlost','closed won','closed lost'
      )
      GROUP BY norm_stage
@@ -101,12 +102,16 @@ async function getStageOrdering(workspaceId: string): Promise<string[]> {
     [workspaceId]
   );
 
-  // Canonical pipeline order for standard normalized stage names.
-  // Empirical position-based ordering breaks when stages are frequently skipped
-  // (e.g. many deals go qualification→decision without evaluation, pulling decision's
-  // avg position below evaluation's even though eval is earlier in the pipeline).
-  // Stages in this map are always sorted by canonical position; unknown/custom stages
-  // append after using their empirical avg_first_position scaled above the max canonical value.
+  if (raw) {
+    // In raw mode, use empirical ordering only — no canonical map since raw CRM
+    // stage names are workspace-specific and don't align to a canonical vocabulary.
+    return positionResult.rows
+      .filter(r => !TERMINAL_RAW.has(r.norm_stage.toLowerCase()))
+      .sort((a, b) => a.avg_first_position - b.avg_first_position)
+      .map(r => r.norm_stage);
+  }
+
+  // Normalized mode: canonical order for standard stage names, empirical for custom ones.
   const CANONICAL_STAGE_ORDER: Record<string, number> = {
     'awareness':     1,
     'discovery':     2,
@@ -119,7 +124,7 @@ async function getStageOrdering(workspaceId: string): Promise<string[]> {
   const CANONICAL_MAX = 7;
 
   return positionResult.rows
-    .filter(r => !TERMINAL.has(r.norm_stage))
+    .filter(r => !TERMINAL_RAW.has(r.norm_stage))
     .sort((a, b) => {
       const posA = CANONICAL_STAGE_ORDER[a.norm_stage] ?? (CANONICAL_MAX + a.avg_first_position);
       const posB = CANONICAL_STAGE_ORDER[b.norm_stage] ?? (CANONICAL_MAX + b.avg_first_position);
@@ -129,12 +134,21 @@ async function getStageOrdering(workspaceId: string): Promise<string[]> {
 }
 
 /**
- * Reconstruct which stage each deal was in at a specific timestamp
+ * Reconstruct which stage each deal was in at a specific timestamp.
+ * When raw=true, returns raw (unnormalized) CRM stage names.
  */
 async function getDealsAtTimestamp(
   workspaceId: string,
-  timestamp: Date
+  timestamp: Date,
+  raw = false
 ): Promise<Map<string, { stage: string; amount: number; dealId: string; dealName: string }>> {
+  const stageExpr = raw
+    ? 'stage'
+    : 'COALESCE(stage_normalized, stage)';
+  const fallbackExpr = raw
+    ? 'd.stage'
+    : 'd.stage_normalized';
+
   const result = await query<{
     deal_id: string;
     deal_name: string;
@@ -144,7 +158,7 @@ async function getDealsAtTimestamp(
     `WITH latest_transition AS (
       SELECT DISTINCT ON (deal_id)
         deal_id,
-        COALESCE(stage_normalized, stage) AS stage_at_time
+        ${stageExpr} AS stage_at_time
       FROM deal_stage_history
       WHERE workspace_id = $1
         AND entered_at < $2
@@ -154,7 +168,7 @@ async function getDealsAtTimestamp(
       d.id as deal_id,
       d.name as deal_name,
       d.amount,
-      COALESCE(lt.stage_at_time, d.stage_normalized) as stage_at_time
+      COALESCE(lt.stage_at_time, ${fallbackExpr}) as stage_at_time
     FROM deals d
     LEFT JOIN latest_transition lt ON lt.deal_id = d.id
     WHERE d.workspace_id = $1
@@ -230,12 +244,14 @@ export async function waterfallAnalysis(
     }
   }
 
-  // 1. Get ordered stages
-  const orderedStages = await getStageOrdering(workspaceId);
+  const raw = filterParams?.raw ?? false;
+
+  // 1. Get ordered stages (raw or normalized depending on mode)
+  const orderedStages = await getStageOrdering(workspaceId, raw);
 
   // 2. Get deals at start and end of period
-  const dealsAtStartRaw = await getDealsAtTimestamp(workspaceId, periodStart);
-  const dealsAtEndRaw = await getDealsAtTimestamp(workspaceId, periodEnd);
+  const dealsAtStartRaw = await getDealsAtTimestamp(workspaceId, periodStart, raw);
+  const dealsAtEndRaw = await getDealsAtTimestamp(workspaceId, periodEnd, raw);
 
   // Apply scope filter to deal snapshots
   const dealsAtStart = scopedDealIds
@@ -318,10 +334,14 @@ export async function waterfallAnalysis(
   let closedLostCount = 0;
   let closedLostValue = 0;
 
+  const CLOSED_WON_VALS = new Set(['closed_won', 'closedwon', 'closed won']);
+  const CLOSED_LOST_VALS = new Set(['closed_lost', 'closedlost', 'closed lost']);
+
   for (const t of transitions) {
     const amount = dealAmounts.get(t.dealId) || 0;
-    const fromStage = t.fromStageNormalized;
-    const toStage = t.toStageNormalized;
+    // In raw mode use the literal CRM stage name; otherwise use the normalized version
+    const fromStage = raw ? t.fromStage : t.fromStageNormalized;
+    const toStage   = raw ? t.toStage   : t.toStageNormalized;
 
     // New pipeline created
     if (!fromStage) {
@@ -335,8 +355,8 @@ export async function waterfallAnalysis(
       continue;
     }
 
-    // Closed won
-    if (toStage === 'closed_won') {
+    // Closed won (check both raw and normalized terminal labels)
+    if (CLOSED_WON_VALS.has((toStage ?? '').toLowerCase())) {
       closedWonCount++;
       closedWonValue += amount;
       const fromFlow = stageFlows.get(fromStage);
@@ -347,8 +367,8 @@ export async function waterfallAnalysis(
       continue;
     }
 
-    // Closed lost
-    if (toStage === 'closed_lost') {
+    // Closed lost (check both raw and normalized terminal labels)
+    if (CLOSED_LOST_VALS.has((toStage ?? '').toLowerCase())) {
       closedLostCount++;
       closedLostValue += amount;
       const fromFlow = stageFlows.get(fromStage);

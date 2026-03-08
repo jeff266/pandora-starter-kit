@@ -109,20 +109,24 @@ export default function PipelineMechanicsPage() {
 function PipelineHistoryTab() {
   const [activePeriod, setActivePeriod] = useState<number | 'ytd'>(90);
   const [showRaw, setShowRaw] = useState(false);
+  const [activePipeline, setActivePipeline] = useState<string | null>(null);
   const [sankeyData, setSankeyData] = useState<SankeyChartData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const hasRawLabels = sankeyData?.stages.some(
-    s => s.rawLabel && s.rawLabel !== s.label
-  ) ?? false;
-
-  const fetchSankey = useCallback(async (period: number | 'ytd') => {
+  const fetchSankey = useCallback(async (
+    period: number | 'ytd',
+    pipeline: string | null = null,
+    raw = false,
+  ) => {
     setLoading(true);
     setError(null);
     try {
       const days = resolveDays(period);
-      const data = await api.get(`/analysis/sankey?periodDays=${days}`) as SankeyChartData;
+      let url = `/analysis/sankey?periodDays=${days}`;
+      if (pipeline) url += `&pipeline=${encodeURIComponent(pipeline)}`;
+      if (raw) url += `&raw=true`;
+      const data = await api.get(url) as SankeyChartData;
       setSankeyData(data);
     } catch (err: any) {
       setError(err.message || 'Failed to load funnel data');
@@ -132,13 +136,25 @@ function PipelineHistoryTab() {
   }, []);
 
   useEffect(() => {
-    fetchSankey(activePeriod);
+    fetchSankey(activePeriod, null, false);
   }, []);
 
   function handlePeriod(preset: number | 'ytd') {
     setActivePeriod(preset);
-    fetchSankey(preset);
+    fetchSankey(preset, activePipeline, showRaw);
   }
+
+  function handlePipeline(pipeline: string | null) {
+    setActivePipeline(pipeline);
+    fetchSankey(activePeriod, pipeline, showRaw);
+  }
+
+  function handleRawToggle(isRaw: boolean) {
+    setShowRaw(isRaw);
+    fetchSankey(activePeriod, activePipeline, isRaw);
+  }
+
+  const availablePipelines = sankeyData?.availableFilters?.pipelines ?? [];
 
   return (
     <div>
@@ -182,8 +198,44 @@ function PipelineHistoryTab() {
           ))}
         </div>
 
-        {/* Stage name toggle — only shown when raw labels exist */}
-        {hasRawLabels && (
+        {/* Normalized / Deal Stages toggle — always shown; Deal Stages refetches raw data */}
+        <div style={{
+          display: 'flex',
+          gap: 2,
+          background: colors.surface,
+          border: `1px solid ${colors.border}`,
+          borderRadius: 8,
+          padding: 3,
+        }}>
+          {(['Normalized', 'Deal Stages'] as const).map(option => {
+            const isRaw = option === 'Deal Stages';
+            const active = showRaw === isRaw;
+            return (
+              <button
+                key={option}
+                onClick={() => handleRawToggle(isRaw)}
+                style={{
+                  padding: '4px 12px',
+                  borderRadius: 5,
+                  border: 'none',
+                  fontSize: 12,
+                  fontFamily: fonts.sans,
+                  fontWeight: active ? 600 : 400,
+                  background: active ? `${colors.accent}18` : 'transparent',
+                  color: active ? colors.accent : colors.textMuted,
+                  cursor: 'pointer',
+                  transition: 'all 0.12s',
+                  outline: 'none',
+                }}
+              >
+                {option}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Pipeline filter pills — shown when multiple pipelines exist */}
+        {availablePipelines.length > 1 && (
           <div style={{
             display: 'flex',
             gap: 2,
@@ -191,32 +243,48 @@ function PipelineHistoryTab() {
             border: `1px solid ${colors.border}`,
             borderRadius: 8,
             padding: 3,
+            flexWrap: 'wrap',
           }}>
-            {(['Normalized', 'Deal Stages'] as const).map(option => {
-              const isRaw = option === 'Deal Stages';
-              const active = showRaw === isRaw;
-              return (
-                <button
-                  key={option}
-                  onClick={() => setShowRaw(isRaw)}
-                  style={{
-                    padding: '4px 12px',
-                    borderRadius: 5,
-                    border: 'none',
-                    fontSize: 12,
-                    fontFamily: fonts.sans,
-                    fontWeight: active ? 600 : 400,
-                    background: active ? `${colors.accent}18` : 'transparent',
-                    color: active ? colors.accent : colors.textMuted,
-                    cursor: 'pointer',
-                    transition: 'all 0.12s',
-                    outline: 'none',
-                  }}
-                >
-                  {option}
-                </button>
-              );
-            })}
+            <button
+              onClick={() => handlePipeline(null)}
+              style={{
+                padding: '4px 10px',
+                borderRadius: 5,
+                border: 'none',
+                fontSize: 12,
+                fontFamily: fonts.sans,
+                fontWeight: activePipeline === null ? 600 : 400,
+                background: activePipeline === null ? `${colors.accent}18` : 'transparent',
+                color: activePipeline === null ? colors.accent : colors.textMuted,
+                cursor: 'pointer',
+                transition: 'all 0.12s',
+                outline: 'none',
+              }}
+            >
+              All
+            </button>
+            {availablePipelines.map(p => (
+              <button
+                key={p}
+                onClick={() => handlePipeline(p)}
+                style={{
+                  padding: '4px 10px',
+                  borderRadius: 5,
+                  border: 'none',
+                  fontSize: 12,
+                  fontFamily: fonts.sans,
+                  fontWeight: activePipeline === p ? 600 : 400,
+                  background: activePipeline === p ? `${colors.accent}18` : 'transparent',
+                  color: activePipeline === p ? colors.accent : colors.textMuted,
+                  cursor: 'pointer',
+                  transition: 'all 0.12s',
+                  outline: 'none',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {p}
+              </button>
+            ))}
           </div>
         )}
       </div>

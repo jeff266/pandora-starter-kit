@@ -19,7 +19,8 @@ export async function buildSankeyChartData(
   workspaceId: string,
   current: WaterfallResult,
   previous?: WaterfallResult,
-  activeFilter?: { type: 'all' | 'pipeline' | 'scope'; id?: string; label: string }
+  activeFilter?: { type: 'all' | 'pipeline' | 'scope'; id?: string; label: string },
+  raw = false
 ): Promise<SankeyChartData> {
 
   // 1. Fetch raw→normalized stage name mapping for this workspace
@@ -44,27 +45,32 @@ export async function buildSankeyChartData(
     .filter(s => s.entered > 0 || s.endOfPeriod > 0 || s.startOfPeriod > 0 || s.won > 0)
     .map(s => {
       const formattedLabel = formatStageName(s.stage);
-      const rawSet = rawByNormalized.get(s.stage);
-      // Only set rawLabel when it is a human-readable value that differs from
-      // the normalized label. Filter out:
-      //   - Purely numeric IDs (e.g. HubSpot stage IDs like 1027734847)
-      //   - All-lowercase concatenated keys with no word boundaries
-      //     (e.g. 'contractsent', 'appointmentscheduled') — these are internal
-      //     CRM keys, not display labels. A readable raw value must contain at
-      //     least one underscore, space, or uppercase letter.
-      const rawNames = rawSet
-        ? [...rawSet].filter(r => {
-            if (!/[a-zA-Z]/.test(r)) return false;
-            if (!/[_\s]/.test(r) && !/[A-Z]/.test(r)) return false;
-            return true;
-          })
-        : [];
-      // Format the raw names the same way so the comparison is apples-to-apples
-      const formattedRawNames = rawNames.map(r => formatStageName(r));
-      const rawLabelStr = [...new Set(formattedRawNames)].join(' / ');
-      const rawLabel = rawLabelStr && rawLabelStr !== formattedLabel
-        ? rawLabelStr
-        : undefined;
+
+      // In raw mode the stage IS the raw CRM name — no rawLabel needed.
+      // In normalized mode, rawLabel surfaces the original CRM stage names that
+      // collapsed into this normalized bucket (e.g. "Appt Scheduled / Qualified").
+      let rawLabel: string | undefined;
+      if (!raw) {
+        const rawSet = rawByNormalized.get(s.stage);
+        // Only set rawLabel when it is a human-readable value that differs from
+        // the normalized label. Filter out:
+        //   - Purely numeric IDs (e.g. HubSpot stage IDs like 1027734847)
+        //   - All-lowercase concatenated keys with no word boundaries
+        //     (e.g. 'contractsent', 'appointmentscheduled') — these are internal
+        //     CRM keys, not display labels. A readable raw value must contain at
+        //     least one underscore, space, or uppercase letter.
+        const rawNames = rawSet
+          ? [...rawSet].filter(r => {
+              if (!/[a-zA-Z]/.test(r)) return false;
+              if (!/[_\s]/.test(r) && !/[A-Z]/.test(r)) return false;
+              return true;
+            })
+          : [];
+        const formattedRawNames = rawNames.map(r => formatStageName(r));
+        const rawLabelStr = [...new Set(formattedRawNames)].join(' / ');
+        rawLabel = rawLabelStr && rawLabelStr !== formattedLabel ? rawLabelStr : undefined;
+      }
+
       return {
         id: s.stage,
         label: formattedLabel,
@@ -79,6 +85,13 @@ export async function buildSankeyChartData(
         lostValue: s.fellOutValue,
       };
     });
+
+  // Drop leading stages that have fewer historical entries than the next stage.
+  // These are bypass-able pre-funnel stages (e.g. 'Awareness' with 3 deals
+  // while 'Qualification' has 38) that would create an inverted funnel start.
+  while (stages.length >= 2 && stages[0].entered < stages[1].entered) {
+    stages.shift();
+  }
 
   // 3. Build flows from pairwise stage flow data
   const flows: SankeyFlow[] = current.flows.map(f => ({

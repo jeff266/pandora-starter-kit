@@ -245,7 +245,7 @@ router.post('/:workspaceId/analyze/legacy', async (req: Request, res: Response):
 
 router.get('/:workspaceId/analysis/sankey', requirePermission('data.deals_view'), async (req: Request, res: Response): Promise<void> => {
   const workspaceId = req.params.workspaceId as string;
-  const { scopeId, pipeline, periodDays } = req.query as Record<string, string | undefined>;
+  const { scopeId, pipeline, periodDays, raw } = req.query as Record<string, string | undefined>;
 
   try {
     const days = Math.min(Math.max(parseInt(periodDays ?? '7', 10) || 7, 1), 365);
@@ -255,8 +255,12 @@ router.get('/:workspaceId/analysis/sankey', requirePermission('data.deals_view')
     const prevEnd = new Date(periodStart.getTime());
     const prevStart = new Date(prevEnd.getTime() - days * 24 * 60 * 60 * 1000);
 
-    const filterParams = (scopeId || pipeline)
-      ? { scopeId: scopeId ?? undefined, pipeline: pipeline ?? undefined }
+    const filterParams = (scopeId || pipeline || raw)
+      ? {
+          scopeId: scopeId ?? undefined,
+          pipeline: pipeline ?? undefined,
+          raw: raw === 'true',
+        }
       : undefined;
 
     const [current, previous] = await Promise.all([
@@ -273,7 +277,7 @@ router.get('/:workspaceId/analysis/sankey', requirePermission('data.deals_view')
       activeFilter = { type: 'all', label: 'All Deals' };
     }
 
-    const chartData = await buildSankeyChartData(workspaceId, current, previous, activeFilter);
+    const chartData = await buildSankeyChartData(workspaceId, current, previous, activeFilter, raw === 'true');
     res.json(chartData);
   } catch (err) {
     console.error('[analysis/sankey] Error:', err instanceof Error ? err.message : err);
