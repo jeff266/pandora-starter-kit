@@ -38,13 +38,31 @@ export async function buildSankeyChartData(
     rawByNormalized.get(row.normalized)!.add(row.raw);
   }
 
+  // 1b. In raw mode for a specific pipeline, fetch CRM display names from stage_configs.
+  //     stage_configs.stage_name is the human-readable label (e.g. "Demo Conducted")
+  //     while stage_configs.stage_id is the raw CRM key (e.g. "decisionmakerboughtin").
+  const stageNameMap = new Map<string, string>();
+  if (raw && activeFilter?.type === 'pipeline' && activeFilter.id) {
+    const scRows = await query<{ stage_id: string; stage_name: string }>(
+      `SELECT stage_id, stage_name
+       FROM stage_configs
+       WHERE workspace_id = $1
+         AND pipeline_name = $2`,
+      [workspaceId, activeFilter.id]
+    ).then(r => r.rows).catch(() => [] as Array<{ stage_id: string; stage_name: string }>);
+    for (const row of scRows) {
+      if (row.stage_name) stageNameMap.set(row.stage_id, row.stage_name);
+    }
+  }
+
   // 2. Build stage nodes from current result.
   // Keep stages that have any historical activity (entered OR endOfPeriod OR won),
   // so the funnel includes stages that were actively traversed during the period.
   const stages: SankeyStageNode[] = current.stages
     .filter(s => s.entered > 0 || s.endOfPeriod > 0 || s.startOfPeriod > 0 || s.won > 0)
     .map(s => {
-      const formattedLabel = formatStageName(s.stage);
+      // Use stage_configs display name when available (raw+pipeline mode), otherwise format the key.
+      const formattedLabel = stageNameMap.get(s.stage) ?? formatStageName(s.stage);
 
       // In raw mode the stage IS the raw CRM name — no rawLabel needed.
       // In normalized mode, rawLabel surfaces the original CRM stage names that

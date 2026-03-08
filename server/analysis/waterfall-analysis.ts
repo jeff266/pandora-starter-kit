@@ -61,7 +61,7 @@ export interface WaterfallFilterParams {
  * incorrect HubSpot metadata. Uses MIN position per deal to avoid inflation from
  * duplicate stage IDs that normalize to the same value.
  */
-async function getStageOrdering(workspaceId: string, raw = false): Promise<string[]> {
+async function getStageOrdering(workspaceId: string, raw = false, pipeline?: string): Promise<string[]> {
   // Infer order by computing average sequence position of each stage across all deals.
   // Stages that appear earlier in deal timelines (lower avg position) sort first.
   // When raw=true, use the literal CRM stage name; otherwise use the normalized name.
@@ -69,6 +69,26 @@ async function getStageOrdering(workspaceId: string, raw = false): Promise<strin
     'closed_won', 'closedwon', 'closed won',
     'closed_lost', 'closedlost', 'closed lost',
   ]);
+
+  // When viewing raw stages for a specific pipeline, use stage_configs which contains
+  // the CRM-assigned display_order — far more reliable than inferring order from deal
+  // flow heuristics which can be skewed by multi-pipeline data.
+  if (raw && pipeline) {
+    const scResult = await query<{ stage_id: string }>(
+      `SELECT stage_id
+       FROM stage_configs
+       WHERE workspace_id = $1
+         AND pipeline_name = $2
+         AND is_active = true
+         AND LOWER(stage_id) NOT IN ('closedwon','closedlost','closed_won','closed_lost')
+       ORDER BY display_order`,
+      [workspaceId, pipeline]
+    ).catch(() => ({ rows: [] as Array<{ stage_id: string }> }));
+
+    if (scResult.rows.length > 0) {
+      return scResult.rows.map(r => r.stage_id);
+    }
+  }
 
   const stageExpr = raw
     ? 'stage'
@@ -103,9 +123,9 @@ async function getStageOrdering(workspaceId: string, raw = false): Promise<strin
   );
 
   if (raw) {
-    // In raw mode, use empirical ordering only — no canonical map since raw CRM
-    // stage names are workspace-specific and don't align to a canonical vocabulary.
-    // Filter out purely numeric stage IDs (e.g. HubSpot internal IDs like 1027734847).
+    // In raw mode without a pipeline filter, fall back to empirical ordering.
+    // Filter out purely numeric stage IDs (e.g. HubSpot internal IDs like 1027734847)
+    // since they have no readable label outside of stage_configs context.
     return positionResult.rows
       .filter(r => !TERMINAL_RAW.has(r.norm_stage.toLowerCase()))
       .filter(r => /[a-zA-Z]/.test(r.norm_stage))
@@ -249,7 +269,7 @@ export async function waterfallAnalysis(
   const raw = filterParams?.raw ?? false;
 
   // 1. Get ordered stages (raw or normalized depending on mode)
-  const orderedStages = await getStageOrdering(workspaceId, raw);
+  const orderedStages = await getStageOrdering(workspaceId, raw, filterParams?.pipeline);
 
   // 2. Get deals at start and end of period
   const dealsAtStartRaw = await getDealsAtTimestamp(workspaceId, periodStart, raw);
