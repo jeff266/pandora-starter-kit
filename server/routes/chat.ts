@@ -13,6 +13,7 @@ import {
 } from '../chat/session-service.js';
 import { query } from '../db.js';
 import { processFeedback, type AgentFeedback } from '../agents/feedback-processor.js';
+import { extractAgentFromConversation } from '../chat/conversation-extractor.js';
 
 const router = Router();
 
@@ -413,6 +414,31 @@ router.post('/:workspaceId/chat/repeated-question', async (req: Request, res: Re
   } catch (err) {
     console.error('[chat] repeated-question error:', err);
     res.status(500).json({ error: 'Failed to record signal' });
+  }
+});
+
+// Extract agent config from an existing conversation
+router.post('/:workspaceId/chat/extract-agent', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const workspaceId = req.params.workspaceId as string;
+    const { conversation_id } = req.body;
+
+    if (!conversation_id) {
+      res.status(400).json({ error: 'conversation_id is required' });
+      return;
+    }
+
+    const state = await getConversationState(workspaceId, 'web', conversation_id);
+    if (!state || !state.messages || state.messages.length === 0) {
+      res.status(400).json({ error: 'No conversation found for this id' });
+      return;
+    }
+
+    const result = await extractAgentFromConversation(state.messages as any, workspaceId);
+    res.json(result);
+  } catch (err) {
+    console.error('[chat] extract-agent error:', err);
+    res.status(500).json({ error: 'Failed to extract agent from conversation' });
   }
 });
 

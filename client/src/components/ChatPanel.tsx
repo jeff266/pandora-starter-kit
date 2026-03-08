@@ -6,6 +6,7 @@ import { Icon } from './icons';
 import ChartRenderer from './shared/ChartRenderer';
 import type { ChartSpec } from './shared/ChartRenderer';
 import ChatDocBar from './ChatDocBar';
+import SaveAsAgentModal from './SaveAsAgentModal';
 
 interface ToolCall {
   tool: string;
@@ -107,6 +108,10 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
   const isResizing = useRef(false);
   const resizeStartX = useRef(0);
   const resizeStartWidth = useRef(0);
+  const [agentSaved, setAgentSaved] = useState(false);
+  const [agentBannerDismissed, setAgentBannerDismissed] = useState(false);
+  const [extractedAgentData, setExtractedAgentData] = useState<any>(null);
+  const [showAgentModal, setShowAgentModal] = useState(false);
 
   const hasTableContent = messages.some(m => m.role === 'assistant' && m.content.split('\n').some(l => isTableRow(l)));
 
@@ -201,6 +206,18 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
     }
     prevMessageCount.current = newCount;
   }, [messages]);
+
+  // Auto-fetch agent extraction when conversation reaches the threshold
+  const userTurns = messages.filter(m => m.role === 'user').length;
+  const hasSkillsInvoked = messages.some(m => m.role === 'assistant' && (m.tool_call_count || 0) > 0);
+  const showAgentBanner = !isHistoryView && !agentSaved && !agentBannerDismissed && userTurns >= 5 && hasSkillsInvoked;
+  useEffect(() => {
+    if (showAgentBanner && threadId && !extractedAgentData) {
+      api.post('/chat/extract-agent', { conversation_id: threadId })
+        .then((data: any) => setExtractedAgentData(data))
+        .catch(() => {});
+    }
+  }, [showAgentBanner, threadId, extractedAgentData]);
 
   const submitFeedback = async (responseId: string, signalType: 'thumbs_up' | 'thumbs_down') => {
     try {
@@ -650,6 +667,55 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
         </div>
 
         {!isHistoryView && <ChatDocBar threadId={threadId} />}
+
+        {showAgentBanner && extractedAgentData && (
+          <div style={{
+            margin: '0 12px 8px',
+            background: 'linear-gradient(135deg, #1e2a3d 0%, #1e2230 100%)',
+            border: '1px solid #3a5080',
+            borderRadius: 8,
+            padding: '10px 14px',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            fontSize: 12, color: '#94b4e8', gap: 8,
+          }}>
+            <span style={{ flex: 1, minWidth: 0 }}>
+              💡 This looks like a <strong style={{ color: '#a8c4f0' }}>{extractedAgentData.suggested_name}</strong>. Save as recurring Agent?
+            </span>
+            <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+              <button
+                onClick={() => setShowAgentModal(true)}
+                style={{
+                  background: '#3a5cb8', border: 'none', borderRadius: 5,
+                  color: '#fff', padding: '4px 10px', cursor: 'pointer', fontSize: 12, fontWeight: 600,
+                }}
+              >
+                Save →
+              </button>
+              <button
+                onClick={() => setAgentBannerDismissed(true)}
+                style={{
+                  background: 'none', border: 'none', color: '#64748b',
+                  cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: '2px 4px',
+                }}
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        )}
+
+        {showAgentModal && extractedAgentData && threadId && (
+          <SaveAsAgentModal
+            extraction={extractedAgentData}
+            threadId={threadId}
+            onSave={(_agentId, agentName) => {
+              setShowAgentModal(false);
+              setAgentSaved(true);
+              setExtractedAgentData((prev: any) => ({ ...prev, _savedName: agentName }));
+            }}
+            onClose={() => setShowAgentModal(false)}
+          />
+        )}
 
         {!isHistoryView && (
           <div style={{ ...styles.inputContainer, ...(isMobile ? { padding: '10px 10px 14px' } : {}) }}>

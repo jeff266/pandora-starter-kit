@@ -28,6 +28,7 @@ import { getSlackAppClient } from '../connectors/slack/slack-app-client.js';
 import { formatAgentWithEvidence } from '../skills/formatters/slack-formatter.js';
 import { deliverToChannels, type DeliveryChannel } from './channels.js';
 import { getConsultantContext } from '../skills/consultant-context.js';
+import { getAgent } from './agent-service.js';
 import { sanitizeForPrompt } from '../utils/sanitize-for-prompt.js';
 
 export class AgentRuntime {
@@ -276,6 +277,47 @@ export class AgentRuntime {
     return result;
   }
 
+  private buildGoalAwareSynthesisPrompt(
+    goal: string,
+    standing_questions: string[],
+    allOutputs: string
+  ): { systemPrompt: string; userPrompt: string } {
+    const questionsBlock = standing_questions
+      .map((q, i) => `Q${i + 1}: ${q}`)
+      .join('\n');
+
+    const systemPrompt = `You are a VP of Revenue Operations delivering a recurring briefing. Be direct, specific, and evidence-based. Every claim must reference actual deal names, rep names, or dollar amounts from the findings. If evidence is insufficient to answer a standing question, say so in one sentence — do not speculate.`;
+
+    const userPrompt = `YOUR MANDATE:
+${goal}
+
+SKILL FINDINGS:
+${allOutputs}
+
+Produce a briefing structured EXACTLY as follows:
+
+## STATUS AGAINST GOAL
+Are we on track to achieve: ${goal}?
+Lead with a direct YES / NO / AT-RISK answer, then 2-3 sentences of supporting evidence. Include one sentence on what changed since last week if the evidence shows it.
+
+## STANDING QUESTIONS
+${questionsBlock}
+Answer each question in 2-4 sentences using specific deal names, rep names, and dollar amounts. Format as:
+Q1: [question restated]
+A1: [answer from evidence]
+(repeat for each question)
+
+## THIS WEEK'S ACTIONS
+List 3-5 specific actions. Each must name a person, a deal or metric, and the exact action to take. Only include actions that directly affect the goal.
+
+Rules:
+- Lead with the goal status — never bury it
+- Every claim must be traceable to the skill evidence above
+- No more than 600 words total`;
+
+    return { systemPrompt, userPrompt };
+  }
+
   private async synthesize(
     agent: AgentDefinition,
     skillOutputs: Record<string, SkillOutput>,
@@ -306,8 +348,25 @@ export class AgentRuntime {
       .join('\n\n---\n\n');
     userPrompt = userPrompt.replace('{{skill_outputs}}', allOutputs);
 
-    // Inject consultant call context into synthesis system prompt (if available)
+    // Check DB agent for goal-aware synthesis
     let systemPrompt = agent.synthesis.systemPrompt;
+    try {
+      const dbAgent = await getAgent(agent.id, workspaceId);
+      if (dbAgent?.goal && Array.isArray(dbAgent.standing_questions) && dbAgent.standing_questions.length > 0) {
+        const goalPrompts = this.buildGoalAwareSynthesisPrompt(
+          dbAgent.goal,
+          dbAgent.standing_questions,
+          allOutputs
+        );
+        systemPrompt = goalPrompts.systemPrompt;
+        userPrompt = goalPrompts.userPrompt;
+        console.log(`[Agent ${agent.id}] Using goal-aware synthesis: "${dbAgent.goal}"`);
+      }
+    } catch (err) {
+      // Non-fatal — fall through to default synthesis
+    }
+
+    // Inject consultant call context into synthesis system prompt (if available)
     try {
       const consultantContext = await getConsultantContext(workspaceId);
       if (consultantContext) {

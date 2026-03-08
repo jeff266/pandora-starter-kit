@@ -21,6 +21,10 @@ export interface CreateAgentInput {
   output_formats?: string[];
   event_config?: Record<string, any> | null;
   scope_filters?: string[];
+  goal?: string;
+  standing_questions?: string[];
+  created_from?: 'manual' | 'conversation';
+  seed_conversation_id?: string;
 }
 
 export interface Agent {
@@ -50,6 +54,10 @@ export interface Agent {
   data_window: Record<string, any>;
   output_formats: string[];
   event_config: Record<string, any> | null;
+  goal: string | null;
+  standing_questions: string[];
+  created_from: 'manual' | 'conversation';
+  seed_conversation_id: string | null;
 }
 
 export interface AgentPerformance {
@@ -126,8 +134,9 @@ export async function createAgent(workspaceId: string, input: CreateAgentInput):
        (workspace_id, name, description, icon, template_id, skill_ids, delivery_rule_id,
         estimated_tokens_per_week, estimated_deliveries_per_week, estimated_findings_per_delivery,
         fatigue_score, focus_score, is_active,
-        audience, focus_questions, data_window, output_formats, event_config, focus_config)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+        audience, focus_questions, data_window, output_formats, event_config, focus_config,
+        goal, standing_questions, created_from, seed_conversation_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
      RETURNING *`,
     [
       workspaceId,
@@ -149,6 +158,10 @@ export async function createAgent(workspaceId: string, input: CreateAgentInput):
       JSON.stringify(input.output_formats ?? ['slack']),
       input.event_config ? JSON.stringify(input.event_config) : null,
       JSON.stringify(focusConfig),
+      input.goal ?? null,
+      JSON.stringify(input.standing_questions ?? []),
+      input.created_from ?? 'manual',
+      input.seed_conversation_id ?? null,
     ]
   );
   return agentResult.rows[0];
@@ -216,7 +229,9 @@ export async function updateAgent(
        data_window=COALESCE($15, data_window),
        output_formats=COALESCE($16, output_formats),
        event_config=CASE WHEN $17::boolean THEN $18 ELSE event_config END,
-       focus_config=COALESCE($19, focus_config)
+       focus_config=COALESCE($19, focus_config),
+       goal=COALESCE($20, goal),
+       standing_questions=COALESCE($21, standing_questions)
      WHERE id=$11 AND workspace_id=$12
      RETURNING *`,
     [
@@ -231,6 +246,8 @@ export async function updateAgent(
       input.event_config !== undefined,
       input.event_config !== undefined ? (input.event_config ? JSON.stringify(input.event_config) : null) : null,
       updatedFocusConfig,
+      input.goal !== undefined ? input.goal : null,
+      input.standing_questions !== undefined ? JSON.stringify(input.standing_questions) : null,
     ]
   );
   return result.rows[0];

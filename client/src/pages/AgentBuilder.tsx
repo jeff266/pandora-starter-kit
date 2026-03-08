@@ -96,7 +96,7 @@ const SCHEDULE_PRESETS: { label: string; cron: string }[] = [
 ];
 
 type ViewState = 'gallery' | 'builder' | 'list' | 'copilot';
-type BuilderTab = 'audience' | 'focus' | 'skills' | 'data_window' | 'scope' | 'schedule' | 'formats';
+type BuilderTab = 'audience' | 'goal' | 'focus' | 'skills' | 'data_window' | 'scope' | 'schedule' | 'formats';
 
 interface NamedFilterOption {
   id: string;
@@ -121,6 +121,9 @@ export default function AgentBuilder() {
   const [showIconPicker, setShowIconPicker] = useState(false);
   const [audience, setAudience] = useState<AudienceConfig>({ role: 'VP Sales', detail_preference: 'manager' });
   const [focusQuestions, setFocusQuestions] = useState<string[]>([]);
+  const [goal, setGoal] = useState('');
+  const [standingQuestions, setStandingQuestions] = useState<string[]>([]);
+  const [standingQInput, setStandingQInput] = useState('');
   const [dataWindow, setDataWindow] = useState<DataWindowConfig>({ primary: 'current_week', comparison: 'previous_period' });
   const [outputFormats, setOutputFormats] = useState<string[]>(['slack']);
   const [skills, setSkills] = useState<string[]>([]);
@@ -201,6 +204,8 @@ export default function AgentBuilder() {
     setIcon(a.icon);
     setAudience(a.audience?.role ? a.audience : { role: 'VP Sales', detail_preference: 'manager' });
     setFocusQuestions(a.focus_questions || []);
+    setGoal((a as any).goal || '');
+    setStandingQuestions((a as any).standing_questions || []);
     setDataWindow(a.data_window?.primary ? a.data_window : { primary: 'current_week', comparison: 'previous_period' });
     setOutputFormats(a.output_formats || ['slack']);
     setSkills(a.skill_ids || []);
@@ -218,6 +223,8 @@ export default function AgentBuilder() {
     setIcon('🤖');
     setAudience({ role: 'VP Sales', detail_preference: 'manager' });
     setFocusQuestions([]);
+    setGoal('');
+    setStandingQuestions([]);
     setDataWindow({ primary: 'current_week', comparison: 'previous_period' });
     setOutputFormats(['slack']);
     setSkills([]);
@@ -248,6 +255,8 @@ export default function AgentBuilder() {
           data_window: dataWindow,
           output_formats: outputFormats,
           scope_filters: scopeFilters,
+          goal: goal || undefined,
+          standing_questions: standingQuestions.length > 0 ? standingQuestions : undefined,
           event_config: schedule.type === 'event_prep' ? {
             event_name: schedule.event_name,
             prep_days_before: schedule.prep_days_before,
@@ -281,6 +290,8 @@ export default function AgentBuilder() {
           data_window: dataWindow,
           output_formats: outputFormats,
           scope_filters: scopeFilters,
+          goal: goal || undefined,
+          standing_questions: standingQuestions.length > 0 ? standingQuestions : undefined,
           event_config: schedule.type === 'event_prep' ? {
             event_name: schedule.event_name,
             prep_days_before: schedule.prep_days_before,
@@ -438,9 +449,20 @@ export default function AgentBuilder() {
                     {a.description}
                   </p>
                 )}
+                {(a as any).goal && (
+                  <p style={{ font: `400 12px ${fonts.sans}`, color: colors.textMuted, margin: '0 0 8px', lineHeight: 1.4, fontStyle: 'italic' }}>
+                    Goal: {(a as any).goal}
+                  </p>
+                )}
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                   {a.audience?.role && <span style={badge}>{a.audience.role}</span>}
                   <span style={{ ...badge, background: colors.purpleSoft, color: colors.purple }}>{a.skill_ids?.length || 0} skills</span>
+                  {(a as any).standing_questions?.length > 0 && (
+                    <span style={{ ...badge, background: colors.accentSoft, color: colors.accent }}>{(a as any).standing_questions.length} questions</span>
+                  )}
+                  {(a as any).created_from === 'conversation' && (
+                    <span style={{ ...badge, background: '#1a2a1a', color: '#4ade80' }}>from chat</span>
+                  )}
                   {(a.output_formats || []).map(f => <span key={f} style={{ ...badge, background: colors.surfaceHover, color: colors.textSecondary }}>{f}</span>)}
                 </div>
               </div>
@@ -529,11 +551,38 @@ export default function AgentBuilder() {
     { key: 'audience', label: 'Audience' },
     { key: 'focus', label: 'Focus Questions' },
     { key: 'skills', label: 'Skills' },
+    { key: 'goal', label: 'Goal & Questions' },
     { key: 'data_window', label: 'Data Window' },
     { key: 'scope', label: 'Scope Filters' },
     { key: 'schedule', label: 'Schedule' },
     { key: 'formats', label: 'Output Formats' },
   ];
+
+  const SKILL_QUESTION_SUGGESTIONS: Record<string, string[]> = {
+    'forecast-rollup': [
+      'What is the current base case and gap to quota?',
+      'Which deals changed forecast category this week?',
+    ],
+    'pipeline-hygiene': [
+      'Which deals are stale or missing required fields?',
+    ],
+    'rep-scorecard': [
+      'Which reps are behind on coverage or attainment?',
+    ],
+    'single-thread-alert': [
+      'Which enterprise deals have only one contact?',
+    ],
+    'data-quality': [
+      'What is the current data quality score by field?',
+    ],
+    'pipeline-coverage': [
+      'Is pipeline coverage above 3x for the current quarter?',
+    ],
+  };
+
+  const suggestedQuestions = Array.from(
+    new Set(skills.flatMap(s => SKILL_QUESTION_SUGGESTIONS[s] || []))
+  ).filter(q => !standingQuestions.includes(q));
 
   return (
     <div style={{ padding: 32, maxWidth: 900, margin: '0 auto' }}>
@@ -604,6 +653,30 @@ export default function AgentBuilder() {
         placeholder="Description..."
         style={{ ...input, width: '100%', marginBottom: 24 }}
       />
+
+      {/* Goal Header — shown when editing an agent that has a goal */}
+      {editingAgentId && goal && (
+        <div style={{
+          background: 'linear-gradient(135deg, #1a2340 0%, #1e2230 100%)',
+          border: `1px solid #2d4080`,
+          borderRadius: 10,
+          padding: '16px 20px',
+          marginBottom: 20,
+        }}>
+          <div style={{ font: `500 11px ${fonts.sans}`, color: '#6488ea', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>Goal</div>
+          <div style={{ font: `400 14px ${fonts.sans}`, color: colors.text, lineHeight: 1.5 }}>{goal}</div>
+          {standingQuestions.length > 0 && (
+            <div style={{ marginTop: 12, borderTop: '1px solid #2a3147', paddingTop: 10 }}>
+              <div style={{ font: `500 11px ${fonts.sans}`, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>
+                Standing Questions ({standingQuestions.length})
+              </div>
+              <ul style={{ margin: 0, paddingLeft: 18, font: `400 12px ${fonts.sans}`, color: colors.textSecondary, lineHeight: 1.7 }}>
+                {standingQuestions.map((q, i) => <li key={i}>{q}</li>)}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Latest Briefing Card */}
       {latestGeneration && editingAgentId && (
@@ -766,6 +839,97 @@ export default function AgentBuilder() {
               </button>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* ─── Goal & Questions Tab ────────────────────── */}
+      {activeTab === 'goal' && (
+        <div>
+          <SectionLabel>Goal <span style={{ color: colors.textMuted, fontWeight: 400 }}>(optional but recommended)</span></SectionLabel>
+          <p style={{ margin: '0 0 8px', font: `400 12px ${fonts.sans}`, color: colors.textSecondary }}>
+            What business outcome is this Agent working toward?
+          </p>
+          <textarea
+            value={goal}
+            onChange={e => setGoal(e.target.value.slice(0, 200))}
+            placeholder="Ensure pipeline is healthy and on track to hit Q1 quota of $2.1M"
+            rows={3}
+            style={{ ...input, width: '100%', boxSizing: 'border-box', resize: 'vertical', marginBottom: 8 }}
+          />
+          <p style={{ margin: '0 0 24px', font: `400 11px ${fonts.sans}`, color: colors.textMuted }}>
+            Without a goal, you get a findings list. With a goal, you get a verdict + evidence.
+          </p>
+
+          <SectionLabel>Standing Questions <span style={{ color: colors.textMuted, fontWeight: 400 }}>(optional, max 5)</span></SectionLabel>
+          <p style={{ margin: '0 0 8px', font: `400 12px ${fonts.sans}`, color: colors.textSecondary }}>
+            What specific questions should this Agent answer on every run?
+          </p>
+
+          {standingQuestions.map((q, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+              <span style={{ flex: 1, font: `400 13px ${fonts.sans}`, color: colors.text, padding: '6px 0' }}>
+                {i + 1}. {q}
+              </span>
+              <button
+                onClick={() => setStandingQuestions(prev => prev.filter((_, j) => j !== i))}
+                style={{ background: 'none', border: 'none', color: colors.textMuted, cursor: 'pointer', padding: '4px' }}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+
+          {standingQuestions.length < 5 && (
+            <div style={{ display: 'flex', gap: 8, marginBottom: 16, marginTop: 8 }}>
+              <input
+                value={standingQInput}
+                onChange={e => setStandingQInput(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && standingQInput.trim() && standingQuestions.length < 5) {
+                    setStandingQuestions(prev => [...prev, standingQInput.trim()]);
+                    setStandingQInput('');
+                  }
+                }}
+                placeholder="e.g. Which deals moved out of commit since last week?"
+                style={{ ...input, flex: 1 }}
+              />
+              <button
+                onClick={() => {
+                  if (standingQInput.trim() && standingQuestions.length < 5) {
+                    setStandingQuestions(prev => [...prev, standingQInput.trim()]);
+                    setStandingQInput('');
+                  }
+                }}
+                style={btnSmall}
+              >
+                Add
+              </button>
+            </div>
+          )}
+
+          {suggestedQuestions.length > 0 && (
+            <div>
+              <p style={{ margin: '16px 0 8px', font: `500 11px ${fonts.sans}`, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Suggestions based on your skills
+              </p>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {suggestedQuestions.map(q => (
+                  <button
+                    key={q}
+                    onClick={() => standingQuestions.length < 5 && setStandingQuestions(prev => [...prev, q])}
+                    disabled={standingQuestions.length >= 5}
+                    style={{
+                      background: colors.accentSoft, border: `1px solid ${colors.border}`,
+                      borderRadius: 20, padding: '4px 12px', cursor: standingQuestions.length >= 5 ? 'not-allowed' : 'pointer',
+                      font: `400 12px ${fonts.sans}`, color: colors.accent,
+                    }}
+                  >
+                    + {q}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
