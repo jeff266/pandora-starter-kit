@@ -59,6 +59,7 @@ import SQLWorkspace from './pages/SQLWorkspace';
 import DataDictionary from './pages/DataDictionary';
 import ForecastPage from './pages/ForecastPage';
 import PipelinePage from './pages/PipelinePage';
+import PipelineMechanicsPage from './pages/PipelineMechanicsPage';
 import InvestigationHistoryPage from './pages/InvestigationHistoryPage';
 import { colors, fonts } from './styles/theme';
 import { useIsMobile } from './hooks/useIsMobile';
@@ -91,7 +92,8 @@ const pageTitles: Record<string, string> = {
   '/marketplace': 'Marketplace',
   '/settings': 'Settings',
   '/icp-profile': 'ICP Profile',
-  '/stage-velocity': 'Stage Velocity',
+  '/stage-velocity': 'Pipeline Mechanics',
+  '/pipeline-mechanics': 'Pipeline Mechanics',
   '/competition': 'Competitive Intelligence',
   '/prospects': 'Prospects',
   '/admin/scopes': 'Workspace Scopes',
@@ -331,7 +333,8 @@ export default function App() {
             <Route path="/settings/dimensions" element={<DimensionBuilder />} />
             <Route path="/settings/:tab" element={<SettingsPage />} />
             <Route path="/icp-profile" element={<IcpProfilePage />} />
-            <Route path="/stage-velocity" element={<BenchmarksGrid />} />
+            <Route path="/pipeline-mechanics" element={<PipelineMechanicsPage />} />
+            <Route path="/stage-velocity" element={<Navigate to="/pipeline-mechanics" replace />} />
             <Route path="/competition" element={<CompetitiveIntelligencePage />} />
             <Route path="/prospects" element={<ProspectsPage />} />
             <Route path="/admin/scopes" element={<AdminScopesPage />} />

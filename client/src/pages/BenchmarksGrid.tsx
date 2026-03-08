@@ -314,7 +314,11 @@ function MathModal({ modal, onClose }: { modal: MathModalState; onClose: () => v
   );
 }
 
-export default function BenchmarksGrid() {
+interface BenchmarksGridProps {
+  hideHeader?: boolean;
+}
+
+export default function BenchmarksGrid({ hideHeader = false }: BenchmarksGridProps) {
   const { currentWorkspace } = useWorkspace();
   const { anon } = useDemoMode();
   const workspaceId = currentWorkspace?.id;
@@ -578,10 +582,11 @@ export default function BenchmarksGrid() {
   );
 
   return (
-    <div style={{ padding: '24px 32px', fontFamily: fonts.sans }}>
+    <div style={{ padding: hideHeader ? '0' : '24px 32px', fontFamily: fonts.sans }}>
       {mathModal && <MathModal modal={mathModal} onClose={() => setMathModal(null)} />}
 
-      {/* Header */}
+      {/* Header — hidden when embedded in a tab context */}
+      {!hideHeader && (
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 24, flexWrap: 'wrap', gap: 12 }}>
         <div>
           <h1 style={{ fontSize: 22, fontWeight: 700, color: colors.text, margin: 0, marginBottom: 4 }}>
@@ -658,6 +663,7 @@ export default function BenchmarksGrid() {
           </button>
         </div>
       </div>
+      )}
 
       {!hasAnyData ? (
         <div style={{ padding: 48, textAlign: 'center', background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10, color: colors.textMuted, fontSize: 13 }}>

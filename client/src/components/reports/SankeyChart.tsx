@@ -40,9 +40,10 @@ interface SankeyChartProps {
   chartData?: SankeyChartData;
   workspaceId?: string;
   hideFilters?: boolean;
+  showRaw?: boolean;
 }
 
-export default function SankeyChart({ data, chartData: chartDataProp, hideFilters = false }: SankeyChartProps) {
+export default function SankeyChart({ data, chartData: chartDataProp, hideFilters = false, showRaw = false }: SankeyChartProps) {
   const initialData = (data ?? chartDataProp) ?? null;
   const [chartData, setChartData] = useState<SankeyChartData | null>(initialData);
   const [loading, setLoading] = useState(false);
@@ -63,6 +64,7 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
   })();
 
   const { stages, flows, conversionRates, periodLabel, availableFilters } = chartData;
+
   const hasFilters =
     !hideFilters && (availableFilters.pipelines.length > 0 || availableFilters.scopes.length > 0);
 
@@ -330,7 +332,7 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
                   fill={color}
                   fontFamily={fonts.sans}
                 >
-                  {truncate(stage.label, 16)}
+                  {truncate(showRaw && stage.rawLabel ? stage.rawLabel : stage.label, 16)}
                 </text>
 
                 {/* Deal count */}
@@ -405,7 +407,16 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
             gap: 8,
           }}
         >
-          {conversionRates.map((cr, i) => (
+          {conversionRates.map((cr, i) => {
+            const fromStage = stages[i];
+            const toStage = stages[i + 1];
+            const displayFrom = showRaw && fromStage?.rawLabel
+              ? fromStage.rawLabel
+              : cr.fromLabel;
+            const displayTo = showRaw && toStage?.rawLabel
+              ? toStage.rawLabel
+              : cr.toLabel;
+            return (
             <div
               key={i}
               style={{
@@ -426,7 +437,7 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
                   textOverflow: 'ellipsis',
                 }}
               >
-                {truncate(cr.fromLabel, 9)} → {truncate(cr.toLabel, 9)}
+                {truncate(displayFrom, 9)} → {truncate(displayTo, 9)}
               </div>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 5 }}>
                 <span
@@ -454,7 +465,8 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
                 )}
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

@@ -129,6 +129,7 @@ export interface ChartData {
 export interface SankeyStageNode {
   id: string;
   label: string;
+  rawLabel?: string;
   deals: number;
   value: number;
   won: number;

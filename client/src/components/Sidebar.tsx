@@ -38,7 +38,7 @@ const sections: NavSection[] = [
     title: 'INTELLIGENCE',
     items: [
       { label: 'ICP Profile', path: '/icp-profile', icon: '\u2605' },
-      { label: 'Stage Velocity', path: '/stage-velocity', icon: '\u25B6' },
+      { label: 'Pipeline Mechanics', path: '/pipeline-mechanics', icon: '\u25C8' },
       { label: 'Competition', path: '/competition', icon: '\u229B' },
       { label: 'Agents', path: '/agents', icon: '\u25C8' },
       { label: 'Skills', path: '/skills', icon: '\u2699' },

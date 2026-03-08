@@ -22,21 +22,46 @@ export async function buildSankeyChartData(
   activeFilter?: { type: 'all' | 'pipeline' | 'scope'; id?: string; label: string }
 ): Promise<SankeyChartData> {
 
-  // 1. Build stage nodes from current result
+  // 1. Fetch raw→normalized stage name mapping for this workspace
+  const rawStageRows = await query<{ raw: string; normalized: string }>(
+    `SELECT DISTINCT stage AS raw, COALESCE(stage_normalized, stage) AS normalized
+     FROM deal_stage_history
+     WHERE workspace_id = $1`,
+    [workspaceId]
+  ).then(r => r.rows).catch(() => [] as Array<{ raw: string; normalized: string }>);
+
+  // Map normalized → set of distinct raw names
+  const rawByNormalized = new Map<string, Set<string>>();
+  for (const row of rawStageRows) {
+    if (!rawByNormalized.has(row.normalized)) rawByNormalized.set(row.normalized, new Set());
+    rawByNormalized.get(row.normalized)!.add(row.raw);
+  }
+
+  // 2. Build stage nodes from current result
   const stages: SankeyStageNode[] = current.stages
     .filter(s => s.endOfPeriod > 0 || s.startOfPeriod > 0 || s.won > 0)
-    .map(s => ({
-      id: s.stage,
-      label: formatStageName(s.stage),
-      deals: s.endOfPeriod,
-      value: s.endOfPeriodValue,
-      won: s.won,
-      wonValue: s.wonValue,
-      lostCount: s.fellOut,
-      lostValue: s.fellOutValue,
-    }));
+    .map(s => {
+      const formattedLabel = formatStageName(s.stage);
+      const rawSet = rawByNormalized.get(s.stage);
+      // Only set rawLabel when it differs from the formatted label
+      const rawNames = rawSet ? [...rawSet] : [];
+      const rawLabel = rawNames.length > 0 && rawNames.join(' / ') !== formattedLabel
+        ? rawNames.join(' / ')
+        : undefined;
+      return {
+        id: s.stage,
+        label: formattedLabel,
+        rawLabel,
+        deals: s.endOfPeriod,
+        value: s.endOfPeriodValue,
+        won: s.won,
+        wonValue: s.wonValue,
+        lostCount: s.fellOut,
+        lostValue: s.fellOutValue,
+      };
+    });
 
-  // 2. Build flows from pairwise stage flow data
+  // 3. Build flows from pairwise stage flow data
   const flows: SankeyFlow[] = current.flows.map(f => ({
     fromId: f.fromStage,
     toId: f.toStage,
