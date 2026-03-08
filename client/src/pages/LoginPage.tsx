@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { useWorkspace } from '../context/WorkspaceContext';
 import { colors, fonts } from '../styles/theme';
+import { api } from '../lib/api';
 
-type Screen = 'email' | 'name' | 'join';
+type Screen = 'email' | 'name' | 'join' | 'forgot' | 'forgot-sent';
 
 export default function LoginPage() {
   const { login, joinWorkspace, isAuthenticated, workspaces, selectWorkspace } = useWorkspace();
@@ -61,6 +62,86 @@ export default function LoginPage() {
     />;
   }
 
+  if (screen === 'forgot') {
+    return (
+      <Shell>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ textAlign: 'center', marginBottom: 8 }}>
+            <h1 style={{ fontSize: 18, fontWeight: 700, color: colors.text, fontFamily: fonts.sans }}>
+              Reset your password
+            </h1>
+            <p style={{ fontSize: 12, color: colors.textMuted, marginTop: 4 }}>
+              Enter your email and we'll send a reset link
+            </p>
+          </div>
+          <Input
+            label="Email"
+            type="email"
+            value={email}
+            onChange={setEmail}
+            placeholder="you@company.com"
+            autoFocus
+          />
+          {error && <ErrorText>{error}</ErrorText>}
+          <SubmitButton
+            loading={loading}
+            onClick={async () => {
+              if (!email.trim()) { setError('Email is required'); return; }
+              setLoading(true); setError('');
+              try {
+                await api.post('/auth/forgot-password', { email: email.trim() });
+                setScreen('forgot-sent');
+              } catch (err: any) {
+                setError(err.message || 'Something went wrong. Please try again.');
+              } finally {
+                setLoading(false);
+              }
+            }}
+          >
+            Send reset link
+          </SubmitButton>
+          <button
+            onClick={() => { setError(''); setScreen('email'); }}
+            style={{ fontSize: 12, color: colors.accent, background: 'none', cursor: 'pointer', border: 'none', textAlign: 'center', fontFamily: fonts.sans }}
+          >
+            Back to sign in
+          </button>
+        </div>
+      </Shell>
+    );
+  }
+
+  if (screen === 'forgot-sent') {
+    return (
+      <Shell>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, textAlign: 'center' }}>
+          <div style={{
+            width: 48, height: 48, borderRadius: '50%',
+            background: `${colors.accent}20`,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            margin: '0 auto 8px',
+            fontSize: 22,
+          }}>
+            ✉
+          </div>
+          <h1 style={{ fontSize: 18, fontWeight: 700, color: colors.text, fontFamily: fonts.sans, margin: 0 }}>
+            Check your email
+          </h1>
+          <p style={{ fontSize: 13, color: colors.textMuted, lineHeight: 1.6, margin: 0 }}>
+            If <strong style={{ color: colors.text }}>{email}</strong> is registered,
+            you'll receive a reset link shortly. Check your spam folder if you don't see it.
+          </p>
+          <button
+            onClick={() => { setError(''); setScreen('email'); }}
+            style={{ fontSize: 12, color: colors.accent, background: 'none', cursor: 'pointer', border: 'none', textAlign: 'center', fontFamily: fonts.sans, marginTop: 4 }}
+          >
+            Back to sign in
+          </button>
+        </div>
+      </Shell>
+    );
+  }
+
   const handleEmailSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email.trim()) { setError('Email is required'); return; }
@@ -98,7 +179,13 @@ export default function LoginPage() {
             </p>
           </div>
           <Input label="Name" value={name} onChange={setName} placeholder="Your full name" autoFocus />
-          <Input label="Password" type="password" value={password} onChange={setPassword} placeholder="Choose a password" />
+          <PasswordInput
+            label="Password"
+            value={password}
+            onChange={setPassword}
+            placeholder="Choose a password"
+            autoComplete="new-password"
+          />
           {error && <ErrorText>{error}</ErrorText>}
           <SubmitButton loading={loading}>Create Account</SubmitButton>
         </form>
@@ -118,9 +205,26 @@ export default function LoginPage() {
           </p>
         </div>
         <Input label="Email" type="email" value={email} onChange={setEmail} placeholder="you@company.com" autoFocus />
-        <Input label="Password" type="password" value={password} onChange={setPassword} placeholder="Your password" />
+        <PasswordInput
+          label="Password"
+          value={password}
+          onChange={setPassword}
+          placeholder="Your password"
+          autoComplete="current-password"
+        />
         {error && <ErrorText>{error}</ErrorText>}
         <SubmitButton loading={loading}>Sign In</SubmitButton>
+        <button
+          type="button"
+          onClick={() => { setError(''); setScreen('forgot'); }}
+          style={{
+            fontSize: 12, color: colors.accent, background: 'none',
+            cursor: 'pointer', border: 'none', textAlign: 'center',
+            fontFamily: fonts.sans, marginTop: -4,
+          }}
+        >
+          Forgot password?
+        </button>
       </form>
     </Shell>
   );
@@ -165,15 +269,73 @@ function Input({ label, value, onChange, placeholder, type = 'text', autoFocus }
   );
 }
 
-function SubmitButton({ loading, children }: { loading: boolean; children: React.ReactNode }) {
+function PasswordInput({ label, value, onChange, placeholder, autoComplete, autoFocus }: {
+  label: string; value: string; onChange: (v: string) => void;
+  placeholder: string; autoComplete?: string; autoFocus?: boolean;
+}) {
+  const [visible, setVisible] = useState(false);
+
+  return (
+    <div>
+      <label style={{ fontSize: 11, fontWeight: 600, color: colors.textSecondary, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+        {label}
+      </label>
+      <div style={{ position: 'relative', marginTop: 6 }}>
+        <input
+          type={visible ? 'text' : 'password'}
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          placeholder={placeholder}
+          autoFocus={autoFocus}
+          autoComplete={autoComplete}
+          style={{
+            display: 'block', width: '100%', padding: '8px 36px 8px 12px',
+            background: colors.surfaceRaised, border: `1px solid ${colors.border}`,
+            borderRadius: 6, color: colors.text, fontSize: 13, fontFamily: fonts.sans,
+            boxSizing: 'border-box',
+          }}
+        />
+        <button
+          type="button"
+          onClick={() => setVisible(v => !v)}
+          tabIndex={-1}
+          style={{
+            position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+            background: 'none', border: 'none', padding: 4, cursor: 'pointer',
+            color: colors.textMuted, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            lineHeight: 1,
+          }}
+          aria-label={visible ? 'Hide password' : 'Show password'}
+        >
+          {visible ? (
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+              <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+              <line x1="1" y1="1" x2="23" y2="23" />
+            </svg>
+          ) : (
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+          )}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SubmitButton({ loading, children, onClick }: { loading: boolean; children: React.ReactNode; onClick?: () => void }) {
   return (
     <button
-      type="submit"
+      type={onClick ? 'button' : 'submit'}
       disabled={loading}
+      onClick={onClick}
       style={{
         padding: '10px 14px', background: loading ? colors.surfaceHover : colors.accent,
         color: '#fff', borderRadius: 6, fontSize: 13, fontWeight: 600, marginTop: 4,
         opacity: loading ? 0.7 : 1, cursor: loading ? 'wait' : 'pointer', border: 'none',
+        width: '100%',
       }}
     >
       {loading ? 'Please wait...' : children}
@@ -182,7 +344,7 @@ function SubmitButton({ loading, children }: { loading: boolean; children: React
 }
 
 function ErrorText({ children }: { children: React.ReactNode }) {
-  return <p style={{ fontSize: 12, color: colors.red, textAlign: 'center' }}>{children}</p>;
+  return <p style={{ fontSize: 12, color: colors.red, textAlign: 'center', margin: 0 }}>{children}</p>;
 }
 
 function WorkspacePicker({ workspaces, onSelect, onJoin }: {

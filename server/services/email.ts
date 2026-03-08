@@ -63,6 +63,54 @@ export async function sendMagicLink(
   }
 }
 
+export async function sendPasswordResetEmail(
+  email: string,
+  token: string
+): Promise<{ sent: boolean }> {
+  const baseUrl = process.env.APP_URL || `https://${process.env.REPLIT_DEV_DOMAIN || 'localhost:5000'}`;
+  const resetUrl = `${baseUrl}/reset-password?token=${token}`;
+
+  const html = `
+    <div style="font-family: -apple-system, sans-serif; max-width: 460px; margin: 0 auto; padding: 40px 20px;">
+      <h2 style="color: #1a1a2e; font-size: 20px; margin-bottom: 8px;">
+        Reset your Pandora password
+      </h2>
+      <p style="color: #555; font-size: 14px; line-height: 1.6;">
+        We received a request to reset your password. Click the button below to choose a new one.
+        This link expires in <strong>1 hour</strong>.
+      </p>
+      <a href="${resetUrl}"
+         style="display: inline-block; background: #3b82f6; color: #fff;
+                padding: 12px 28px; border-radius: 6px; font-size: 14px;
+                font-weight: 600; text-decoration: none; margin: 24px 0;">
+        Reset Password
+      </a>
+      <p style="color: #999; font-size: 12px; margin-top: 32px;">
+        If you didn't request a password reset, you can safely ignore this email —
+        your password will not change.
+      </p>
+      <p style="color: #bbb; font-size: 11px; margin-top: 8px;">
+        This link can only be used once.
+      </p>
+    </div>
+  `;
+
+  try {
+    const client = getResendClient();
+    await client.emails.send({
+      from: FROM_EMAIL,
+      to: email,
+      subject: 'Reset your Pandora password',
+      html,
+    });
+    console.log(`[email] Password reset email sent to ${email}`);
+    return { sent: true };
+  } catch (err) {
+    console.log(`[email] Failed to send password reset email to ${email}:`, err instanceof Error ? err.message : err);
+    return { sent: false };
+  }
+}
+
 export async function sendWaitlistEmail(email: string, name?: string): Promise<void> {
   const subject = "You're on the Pandora waitlist";
 

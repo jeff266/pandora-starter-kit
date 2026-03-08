@@ -9,6 +9,7 @@ import NotificationBell from './components/notifications/NotificationBell';
 import Placeholder from './components/Placeholder';
 import ChatPanel from './components/ChatPanel';
 import LoginPage from './pages/LoginPage';
+import ResetPasswordPage from './pages/ResetPasswordPage';
 import AuthCallback from './pages/AuthCallback';
 import PandoraHomepage from './pages/PandoraHomepage';
 import WorkspacePicker from './pages/WorkspacePicker';
@@ -255,9 +256,13 @@ export default function App() {
     if (location.pathname === '/login') {
       return <LoginPage />;
     }
+    if (location.pathname === '/reset-password') {
+      return <ResetPasswordPage />;
+    }
     return (
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="*" element={<PandoraHomepage />} />
       </Routes>
     );

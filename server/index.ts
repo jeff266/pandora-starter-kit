@@ -526,13 +526,25 @@ async function start(): Promise<void> {
     console.log(`[server] Pandora v0.1.0 listening on port ${PORT} (accepting /health/alive)`);
   });
 
-  let tDb: number;
-  try {
-    await verifyConnection();
-    tDb = performance.now();
-    console.log("[server] Database connection verified");
-  } catch (err) {
-    console.error("[server] Failed to connect to database:", err);
+  let tDb: number = 0;
+  let dbConnected = false;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      await verifyConnection();
+      tDb = performance.now();
+      console.log("[server] Database connection verified");
+      dbConnected = true;
+      break;
+    } catch (err) {
+      console.error(`[server] DB connection attempt ${attempt}/3 failed:`, err instanceof Error ? err.message : err);
+      if (attempt < 3) {
+        console.log(`[server] Retrying in 3s...`);
+        await new Promise(resolve => setTimeout(resolve, 3000));
+      }
+    }
+  }
+  if (!dbConnected) {
+    console.error("[server] Failed to connect to database after 3 attempts. Exiting.");
     process.exit(1);
   }
 
