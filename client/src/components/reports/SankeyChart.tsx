@@ -5,15 +5,16 @@ import { colors, fonts } from '../../styles/theme';
 
 // Stage color palette
 const STAGE_COLORS = ['#818cf8', '#34d399', '#fbbf24', '#f472b6', '#60a5fa', '#a78bfa', '#2dd4bf'];
-const LOST_COLOR = '#7f1d1d';
+const LOST_COLOR = '#f87171';
 const LOST_BAR_COLOR = '#991b1b';
 
 // Layout constants
 const NODE_W = 28;
 const MAX_H = 220;
 const MIN_H = 20;
+const MAX_LOST_H = 48;  // max height of below-axis lost bars
 const LABEL_TOP = 80;   // space above chart area for name/count labels
-const BOTTOM_H = 56;    // space below baseline for lost/value labels
+const BOTTOM_H = 90;    // space below baseline for lost bars + labels
 const SIDE_PAD = 28;
 const GAP = 80;
 
@@ -96,20 +97,27 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
   const n = stages.length;
   if (n === 0) return null;
 
-  // Size bars by ARR value, not deal count, to create smooth funnel shape
-  const maxValue = Math.max(...stages.map(s => s.value), 1);
+  // Use historical deal throughput (entered) for bar height.
+  // This gives a naturally decreasing funnel: early stages always see more
+  // deals entering than late stages, so bars taper left-to-right.
+  // entered/enteredValue are the historical throughput fields.
+  // Fall back to deals/value if entered is missing (old cached data).
+  const getEntered = (s: (typeof stages)[0]) => s.entered ?? s.deals ?? 0;
+  const getEnteredValue = (s: (typeof stages)[0]) => s.enteredValue ?? s.value ?? 0;
 
-  const nodeH = stages.map(s => Math.max(MIN_H, (s.value / maxValue) * MAX_H));
+  const maxEntered = Math.max(...stages.map(s => getEntered(s)), 1);
+
+  const nodeH = stages.map(s => Math.max(MIN_H, (getEntered(s) / maxEntered) * MAX_H));
   const nodeX = stages.map((_, i) => SIDE_PAD + i * (NODE_W + GAP));
   // bottom-align all bars to a common baseline
   const baseline = LABEL_TOP + MAX_H;
   const nodeY = nodeH.map(h => baseline - h);
-  // lost segment at bottom of each bar
-  const lostH = stages.map((s, i) =>
-    s.lostCount > 0 ? Math.max(2, (s.lostCount / Math.max(s.deals, 1)) * nodeH[i]) : 0
+  // Full bar height flows onward — lost deals are shown BELOW the baseline, not inside the bar
+  const flowH = nodeH.slice();
+  // Below-baseline lost bar height scaled relative to main bar max
+  const lostBarH = stages.map(s =>
+    s.lostCount > 0 ? Math.max(3, (s.lostCount / maxEntered) * MAX_LOST_H) : 0
   );
-  // flow segment = top of bar (flows onward)
-  const flowH = nodeH.map((h, i) => h - lostH[i]);
 
   const svgW = SIDE_PAD * 2 + n * NODE_W + (n - 1) * GAP;
   const svgH = LABEL_TOP + MAX_H + BOTTOM_H;
@@ -130,11 +138,12 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
     const x2 = nodeX[i + 1];
     const midX = (x1 + x2) / 2;
 
-    // Use pairwise flow data when available, fall back to min of adjacent stages
+    // Use pairwise flow data when available, fall back to min of adjacent entered counts.
+    // Proportion is computed against entered (historical throughput), not the snapshot count.
     const flow = flows.find(f => f.fromId === stages[i].id && f.toId === stages[i + 1].id);
-    const flowDeals = flow?.deals ?? Math.min(stages[i].deals, stages[i + 1].deals);
-    const srcDeals = Math.max(stages[i].deals, 1);
-    const proportion = Math.min(flowDeals / srcDeals, 1);
+    const flowDeals = flow?.deals ?? Math.min(getEntered(stages[i]), getEntered(stages[i + 1]));
+    const srcEntered = Math.max(getEntered(stages[i]), 1);
+    const proportion = Math.min(flowDeals / srcEntered, 1);
 
     // Constant bandH on both sides — the only butterfly-free guarantee
     const bandH = Math.max(2, Math.min(proportion * flowH[i], flowH[i + 1]));
@@ -212,7 +221,7 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
             Pipeline Funnel
           </h4>
           <div style={{ fontSize: 12, color: colors.textMuted, fontFamily: fonts.sans, marginTop: 2 }}>
-            Showing deal flow across pipeline stages — width represents ARR value
+            Historical deal throughput per stage · closed lost shown below axis
             {periodLabel && ` · ${periodLabel}`}
           </div>
         </div>
@@ -377,6 +386,17 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
             );
           })}
 
+          {/* Baseline axis line — separates above (entered) from below (closed lost) */}
+          <line
+            x1={0}
+            y1={baseline}
+            x2={svgW}
+            y2={baseline}
+            stroke={colors.border as string}
+            strokeWidth={1}
+            strokeDasharray="3 3"
+          />
+
           {/* 3 & 4. Bar segments + labels */}
           {stages.map((stage, i) => {
             const color = STAGE_COLORS[i % STAGE_COLORS.length];
@@ -385,7 +405,7 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
 
             return (
               <g key={stage.id}>
-                {/* Flow segment (top) */}
+                {/* Main bar — sized by historical entries, extends UP from baseline */}
                 {flowH[i] > 0 && (
                   <rect
                     x={nodeX[i]}
@@ -397,15 +417,15 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
                   />
                 )}
 
-                {/* Lost segment (bottom) */}
-                {lostH[i] > 0 && (
+                {/* Below-baseline lost bar — closed/lost deals, extends DOWN from baseline */}
+                {lostBarH[i] > 0 && (
                   <rect
                     x={nodeX[i]}
-                    y={nodeY[i] + flowH[i]}
+                    y={baseline}
                     width={NODE_W}
-                    height={lostH[i]}
+                    height={lostBarH[i]}
                     fill={LOST_BAR_COLOR}
-                    rx={lostH[i] > 4 ? 2 : 0}
+                    rx={lostBarH[i] > 4 ? 2 : 0}
                   />
                 )}
 
@@ -422,7 +442,7 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
                   {truncate(stageName, 14)}
                 </text>
 
-                {/* Deal count — one line below name */}
+                {/* Entered deal count — one line below name */}
                 <text
                   x={cx}
                   y={nodeY[i] - 12}
@@ -431,10 +451,10 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
                   fill={colors.textMuted as string}
                   fontFamily={fonts.sans}
                 >
-                  {stage.deals} deal{stage.deals !== 1 ? 's' : ''}
+                  {getEntered(stage)} deal{getEntered(stage) !== 1 ? 's' : ''}
                 </text>
 
-                {/* ARR value — inside or just below bar, only if bar tall enough */}
+                {/* ARR value — just below baseline */}
                 {nodeH[i] >= 30 && (
                   <text
                     x={cx}
@@ -445,21 +465,21 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
                     fontFamily={fonts.sans}
                     fontWeight="600"
                   >
-                    {formatCurrency(stage.value)}
+                    {formatCurrency(getEnteredValue(stage))}
                   </text>
                 )}
 
-                {/* Lost count + value — below ARR */}
+                {/* Lost count label — below the lost bar */}
                 {stage.lostCount > 0 && (
                   <text
                     x={cx}
-                    y={baseline + 30}
+                    y={baseline + lostBarH[i] + 16}
                     textAnchor="middle"
                     fontSize={9}
                     fill={LOST_COLOR}
                     fontFamily={fonts.sans}
                   >
-                    -{stage.lostCount} lost {formatCurrency(stage.lostValue)}
+                    -{stage.lostCount} lost
                   </text>
                 )}
               </g>
@@ -479,15 +499,15 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
             <div style={{ width: 10, height: 10, borderRadius: 2, background: STAGE_COLORS[0], opacity: 0.85 }} />
-            <span style={{ fontSize: 11, color: colors.textMuted }}>Flow to next stage</span>
+            <span style={{ fontSize: 11, color: colors.textMuted }}>Deals entered</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
             <div style={{ width: 10, height: 10, borderRadius: 2, background: LOST_BAR_COLOR }} />
-            <span style={{ fontSize: 11, color: colors.textMuted }}>Closed lost</span>
+            <span style={{ fontSize: 11, color: colors.textMuted }}>Closed lost (below axis)</span>
           </div>
           <div style={{ flex: 1, textAlign: 'right' }}>
             <span style={{ fontSize: 10, color: colors.textMuted }}>
-              Width represents ARR value · Hover flows for detail
+              Band = deals that progressed · Hover for detail
             </span>
           </div>
         </div>

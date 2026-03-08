@@ -37,9 +37,11 @@ export async function buildSankeyChartData(
     rawByNormalized.get(row.normalized)!.add(row.raw);
   }
 
-  // 2. Build stage nodes from current result
+  // 2. Build stage nodes from current result.
+  // Keep stages that have any historical activity (entered OR endOfPeriod OR won),
+  // so the funnel includes stages that were actively traversed during the period.
   const stages: SankeyStageNode[] = current.stages
-    .filter(s => s.endOfPeriod > 0 || s.startOfPeriod > 0 || s.won > 0)
+    .filter(s => s.entered > 0 || s.endOfPeriod > 0 || s.startOfPeriod > 0 || s.won > 0)
     .map(s => {
       const formattedLabel = formatStageName(s.stage);
       const rawSet = rawByNormalized.get(s.stage);
@@ -69,6 +71,8 @@ export async function buildSankeyChartData(
         rawLabel,
         deals: s.endOfPeriod,
         value: s.endOfPeriodValue,
+        entered: s.entered,
+        enteredValue: s.enteredValue,
         won: s.won,
         wonValue: s.wonValue,
         lostCount: s.fellOut,

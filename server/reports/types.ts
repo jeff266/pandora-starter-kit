@@ -132,6 +132,8 @@ export interface SankeyStageNode {
   rawLabel?: string;
   deals: number;
   value: number;
+  entered: number;
+  enteredValue: number;
   won: number;
   wonValue: number;
   lostCount: number;
