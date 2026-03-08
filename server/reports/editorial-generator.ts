@@ -196,6 +196,18 @@ export async function generateEditorialReport(
     tokens_used: editorial.tokens_used,
   });
 
+  // 9a. Attach chart data from skill evidence to matching sections
+  for (const section of editorial.sections) {
+    if ((section as any).chart_data) continue;
+    for (const skillId of (section.source_skills ?? [])) {
+      const evidence = skillEvidence[skillId];
+      if (evidence?.chart_data) {
+        (section as any).chart_data = evidence.chart_data;
+        break;
+      }
+    }
+  }
+
   // 9. Render to requested formats
   logger.info('[EditorialGenerator] Rendering report', { formats: template.formats });
   const renderStartTime = Date.now();

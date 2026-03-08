@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { Download, Share2, Settings, ChevronLeft, ChevronRight, Eye } from 'lucide-react';
-import type { SectionContent, MetricCard, DealCard, ActionItem } from '../components/reports/types';
+import type { SectionContent, MetricCard, DealCard, ActionItem, SankeyChartData } from '../components/reports/types';
 import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
 import { renderMarkdown } from '../lib/render-markdown';
 import SectionFeedback from '../components/reports/SectionFeedback';
 import OverallBriefingFeedback from '../components/reports/OverallBriefingFeedback';
+import SankeyChart from '../components/reports/SankeyChart';
 
 interface ReportGeneration {
   id: string;
@@ -568,6 +569,14 @@ function ReportSection({ section, isCollapsed, onToggle, anonymizeMode, workspac
                 <MetricCardComponent key={idx} metric={metric} />
               ))}
             </div>
+          )}
+
+          {/* Sankey Pipeline Funnel Chart */}
+          {(section as any).chart_data?.type === 'sankey' && (
+            <SankeyChart
+              data={(section as any).chart_data as SankeyChartData}
+              workspaceId={workspaceId}
+            />
           )}
 
           {/* Narrative */}

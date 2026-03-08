@@ -10,6 +10,8 @@ import {
 import { logChatMessage } from '../lib/chat-logger.js';
 import { getOrCreateSession, appendChatMessage, getEntityMessages } from '../chat/session-service.js';
 import { randomUUID } from 'crypto';
+import { waterfallAnalysis } from '../analysis/waterfall-analysis.js';
+import { buildSankeyChartData } from '../analysis/sankey-builder.js';
 
 const router = Router();
 
@@ -226,6 +228,55 @@ router.post('/:workspaceId/analyze/legacy', async (req: Request, res: Response):
       return;
     }
     res.status(500).json({ error: msg });
+  }
+});
+
+// ============================================================================
+// GET /:workspaceId/analysis/sankey
+// Returns SankeyChartData for the interactive pipeline funnel visualization.
+// Supports filter re-slicing by pipeline name or analysis scope.
+//
+// Query params:
+//   scopeId?    — analysis_scopes.scope_id to filter by
+//   pipeline?   — CRM pipeline name to filter by
+//   periodDays? — look-back window in days (default: 7, max: 365)
+// ============================================================================
+
+router.get('/:workspaceId/analysis/sankey', requirePermission('pipeline.view'), async (req: Request, res: Response): Promise<void> => {
+  const workspaceId = req.params.workspaceId as string;
+  const { scopeId, pipeline, periodDays } = req.query as Record<string, string | undefined>;
+
+  try {
+    const days = Math.min(Math.max(parseInt(periodDays ?? '7', 10) || 7, 1), 365);
+
+    const periodEnd = new Date();
+    const periodStart = new Date(periodEnd.getTime() - days * 24 * 60 * 60 * 1000);
+    const prevEnd = new Date(periodStart.getTime());
+    const prevStart = new Date(prevEnd.getTime() - days * 24 * 60 * 60 * 1000);
+
+    const filterParams = (scopeId || pipeline)
+      ? { scopeId: scopeId ?? undefined, pipeline: pipeline ?? undefined }
+      : undefined;
+
+    const [current, previous] = await Promise.all([
+      waterfallAnalysis(workspaceId, periodStart, periodEnd, filterParams),
+      waterfallAnalysis(workspaceId, prevStart, prevEnd, filterParams),
+    ]);
+
+    let activeFilter: { type: 'all' | 'pipeline' | 'scope'; id?: string; label: string };
+    if (pipeline) {
+      activeFilter = { type: 'pipeline', id: pipeline, label: pipeline };
+    } else if (scopeId && scopeId !== 'default') {
+      activeFilter = { type: 'scope', id: scopeId, label: scopeId };
+    } else {
+      activeFilter = { type: 'all', label: 'All Deals' };
+    }
+
+    const chartData = await buildSankeyChartData(workspaceId, current, previous, activeFilter);
+    res.json(chartData);
+  } catch (err) {
+    console.error('[analysis/sankey] Error:', err instanceof Error ? err.message : err);
+    res.status(500).json({ error: 'Failed to compute Sankey chart data' });
   }
 });
 

@@ -1,5 +1,6 @@
 import type { SkillEvidence } from '../types.js';
 import { EvidenceBuilder, buildDataSources, dealToRecord } from '../evidence-builder.js';
+import { buildSankeyChartData } from '../../analysis/sankey-builder.js';
 
 export async function buildPipelineWaterfallEvidence(
   stepResults: Record<string, any>,
@@ -74,5 +75,24 @@ export async function buildPipelineWaterfallEvidence(
     });
   }
 
-  return eb.build();
+  const evidence = eb.build();
+
+  // Attach Sankey chart data if waterfall results are available
+  const currentWaterfall = stepResults.current_waterfall || stepResults.waterfall_result;
+  const previousWaterfall = stepResults.previous_waterfall || stepResults.prev_waterfall;
+
+  if (currentWaterfall?.stages?.length > 0) {
+    try {
+      evidence.chart_data = await buildSankeyChartData(
+        workspaceId,
+        currentWaterfall,
+        previousWaterfall ?? undefined
+      );
+    } catch (err) {
+      // Non-fatal — chart data is optional
+      console.warn('[pipeline-waterfall] Failed to build Sankey chart data:', err instanceof Error ? err.message : err);
+    }
+  }
+
+  return evidence;
 }

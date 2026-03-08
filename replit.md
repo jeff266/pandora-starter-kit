@@ -548,6 +548,31 @@ T010–T021 are all built and running. Migration tracker updated with 134–137.
 
 ---
 
+## Sankey Pipeline Funnel Visualization (March 2026)
+
+### Architecture
+Interactive SVG Sankey diagram for the report viewer showing stage-by-stage deal flow. Filter-first design: all slicing dimensions (pipelines, scopes) are baked in from the start.
+
+### Data Flow
+`waterfallAnalysis()` → `buildSankeyChartData()` → `SkillEvidence.chart_data` → editorial-generator attaches to `SectionContent.chart_data` → `SankeyChart.tsx` renders with filter bar → filter change calls live API endpoint → fresh `SankeyChartData` replaces chart.
+
+### Files
+- **`server/analysis/waterfall-analysis.ts`**: Added `WaterfallFlow` interface, `endOfPeriodValue` to `WaterfallStageFlow`, `flows: WaterfallFlow[]` to `WaterfallResult`, optional `filterParams?: WaterfallFilterParams` to `waterfallAnalysis()`. Filter support builds a `scopedDealIds` Set by querying deals with scope WHERE clause or pipeline filter, then post-filters deal snapshots and transitions.
+- **`server/analysis/sankey-builder.ts`** (new): `buildSankeyChartData(workspaceId, current, previous?, activeFilter?)` — converts `WaterfallResult` to `SankeyChartData`. Fetches available pipelines (distinct `deals.pipeline`) and scopes (confirmed `analysis_scopes`) for the filter bar.
+- **`server/reports/types.ts`**: Added `SankeyStageNode`, `SankeyFlow`, `SankeyConversionRate`, `SankeyChartData` interfaces. `SectionContent.chart_data` is now `ChartData | SankeyChartData`.
+- **`server/skills/types.ts`**: `SkillEvidence.chart_data?` field added.
+- **`server/skills/evidence-builders/pipeline-waterfall.ts`**: After building evidence, calls `buildSankeyChartData()` using `stepResults.current_waterfall` / `stepResults.previous_waterfall`.
+- **`server/reports/editorial-generator.ts`**: Post-synthesis loop attaches `evidence.chart_data` to matching sections via `source_skills` lookup. Generic — works for any skill.
+- **`server/routes/analysis.ts`**: `GET /:workspaceId/analysis/sankey?scopeId=&pipeline=&periodDays=` endpoint. Runs filtered waterfall analysis for current + previous period, returns `SankeyChartData` JSON. Protected by `requirePermission('pipeline.view')`.
+- **`client/src/components/reports/types.ts`**: Mirror of all Sankey types + `chart_data?: SankeyChartData` on `SectionContent`.
+- **`client/src/components/reports/SankeyChart.tsx`** (new): SVG Sankey component. Stage cards sized proportionally, bezier flow curves between stages, won/lost badges, hover tooltip on flows, conversion rate grid with WoW delta badges. Filter bar at top: "All Deals" + pipeline pills + scope pills (with ▶/◈ icons to differentiate). Filter change calls live API, replaces chart data with loading shimmer.
+- **`client/src/pages/ReportViewer.tsx`**: Renders `<SankeyChart />` when `section.chart_data?.type === 'sankey'`.
+
+### Filtering
+- **Pipelines**: Queries `DISTINCT pipeline FROM deals` — the actual CRM pipeline field (HubSpot deal pipeline, Salesforce record type, etc.)
+- **Scopes**: Confirmed `analysis_scopes` (the workspace segmentation system — Enterprise, SMB, Named Accounts, etc.)
+- Interactive: filter pills call `GET /analysis/sankey?pipeline=X` or `?scopeId=Y` live; no page reload or report regeneration needed.
+
 ## Pipeline Resolution System (March 2026)
 
 ### Architecture

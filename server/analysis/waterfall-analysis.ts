@@ -7,6 +7,7 @@
 
 import { query } from '../db.js';
 import { getStageTransitionsInWindow, getStageConversionRates, getAverageTimeInStage } from './stage-history-queries.js';
+import { getScopeWhereClause, type ActiveScope } from '../config/scope-loader.js';
 
 export interface WaterfallStageFlow {
   stage: string;
@@ -17,6 +18,7 @@ export interface WaterfallStageFlow {
   fellOut: number;                // Deals that closed-lost from this stage
   won: number;                    // Deals that closed-won from this stage
   endOfPeriod: number;            // Deals in this stage at period end
+  endOfPeriodValue: number;       // $ sum of open deals in this stage at period end
   netChange: number;              // endOfPeriod - startOfPeriod
   enteredValue: number;           // $ sum of deals entered
   advancedValue: number;          // $ sum of deals advanced
@@ -24,8 +26,16 @@ export interface WaterfallStageFlow {
   wonValue: number;               // $ sum of deals won
 }
 
+export interface WaterfallFlow {
+  fromStage: string;
+  toStage: string;
+  count: number;
+  value: number;
+}
+
 export interface WaterfallResult {
   stages: WaterfallStageFlow[];
+  flows: WaterfallFlow[];
   summary: {
     newPipelineCreated: { count: number; value: number };
     closedWon: { count: number; value: number };
@@ -36,6 +46,11 @@ export interface WaterfallResult {
   };
   periodStart: Date;
   periodEnd: Date;
+}
+
+export interface WaterfallFilterParams {
+  scopeId?: string;
+  pipeline?: string;
 }
 
 /**
@@ -171,17 +186,73 @@ async function getDealsAtTimestamp(
 export async function waterfallAnalysis(
   workspaceId: string,
   periodStart: Date,
-  periodEnd: Date
+  periodEnd: Date,
+  filterParams?: WaterfallFilterParams
 ): Promise<WaterfallResult> {
+  // 0. Resolve filter: build a set of eligible deal IDs if filtering is requested
+  let scopedDealIds: Set<string> | null = null;
+
+  if (filterParams?.pipeline) {
+    const escaped = filterParams.pipeline.replace(/'/g, "''");
+    const filtered = await query<{ id: string }>(
+      `SELECT id FROM deals WHERE workspace_id = $1 AND pipeline = '${escaped}'`,
+      [workspaceId]
+    ).catch(() => ({ rows: [] as Array<{ id: string }> }));
+    scopedDealIds = new Set(filtered.rows.map(r => r.id));
+  } else if (filterParams?.scopeId && filterParams.scopeId !== 'default') {
+    const scopeRow = await query<{
+      filter_field: string;
+      filter_operator: string;
+      filter_values: string[];
+      field_overrides: any;
+    }>(
+      `SELECT filter_field, filter_operator, filter_values, field_overrides
+       FROM analysis_scopes
+       WHERE workspace_id = $1 AND scope_id = $2
+       LIMIT 1`,
+      [workspaceId, filterParams.scopeId]
+    ).catch(() => ({ rows: [] as any[] }));
+
+    if (scopeRow.rows.length > 0) {
+      const scope: ActiveScope = {
+        scope_id: filterParams.scopeId,
+        name: '',
+        filter_field: scopeRow.rows[0].filter_field,
+        filter_operator: scopeRow.rows[0].filter_operator || 'in',
+        filter_values: scopeRow.rows[0].filter_values || [],
+        field_overrides: scopeRow.rows[0].field_overrides || {},
+      };
+      const whereClause = getScopeWhereClause(scope);
+      if (whereClause) {
+        const filtered = await query<{ id: string }>(
+          `SELECT id FROM deals WHERE workspace_id = $1 AND (${whereClause})`,
+          [workspaceId]
+        ).catch(() => ({ rows: [] as Array<{ id: string }> }));
+        scopedDealIds = new Set(filtered.rows.map(r => r.id));
+      }
+    }
+  }
+
   // 1. Get ordered stages
   const orderedStages = await getStageOrdering(workspaceId);
 
   // 2. Get deals at start and end of period
-  const dealsAtStart = await getDealsAtTimestamp(workspaceId, periodStart);
-  const dealsAtEnd = await getDealsAtTimestamp(workspaceId, periodEnd);
+  const dealsAtStartRaw = await getDealsAtTimestamp(workspaceId, periodStart);
+  const dealsAtEndRaw = await getDealsAtTimestamp(workspaceId, periodEnd);
+
+  // Apply scope filter to deal snapshots
+  const dealsAtStart = scopedDealIds
+    ? new Map(Array.from(dealsAtStartRaw.entries()).filter(([id]) => scopedDealIds!.has(id)))
+    : dealsAtStartRaw;
+  const dealsAtEnd = scopedDealIds
+    ? new Map(Array.from(dealsAtEndRaw.entries()).filter(([id]) => scopedDealIds!.has(id)))
+    : dealsAtEndRaw;
 
   // 3. Get all transitions during the period
-  const transitions = await getStageTransitionsInWindow(workspaceId, periodStart, periodEnd);
+  const allTransitions = await getStageTransitionsInWindow(workspaceId, periodStart, periodEnd);
+  const transitions = scopedDealIds
+    ? allTransitions.filter(t => scopedDealIds!.has(t.dealId))
+    : allTransitions;
 
   // 4. Build transition maps
   const transitionsByDeal = new Map<string, typeof transitions>();
@@ -214,6 +285,7 @@ export async function waterfallAnalysis(
       fellOut: 0,
       won: 0,
       endOfPeriod: 0,
+      endOfPeriodValue: 0,
       netChange: 0,
       enteredValue: 0,
       advancedValue: 0,
@@ -230,16 +302,18 @@ export async function waterfallAnalysis(
     }
   }
 
-  // 8. Count deals at end of period per stage
+  // 8. Count deals at end of period per stage (and track open ARR)
   for (const deal of dealsAtEnd.values()) {
     const flow = stageFlows.get(deal.stage);
     if (flow) {
       flow.endOfPeriod++;
+      flow.endOfPeriodValue += deal.amount;
     }
   }
 
-  // 9. Classify transitions
+  // 9. Classify transitions + track pairwise stage flows
   const stageIndex = new Map(orderedStages.map((s, i) => [s, i]));
+  const pairwiseFlows = new Map<string, WaterfallFlow>();
   let newPipelineCount = 0;
   let newPipelineValue = 0;
   let closedWonCount = 0;
@@ -303,9 +377,18 @@ export async function waterfallAnalysis(
 
       if (fromFlow) {
         if (toIndex > fromIndex) {
-          // Advanced to later stage
+          // Advanced to later stage — track pairwise flow
           fromFlow.advanced++;
           fromFlow.advancedValue += amount;
+
+          const flowKey = `${fromStage}→${toStage}`;
+          const existing = pairwiseFlows.get(flowKey);
+          if (existing) {
+            existing.count++;
+            existing.value += amount;
+          } else {
+            pairwiseFlows.set(flowKey, { fromStage, toStage: toStage!, count: 1, value: amount });
+          }
         } else {
           // Fell back to earlier stage
           fromFlow.fellBack++;
@@ -327,6 +410,7 @@ export async function waterfallAnalysis(
   // 11. Return result
   return {
     stages: Array.from(stageFlows.values()),
+    flows: Array.from(pairwiseFlows.values()),
     summary: {
       newPipelineCreated: { count: newPipelineCount, value: newPipelineValue },
       closedWon: { count: closedWonCount, value: closedWonValue },

@@ -263,6 +263,9 @@ export interface SkillEvidence {
 
   /** Named filters applied to scope this analysis */
   applied_filters?: AppliedFilterEvidence[];
+
+  /** Optional chart data to attach to the report section for this skill */
+  chart_data?: import('../reports/types.js').SankeyChartData | import('../reports/types.js').ChartData;
 }
 
 export interface EvidenceClaim {

@@ -80,7 +80,7 @@ export interface SectionContent {
     rows: TableRow[];
   };
   deal_cards?: DealCard[];              // Risk deals, closed deals, etc.
-  chart_data?: ChartData;               // For renderers that support charts
+  chart_data?: ChartData | SankeyChartData;  // For renderers that support charts
   action_items?: ActionItem[];          // Recommended actions
 
   // Metadata
@@ -120,6 +120,48 @@ export interface ChartData {
     data: number[];
     color?: string;
   }[];
+}
+
+// ============================================================================
+// Sankey Pipeline Funnel Chart
+// ============================================================================
+
+export interface SankeyStageNode {
+  id: string;
+  label: string;
+  deals: number;
+  value: number;
+  won: number;
+  wonValue: number;
+  lostCount: number;
+  lostValue: number;
+}
+
+export interface SankeyFlow {
+  fromId: string;
+  toId: string;
+  deals: number;
+  value: number;
+}
+
+export interface SankeyConversionRate {
+  fromLabel: string;
+  toLabel: string;
+  rate: number;
+  delta?: number;
+}
+
+export interface SankeyChartData {
+  type: 'sankey';
+  stages: SankeyStageNode[];
+  flows: SankeyFlow[];
+  conversionRates: SankeyConversionRate[];
+  periodLabel?: string;
+  activeFilter: { type: 'all' | 'pipeline' | 'scope'; id?: string; label: string };
+  availableFilters: {
+    pipelines: string[];
+    scopes: Array<{ id: string; name: string }>;
+  };
 }
 
 export interface ActionItem {
