@@ -792,16 +792,16 @@ export default function AgentBuilder() {
       {/* Goal Header — shown when editing an agent that has a goal */}
       {editingAgentId && goal && (
         <div style={{
-          background: 'linear-gradient(135deg, #1a2340 0%, #1e2230 100%)',
-          border: `1px solid #2d4080`,
+          background: colors.surface,
+          border: `1px solid ${colors.border}`,
           borderRadius: 10,
           padding: '16px 20px',
           marginBottom: 20,
         }}>
-          <div style={{ font: `500 11px ${fonts.sans}`, color: '#6488ea', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>Goal</div>
+          <div style={{ font: `500 11px ${fonts.sans}`, color: colors.accent, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>Goal</div>
           <div style={{ font: `400 14px ${fonts.sans}`, color: colors.text, lineHeight: 1.5 }}>{goal}</div>
           {standingQuestions.length > 0 && (
-            <div style={{ marginTop: 12, borderTop: '1px solid #2a3147', paddingTop: 10 }}>
+            <div style={{ marginTop: 12, borderTop: `1px solid ${colors.border}`, paddingTop: 10 }}>
               <div style={{ font: `500 11px ${fonts.sans}`, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>
                 Standing Questions ({standingQuestions.length})
               </div>
@@ -1020,6 +1020,37 @@ export default function AgentBuilder() {
       {/* ─── Skills Tab ──────────────────────────────── */}
       {activeTab === 'skills' && (
         <div>
+          {/* Tradeoff explainer */}
+          <div style={{
+            background: colors.surface,
+            border: `1px solid ${colors.border}`,
+            borderRadius: 8,
+            padding: '12px 14px',
+            marginBottom: 16,
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr 1fr',
+            gap: 12,
+          }}>
+            <div>
+              <div style={{ font: `600 11px ${fonts.sans}`, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Too few (0–1)</div>
+              <div style={{ font: `400 12px ${fonts.sans}`, color: colors.textSecondary, lineHeight: 1.5 }}>
+                Limited data coverage. The agent can only answer what that one skill sees — blind spots are likely.
+              </div>
+            </div>
+            <div style={{ borderLeft: `1px solid ${colors.border}`, paddingLeft: 12 }}>
+              <div style={{ font: `600 11px ${fonts.sans}`, color: '#16a34a', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Sweet spot (2–4)</div>
+              <div style={{ font: `400 12px ${fonts.sans}`, color: colors.textSecondary, lineHeight: 1.5 }}>
+                Enough coverage for a focused goal. Synthesis stays tight and coherent.
+              </div>
+            </div>
+            <div style={{ borderLeft: `1px solid ${colors.border}`, paddingLeft: 12 }}>
+              <div style={{ font: `600 11px ${fonts.sans}`, color: '#d97706', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Too many (5+)</div>
+              <div style={{ font: `400 12px ${fonts.sans}`, color: colors.textSecondary, lineHeight: 1.5 }}>
+                Each skill adds ~15K tokens and ~30s. Synthesis dilutes — Claude struggles to stay on goal.
+              </div>
+            </div>
+          </div>
+
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
             <span style={{ font: `500 12px ${fonts.sans}`, letterSpacing: '0.05em', textTransform: 'uppercase', color: colors.textSecondary }}>
               Skills to run ({skills.length})
@@ -1078,6 +1109,37 @@ export default function AgentBuilder() {
               );
             })}
           </div>
+
+          {/* Dynamic count feedback */}
+          {(() => {
+            const n = skills.length;
+            const estTokens = n === 0 ? 0 : n * 15000 + 5000;
+            const estSecs = n === 0 ? 0 : n * 20 + 10;
+            const fmtTokens = estTokens >= 1000 ? `~${Math.round(estTokens / 1000)}K` : `~${estTokens}`;
+            const fmtTime = estSecs >= 60 ? `~${Math.round(estSecs / 60)}m` : `~${estSecs}s`;
+
+            if (n === 0) return (
+              <div style={{ marginTop: 12, font: `400 12px ${fonts.sans}`, color: '#d97706' }}>
+                No skills selected — the agent has nothing to run.
+              </div>
+            );
+            if (n <= 4) return (
+              <div style={{ marginTop: 12, font: `400 12px ${fonts.sans}`, color: '#16a34a' }}>
+                {n} skill{n > 1 ? 's' : ''} · {fmtTokens} tokens per run · {fmtTime} run time
+                {n >= 2 && n <= 4 && <span style={{ marginLeft: 6, color: colors.textMuted }}>— recommended range</span>}
+              </div>
+            );
+            if (n <= 6) return (
+              <div style={{ marginTop: 12, font: `400 12px ${fonts.sans}`, color: '#d97706' }}>
+                {n} skills · {fmtTokens} tokens · {fmtTime} run time · synthesis may lose focus with this many inputs
+              </div>
+            );
+            return (
+              <div style={{ marginTop: 12, font: `400 12px ${fonts.sans}`, color: '#dc2626' }}>
+                {n} skills is unusually high — consider narrowing to the most relevant ones. {fmtTokens} tokens · {fmtTime} run time.
+              </div>
+            );
+          })()}
         </div>
       )}
 
