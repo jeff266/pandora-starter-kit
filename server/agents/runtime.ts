@@ -338,7 +338,7 @@ export class AgentRuntime {
     workspaceId: string,
     runId: string
   ): Promise<{ output: string; tokens: { input: number; output: number } }> {
-    let userPrompt = agent.synthesis.userPromptTemplate;
+    let userPrompt = agent.synthesis.userPromptTemplate || '{{skill_outputs}}';
 
     for (const [key, skillOutput] of Object.entries(skillOutputs)) {
       const content = skillOutput.output || skillOutput.summary;
@@ -363,7 +363,8 @@ export class AgentRuntime {
     userPrompt = userPrompt.replace('{{skill_outputs}}', allOutputs);
 
     // Check DB agent first, then fall back to registry definition for goal-aware synthesis
-    let systemPrompt = agent.synthesis.systemPrompt;
+    const DEFAULT_SYSTEM_PROMPT = 'You are a revenue intelligence analyst. Synthesize the following skill outputs into a concise, actionable briefing for the sales team. Use markdown formatting with clear sections.';
+    let systemPrompt = agent.synthesis.systemPrompt || DEFAULT_SYSTEM_PROMPT;
     let synthesisMode: 'goal_aware' | 'findings_dump' = 'findings_dump';
     try {
       const dbAgent = await getAgent(agent.id, workspaceId);
