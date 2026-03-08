@@ -1033,8 +1033,13 @@ function detectVisualizationHint(message: string): string | null {
   // Line / Time series
   if (/trend\s+over\s+time|pacing|how\s+are\s+we\s+tracking|week\s+by\s+week|attainment\s+pace/.test(m)) return 'line';
   
-  // Stacked Bar
+  // Stacked Bar — multi-dimensional overlay and comparison
   if (/forecast\s+breakdown|commit\s+vs|by\s+category|commit\s+and\s+best\s+case/.test(m)) return 'stacked_bar';
+  if (/overlay|add.*on\s+top|layer.*on|combine.*chart|add.*to.*chart|on\s+top\s+of/.test(m)) return 'stacked_bar';
+  if (/hygiene.*stage|stage.*hygiene|hygiene.*by.*stage/.test(m)) return 'stacked_bar';
+  if (/contact.*coverage.*stage|coverage.*by.*stage|contacts.*per.*stage/.test(m)) return 'stacked_bar';
+  if (/activity.*by.*stage|stale.*by.*stage|stage.*activity/.test(m)) return 'stacked_bar';
+  if (/rep.*attainment.*quota|quota.*vs.*won|won.*vs.*quota|attainment.*vs.*quota/.test(m)) return 'stacked_bar';
   
   // Donut
   if (/distribution|what\s+percent|win.?loss\s+split|icp\s+grade|breakdown\s+of/.test(m)) return 'donut';
@@ -1424,12 +1429,47 @@ Required fields:
 - source.record_count: number of records
 
 Choose chartType that best fits the data shape:
-- bar: for categories, stage breakdowns
-- horizontal_bar: for rep comparisons, named entities
-- line: for time series, trends
-- stacked_bar: for category breakdowns with subcategories
-- donut: for distributions, percentages
-- waterfall: for pipeline movement, changes
+- bar: for single-dimension categories and stage breakdowns
+- horizontal_bar: for rep comparisons, named entity rankings
+- line: for time series and trends
+- stacked_bar: for TWO dimensions across the same categories (see below)
+- donut: for distributions and percentages
+- waterfall: for pipeline movement and changes
+
+## Multi-Dimensional Charts (stacked_bar)
+
+Use stacked_bar when the user asks to overlay, layer, add, or combine a second dimension onto an existing chart. Common scenarios:
+
+- Pipeline by stage + hygiene (total deals vs deals with contacts vs stale)
+- Pipeline by stage + contact coverage (deals with 2+ contacts vs 1 vs none)
+- Rep attainment: closed-won stacked against open pipeline, against quota reference line
+- Forecast: commit + best_case + pipeline stacked, with quota as referenceValue
+
+HOW TO BUILD A stacked_bar from multiple tool calls:
+1. Make 2-3 tool calls to get each dimension at the same grouping level (e.g. per stage)
+2. For each category, emit one data entry per segment using the segment field: { label, value, segment }
+3. All entries with the same label are grouped together automatically
+
+Example — Pipeline + hygiene by stage:
+- Call compute_metric_segmented(metric='pipeline_value', segment_by='stage') → pipeline value per stage
+- Call get_skill_evidence(skill_id='pipeline-hygiene') → extract stale/at-risk deal counts per stage
+- Emit stacked_bar:
+  data: [
+    {"label": "Demo Conducted", "value": 1043635, "segment": "pipeline"},
+    {"label": "Demo Conducted", "value": 5, "segment": "at_risk"},
+    {"label": "Pilot", "value": 435691, "segment": "pipeline"},
+    {"label": "Pilot", "value": 8, "segment": "at_risk"},
+    ...
+  ]
+
+Example — Contact coverage by stage:
+- Call query_deals() filtered per stage for total counts
+- Call query_deals(has_contacts=true) per stage for covered counts
+- Emit stacked_bar with segments "with_contacts" and "no_contacts"
+
+FOLLOW-UP DEEPENING RULE: When the user says "overlay X on top", "add X to that chart", "layer X on", "show X alongside" — this means rebuild the chart as a stacked_bar combining both dimensions. Always make the required tool calls and emit a stacked_bar. Never respond with prose alone when a chart can show it.
+
+PROACTIVE OFFER: After answering a pipeline-by-stage or deal-distribution question with a bar chart, append exactly one follow-up line: "Want me to layer in hygiene or contact coverage on top of this?"
 
 DO NOT calculate numeric values yourself — use only values returned by tools.
 The system will transform raw_annotation into a voice-styled annotation automatically.${vizHint ? `\n\nPreferred chart type for this question: ${vizHint} — use this unless the data shape clearly calls for a different type.` : ''}`;
