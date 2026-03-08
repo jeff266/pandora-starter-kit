@@ -159,6 +159,7 @@ interface WinningPathsChartProps {
   data: WinningPathsData | null;
   workspaceId?: string;
   embedded?: boolean;
+  hideFilters?: boolean;
   onDataChange?: (data: WinningPathsData) => void;
 }
 
@@ -166,6 +167,7 @@ export default function WinningPathsChart({
   data: initialData,
   workspaceId,
   embedded = false,
+  hideFilters = false,
   onDataChange,
 }: WinningPathsChartProps) {
   const [data, setData] = useState<WinningPathsData | null>(initialData);
@@ -294,7 +296,7 @@ export default function WinningPathsChart({
           )}
         </div>
 
-        {!embedded && currentData && (currentData.availablePipelines.length > 0 || currentData.availableScopes.length > 0) && (
+        {!embedded && !hideFilters && currentData && (currentData.availablePipelines.length > 0 || currentData.availableScopes.length > 0) && (
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
             {pill('All Deals', !activePipeline && !activeScopeId, () => { setActivePipeline(''); setActiveScopeId(''); applyFilter('', '', activeSizeBand); })}
             {currentData.availablePipelines.map((p) =>

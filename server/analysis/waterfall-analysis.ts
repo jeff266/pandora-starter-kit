@@ -75,13 +75,19 @@ async function getStageOrdering(workspaceId: string): Promise<string[]> {
   }
 
   // Fallback: infer order from deal progression patterns
+  // stage_normalized is a column; from_stage_normalized must be computed via LAG in a subquery
   const transitionResult = await query<{ from_stage_normalized: string; to_stage_normalized: string; count: number }>(
     `SELECT from_stage_normalized, to_stage_normalized, COUNT(*) as count
-     FROM deal_stage_history
-     WHERE workspace_id = $1
-       AND from_stage_normalized IS NOT NULL
+     FROM (
+       SELECT
+         LAG(COALESCE(stage_normalized, stage)) OVER (PARTITION BY deal_id ORDER BY entered_at) AS from_stage_normalized,
+         COALESCE(stage_normalized, stage) AS to_stage_normalized
+       FROM deal_stage_history
+       WHERE workspace_id = $1
+     ) sub
+     WHERE from_stage_normalized IS NOT NULL
        AND to_stage_normalized IS NOT NULL
-       AND to_stage_normalized NOT IN ('closed_won', 'closed_lost')
+       AND to_stage_normalized NOT IN ('closed_won', 'closedwon', 'closed won', 'closed_lost', 'closedlost', 'closed lost')
      GROUP BY from_stage_normalized, to_stage_normalized
      ORDER BY count DESC`,
     [workspaceId]
@@ -147,11 +153,11 @@ async function getDealsAtTimestamp(
     `WITH latest_transition AS (
       SELECT DISTINCT ON (deal_id)
         deal_id,
-        to_stage_normalized as stage_at_time
+        COALESCE(stage_normalized, stage) AS stage_at_time
       FROM deal_stage_history
       WHERE workspace_id = $1
-        AND changed_at < $2
-      ORDER BY deal_id, changed_at DESC
+        AND entered_at < $2
+      ORDER BY deal_id, entered_at DESC
     )
     SELECT
       d.id as deal_id,
@@ -159,7 +165,7 @@ async function getDealsAtTimestamp(
       d.amount,
       COALESCE(lt.stage_at_time, d.stage_normalized) as stage_at_time
     FROM deals d
-    LEFT JOIN latest_transition lt ON lt.dealId = d.id
+    LEFT JOIN latest_transition lt ON lt.deal_id = d.id
     WHERE d.workspace_id = $1
       AND d.created_at < $2
       AND (d.close_date IS NULL OR d.close_date >= $2)

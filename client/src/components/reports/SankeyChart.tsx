@@ -36,14 +36,24 @@ function truncate(s: string, max: number) {
 // ============================================================================
 
 interface SankeyChartProps {
-  data: SankeyChartData;
+  data?: SankeyChartData;
+  chartData?: SankeyChartData;
   workspaceId?: string;
+  hideFilters?: boolean;
 }
 
-export default function SankeyChart({ data: initialData }: SankeyChartProps) {
-  const [chartData, setChartData] = useState<SankeyChartData>(initialData);
+export default function SankeyChart({ data, chartData: chartDataProp, hideFilters = false }: SankeyChartProps) {
+  const initialData = (data ?? chartDataProp) ?? null;
+  const [chartData, setChartData] = useState<SankeyChartData | null>(initialData);
   const [loading, setLoading] = useState(false);
   const [hoveredFlow, setHoveredFlow] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    const next = (data ?? chartDataProp) ?? null;
+    if (next) setChartData(next);
+  }, [data, chartDataProp]);
+
+  if (!chartData) return null;
 
   const activeFilterKey = (() => {
     const af = chartData.activeFilter;
@@ -54,7 +64,7 @@ export default function SankeyChart({ data: initialData }: SankeyChartProps) {
 
   const { stages, flows, conversionRates, periodLabel, availableFilters } = chartData;
   const hasFilters =
-    availableFilters.pipelines.length > 0 || availableFilters.scopes.length > 0;
+    !hideFilters && (availableFilters.pipelines.length > 0 || availableFilters.scopes.length > 0);
 
   const handleFilterChange = useCallback(
     async (key: FilterKey) => {

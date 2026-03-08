@@ -57,37 +57,22 @@ export async function computeWinningPaths(
 ): Promise<WinningPathsData> {
   const { pipeline, scopeId, sizeBand } = filterParams ?? {};
 
-  let scopeDealIds: Set<string> | null = null;
-  if (scopeId) {
-    const scopeResult = await query<{ deal_id: string }>(
-      `SELECT DISTINCT deal_id
-       FROM deal_scope_memberships
-       WHERE workspace_id = $1 AND scope_id = $2`,
-      [workspaceId, scopeId]
-    );
-    scopeDealIds = new Set(scopeResult.rows.map((r) => r.deal_id));
-    if (scopeDealIds.size === 0) {
-      const [pipelines, scopes] = await Promise.all([
-        fetchAvailablePipelines(workspaceId),
-        fetchAvailableScopes(workspaceId),
-      ]);
-      return {
-        paths: [],
-        totalWins: 0,
-        availablePipelines: pipelines,
-        availableScopes: scopes,
-        activeFilter: filterParams,
-      };
-    }
+  // Build params and clauses without junction table — scope_id is directly on deals
+  const params: any[] = [workspaceId];
+  let pipelineClause = '';
+  let scopeClause = '';
+
+  if (pipeline) {
+    params.push(pipeline);
+    pipelineClause = `AND d.pipeline = $${params.length}`;
   }
 
-  const pipelineClause = pipeline ? `AND d.pipeline = $3` : '';
-  const sizeClause = sizeBandClause(sizeBand);
-  const scopeClause = scopeDealIds ? `AND d.id = ANY($${pipeline ? 4 : 3}::text[])` : '';
+  if (scopeId) {
+    params.push(scopeId);
+    scopeClause = `AND d.scope_id = $${params.length}`;
+  }
 
-  const params: any[] = [workspaceId];
-  if (pipeline) params.push(pipeline);
-  if (scopeDealIds) params.push([...scopeDealIds]);
+  const sizeClause = sizeBandClause(sizeBand);
 
   const pathsResult = await query<{
     sequence: string;
@@ -110,7 +95,7 @@ export async function computeWinningPaths(
         wd.id AS deal_id,
         wd.amount,
         wd.cycle_days,
-        array_agg(dsh.stage ORDER BY dsh.entered_at) AS stage_seq
+        array_agg(COALESCE(dsh.stage_normalized, dsh.stage) ORDER BY dsh.entered_at) AS stage_seq
       FROM won_deals wd
       JOIN deal_stage_history dsh ON dsh.deal_id = wd.id AND dsh.workspace_id = $1
       GROUP BY wd.id, wd.amount, wd.cycle_days
@@ -176,7 +161,7 @@ export async function computeSimilarPaths(
   }
 
   const historyResult = await query<{ stage: string }>(
-    `SELECT stage FROM deal_stage_history
+    `SELECT COALESCE(stage_normalized, stage) AS stage FROM deal_stage_history
      WHERE deal_id = $1 AND workspace_id = $2
      ORDER BY entered_at ASC`,
     [dealId, workspaceId]
