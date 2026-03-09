@@ -38,20 +38,40 @@ export async function buildSankeyChartData(
     rawByNormalized.get(row.normalized)!.add(row.raw);
   }
 
-  // 1b. In raw mode for a specific pipeline, fetch CRM display names from stage_configs.
+  // 1b. In raw mode, fetch CRM display names from stage_configs for the whole workspace.
   //     stage_configs.stage_name is the human-readable label (e.g. "Demo Conducted")
   //     while stage_configs.stage_id is the raw CRM key (e.g. "decisionmakerboughtin").
+  //     When a specific pipeline is active its rows take priority (inserted last),
+  //     otherwise the workspace-wide map covers the "All Deals" view.
   const stageNameMap = new Map<string, string>();
-  if (raw && activeFilter?.type === 'pipeline' && activeFilter.id) {
-    const scRows = await query<{ stage_id: string; stage_name: string }>(
+  if (raw) {
+    // Load all pipelines first (gives coverage for "All Deals" view)
+    const allScRows = await query<{ stage_id: string; stage_name: string }>(
       `SELECT stage_id, stage_name
        FROM stage_configs
        WHERE workspace_id = $1
-         AND pipeline_name = $2`,
-      [workspaceId, activeFilter.id]
+         AND stage_name IS NOT NULL
+         AND stage_name != ''
+       ORDER BY display_order`,
+      [workspaceId]
     ).then(r => r.rows).catch(() => [] as Array<{ stage_id: string; stage_name: string }>);
-    for (const row of scRows) {
-      if (row.stage_name) stageNameMap.set(row.stage_id, row.stage_name);
+    for (const row of allScRows) {
+      if (!stageNameMap.has(row.stage_id)) stageNameMap.set(row.stage_id, row.stage_name);
+    }
+    // When a specific pipeline is active, let its names override (inserted last wins)
+    if (activeFilter?.type === 'pipeline' && activeFilter.id) {
+      const scRows = await query<{ stage_id: string; stage_name: string }>(
+        `SELECT stage_id, stage_name
+         FROM stage_configs
+         WHERE workspace_id = $1
+           AND pipeline_name = $2
+           AND stage_name IS NOT NULL
+           AND stage_name != ''`,
+        [workspaceId, activeFilter.id]
+      ).then(r => r.rows).catch(() => [] as Array<{ stage_id: string; stage_name: string }>);
+      for (const row of scRows) {
+        stageNameMap.set(row.stage_id, row.stage_name);
+      }
     }
   }
 
@@ -104,6 +124,35 @@ export async function buildSankeyChartData(
         lostValue: s.fellOutValue,
       };
     });
+
+  // 2b. In raw mode, merge stages that resolved to the same display label.
+  // This collapses cases where both a CRM key (e.g. "decisionmakerboughtin") and a
+  // human-readable fallback (e.g. "Demo Conducted" from deals.stage) appear as separate
+  // stage entries because of how deal_stage_history vs deals.stage interact.
+  if (raw) {
+    const merged: typeof stages = [];
+    const labelIndex = new Map<string, number>(); // label → index in merged
+    for (const s of stages) {
+      const existing = labelIndex.get(s.label);
+      if (existing !== undefined) {
+        const m = merged[existing];
+        m.deals         = (m.deals ?? 0) + (s.deals ?? 0);
+        m.value         = (m.value ?? 0) + (s.value ?? 0);
+        m.entered       = (m.entered ?? 0) + (s.entered ?? 0);
+        m.enteredValue  = (m.enteredValue ?? 0) + (s.enteredValue ?? 0);
+        m.startOfPeriod = (m.startOfPeriod ?? 0) + (s.startOfPeriod ?? 0);
+        m.won           = (m.won ?? 0) + (s.won ?? 0);
+        m.wonValue      = (m.wonValue ?? 0) + (s.wonValue ?? 0);
+        m.lostCount     = (m.lostCount ?? 0) + (s.lostCount ?? 0);
+        m.lostValue     = (m.lostValue ?? 0) + (s.lostValue ?? 0);
+      } else {
+        labelIndex.set(s.label, merged.length);
+        merged.push({ ...s });
+      }
+    }
+    stages.length = 0;
+    stages.push(...merged);
+  }
 
   // Drop leading stages that have fewer total deals than the next stage.
   // Uses startOfPeriod + entered (total throughput) so that a stage with many

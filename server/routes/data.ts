@@ -144,6 +144,31 @@ router.get('/:id/deals/pipelines', async (req: Request, res: Response): Promise<
   }
 });
 
+// Returns actual CRM pipeline names (distinct values from deals.pipeline / stage_configs),
+// ordered by deal volume descending. Used by Pipeline Mechanics and Forecast page pipeline filters.
+router.get('/:id/deals/crm-pipelines', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const result = await query<{ name: string; deal_count: number }>(
+      `SELECT sc.pipeline_name AS name, COALESCE(COUNT(d.id), 0)::int AS deal_count
+       FROM stage_configs sc
+       LEFT JOIN deals d
+         ON d.workspace_id = sc.workspace_id
+         AND d.pipeline = sc.pipeline_name
+       WHERE sc.workspace_id = $1
+         AND sc.pipeline_name IS NOT NULL
+         AND sc.pipeline_name != ''
+       GROUP BY sc.pipeline_name
+       HAVING COALESCE(COUNT(d.id), 0) > 0
+       ORDER BY deal_count DESC, sc.pipeline_name`,
+      [req.params.id as string]
+    );
+    res.json(result.rows.map(r => ({ id: r.name, name: r.name })));
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
+  }
+});
+
 router.get('/:id/deals/:dealId', async (req: Request, res: Response): Promise<void> => {
   try {
     const deal = await getDeal(req.params.id as string, req.params.dealId as string);

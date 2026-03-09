@@ -42,17 +42,17 @@ export default function PipelineMechanicsPage() {
   const { currentWorkspace } = useWorkspace();
 
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
-  const [activeScope, setActiveScope] = useState<string | null>(null);
+  const [activePipeline, setActivePipeline] = useState<string | null>(null);
 
   useEffect(() => {
     if (!currentWorkspace?.id) return;
-    api.get('/deals/pipelines')
+    api.get('/deals/crm-pipelines')
       .then((data: any) => setPipelines(Array.isArray(data) ? data : []))
       .catch(() => setPipelines([]));
   }, [currentWorkspace?.id]);
 
   function setTab(id: TabId) {
-    setActiveScope(null);
+    setActivePipeline(null);
     setSearchParams({ tab: id }, { replace: true });
   }
 
@@ -118,7 +118,7 @@ export default function PipelineMechanicsPage() {
           ))}
         </div>
 
-        {/* Pipeline / scope filter — shown when workspace has multiple pipelines */}
+        {/* Pipeline filter — shown when workspace has multiple CRM pipelines */}
         {pipelines.length > 1 && (
           <div style={{
             display: 'flex',
@@ -127,12 +127,13 @@ export default function PipelineMechanicsPage() {
             border: `1px solid ${colors.border}`,
             borderRadius: 8,
             padding: 3,
+            flexWrap: 'wrap',
           }}>
-            <button onClick={() => setActiveScope(null)} style={scopeButtonStyle(activeScope === null)}>
+            <button onClick={() => setActivePipeline(null)} style={scopeButtonStyle(activePipeline === null)}>
               All
             </button>
             {pipelines.map(p => (
-              <button key={p.id} onClick={() => setActiveScope(p.id)} style={scopeButtonStyle(activeScope === p.id)}>
+              <button key={p.id} onClick={() => setActivePipeline(p.id)} style={scopeButtonStyle(activePipeline === p.id)}>
                 {p.name}
               </button>
             ))}
@@ -143,13 +144,13 @@ export default function PipelineMechanicsPage() {
       {/* Tab content */}
       <SectionErrorBoundary fallbackMessage="Unable to load this view.">
         {activeTab === 'stage-velocity' && (
-          <BenchmarksGrid hideHeader pipelineOverride={activeScope ?? 'all'} />
+          <BenchmarksGrid hideHeader pipelineOverride={activePipeline ?? 'all'} />
         )}
         {activeTab === 'pipeline-history' && (
-          <PipelineHistoryTab scopeId={activeScope} />
+          <PipelineHistoryTab pipeline={activePipeline} />
         )}
         {activeTab === 'winning-paths' && (
-          <WinningPathsTab scopeId={activeScope} />
+          <WinningPathsTab scopeId={activePipeline} />
         )}
       </SectionErrorBoundary>
     </div>
@@ -158,7 +159,7 @@ export default function PipelineMechanicsPage() {
 
 // ── Pipeline History Tab ──────────────────────────────────────────────────────
 
-function PipelineHistoryTab({ scopeId }: { scopeId: string | null }) {
+function PipelineHistoryTab({ pipeline }: { pipeline: string | null }) {
   const [activePeriod, setActivePeriod] = useState<number | 'ytd'>(90);
   const [showRaw, setShowRaw] = useState(false);
   const [sankeyData, setSankeyData] = useState<SankeyChartData | null>(null);
@@ -167,7 +168,7 @@ function PipelineHistoryTab({ scopeId }: { scopeId: string | null }) {
 
   const fetchSankey = useCallback(async (
     period: number | 'ytd',
-    scope: string | null = null,
+    activePipeline: string | null = null,
     raw = false,
   ) => {
     setLoading(true);
@@ -175,7 +176,7 @@ function PipelineHistoryTab({ scopeId }: { scopeId: string | null }) {
     try {
       const days = resolveDays(period);
       let url = `/analysis/sankey?periodDays=${days}`;
-      if (scope) url += `&scopeId=${encodeURIComponent(scope)}`;
+      if (activePipeline) url += `&pipeline=${encodeURIComponent(activePipeline)}`;
       if (raw) url += `&raw=true`;
       const data = await api.get(url) as SankeyChartData;
       setSankeyData(data);
@@ -187,17 +188,17 @@ function PipelineHistoryTab({ scopeId }: { scopeId: string | null }) {
   }, []);
 
   useEffect(() => {
-    fetchSankey(activePeriod, scopeId, showRaw);
-  }, [scopeId]);
+    fetchSankey(activePeriod, pipeline, showRaw);
+  }, [pipeline]);
 
   function handlePeriod(preset: number | 'ytd') {
     setActivePeriod(preset);
-    fetchSankey(preset, scopeId, showRaw);
+    fetchSankey(preset, pipeline, showRaw);
   }
 
   function handleRawToggle(isRaw: boolean) {
     setShowRaw(isRaw);
-    fetchSankey(activePeriod, scopeId, isRaw);
+    fetchSankey(activePeriod, pipeline, isRaw);
   }
 
   return (

@@ -123,9 +123,43 @@ async function getStageOrdering(workspaceId: string, raw = false, pipeline?: str
   );
 
   if (raw) {
-    // In raw mode without a pipeline filter, fall back to empirical ordering.
-    // Filter out purely numeric stage IDs (e.g. HubSpot internal IDs like 1027734847)
-    // since they have no readable label outside of stage_configs context.
+    // In raw mode without a pipeline filter, use stage_configs ordering weighted by
+    // deal count per pipeline. The primary pipeline (most deals) dominates the ordering,
+    // and each stage_id is only included once (first pipeline that has it wins).
+    // This avoids the multi-pipeline position-averaging skew from pure empirical ordering.
+    const configRows = await query<{ stage_id: string; deal_count: number }>(
+      `SELECT sc.stage_id, COALESCE(COUNT(d.id), 0)::int AS deal_count
+       FROM stage_configs sc
+       LEFT JOIN deals d ON d.workspace_id = sc.workspace_id AND d.pipeline = sc.pipeline_name
+       WHERE sc.workspace_id = $1
+         AND sc.is_active = true
+         AND LOWER(sc.stage_id) NOT IN ('closedwon','closedlost','closed_won','closed_lost')
+       GROUP BY sc.stage_id, sc.pipeline_name, sc.display_order
+       ORDER BY COALESCE(COUNT(d.id), 0) DESC, sc.display_order ASC`,
+      [workspaceId]
+    ).catch(() => ({ rows: [] as Array<{ stage_id: string; deal_count: number }> }));
+
+    if (configRows.rows.length > 0) {
+      const seen = new Set<string>();
+      const ordered: string[] = [];
+      for (const row of configRows.rows) {
+        if (!seen.has(row.stage_id)) {
+          seen.add(row.stage_id);
+          ordered.push(row.stage_id);
+        }
+      }
+      // Append empirically-discovered stage IDs not found in stage_configs (custom stages)
+      // filtering out purely numeric IDs which have no readable label.
+      const empiricalExtras = positionResult.rows
+        .filter(r => !TERMINAL_RAW.has(r.norm_stage.toLowerCase()))
+        .filter(r => /[a-zA-Z]/.test(r.norm_stage))
+        .filter(r => !seen.has(r.norm_stage))
+        .sort((a, b) => a.avg_first_position - b.avg_first_position)
+        .map(r => r.norm_stage);
+      return [...ordered, ...empiricalExtras];
+    }
+
+    // Ultimate fallback: pure empirical ordering (no stage_configs in this workspace)
     return positionResult.rows
       .filter(r => !TERMINAL_RAW.has(r.norm_stage.toLowerCase()))
       .filter(r => /[a-zA-Z]/.test(r.norm_stage))
