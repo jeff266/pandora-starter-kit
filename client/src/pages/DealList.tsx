@@ -137,7 +137,7 @@ export default function DealList() {
         name: d.deal_name || '',
         amount: Number(d.amount) || 0,
         stage: d.stage || '',
-        stage_normalized: d.stage || '',
+        stage_normalized: d.stage_normalized || d.stage || '',
         owner: d.owner || '',
         close_date: d.close_date,
         days_in_stage: d.days_in_stage,
@@ -213,9 +213,22 @@ export default function DealList() {
     }).catch(() => {});
   }, [fetchDeals, activeLens]);
 
-  const uniqueStages = useMemo(() =>
-    Array.from(new Set(allDeals.map(d => d.stage).filter(Boolean))).sort(),
-  [allDeals]);
+  const uniqueStages = useMemo(() => {
+    const stageMap = new Map<string, string>();
+    for (const d of allDeals) {
+      const norm = d.stage_normalized;
+      if (!norm) continue;
+      const isNumeric = /^\d+$/.test(d.stage || '');
+      if (!stageMap.has(norm)) {
+        stageMap.set(norm, isNumeric ? norm : (d.stage || norm));
+      } else if (!isNumeric && d.stage) {
+        stageMap.set(norm, d.stage);
+      }
+    }
+    return Array.from(stageMap.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([value, label]) => ({ value, label }));
+  }, [allDeals]);
 
   const uniqueOwners = useMemo(() =>
     Array.from(new Set(allDeals.map(d => d.owner).filter(Boolean))).sort(),
@@ -394,7 +407,7 @@ export default function DealList() {
             }))
           ]} />
         <FilterSelect label="Stage" value={stageFilter} onChange={setStageFilter}
-          options={[{ value: 'all', label: 'All' }, ...uniqueStages.map(s => ({ value: s, label: s.replace(/_/g, ' ') }))]} />
+          options={[{ value: 'all', label: 'All' }, ...uniqueStages.map(s => ({ value: s.value, label: s.label.replace(/_/g, ' ') }))]} />
         <FilterSelect label="Owner" value={ownerFilter} onChange={setOwnerFilter}
           options={[{ value: 'all', label: 'All' }, ...uniqueOwners.map(o => ({ value: o, label: anon.person(shortName(o)) }))]} />
         <FilterSelect label="Health" value={healthFilter} onChange={setHealthFilter}
