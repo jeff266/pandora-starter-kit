@@ -1,14 +1,14 @@
 /**
- * Behavioral Winning Path Skill
+ * Behavioral Winning Path Skill — v2
  *
- * Identifies behavioral milestone sequences that characterize won vs. lost deals,
- * sourced from conversation intelligence, email engagement, contact roles, or
- * stage history depending on data availability.
+ * Discovers behavioral milestone sequences from closed won deal transcripts
+ * using DeepSeek (discovery pass + scoring pass), then synthesizes findings
+ * with Claude. Falls back to predefined proxies for Tiers 2–4.
  *
- * Tier 1: Conversation Intelligence (Gong / Fireflies) — HIGH confidence
- * Tier 2: Email Engagement — MEDIUM confidence
- * Tier 3: Contact Role Coverage — LOW-MEDIUM confidence
- * Tier 4: Stage History Only — LOW confidence
+ * Tier 1: Conversation Intelligence (Gong / Fireflies) — discovery-first, HIGH confidence
+ * Tier 2: Email Engagement — predefined proxies, MEDIUM confidence
+ * Tier 3: Contact Role Coverage — predefined proxies, LOW-MEDIUM confidence
+ * Tier 4: Stage History Only — predefined proxies, LOW confidence
  */
 
 import type { SkillDefinition } from '../types.js';
@@ -17,8 +17,8 @@ export const behavioralWinningPathSkill: SkillDefinition = {
   id: 'behavioral-winning-path',
   name: 'Behavioral Winning Path',
   description:
-    'Identifies behavioral milestone sequences that characterize won vs. lost deals, sourced from conversation intelligence, email engagement, contact roles, or stage history depending on data availability',
-  version: '1.0.0',
+    'Discovers behavioral milestone sequences from closed won deal transcripts (Tier 1) or derives structural proxies from email/CRM data (Tiers 2–4). Identifies what separates won deals from lost deals in behavioral terms.',
+  version: '2.0.0',
   category: 'intelligence',
   tier: 'mixed',
 
@@ -40,138 +40,56 @@ export const behavioralWinningPathSkill: SkillDefinition = {
       outputKey: 'tier_probe',
     },
 
-    // Step 2: Extract behavioral milestones for all four tiers
+    // Step 2: Extract behavioral milestones
+    // For Tier 1: runs DeepSeek discovery + scoring internally (no separate classify step)
+    // For Tiers 2–4: returns predefined proxy milestones
     {
       id: 'extract-milestones',
       name: 'Extract Behavioral Milestones',
       tier: 'compute',
       dependsOn: ['probe-data-tier'],
       computeFn: 'bwpExtractMilestones',
-      computeArgs: { periodDays: 180 },
+      computeArgs: { periodDays: 548 }, // 18 months — structural patterns need long windows
       outputKey: 'milestone_matrix',
     },
 
-    // Step 3: DeepSeek — classify transcript excerpts (Tier 1 only; gracefully no-ops otherwise)
-    {
-      id: 'classify-transcripts',
-      name: 'Classify Transcript Signals (DeepSeek)',
-      tier: 'deepseek',
-      dependsOn: ['extract-milestones'],
-      deepseekPrompt: `You are classifying sales call transcript excerpts to identify behavioral signals. Answer ONLY in JSON.
-
-{{#if milestone_matrix.transcriptExcerptsForClassification.length}}
-For each excerpt below, classify the behavioral signals present. Return true only if clearly present in the text.
-
-Excerpts:
-{{{json milestone_matrix.transcriptExcerptsForClassification}}}
-
-For each excerpt (by conversationId), return a classification object.
-{{else}}
-No transcript excerpts available for this workspace (Tier {{milestone_matrix.tier}} data).
-Return an empty classifications array.
-{{/if}}
-
-Return ONLY this JSON structure:
-{
-  "classifications": [
-    {
-      "conversationId": "string",
-      "dealId": "string",
-      "use_case_articulated": false,
-      "success_metric_stated": false,
-      "technical_win_language": false,
-      "blocking_objection_present": false,
-      "executive_decision_language": false,
-      "primary_speaker": "balanced"
-    }
-  ],
-  "skipped": false
-}`,
-      deepseekSchema: {
-        type: 'object',
-        properties: {
-          classifications: {
-            type: 'array',
-            items: {
-              type: 'object',
-              properties: {
-                conversationId: { type: 'string' },
-                dealId: { type: 'string' },
-                use_case_articulated: { type: 'boolean' },
-                success_metric_stated: { type: 'boolean' },
-                technical_win_language: { type: 'boolean' },
-                blocking_objection_present: { type: 'boolean' },
-                executive_decision_language: { type: 'boolean' },
-                primary_speaker: { type: 'string' },
-              },
-              required: ['conversationId', 'dealId'],
-            },
-          },
-          skipped: { type: 'boolean' },
-        },
-        required: ['classifications'],
-      },
-      outputKey: 'transcript_classifications',
-    },
-
-    // Step 4: Claude synthesis
+    // Step 3: Claude synthesis
     {
       id: 'synthesize-winning-path',
       name: 'Synthesize Behavioral Winning Path',
       tier: 'claude',
-      dependsOn: ['extract-milestones', 'classify-transcripts'],
+      dependsOn: ['extract-milestones'],
       claudePrompt: `You are a RevOps analyst synthesizing a Behavioral Winning Path analysis.
 
-Data tier: {{milestone_matrix.tierLabel}}
-Analysis window: {{milestone_matrix.analysisPeriodDays}} days of closed deals
-Won deals: {{milestone_matrix.totalWonDeals}} | Avg cycle: {{milestone_matrix.avgWonCycleDays}} days
-Lost deals: {{milestone_matrix.totalLostDeals}} | Avg cycle: {{milestone_matrix.avgLostCycleDays}} days
-Data confidence: {{milestone_matrix.confidenceNote}}
+Pipeline: {{#if milestone_matrix.meta.pipelineId}}{{milestone_matrix.meta.pipelineId}}{{else}}All Pipelines{{/if}}
+Won cycle median: {{milestone_matrix.wonMedianDays}} days
+Analysis: {{milestone_matrix.meta.totalWonDeals}} won + {{milestone_matrix.meta.totalLostDeals}} lost deals, trailing 18 months
+Discovery: {{milestone_matrix.discoveryNote}}{{#if milestone_matrix.isDiscovered}} — {{milestone_matrix.meta.transcriptsSampled}} transcripts analyzed{{/if}}
 
 {{#if milestone_matrix.wonMilestones.length}}
-Top behavioral milestones (won deals, sorted by lift):
+DISCOVERED MILESTONES (ordered by avg timing):
 {{{json milestone_matrix.wonMilestones}}}
 
-Key absences in lost deals:
+BIGGEST GAPS (milestones with highest lift, sorted desc):
 {{{json milestone_matrix.lostAbsences}}}
-
-{{#if transcript_classifications.classifications.length}}
-Transcript signal classifications (DeepSeek):
-{{{json transcript_classifications.classifications}}}
-{{/if}}
 {{else}}
 No milestone data available — insufficient closed deal history. Explain that more closed deals are needed to generate behavioral patterns (minimum ~10 won and ~10 lost in the analysis window).
 {{/if}}
 
-Write a RevOps synthesis with the following structure. Be direct and specific. No filler.
+Write a Behavioral Winning Path analysis for this pipeline.
+3–4 paragraphs. No generic GTM advice. Everything you say must be grounded in the discovered milestones and pipeline data above.
 
-## Behavioral Winning Path — {{milestone_matrix.tierLabel}}
+Structure:
+1. What this pipeline's winning motion actually looks like, in specific behavioral terms (not stage names). Use the milestone titles{{#if milestone_matrix.isDiscovered}} and evidence phrases{{/if}}.
+2. The single most differentiating behavior — highest lift milestone — and what it implies about how buyers here make decisions.
+3. Where lost deals break down. Connect the biggest absence pattern to what reps should watch for in open pipeline.
+4. One coaching implication for managers reviewing this pipeline right now.
 
-**Headline:** [1 sentence — the single most differentiating behavioral pattern between won and lost deals]
+Do not write bullet points. Do not use the phrase "it's important to". Write like a senior RevOps analyst who has read these transcripts.
 
-**Top 3 Milestones by Win Rate Lift:**
-{{#each milestone_matrix.wonMilestones}}{{#unless this.insufficientData}}
-- **{{this.title}}** — present in {{this.wonPct}}% of won deals vs {{this.lostPct}}% of lost deals · {{this.lift}}× win rate lift · _{{this.subtitle}}_
-{{/unless}}{{/each}}
-
-(Select only the 3 highest-lift milestones. Skip insufficient_data ones.)
-
-**Biggest Risk Signal:**
-[1–2 sentences — the absence pattern in lost deals most actionable for reps working open pipeline right now]
-
-**Coaching Implication:**
-[1–2 sentences — what managers should reinforce or inspect based on this pattern]
-
-{{#unless (eq milestone_matrix.tier 1)}}
-**Data Caveat:**
-[1 sentence — what richer data would reveal that current signals cannot]
+{{#unless milestone_matrix.isDiscovered}}
+Note: These milestones are structural proxies derived from {{milestone_matrix.tierLabel}}, not discovered from conversation transcripts. Connect Gong or Fireflies to unlock transcript-based discovery.
 {{/unless}}
-
-Rules:
-- Use specific numbers from the data (percentages, lift scores, days)
-- If total won or lost < 10, lead with a data scarcity caveat before the analysis
-- If tier is 4 (stage history only), be explicit that these are structural proxies, not behavioral proof
-- Word budget: 400 words
 
 {{voiceBlock}}
 
@@ -181,24 +99,26 @@ After your synthesis, emit an <actions> block with a JSON array of coaching acti
 - title: short action title
 - summary: 1-2 sentence explanation
 - recommended_steps: array of 1-3 concrete steps
-- owner_email: manager email if available
 - urgency_label: "this_week" | "next_week" | "next_month"
 
-Focus on the top 3 most actionable coaching or process insights. Example:
+Focus on the top 3 most actionable coaching or process insights.
 <actions>
-[{"action_type":"coach_rep","severity":"warning","title":"Enforce discovery call within 30 days","summary":"Won deals had discovery calls within 30 days at 3x the rate of lost deals. No discovery call in this window is the strongest predictor of loss.","recommended_steps":["Add discovery call completion to deal qualification checklist","Flag deals with no call activity after 14 days","Review open pipeline deals missing discovery calls"],"urgency_label":"this_week"}]
+[{"action_type":"coach_rep","severity":"warning","title":"Enforce discovery call within first quarter of cycle","summary":"Won deals showed discovery call behavior at significantly higher rates than lost deals. Absence of this milestone early is the strongest predictor of loss.","recommended_steps":["Add discovery milestone to deal qualification checklist","Flag deals with no call activity after 25% of median cycle","Review open pipeline deals missing early discovery calls"],"urgency_label":"this_week"}]
 </actions>`,
       outputKey: 'narrative',
     },
   ],
 
+  // Quarterly cadence. Winning behaviors are structural patterns over 18 months of closed
+  // deals — not a weekly signal. Running weekly produces noise on small samples.
   schedule: {
-    cron: '0 6 * * 1', // Monday 6 AM UTC — available before weekly pipeline review
+    cron: '0 5 1 1,4,7,10 *', // First day of each quarter at 5 AM UTC
     trigger: 'on_demand',
+    description: 'Quarterly — Jan 1, Apr 1, Jul 1, Oct 1 at 5 AM UTC',
   },
 
   outputFormat: 'markdown',
-  estimatedDuration: '60s',
+  estimatedDuration: '90s',
 
   answers_questions: [
     'behavioral winning path',
@@ -213,6 +133,7 @@ Focus on the top 3 most actionable coaching or process insights. Example:
     'what separates won and lost',
     'deal patterns',
     'milestone',
+    'winning path',
   ],
 
   evidenceSchema: {
@@ -220,6 +141,7 @@ Focus on the top 3 most actionable coaching or process insights. Example:
     columns: [
       { key: 'milestone_id', display: 'Milestone', format: 'text' },
       { key: 'title', display: 'Behavior', format: 'text' },
+      { key: 'is_discovered', display: 'Discovered', format: 'text' },
       { key: 'won_pct', display: 'Won %', format: 'number' },
       { key: 'lost_pct', display: 'Lost %', format: 'number' },
       { key: 'lift', display: 'Win Rate Lift', format: 'number' },

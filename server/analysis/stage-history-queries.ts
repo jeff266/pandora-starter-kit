@@ -462,3 +462,46 @@ export async function getAverageTimeInStage(
     dealCount: parseInt(row.deal_count, 10),
   }));
 }
+
+/**
+ * Compute won-deal cycle length percentiles for a workspace (or specific pipeline).
+ * Returns null when sample is too small (< 5 deals) to be meaningful.
+ * Uses created_at and close_date — excludes outliers > 730 days.
+ */
+export async function getWonCyclePercentiles(
+  workspaceId: string,
+  pipeline?: string
+): Promise<{ p25: number; p50: number; p75: number; p90: number; sampleSize: number } | null> {
+  const params: string[] = [workspaceId];
+  if (pipeline) params.push(pipeline);
+
+  const result = await query(`
+    SELECT
+      PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY cycle_days)::int AS p25,
+      PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY cycle_days)::int AS p50,
+      PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY cycle_days)::int AS p75,
+      PERCENTILE_CONT(0.90) WITHIN GROUP (ORDER BY cycle_days)::int AS p90,
+      COUNT(*)::int AS sample_size
+    FROM (
+      SELECT
+        EXTRACT(DAY FROM (close_date::timestamptz - created_at))::int AS cycle_days
+      FROM deals
+      WHERE workspace_id = $1
+        AND stage_normalized = 'closed_won'
+        AND close_date IS NOT NULL
+        AND created_at IS NOT NULL
+        ${pipeline ? 'AND pipeline = $2' : ''}
+    ) sub
+    WHERE cycle_days > 0 AND cycle_days < 730
+  `, params);
+
+  const row = result.rows[0];
+  if (!row || parseInt(row.sample_size ?? '0') < 5) return null;
+  return {
+    p25:        parseInt(row.p25)         || 30,
+    p50:        parseInt(row.p50)         || 60,
+    p75:        parseInt(row.p75)         || 90,
+    p90:        parseInt(row.p90)         || 120,
+    sampleSize: parseInt(row.sample_size) || 0,
+  };
+}

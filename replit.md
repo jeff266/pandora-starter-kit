@@ -789,31 +789,38 @@ Prevents false-confidence analysis for new workspaces without reliable benchmark
 - **`hypothesis-engine.ts`**: Tier 2 — passes `HISTORY_TIER: 2` context block into DeepSeek prompt; applies −0.15 confidence reduction for `variance_decomposition` and `process_vs_luck` layers; adds proxy benchmark note to supporting signals.
 - **`synthesis-prompts.ts`**: `buildTier1EarlyStagePrompt()` — no anomaly language, observations only, answers win/loss patterns + forward pipeline. `buildEarlyStageBanner()` — user-facing banner naming closed deals, months of data, and estimated unlock milestone. Tier 2 forces Option A/B framing regardless of confidence score.
 
-## Behavioral Winning Path — Full Implementation (Skill + UI)
+## Behavioral Winning Path — v2 Discovery-First Implementation
+
+### Architecture (v2)
+- **Cron**: `0 5 1 1,4,7,10 *` — quarterly (Jan/Apr/Jul/Oct 1st at 5 AM UTC). Behavioral patterns are structural; weekly cadence produces noise.
+- **Tier 1 (Gong/Fireflies)**: Two-pass DeepSeek discovery — (1) discovery pass over up to 30 won deal transcripts (2 calls each), extracts 4–8 recurring behavioral milestones as JSON; (2) scoring pass scores top 5 milestones against 25 won + 25 lost deals in batches of 10. Falls back to predefined 6-item taxonomy if discovery yields < 3 valid milestones.
+- **Time windows**: Computed from pipeline's actual won cycle median via `getWonCyclePercentiles()` (four windows: 0–25%, 25–50%, 50–75%, 75–100% of median). Not hardcoded "Day 0–30" labels.
+- **Tiers 2–4**: Predefined proxy milestones unchanged (email, contact roles, stage history).
+- **MilestoneMatrix v2 fields**: `isDiscovered`, `discoveryNote`, `wonMedianDays`, `meta` (transcriptsSampled, dealsScored, pipelineId, generatedAt).
+- **Analysis window**: 548 days (18 months).
 
 ### Backend skill (`server/skills/library/behavioral-winning-path.ts`)
-4-step pipeline: (1) tier probe, (2) milestone extraction, (3) DeepSeek transcript classification, (4) Claude narrative synthesis. Cron: `0 6 * * 1` (Mondays 6 AM UTC). Registered as skill #32.
+3-step pipeline: (1) tier probe, (2) milestone extraction with embedded DeepSeek discovery+scoring, (3) Claude narrative synthesis. No separate classify-transcripts step in v2.
 
 ### Compute layer (`server/skills/compute/behavioral-milestones.ts`)
-- `probeBehavioralDataTier()` — probes conversations, email_activities, deal_contacts, stage_history tables; returns Tier 1–4 + full availability struct.
-- `extractBehavioralMilestones()` — 4-tier branching: Tier 1 = CI transcript signals (participant-based + keyword), Tier 2 = email engagement proxies, Tier 3 = CRM contact role milestones, Tier 4 = stage progression proxies. Returns normalized `MilestoneMatrix`. Lift math suppresses milestones with < 3 deals per cohort (`insufficientData: true`).
+- `probeBehavioralDataTier()` — unchanged. Probes conversations/email/contacts/stages; returns Tier 1–4 struct.
+- `discoverAndScoreMilestones()` — new Tier 1 engine. DeepSeek discovery pass → validate (≥2 evidence phrases, recurrence ≠ low, ≥3 milestones) → score top 5 against won+lost population → assign to pipeline-relative time windows.
+- `computeTimeWindows(wonMedianDays)` — derives 4 named windows (Open/Develop/Validate/Close) from actual p50 won cycle.
+- `extractBehavioralMilestones()` — 4-tier branching. Returns full v2 MilestoneMatrix.
+- `getWonCyclePercentiles()` (in stage-history-queries.ts) — p25/p50/p75/p90 of won deal cycle lengths.
+- `BehavioralMilestone` interface extended with `isDiscovered?`, `description?`, `evidence?[]`.
 
 ### API endpoints (`server/routes/skills.ts`)
-- `GET /:workspaceId/skills/behavioral-winning-path/latest` — most recent completed run (returns `{ runId, result: { milestone_matrix, narrative }, outputText, completedAt, ... }`)
-- `GET /:workspaceId/skills/behavioral-winning-path/tier` — fast tier probe, no LLM (returns `{ tier, tierLabel, availability }`)
+- `GET /:workspaceId/skills/behavioral-winning-path/latest` — most recent completed run
+- `GET /:workspaceId/skills/behavioral-winning-path/tier` — fast tier probe
+- `GET /:workspaceId/skills/behavioral-winning-path/matrix` — on-the-fly SQL computation (pipeline filter support)
 
 ### UI page (`client/src/pages/BehavioralWinningPathPage.tsx`)
 Route: `/winning-path`. Sidebar: INTELLIGENCE section, label "Winning Path", icon ◈.
-- Parallel fetch on mount: `/tier` (fast tier badge) + `/latest` (full matrix)
-- Empty state (404 from `/latest`) → "Run Now" CTA
-- Skeleton: header + 2 rows × 4 columns during load
-- Amber confidence banner for Tiers 2–4
-- 5-column grid (110px label col + 4 time windows) with sticky column headers
-- Won row (green): milestone cards with source badge, wonPct%, lift×, insufficientData greyed-out variant
-- Lost row (toggleable, red): lostAbsence cards with liftIfPresent
-- Detail panel: appears below grid on milestone click; signal breakdown table + 3 stat cards; X to close
-- Synthesis card: Claude narrative rendered with header/bullet formatting
-- Upgrade prompts: tier-specific copy linking to `/connectors`
+- Discovery badge (green pill "Discovered · N transcripts") in header for Tier 1 discovered runs; falls back to TierBadge for Tiers 2–4
+- Dynamic column headers derived from `wonMilestones[].timeWindow` (pipeline-relative day ranges); falls back to hardcoded for Tiers 2–4
+- Evidence drawer in DetailPanel: "From your transcripts" section with italic quoted phrases when `milestone.evidence` is populated
+- Pipeline filter pills, delta badges (±pp vs workspace average), lost pattern toggle unchanged
 - Run Now: POST → poll `/latest` every 5s → refresh on new `completedAt`; success toast
 
 ### Column assignment (windowStart → col index)

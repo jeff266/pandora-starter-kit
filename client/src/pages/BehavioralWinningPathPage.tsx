@@ -26,6 +26,9 @@ interface BehavioralMilestone {
   lift: number;
   avgDaysToMilestone: number;
   insufficientData?: boolean;
+  isDiscovered?: boolean;
+  description?: string;
+  evidence?: string[];
 }
 
 interface LostAbsence {
@@ -47,6 +50,16 @@ interface MilestoneMatrix {
   avgLostCycleDays: number;
   wonMilestones: BehavioralMilestone[];
   lostAbsences: LostAbsence[];
+  isDiscovered?: boolean;
+  discoveryNote?: string;
+  wonMedianDays?: number;
+  meta?: {
+    totalWonDeals: number;
+    totalLostDeals: number;
+    transcriptsSampled: number;
+    dealsScored: number;
+    analysisPeriodDays: number;
+  };
 }
 
 interface TierProbe {
@@ -84,6 +97,20 @@ const COL_HEADERS = [
   { label: 'Day 61–90',  sub: 'Technical validation' },
   { label: 'Day 91–120+', sub: 'Executive & close' },
 ];
+
+function deriveColHeaders(milestones: BehavioralMilestone[]): { label: string; sub: string }[] {
+  const seen = new Set<string>();
+  const cols: { label: string; sub: string }[] = [];
+  for (const m of [...milestones].sort((a, b) => a.windowStart - b.windowStart)) {
+    if (!seen.has(m.timeWindow)) {
+      seen.add(m.timeWindow);
+      cols.push({ label: m.timeWindow, sub: '' });
+    }
+    if (cols.length === 4) break;
+  }
+  while (cols.length < 4) cols.push(COL_HEADERS[cols.length]);
+  return cols;
+}
 
 type SourceKey = 'CI' | 'Email' | 'CRM Roles' | 'Stage History' | string;
 
@@ -331,6 +358,28 @@ function DetailPanel({ milestone, onClose }: { milestone: BehavioralMilestone; o
           <div style={{ fontSize: 11, color: colors.textMuted, fontFamily: font, marginTop: 2 }}>data source</div>
         </div>
       </div>
+
+      {milestone.evidence && milestone.evidence.length > 0 && (
+        <div style={{ marginTop: 14 }}>
+          <div style={{
+            fontSize: 11, fontWeight: 600, color: colors.textMuted,
+            letterSpacing: '0.06em', textTransform: 'uppercase',
+            fontFamily: font, marginBottom: 8,
+          }}>
+            From your transcripts
+          </div>
+          {milestone.evidence.map((phrase, i) => (
+            <div key={i} style={{
+              borderLeft: '2px solid rgba(15,217,162,0.3)',
+              paddingLeft: 10, marginBottom: 8,
+              fontSize: 12, color: colors.textSecondary, fontFamily: font,
+              fontStyle: 'italic', lineHeight: 1.5,
+            }}>
+              "{phrase}"
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -564,9 +613,15 @@ export default function BehavioralWinningPathPage() {
     }
   };
 
-  // Column grouping
+  // Dynamic column headers from discovered milestones (falls back to hardcoded for Tiers 2–4)
+  const colHeaders = deriveColHeaders(matrix?.wonMilestones ?? []);
+  const colLabelToIdx = new Map(colHeaders.map((c, i) => [c.label, i]));
+
+  // Column grouping — prefer label-based bucketing for discovered milestones
   const wonByCol = (matrix?.wonMilestones ?? []).reduce<BehavioralMilestone[][]>((acc, m) => {
-    const ci = getColIndex(m.windowStart);
+    const ci = colLabelToIdx.has(m.timeWindow)
+      ? colLabelToIdx.get(m.timeWindow)!
+      : getColIndex(m.windowStart);
     if (!acc[ci]) acc[ci] = [];
     acc[ci].push(m);
     return acc;
@@ -613,7 +668,17 @@ export default function BehavioralWinningPathPage() {
             <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0, color: colors.text, fontFamily: font }}>
               Winning Path
             </h1>
-            {tierProbe && <TierBadge tier={tierProbe.tier} label={tierProbe.tierLabel} />}
+            {matrix?.isDiscovered ? (
+              <span style={{
+                fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20,
+                background: 'rgba(74,222,128,0.12)', border: '1px solid rgba(74,222,128,0.3)',
+                color: '#4ade80', fontFamily: font, whiteSpace: 'nowrap',
+              }}>
+                Discovered · {matrix.meta?.transcriptsSampled ?? '?'} transcripts
+              </span>
+            ) : (
+              tierProbe && <TierBadge tier={tierProbe.tier} label={tierProbe.tierLabel} />
+            )}
           </div>
           <div style={{ fontSize: 13, color: colors.textMuted, fontFamily: font, marginBottom: 4, lineHeight: 1.5 }}>
             Behavioral milestones that characterize won deals
@@ -797,10 +862,10 @@ export default function BehavioralWinningPathPage() {
               <div style={{ padding: '12px 14px', fontSize: 11, fontWeight: 600, color: colors.textMuted, fontFamily: font, letterSpacing: '0.06em', textTransform: 'uppercase', borderRight: `1px solid ${colors.border}` }}>
                 Stage
               </div>
-              {COL_HEADERS.map((col, ci) => (
+              {colHeaders.map((col, ci) => (
                 <div key={ci} style={{ padding: '12px 14px', borderRight: ci < 3 ? `1px solid ${colors.border}` : undefined }}>
                   <div style={{ fontSize: 12, fontWeight: 700, color: colors.text, fontFamily: font, marginBottom: 2 }}>{col.label}</div>
-                  <div style={{ fontSize: 11, color: colors.textMuted, fontFamily: font }}>{col.sub}</div>
+                  {col.sub && <div style={{ fontSize: 11, color: colors.textMuted, fontFamily: font }}>{col.sub}</div>}
                 </div>
               ))}
             </div>
