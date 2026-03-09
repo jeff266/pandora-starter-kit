@@ -6,7 +6,10 @@ import SectionErrorBoundary from '../components/SectionErrorBoundary';
 import BenchmarksGrid from './BenchmarksGrid';
 import SankeyChart from '../components/reports/SankeyChart';
 import WinningPathsChart from '../components/pipeline/WinningPathsChart';
+import { useWorkspace } from '../context/WorkspaceContext';
 import type { SankeyChartData, WinningPathsData } from '../components/reports/types';
+
+interface Pipeline { id: string; name: string; }
 
 type TabId = 'stage-velocity' | 'pipeline-history' | 'winning-paths';
 
@@ -36,10 +39,37 @@ function resolveDays(preset: number | 'ytd'): number {
 export default function PipelineMechanicsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = (searchParams.get('tab') as TabId) ?? 'stage-velocity';
+  const { currentWorkspace } = useWorkspace();
+
+  const [pipelines, setPipelines] = useState<Pipeline[]>([]);
+  const [activeScope, setActiveScope] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!currentWorkspace?.id) return;
+    api.get('/deals/pipelines')
+      .then((data: any) => setPipelines(Array.isArray(data) ? data : []))
+      .catch(() => setPipelines([]));
+  }, [currentWorkspace?.id]);
 
   function setTab(id: TabId) {
+    setActiveScope(null);
     setSearchParams({ tab: id }, { replace: true });
   }
+
+  const scopeButtonStyle = (active: boolean) => ({
+    padding: '4px 12px',
+    borderRadius: 5,
+    border: 'none',
+    fontSize: 12,
+    fontFamily: fonts.sans,
+    fontWeight: active ? 600 : 400,
+    background: active ? `${colors.accent}18` : 'transparent',
+    color: active ? colors.accent : colors.textMuted,
+    cursor: 'pointer' as const,
+    transition: 'all 0.12s',
+    outline: 'none',
+    whiteSpace: 'nowrap' as const,
+  });
 
   return (
     <div style={{ padding: '24px 28px', maxWidth: 1200, margin: '0 auto', fontFamily: fonts.sans }}>
@@ -53,51 +83,73 @@ export default function PipelineMechanicsPage() {
         </p>
       </div>
 
-      {/* Tab bar */}
-      <div style={{
-        display: 'flex',
-        gap: 2,
-        background: colors.surface,
-        border: `1px solid ${colors.border}`,
-        borderRadius: 10,
-        padding: 4,
-        marginBottom: 24,
-        width: 'fit-content',
-      }}>
-        {TABS.map(tab => (
-          <button
-            key={tab.id}
-            onClick={() => setTab(tab.id)}
-            style={{
-              padding: '6px 18px',
-              borderRadius: 7,
-              border: 'none',
-              fontSize: 13,
-              fontFamily: fonts.sans,
-              fontWeight: activeTab === tab.id ? 600 : 400,
-              background: activeTab === tab.id ? colors.accentSoft : 'transparent',
-              color: activeTab === tab.id ? colors.accent : colors.textMuted,
-              cursor: 'pointer',
-              transition: 'all 0.15s',
-              outline: 'none',
-              whiteSpace: 'nowrap' as const,
-            }}
-          >
-            {tab.label}
-          </button>
-        ))}
+      {/* Tab bar + scope filter row */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24, flexWrap: 'wrap' }}>
+        <div style={{
+          display: 'flex',
+          gap: 2,
+          background: colors.surface,
+          border: `1px solid ${colors.border}`,
+          borderRadius: 10,
+          padding: 4,
+          width: 'fit-content',
+        }}>
+          {TABS.map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setTab(tab.id)}
+              style={{
+                padding: '6px 18px',
+                borderRadius: 7,
+                border: 'none',
+                fontSize: 13,
+                fontFamily: fonts.sans,
+                fontWeight: activeTab === tab.id ? 600 : 400,
+                background: activeTab === tab.id ? colors.accentSoft : 'transparent',
+                color: activeTab === tab.id ? colors.accent : colors.textMuted,
+                cursor: 'pointer',
+                transition: 'all 0.15s',
+                outline: 'none',
+                whiteSpace: 'nowrap' as const,
+              }}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Pipeline / scope filter — shown when workspace has multiple pipelines */}
+        {pipelines.length > 1 && (
+          <div style={{
+            display: 'flex',
+            gap: 2,
+            background: colors.surface,
+            border: `1px solid ${colors.border}`,
+            borderRadius: 8,
+            padding: 3,
+          }}>
+            <button onClick={() => setActiveScope(null)} style={scopeButtonStyle(activeScope === null)}>
+              All
+            </button>
+            {pipelines.map(p => (
+              <button key={p.id} onClick={() => setActiveScope(p.id)} style={scopeButtonStyle(activeScope === p.id)}>
+                {p.name}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Tab content */}
       <SectionErrorBoundary fallbackMessage="Unable to load this view.">
         {activeTab === 'stage-velocity' && (
-          <BenchmarksGrid hideHeader />
+          <BenchmarksGrid hideHeader pipelineOverride={activeScope ?? 'all'} />
         )}
         {activeTab === 'pipeline-history' && (
-          <PipelineHistoryTab />
+          <PipelineHistoryTab scopeId={activeScope} />
         )}
         {activeTab === 'winning-paths' && (
-          <WinningPathsTab />
+          <WinningPathsTab scopeId={activeScope} />
         )}
       </SectionErrorBoundary>
     </div>
@@ -106,17 +158,16 @@ export default function PipelineMechanicsPage() {
 
 // ── Pipeline History Tab ──────────────────────────────────────────────────────
 
-function PipelineHistoryTab() {
+function PipelineHistoryTab({ scopeId }: { scopeId: string | null }) {
   const [activePeriod, setActivePeriod] = useState<number | 'ytd'>(90);
   const [showRaw, setShowRaw] = useState(false);
-  const [activePipeline, setActivePipeline] = useState<string | null>(null);
   const [sankeyData, setSankeyData] = useState<SankeyChartData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const fetchSankey = useCallback(async (
     period: number | 'ytd',
-    pipeline: string | null = null,
+    scope: string | null = null,
     raw = false,
   ) => {
     setLoading(true);
@@ -124,7 +175,7 @@ function PipelineHistoryTab() {
     try {
       const days = resolveDays(period);
       let url = `/analysis/sankey?periodDays=${days}`;
-      if (pipeline) url += `&pipeline=${encodeURIComponent(pipeline)}`;
+      if (scope) url += `&scopeId=${encodeURIComponent(scope)}`;
       if (raw) url += `&raw=true`;
       const data = await api.get(url) as SankeyChartData;
       setSankeyData(data);
@@ -136,25 +187,18 @@ function PipelineHistoryTab() {
   }, []);
 
   useEffect(() => {
-    fetchSankey(activePeriod, null);
-  }, []);
+    fetchSankey(activePeriod, scopeId, showRaw);
+  }, [scopeId]);
 
   function handlePeriod(preset: number | 'ytd') {
     setActivePeriod(preset);
-    fetchSankey(preset, activePipeline, showRaw);
-  }
-
-  function handlePipeline(pipeline: string | null) {
-    setActivePipeline(pipeline);
-    fetchSankey(activePeriod, pipeline, showRaw);
+    fetchSankey(preset, scopeId, showRaw);
   }
 
   function handleRawToggle(isRaw: boolean) {
     setShowRaw(isRaw);
-    fetchSankey(activePeriod, activePipeline, isRaw);
+    fetchSankey(activePeriod, scopeId, isRaw);
   }
-
-  const availablePipelines = sankeyData?.availableFilters?.pipelines ?? [];
 
   return (
     <div>
@@ -234,59 +278,6 @@ function PipelineHistoryTab() {
           })}
         </div>
 
-        {/* Pipeline filter pills — shown when multiple pipelines exist */}
-        {availablePipelines.length > 1 && (
-          <div style={{
-            display: 'flex',
-            gap: 2,
-            background: colors.surface,
-            border: `1px solid ${colors.border}`,
-            borderRadius: 8,
-            padding: 3,
-            flexWrap: 'wrap',
-          }}>
-            <button
-              onClick={() => handlePipeline(null)}
-              style={{
-                padding: '4px 10px',
-                borderRadius: 5,
-                border: 'none',
-                fontSize: 12,
-                fontFamily: fonts.sans,
-                fontWeight: activePipeline === null ? 600 : 400,
-                background: activePipeline === null ? `${colors.accent}18` : 'transparent',
-                color: activePipeline === null ? colors.accent : colors.textMuted,
-                cursor: 'pointer',
-                transition: 'all 0.12s',
-                outline: 'none',
-              }}
-            >
-              All
-            </button>
-            {availablePipelines.map(p => (
-              <button
-                key={p}
-                onClick={() => handlePipeline(p)}
-                style={{
-                  padding: '4px 10px',
-                  borderRadius: 5,
-                  border: 'none',
-                  fontSize: 12,
-                  fontFamily: fonts.sans,
-                  fontWeight: activePipeline === p ? 600 : 400,
-                  background: activePipeline === p ? `${colors.accent}18` : 'transparent',
-                  color: activePipeline === p ? colors.accent : colors.textMuted,
-                  cursor: 'pointer',
-                  transition: 'all 0.12s',
-                  outline: 'none',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {p}
-              </button>
-            ))}
-          </div>
-        )}
       </div>
 
       {/* Chart */}
@@ -323,7 +314,7 @@ function PipelineHistoryTab() {
 
 // ── Winning Paths Tab ─────────────────────────────────────────────────────────
 
-function WinningPathsTab() {
+function WinningPathsTab({ scopeId }: { scopeId: string | null }) {
   const [pathsData, setPathsData] = useState<WinningPathsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -332,12 +323,13 @@ function WinningPathsTab() {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    api.get('/analysis/winning-paths')
+    const url = scopeId ? `/analysis/winning-paths?scopeId=${encodeURIComponent(scopeId)}` : '/analysis/winning-paths';
+    api.get(url)
       .then((data: any) => { if (!cancelled) setPathsData(data as WinningPathsData); })
       .catch((err: any) => { if (!cancelled) setError(err.message || 'Failed to load winning paths'); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, []);
+  }, [scopeId]);
 
   if (error) {
     return (

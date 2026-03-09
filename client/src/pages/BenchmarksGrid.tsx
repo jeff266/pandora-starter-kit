@@ -316,9 +316,10 @@ function MathModal({ modal, onClose }: { modal: MathModalState; onClose: () => v
 
 interface BenchmarksGridProps {
   hideHeader?: boolean;
+  pipelineOverride?: string;
 }
 
-export default function BenchmarksGrid({ hideHeader = false }: BenchmarksGridProps) {
+export default function BenchmarksGrid({ hideHeader = false, pipelineOverride }: BenchmarksGridProps) {
   const { currentWorkspace } = useWorkspace();
   const { anon } = useDemoMode();
   const workspaceId = currentWorkspace?.id;
@@ -334,13 +335,15 @@ export default function BenchmarksGrid({ hideHeader = false }: BenchmarksGridPro
   const [metricMode, setMetricMode] = useState<'median' | 'average'>('median');
   const [mathModal, setMathModal] = useState<MathModalState | null>(null);
 
+  const effectivePipeline = pipelineOverride !== undefined ? pipelineOverride : selectedPipeline;
+
   const load = useCallback(async () => {
     if (!workspaceId) return;
     setLoading(true);
     setError(null);
     try {
       const result: BenchmarksResponse = await api.get(
-        `/stage-benchmarks?pipeline=${encodeURIComponent(selectedPipeline)}`
+        `/stage-benchmarks?pipeline=${encodeURIComponent(effectivePipeline)}`
       );
       setData(result);
     } catch (err: any) {
@@ -348,7 +351,7 @@ export default function BenchmarksGrid({ hideHeader = false }: BenchmarksGridPro
     } finally {
       setLoading(false);
     }
-  }, [workspaceId, selectedPipeline]);
+  }, [workspaceId, effectivePipeline]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -439,14 +442,14 @@ export default function BenchmarksGrid({ hideHeader = false }: BenchmarksGridPro
   // Build norm → actual stage names map for the "show actual names" toggle
   const normToActualNames = new Map<string, string[]>();
   for (const rb of rawBenchmarks) {
-    if (selectedPipeline === 'all' || rb.pipeline === selectedPipeline) {
+    if (effectivePipeline === 'all' || rb.pipeline === effectivePipeline) {
       const existing = normToActualNames.get(rb.stage_normalized) ?? [];
       if (!existing.includes(rb.stage)) normToActualNames.set(rb.stage_normalized, [...existing, rb.stage]);
     }
   }
 
   const stageHeaderLabel = (norm: string, fallback: string) =>
-    showActualNames && selectedPipeline !== 'all'
+    showActualNames && effectivePipeline !== 'all'
       ? (normToActualNames.get(norm)?.join(' · ') || fallback)
       : fallback;
 
@@ -465,7 +468,7 @@ export default function BenchmarksGrid({ hideHeader = false }: BenchmarksGridPro
     return (
       <td
         key={`${stageNorm}_${seg}_won`}
-        onClick={() => b?.won_median != null ? openMath(stageNorm, 'won', stageHeaderLabel(stageNorm, b.stage), seg, b.won_median, pipelineName ?? selectedPipeline) : undefined}
+        onClick={() => b?.won_median != null ? openMath(stageNorm, 'won', stageHeaderLabel(stageNorm, b.stage), seg, b.won_median, pipelineName ?? effectivePipeline) : undefined}
         style={{
           padding: '10px 12px', textAlign: 'center',
           opacity: b?.won_confidence === 'insufficient' ? 0.45 : 1,
@@ -484,7 +487,7 @@ export default function BenchmarksGrid({ hideHeader = false }: BenchmarksGridPro
     return (
       <td
         key={`${stageNorm}_${seg}_lost`}
-        onClick={() => b?.lost_median != null ? openMath(stageNorm, 'lost', stageHeaderLabel(stageNorm, b.stage), seg, b.lost_median, pipelineName ?? selectedPipeline) : undefined}
+        onClick={() => b?.lost_median != null ? openMath(stageNorm, 'lost', stageHeaderLabel(stageNorm, b.stage), seg, b.lost_median, pipelineName ?? effectivePipeline) : undefined}
         style={{
           padding: '10px 12px', textAlign: 'center',
           opacity: b?.lost_confidence === 'insufficient' ? 0.45 : 1,
@@ -624,7 +627,7 @@ export default function BenchmarksGrid({ hideHeader = false }: BenchmarksGridPro
           </div>
 
           {/* Show actual stage names toggle (Grouped mode only, single pipeline) */}
-          {viewMode === 'grouped' && selectedPipeline !== 'all' && (
+          {viewMode === 'grouped' && effectivePipeline !== 'all' && (
             <button
               onClick={() => setShowActualNames(v => !v)}
               style={{
@@ -686,7 +689,7 @@ export default function BenchmarksGrid({ hideHeader = false }: BenchmarksGridPro
           <div style={{ padding: 32, textAlign: 'center', fontSize: 13, color: colors.textMuted }}>
             No grouped benchmark data. Try clicking Refresh or switch to Deal Stages view.
           </div>
-        ) : selectedPipeline === 'all' && uniquePipelines.length > 1 ? (
+        ) : effectivePipeline === 'all' && uniquePipelines.length > 1 ? (
           /* Pipeline-grouped layout */
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             {uniquePipelines.map(pipelineName => {
@@ -823,13 +826,13 @@ export default function BenchmarksGrid({ hideHeader = false }: BenchmarksGridPro
                               <tr key={`${rb.pipeline}-${rb.stage}`} style={{ borderBottom: `1px solid ${colors.border}` }}>
                                 <td style={{ padding: '10px 16px', color: colors.text, fontWeight: 500 }}>{anon.pipeline(rb.stage)}</td>
                                 <td style={{ padding: '10px 12px', textAlign: 'center', cursor: rb.won_median != null ? 'pointer' : 'default' }}
-                                  onClick={() => rb.won_median != null ? openMath(rb.stage_normalized, 'won', rb.stage, 'all', rb.won_median, rb.pipeline || selectedPipeline) : undefined}>
+                                  onClick={() => rb.won_median != null ? openMath(rb.stage_normalized, 'won', rb.stage, 'all', rb.won_median, rb.pipeline || effectivePipeline) : undefined}>
                                   {wonVal !== null && wonVal !== undefined ? (
                                     <span><span style={{ fontWeight: 600, color: '#38A169' }}>{fmtDays(wonVal)}</span><ConfidenceDot tier={rb.won_sample >= 20 ? 'high' : rb.won_sample >= 5 ? 'directional' : 'insufficient'} sample={rb.won_sample} /></span>
                                   ) : <span style={{ color: colors.textMuted }}>—</span>}
                                 </td>
                                 <td style={{ padding: '10px 12px', textAlign: 'center', cursor: rb.lost_median != null ? 'pointer' : 'default' }}
-                                  onClick={() => rb.lost_median != null ? openMath(rb.stage_normalized, 'lost', rb.stage, 'all', rb.lost_median, rb.pipeline || selectedPipeline) : undefined}>
+                                  onClick={() => rb.lost_median != null ? openMath(rb.stage_normalized, 'lost', rb.stage, 'all', rb.lost_median, rb.pipeline || effectivePipeline) : undefined}>
                                   {lostVal !== null && lostVal !== undefined ? (
                                     <span><span style={{ fontWeight: 600, color: '#E53E3E' }}>{fmtDays(lostVal)}</span><ConfidenceDot tier={rb.lost_sample >= 20 ? 'high' : rb.lost_sample >= 5 ? 'directional' : 'insufficient'} sample={rb.lost_sample} /></span>
                                   ) : <span style={{ color: colors.textMuted }}>—</span>}
@@ -905,7 +908,7 @@ export default function BenchmarksGrid({ hideHeader = false }: BenchmarksGridPro
                     <td style={{ padding: '10px 16px', color: colors.text, fontWeight: 500 }}>Total sales cycle</td>
                     <td
                       style={{ padding: '10px 12px', textAlign: 'center', cursor: ct.won_median != null ? 'pointer' : 'default' }}
-                      onClick={() => ct.won_median != null ? openMath('_cycle_total', 'won', 'Closed (total)', 'all', ct.won_median, selectedPipeline !== 'all' ? selectedPipeline : undefined) : undefined}
+                      onClick={() => ct.won_median != null ? openMath('_cycle_total', 'won', 'Closed (total)', 'all', ct.won_median, effectivePipeline !== 'all' ? effectivePipeline : undefined) : undefined}
                     >
                       {ctWonVal != null ? (
                         <span>
@@ -916,7 +919,7 @@ export default function BenchmarksGrid({ hideHeader = false }: BenchmarksGridPro
                     </td>
                     <td
                       style={{ padding: '10px 12px', textAlign: 'center', cursor: ct.lost_median != null ? 'pointer' : 'default' }}
-                      onClick={() => ct.lost_median != null ? openMath('_cycle_total', 'lost', 'Closed (total)', 'all', ct.lost_median, selectedPipeline !== 'all' ? selectedPipeline : undefined) : undefined}
+                      onClick={() => ct.lost_median != null ? openMath('_cycle_total', 'lost', 'Closed (total)', 'all', ct.lost_median, effectivePipeline !== 'all' ? effectivePipeline : undefined) : undefined}
                     >
                       {ctLostVal != null ? (
                         <span>
