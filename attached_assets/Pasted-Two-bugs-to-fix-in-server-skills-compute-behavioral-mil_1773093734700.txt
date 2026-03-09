@@ -1,0 +1,59 @@
+Two bugs to fix in server/skills/compute/behavioral-milestones.ts.
+Fix both before running again.
+
+--- BUG 1: Clinical call contamination ---
+
+The transcript sample is pulling non-sales calls. Evidence: transcript
+excerpts contain "my husband and I decided to take a leap of faith" and
+"we're just getting moving over here" — these are patient/clinical
+conversations, not sales calls.
+
+Root cause: sampleWonTranscripts() is not enforcing deal_id linkage.
+
+Fix: In the deals JOIN inside sampleWonTranscripts(), add this filter
+to BOTH queries (the deal sample query and the per-deal call query):
+
+  AND c.deal_id IS NOT NULL
+
+The full condition should be:
+  WHERE c.workspace_id = $1
+    AND c.deal_id IS NOT NULL     ← add this
+    AND c.is_internal = false
+    AND c.transcript_text IS NOT NULL
+    AND LENGTH(c.transcript_text) > 200
+
+A clinical call that isn't linked to a CRM deal has no deal_id. This
+single filter eliminates patient conversations from the sample entirely.
+
+After adding the filter, log how many transcripts remain. If fewer than
+5 transcripts survive, log a warning and set discoveryFailed: true so
+the skill falls back to predefined milestones rather than running
+discovery on an inadequate sample.
+
+--- BUG 2: All milestones landing in Day 0–20, scoring returns 0% ---
+
+All 7 discovered milestones are stacked in the first column. The other
+three columns are empty. The detail panel shows 0% won deals and 0× lift
+on every milestone.
+
+Two things to check and fix:
+
+A. Column assignment — avgDaysToMilestone is likely null or 0.
+   In the scoring pass, confirm avgDaysToMilestone is being computed as:
+     MEDIAN(days_from_open) for scored won deals where milestone = true
+   If no won deals scored true for a milestone, avgDaysToMilestone
+   defaults to 0 → everything lands in column 0.
+   Fix: if no won deals score true, set insufficientData: true and
+   assign to column 0 explicitly rather than computing from null.
+
+B. Scoring returning 0% — the batch scoring prompt may not be finding
+   deals to score. Add a log before each DeepSeek scoring batch:
+     console.log(`Scoring milestone "${milestone.title}": 
+       ${wonBatch.length} won + ${lostBatch.length} lost deals in batch`)
+   If both are 0, the issue is in the deal sampling for the scoring
+   pass — likely the same deal_id IS NOT NULL problem from Bug 1.
+
+Run after both fixes and share the server log showing:
+1. How many transcripts survived the deal_id filter
+2. The per-milestone scoring batch sizes
+3. Whether avgDaysToMilestone is non-zero for any milestone

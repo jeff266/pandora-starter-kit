@@ -512,6 +512,8 @@ async function discoverAndScoreMilestones(
      JOIN deals d ON d.id = c.deal_id
      WHERE c.workspace_id = $1
        AND c.deal_id = ANY($2)
+       AND c.deal_id IS NOT NULL
+       AND (c.is_internal = false OR c.is_internal IS NULL)
        AND c.transcript_text IS NOT NULL
        AND LENGTH(c.transcript_text) > 200
      ORDER BY c.deal_id, c.duration_seconds DESC`,
@@ -544,7 +546,11 @@ async function discoverAndScoreMilestones(
   }
 
   const transcriptsSampled = samples.length;
-  console.log(`[BehavioralWinningPath] Discovery: ${transcriptsSampled} transcript excerpts from ${byDealSample.size} won deals`);
+  console.log(`[BehavioralWinningPath] Discovery: ${transcriptsSampled} transcript excerpts from ${byDealSample.size} won deals (after deal_id + is_internal filter)`);
+
+  if (transcriptsSampled < 5) {
+    console.warn(`[BehavioralWinningPath] ⚠ Only ${transcriptsSampled} CRM-linked sales transcripts survived filtering (need ≥5). Falling back to predefined taxonomy.`);
+  }
 
   let discoveredMilestones: DiscoveredMilestoneRaw[] = [];
   let isDiscovered = false;
@@ -641,8 +647,13 @@ Only include milestones with at least 2 distinct evidence phrases. Return JSON a
   const scoringLostIds = lostIds.slice(0, 25);
   const scoringAllIds  = [...scoringWonIds, ...scoringLostIds];
 
-  // Fetch transcripts for scoring pool (longest per deal)
-  type ScoringRow = { deal_id: string; transcript_text: string; call_date: Date | string; created_at: Date | string };
+  // Fetch transcripts for scoring pool (longest per deal, sales calls only)
+  type ScoringRow = {
+    deal_id: string;
+    transcript_text: string;
+    call_date: Date | string;
+    created_at: Date | string;
+  };
   const scoringResult = await query(
     `SELECT DISTINCT ON (c.deal_id)
        c.deal_id,
@@ -653,18 +664,27 @@ Only include milestones with at least 2 distinct evidence phrases. Return JSON a
      JOIN deals d ON d.id = c.deal_id
      WHERE c.workspace_id = $1
        AND c.deal_id = ANY($2)
+       AND c.deal_id IS NOT NULL
+       AND (c.is_internal = false OR c.is_internal IS NULL)
        AND c.transcript_text IS NOT NULL
        AND LENGTH(c.transcript_text) > 200
      ORDER BY c.deal_id, c.duration_seconds DESC`,
     [workspaceId, scoringAllIds]
   );
 
-  const scoringByDeal = new Map<string, string>();
+  // Maps: deal_id → transcript excerpt, deal_id → daysFromOpen
+  const scoringByDeal    = new Map<string, string>();
+  const scoringDaysByDeal = new Map<string, number>();
   for (const row of scoringResult.rows as ScoringRow[]) {
     scoringByDeal.set(row.deal_id, row.transcript_text.slice(0, 900));
+    const created  = typeof row.created_at === 'string' ? new Date(row.created_at) : row.created_at;
+    const callDate = typeof row.call_date   === 'string' ? new Date(row.call_date)  : row.call_date;
+    const daysFromOpen = Math.max(0, Math.round((callDate.getTime() - created.getTime()) / 86400000));
+    scoringDaysByDeal.set(row.deal_id, daysFromOpen);
   }
 
-  const dealsWithTranscripts = [...scoringByDeal.keys()];
+  console.log(`[BehavioralWinningPath] Scoring pool: ${scoringByDeal.size} deals with CRM-linked transcripts (${scoringWonIds.filter(id => scoringByDeal.has(id)).length} won, ${scoringLostIds.filter(id => scoringByDeal.has(id)).length} lost)`);
+
   let dealsScored = 0;
 
   const milestoneFinalScores = new Map<string, { wonHits: number; lostHits: number; avgDays: number }>();
@@ -672,19 +692,15 @@ Only include milestones with at least 2 distinct evidence phrases. Return JSON a
   for (const milestone of top5) {
     let wonHits = 0;
     let lostHits = 0;
-
-    // For deals WITHOUT transcripts, use evidence keyword matching as fallback
-    const wonMissingTranscript = scoringWonIds.filter(id => !scoringByDeal.has(id));
-    const lostMissingTranscript = scoringLostIds.filter(id => !scoringByDeal.has(id));
-    // We'll score these without LLM (no transcript = absent)
-    // Only deals with transcripts go through LLM
+    const wonHitDays: number[] = [];
 
     const wonWithTranscript  = scoringWonIds.filter(id => scoringByDeal.has(id));
     const lostWithTranscript = scoringLostIds.filter(id => scoringByDeal.has(id));
     const allWithTranscript  = [...wonWithTranscript, ...lostWithTranscript];
 
     if (allWithTranscript.length === 0) {
-      milestoneFinalScores.set(milestone.id, { wonHits: 0, lostHits: 0, avgDays: wonMedianDays * 0.4 });
+      console.log(`[BehavioralWinningPath] Milestone "${milestone.title}": 0 deals with transcripts in scoring pool — marking insufficientData`);
+      milestoneFinalScores.set(milestone.id, { wonHits: 0, lostHits: 0, avgDays: -1 });
       continue;
     }
 
@@ -692,6 +708,10 @@ Only include milestones with at least 2 distinct evidence phrases. Return JSON a
     const BATCH_SIZE = 10;
     for (let i = 0; i < allWithTranscript.length; i += BATCH_SIZE) {
       const batch = allWithTranscript.slice(i, i + BATCH_SIZE);
+      const wonInBatch  = batch.filter(id => scoringWonIds.includes(id));
+      const lostInBatch = batch.filter(id => scoringLostIds.includes(id));
+
+      console.log(`[BehavioralWinningPath] Scoring milestone "${milestone.title}": ${wonInBatch.length} won + ${lostInBatch.length} lost deals in batch`);
 
       const dealBlock = batch
         .map(id => `deal_id: ${id}\n${scoringByDeal.get(id) ?? ''}`)
@@ -717,7 +737,11 @@ ${dealBlock}`;
         if (scoreMap) {
           for (const [dealId, present] of Object.entries(scoreMap)) {
             if (present === true) {
-              if (scoringWonIds.includes(dealId))  wonHits++;
+              if (scoringWonIds.includes(dealId)) {
+                wonHits++;
+                const days = scoringDaysByDeal.get(dealId);
+                if (days !== undefined) wonHitDays.push(days);
+              }
               if (scoringLostIds.includes(dealId)) lostHits++;
             }
           }
@@ -728,38 +752,53 @@ ${dealBlock}`;
       }
     }
 
-    // Compute avg timing from samples (use transcripts that contain evidence phrases)
-    const lowerEvidence = milestone.evidence.map(e => e.toLowerCase());
-    let timingSum = 0, timingCount = 0;
-    for (const s of samples) {
-      if (lowerEvidence.some(e => s.excerpt.toLowerCase().includes(e))) {
-        timingSum += s.daysFromOpen;
-        timingCount++;
-      }
+    // avgDays: median of won deals that scored true — this gives the actual
+    // moment in the cycle when this behavior appears. Falls back to wonMedianDays * 0.4
+    // only when no won deal scored true.
+    let avgDays: number;
+    if (wonHitDays.length > 0) {
+      wonHitDays.sort((a, b) => a - b);
+      const mid = Math.floor(wonHitDays.length / 2);
+      avgDays = wonHitDays.length % 2 === 1
+        ? wonHitDays[mid]
+        : Math.round((wonHitDays[mid - 1] + wonHitDays[mid]) / 2);
+    } else {
+      avgDays = -1; // will be flagged insufficientData in buildMilestone
     }
-    const avgDays = timingCount > 0 ? Math.round(timingSum / timingCount) : wonMedianDays * 0.4;
+
+    console.log(`[BehavioralWinningPath] Milestone "${milestone.title}": wonHits=${wonHits}/${wonWithTranscript.length} lostHits=${lostHits}/${lostWithTranscript.length} avgDays=${avgDays}`);
 
     milestoneFinalScores.set(milestone.id, { wonHits, lostHits, avgDays });
   }
 
   // ── Step 4: Build BehavioralMilestone objects ──────────────────────────────
 
-  const milestones: BehavioralMilestone[] = top5.map(m => {
-    const scores = milestoneFinalScores.get(m.id) ?? { wonHits: 0, lostHits: 0, avgDays: wonMedianDays * 0.4 };
+  // timing fallback: map typical_timing → window index
+  const timingMap: Record<string, typeof timeWindows[0]> = {
+    early: timeWindows[0],
+    mid:   timeWindows[1] ?? timeWindows[0],
+    late:  timeWindows[2] ?? timeWindows[0],
+  };
 
-    // Assign time window based on avgDays
-    const window = timeWindows.find(w => scores.avgDays >= w.start && scores.avgDays <= w.end)
-      ?? timeWindows[0];
+  const milestones: BehavioralMilestone[] = top5.map((m, idx) => {
+    const scores = milestoneFinalScores.get(m.id) ?? { wonHits: 0, lostHits: 0, avgDays: -1 };
+    const noData = scores.avgDays < 0;
 
-    // For predefined fallback milestones, map typical_timing to a window
-    let assignedWindow = window;
-    if (!isDiscovered) {
-      const timingMap: Record<string, typeof timeWindows[0]> = {
-        early: timeWindows[0],
-        mid:   timeWindows[1] ?? timeWindows[0],
-        late:  timeWindows[2] ?? timeWindows[0],
-      };
-      assignedWindow = timingMap[m.typical_timing] ?? timeWindows[0];
+    let assignedWindow: typeof timeWindows[0];
+
+    if (noData || !isDiscovered) {
+      // No scoring data or predefined taxonomy: use typical_timing for placement.
+      // For discovered milestones with no hits, cycle through windows so they
+      // don't all pile into column 0.
+      const fallbackWindow = isDiscovered
+        ? timeWindows[idx % timeWindows.length]
+        : timingMap[m.typical_timing] ?? timeWindows[0];
+      assignedWindow = fallbackWindow;
+    } else {
+      // Use the actual call timing from scored won deals.
+      // If beyond the last window's end, assign to the last window.
+      assignedWindow = timeWindows.find(w => scores.avgDays >= w.start && scores.avgDays <= w.end)
+        ?? timeWindows[timeWindows.length - 1];
     }
 
     return buildMilestone(
@@ -778,13 +817,13 @@ ${dealBlock}`;
         evidence:    m.evidence,
       },
       {
-        wonDeals:          scores.wonHits,
-        totalWonDeals:     scoringWonIds.length > 0 ? scoringWonIds.length : totalWon,
-        lostDeals:         scores.lostHits,
-        totalLostDeals:    scoringLostIds.length > 0 ? scoringLostIds.length : totalLost,
-        avgDaysToMilestone: scores.avgDays,
-        earlyCount:        scores.wonHits,
-        lateCount:         scores.lostHits,
+        wonDeals:           scores.wonHits,
+        totalWonDeals:      scoringWonIds.length > 0 ? scoringWonIds.length : totalWon,
+        lostDeals:          scores.lostHits,
+        totalLostDeals:     scoringLostIds.length > 0 ? scoringLostIds.length : totalLost,
+        avgDaysToMilestone: noData ? Math.round(assignedWindow.start + (assignedWindow.end - assignedWindow.start) / 2) : scores.avgDays,
+        earlyCount:         scores.wonHits,
+        lateCount:          scores.lostHits,
       }
     );
   });
