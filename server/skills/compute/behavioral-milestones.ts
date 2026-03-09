@@ -247,7 +247,11 @@ export async function probeBehavioralDataTier(workspaceId: string): Promise<Data
     distinctDeals: parseInt(stageResult.rows[0]?.distinct_deals ?? '0'),
   };
 
-  const tier1Ready = conversations.exists && withTranscripts >= 10 && linkedPct >= 0.25;
+  // Tier 1: need transcripts AND at least 20 deals with linked conversations.
+  // We use an absolute count (not a percentage) because the denominator is all deals,
+  // which includes open pipeline that won't yet have conversations attached — this
+  // would penalise workspaces with healthy Gong coverage but a large top-of-funnel.
+  const tier1Ready = conversations.exists && withTranscripts >= 10 && linkedDeals >= 20;
   const tier2Ready = emailActivities.exists && emailActivities.distinctDeals >= 10;
   const tier3Ready = contactRoles.exists && contactRoles.dealsWithMultipleContacts >= 5;
 
@@ -261,7 +265,7 @@ export async function probeBehavioralDataTier(workspaceId: string): Promise<Data
   };
 
   console.log(`[BehavioralWinningPath] Tier probe: Tier ${tier} (${tierLabels[tier]})`);
-  console.log(`[BehavioralWinningPath] conversations=${totalConv} transcripts=${withTranscripts} linkedPct=${linkedPct.toFixed(2)} emails=${emailActivities.count} contacts=${contactRoles.dealsWithMultipleContacts}`);
+  console.log(`[BehavioralWinningPath] conversations=${totalConv} transcripts=${withTranscripts} linkedDeals=${linkedDeals} (linkedPct=${linkedPct.toFixed(2)}) emails=${emailActivities.count} contacts=${contactRoles.dealsWithMultipleContacts}`);
 
   return { tier, tierLabel: tierLabels[tier], availability: { conversations, emailActivities, contactRoles, stageHistory } };
 }
@@ -282,8 +286,8 @@ async function getClosedDeals(
        d.id,
        d.stage_normalized,
        COALESCE(
-         EXTRACT(DAY FROM d.close_date - d.created_date),
-         EXTRACT(DAY FROM d.updated_at - d.created_date),
+         EXTRACT(DAY FROM d.close_date - d.created_at),
+         EXTRACT(DAY FROM d.updated_at - d.created_at),
          30
        )::int AS cycle_days
      FROM deals d
@@ -346,7 +350,7 @@ async function extractTier1Milestones(
        c.transcript_text,
        c.summary,
        c.call_date,
-       d.created_date
+       d.created_at
      FROM conversations c
      JOIN deals d ON d.id = c.deal_id
      WHERE c.workspace_id = $1
@@ -364,7 +368,7 @@ async function extractTier1Milestones(
     transcript_text: string | null;
     summary: string | null;
     call_date: Date | string;
-    created_date: Date | string;
+    created_at: Date | string;
   };
 
   const byDeal = new Map<string, ConvRow[]>();
@@ -420,7 +424,7 @@ async function extractTier1Milestones(
       continue;
     }
 
-    const created = convs[0].created_date;
+    const created = convs[0].created_at;
 
     // milestone: discovery_call_held (Day 0–30, ≥30 min, ≥2 customer participants)
     const earlyConvs = convs.filter(c => daysFrom(created, c.call_date) <= 30);
@@ -564,7 +568,7 @@ async function extractTier2Milestones(
        a.deal_id,
        a.activity_type,
        a.timestamp,
-       d.created_date,
+       d.created_at,
        d.close_date
      FROM activities a
      JOIN deals d ON d.id = a.deal_id
@@ -575,7 +579,7 @@ async function extractTier2Milestones(
     [workspaceId, allIds]
   );
 
-  type EmailRow = { deal_id: string; activity_type: string; timestamp: Date | string; created_date: Date | string; close_date: Date | string | null };
+  type EmailRow = { deal_id: string; activity_type: string; timestamp: Date | string; created_at: Date | string; close_date: Date | string | null };
 
   const byDeal = new Map<string, EmailRow[]>();
   for (const row of emailResult.rows as EmailRow[]) {
@@ -603,7 +607,7 @@ async function extractTier2Milestones(
 
   for (const dealId of allIds) {
     const acts = byDeal.get(dealId) ?? [];
-    const created = acts[0]?.created_date;
+    const created = acts[0]?.created_at;
 
     const flags: EmailFlags = {
       first_reply_received: false,
@@ -786,7 +790,7 @@ async function extractTier4Milestones(
        dsh.entered_at,
        dsh.exited_at,
        dsh.duration_days,
-       d.created_date
+       d.created_at
      FROM deal_stage_history dsh
      JOIN deals d ON d.id = dsh.deal_id
      WHERE dsh.workspace_id = $1
@@ -802,7 +806,7 @@ async function extractTier4Milestones(
     entered_at: Date | string;
     exited_at: Date | string | null;
     duration_days: string | null;
-    created_date: Date | string;
+    created_at: Date | string;
   };
 
   const byDeal = new Map<string, StageRow[]>();
@@ -831,7 +835,7 @@ async function extractTier4Milestones(
 
   for (const dealId of allIds) {
     const stages = byDeal.get(dealId) ?? [];
-    const created = stages[0]?.created_date;
+    const created = stages[0]?.created_at;
 
     const flags: StageFlags = {
       early_discovery_motion: false,
