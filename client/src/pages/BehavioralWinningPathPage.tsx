@@ -644,13 +644,13 @@ function StageSignalDetailPanel({
         ))}
       </div>
 
-      {signal.evidence.length > 0 && (
+      {(signal.evidence || []).length > 0 && (
         <div style={{ marginBottom: 14 }}>
           <div style={{ fontSize: 11, fontWeight: 600, color: colors.textMuted, fontFamily: font, letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 8 }}>
             From your transcripts
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {signal.evidence.map((e, i) => (
+            {(signal.evidence || []).map((e, i) => (
               <div key={i} style={{
                 background: colors.surfaceRaised, border: `1px solid ${colors.borderLight}`,
                 borderLeft: `3px solid ${accentColor}`,
@@ -732,7 +732,7 @@ function StageProgressionGrid({
     );
   }
 
-  const stages = stageMatrix.stages;
+  const stages = stageMatrix.stages || [];
   const colCount = stages.length;
   const gridCols = colCount > 0 ? `repeat(${colCount}, 1fr)` : '1fr';
 
@@ -795,7 +795,7 @@ function StageProgressionGrid({
                     No distinguishing signals found — behaviors are similar across progressors and stallers in this stage
                   </div>
                 ) : (
-                  stage.progressionSignals.map(signal => (
+                  (stage.progressionSignals || []).map(signal => (
                     <StageSignalCard
                       key={signal.id}
                       signal={signal}
@@ -816,12 +816,12 @@ function StageProgressionGrid({
                 borderRight: ci < stages.length - 1 ? `1px solid ${colors.border}` : undefined,
                 minHeight: 60,
               }}>
-                {!stage.coverageTooLow && !stage.insufficientSignal && stage.warningSignals.length > 0 && (
+                {!stage.coverageTooLow && !stage.insufficientSignal && (stage.warningSignals || []).length > 0 && (
                   <>
                     <div style={{ fontSize: 10, fontWeight: 700, color: '#f87171', fontFamily: font, letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 2 }}>
                       ↓ Stalls deals
                     </div>
-                    {stage.warningSignals.map(signal => (
+                    {(stage.warningSignals || []).map(signal => (
                       <StageSignalCard
                         key={signal.id}
                         signal={signal}
