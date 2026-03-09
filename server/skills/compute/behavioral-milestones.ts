@@ -276,10 +276,14 @@ export async function probeBehavioralDataTier(workspaceId: string): Promise<Data
 
 async function getClosedDeals(
   workspaceId: string,
-  periodDays: number
+  periodDays: number,
+  pipeline?: string
 ): Promise<{ wonIds: string[]; lostIds: string[]; avgWonCycleDays: number; avgLostCycleDays: number }> {
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - periodDays);
+
+  const params: (string | Date)[] = [workspaceId, cutoff];
+  if (pipeline) params.push(pipeline);
 
   const result = await query(
     `SELECT
@@ -294,8 +298,9 @@ async function getClosedDeals(
      WHERE d.workspace_id = $1
        AND d.stage_normalized IN ('closed_won','closed_lost')
        AND d.close_date >= $2
+       ${pipeline ? 'AND d.pipeline = $3' : ''}
      LIMIT 300`,
-    [workspaceId, cutoff]
+    params
   );
 
   const wonIds: string[] = [];
@@ -919,9 +924,10 @@ async function extractTier4Milestones(
 export async function extractBehavioralMilestones(
   workspaceId: string,
   tierProbe: DataTierProbe,
-  periodDays = 180
+  periodDays = 180,
+  pipeline?: string
 ): Promise<MilestoneMatrix> {
-  const { wonIds, lostIds, avgWonCycleDays, avgLostCycleDays } = await getClosedDeals(workspaceId, periodDays);
+  const { wonIds, lostIds, avgWonCycleDays, avgLostCycleDays } = await getClosedDeals(workspaceId, periodDays, pipeline);
 
   const totalWon = wonIds.length;
   const totalLost = lostIds.length;

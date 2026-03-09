@@ -15,7 +15,7 @@ import { logChatMessage } from '../lib/chat-logger.js';
 import { buildConversationHistory } from '../lib/conversation-history.js';
 import type { HistoryTurn } from '../lib/conversation-history.js';
 import { randomUUID } from 'crypto';
-import { probeBehavioralDataTier } from '../skills/compute/behavioral-milestones.js';
+import { probeBehavioralDataTier, extractBehavioralMilestones } from '../skills/compute/behavioral-milestones.js';
 
 const router = Router();
 
@@ -1502,6 +1502,31 @@ router.get('/:workspaceId/skills/behavioral-winning-path/tier', async (req, res)
   } catch (err: any) {
     console.error('[behavioral-winning-path/tier] Error:', err.message);
     return res.status(500).json({ error: 'Failed to probe behavioral winning path data tier' });
+  }
+});
+
+/**
+ * GET /:workspaceId/skills/behavioral-winning-path/matrix
+ * On-the-fly milestone matrix computation with optional pipeline filter.
+ * No LLM calls — pure SQL extraction. Used by the frontend when a pipeline is selected.
+ * Query params:
+ *   pipeline? — CRM pipeline name to filter closed deals by
+ *   periodDays? — look-back window in days (default: 180)
+ */
+router.get('/:workspaceId/skills/behavioral-winning-path/matrix', async (req, res) => {
+  const { workspaceId } = req.params;
+  const pipeline = req.query.pipeline as string | undefined;
+  const periodDays = Math.min(Math.max(parseInt(req.query.periodDays as string ?? '180', 10) || 180, 30), 1825);
+
+  try {
+    const probe = await probeBehavioralDataTier(workspaceId);
+    const matrix = await extractBehavioralMilestones(workspaceId, probe, periodDays, pipeline || undefined);
+    // Strip transcript excerpts — not needed for the live filter view
+    const { transcriptExcerptsForClassification: _stripped, ...safeMatrix } = matrix as any;
+    return res.json(safeMatrix);
+  } catch (err: any) {
+    console.error('[behavioral-winning-path/matrix] Error:', err.message);
+    return res.status(500).json({ error: 'Failed to compute milestone matrix' });
   }
 });
 

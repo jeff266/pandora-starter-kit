@@ -154,7 +154,7 @@ export default function PipelineMechanicsPage() {
           <PipelineHistoryTab pipeline={activePipeline} />
         )}
         {activeTab === 'winning-paths' && (
-          <WinningPathsTab scopeId={activePipeline} />
+          <WinningPathsTab pipeline={activePipeline} />
         )}
       </SectionErrorBoundary>
     </div>
@@ -319,7 +319,7 @@ function PipelineHistoryTab({ pipeline }: { pipeline: string | null }) {
 
 // ── Winning Paths Tab ─────────────────────────────────────────────────────────
 
-function WinningPathsTab({ scopeId }: { scopeId: string | null }) {
+function WinningPathsTab({ pipeline }: { pipeline: string | null }) {
   const [pathsData, setPathsData] = useState<WinningPathsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -328,13 +328,13 @@ function WinningPathsTab({ scopeId }: { scopeId: string | null }) {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    const url = scopeId ? `/analysis/winning-paths?scopeId=${encodeURIComponent(scopeId)}` : '/analysis/winning-paths';
+    const url = pipeline ? `/analysis/winning-paths?pipeline=${encodeURIComponent(pipeline)}` : '/analysis/winning-paths';
     api.get(url)
       .then((data: any) => { if (!cancelled) setPathsData(data as WinningPathsData); })
       .catch((err: any) => { if (!cancelled) setError(err.message || 'Failed to load winning paths'); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [scopeId]);
+  }, [pipeline]);
 
   if (error) {
     return (

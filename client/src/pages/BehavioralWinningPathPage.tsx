@@ -436,11 +436,21 @@ export default function BehavioralWinningPathPage() {
   const [runMessage, setRunMessage]         = useState<string | null>(null);
   const [showLost, setShowLost]             = useState(true);
   const [selectedMilestone, setSelected]   = useState<BehavioralMilestone | null>(null);
+  const [pipelines, setPipelines]           = useState<{ id: string; name: string }[]>([]);
+  const [activePipeline, setActivePipeline] = useState<string | null>(null);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastCompletedAt = useRef<string | null>(null);
 
   const stopPoll = () => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } };
+
+  // Fetch CRM pipeline list for the filter bar
+  useEffect(() => {
+    if (!workspaceId) return;
+    api.get('/deals/crm-pipelines')
+      .then((data: any) => setPipelines(Array.isArray(data) ? data : []))
+      .catch(() => setPipelines([]));
+  }, [workspaceId]);
 
   const applyRunResult = useCallback((run: RunResult) => {
     const m = run.result?.milestone_matrix ?? null;
@@ -481,7 +491,30 @@ export default function BehavioralWinningPathPage() {
     setLoading(false);
   }, [workspaceId, applyRunResult]);
 
-  useEffect(() => { loadData(); return stopPoll; }, [loadData]);
+  const loadPipelineMatrix = useCallback(async (pipeline: string) => {
+    if (!workspaceId) return;
+    setLoading(true);
+    setError(null);
+    setNoRun(false);
+    setSynthesis(null);
+    try {
+      const data = await api.get(`/skills/behavioral-winning-path/matrix?pipeline=${encodeURIComponent(pipeline)}`);
+      setMatrix(data as MilestoneMatrix);
+    } catch (err: any) {
+      setError(err?.message ?? 'Failed to load pipeline matrix');
+      setMatrix(null);
+    }
+    setLoading(false);
+  }, [workspaceId]);
+
+  // Single effect: re-runs when workspaceId or activePipeline changes
+  useEffect(() => {
+    if (!workspaceId) return;
+    if (activePipeline) loadPipelineMatrix(activePipeline);
+    else loadData();
+    return stopPoll;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceId, activePipeline]);
 
   const startRun = async () => {
     if (running) return;
@@ -611,6 +644,43 @@ export default function BehavioralWinningPathPage() {
           )}
         </div>
       </div>
+
+      {/* ── Pipeline filter pills ───────────────────────────────────────────── */}
+      {pipelines.length > 1 && (
+        <div style={{
+          display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 18,
+          background: colors.surface, border: `1px solid ${colors.border}`,
+          borderRadius: 9, padding: '10px 14px',
+        }}>
+          <button
+            onClick={() => setActivePipeline(null)}
+            style={{
+              background: activePipeline === null ? colors.accentSoft : 'transparent',
+              border: `1px solid ${activePipeline === null ? colors.accent : colors.borderLight}`,
+              color: activePipeline === null ? colors.accent : colors.textMuted,
+              fontSize: 12, fontWeight: 600, padding: '5px 12px',
+              borderRadius: 6, cursor: 'pointer', fontFamily: font, transition: 'all 0.15s',
+            }}
+          >
+            All Pipelines
+          </button>
+          {pipelines.map(p => (
+            <button
+              key={p.id}
+              onClick={() => setActivePipeline(p.name)}
+              style={{
+                background: activePipeline === p.name ? colors.accentSoft : 'transparent',
+                border: `1px solid ${activePipeline === p.name ? colors.accent : colors.borderLight}`,
+                color: activePipeline === p.name ? colors.accent : colors.textMuted,
+                fontSize: 12, fontWeight: 600, padding: '5px 12px',
+                borderRadius: 6, cursor: 'pointer', fontFamily: font, transition: 'all 0.15s',
+              }}
+            >
+              {p.name}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* ── Error ───────────────────────────────────────────────────────────── */}
       {error && (
@@ -781,13 +851,22 @@ export default function BehavioralWinningPathPage() {
             />
           )}
 
-          {/* ── Synthesis card ──────────────────────────────────────────────── */}
-          {synthesis && (
+          {/* ── Synthesis card (All Pipelines view only) ────────────────────── */}
+          {synthesis && !activePipeline && (
             <SynthesisCard
               text={synthesis}
               completedAt={completedAt ?? ''}
               periodDays={matrix.analysisPeriodDays}
             />
+          )}
+          {activePipeline && (
+            <div style={{
+              marginTop: 16, padding: '10px 16px',
+              background: colors.surface, border: `1px solid ${colors.border}`,
+              borderRadius: 8, fontSize: 12, color: colors.textMuted, fontFamily: font,
+            }}>
+              AI synthesis is available in the <strong style={{ color: colors.textSecondary }}>All Pipelines</strong> view — select it above to see the full analysis.
+            </div>
           )}
 
           {/* ── Upgrade prompt ──────────────────────────────────────────────── */}
