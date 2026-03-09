@@ -187,6 +187,13 @@ export interface WorkspaceConfig {
     enabled_skill_ids: string[];
   };
   _meta?: Record<string, any>;
+
+  /** Sales methodology configured or detected for this workspace */
+  methodology?: {
+    framework_id: string;
+    confidence: number;
+    source: string;
+  };
 }
 
 // ===== VOICE CONFIG =====

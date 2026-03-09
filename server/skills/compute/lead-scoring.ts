@@ -13,6 +13,7 @@
  */
 
 import { query } from '../../db.js';
+import { getChampionAndSentimentSignals, getConversationRiskSignals } from '../../analysis/enrichment-queries.js';
 import { emitProspectScoredEvents, type ScoredEntity } from '../../webhooks/prospect-score-events.js';
 import { createLogger } from '../../utils/logger.js';
 import {
@@ -390,12 +391,24 @@ async function extractDealFeatures(workspaceId: string): Promise<DealFeatures[]>
         LIMIT 1
       `, [workspaceId, row.id]);
 
-      if (latestCallResult.rows.length > 0) {
+      // Prefer pre-enriched signals when available; fall back to heuristics
+      const [enrichedChampion, enrichedRisk] = await Promise.all([
+        getChampionAndSentimentSignals(workspaceId, [row.id]).catch(() => new Map()),
+        getConversationRiskSignals(workspaceId, [row.id]).catch(() => new Map()),
+      ]);
+      const champSignals = enrichedChampion.get(row.id);
+      const riskSignals = enrichedRisk.get(row.id);
+
+      if (champSignals && !champSignals.no_calls_in_stage) {
+        conversationIntelligence = {
+          championDetected: champSignals.champion_language,
+          nextStepsExplicit: false,
+          sentimentDeclining: champSignals.sentiment_vs_prior === 'declining',
+          competitorHeavy: riskSignals?.competitorHeavy ?? false,
+        };
+      } else if (latestCallResult.rows.length > 0) {
         const latestCall = latestCallResult.rows[0];
         const textForClassification = latestCall.transcript_text || latestCall.summary;
-
-        // TODO: Call DeepSeek API for classification when integrated
-        // For now, use simple heuristics as placeholders
         conversationIntelligence = {
           championDetected: textForClassification?.toLowerCase().includes('champion') ||
                             textForClassification?.toLowerCase().includes('advocate'),

@@ -112,6 +112,9 @@ export interface SkillDefinition {
 
   /** Number of successful runs — populated for custom skills only; used to guard override suppression */
   runCount?: number;
+
+  /** Lifecycle status — 'stub' renders "Coming soon" and does not execute */
+  status?: 'stub' | 'active';
 }
 
 // ============================================================================

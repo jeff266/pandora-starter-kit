@@ -6234,6 +6234,18 @@ const ciCompGatherMentions: ToolDefinition = {
         [context.workspaceId, String(lookbackMonths)]
       ).catch(() => ({ rows: [] as any[] }));
 
+      // Enrichment source: conversation_enrichments.competitor_mentions JSONB
+      const enrichmentResult = await query<any>(
+        `SELECT ce.deal_id, ce.competitor_mentions,
+                d.name as deal_name, d.amount, d.stage, d.stage_normalized, d.owner
+         FROM conversation_enrichments ce
+         JOIN deals d ON d.id = ce.deal_id AND d.workspace_id = $1
+         WHERE ce.workspace_id = $1
+           AND ce.competitor_count > 0
+           AND ce.enriched_at >= NOW() - ($2 || ' months')::interval`,
+        [context.workspaceId, String(lookbackMonths)]
+      ).catch(() => ({ rows: [] as any[] }));
+
       // Aggregate by competitor across all sources
       const compMap = new Map<string, { deal_ids: Set<string>; deals: any[] }>();
       const addMention = (name: string, deal: any) => {
@@ -6255,6 +6267,12 @@ const ciCompGatherMentions: ToolDefinition = {
         const val = typeof r.insight_value === 'string' ? r.insight_value : JSON.stringify(r.insight_value);
         if (val) addMention(val, r);
       }
+      for (const r of enrichmentResult.rows) {
+        const mentions = Array.isArray(r.competitor_mentions) ? r.competitor_mentions : [];
+        for (const m of mentions) {
+          if (m.name) addMention(m.name, r);
+        }
+      }
 
       const competitors = Array.from(compMap.entries())
         .map(([name, data]) => ({
@@ -6267,8 +6285,8 @@ const ciCompGatherMentions: ToolDefinition = {
 
       return {
         competitors,
-        total_deals_with_competition: new Set([...signalResult.rows, ...convResult.rows, ...insightResult.rows].map(r => r.deal_id)).size,
-        data_sources: { conversation_signals: signalResult.rows.length, conversations: convResult.rows.length, deal_insights: insightResult.rows.length },
+        total_deals_with_competition: new Set([...signalResult.rows, ...convResult.rows, ...insightResult.rows, ...enrichmentResult.rows].map(r => r.deal_id)).size,
+        data_sources: { conversation_signals: signalResult.rows.length, conversations: convResult.rows.length, deal_insights: insightResult.rows.length, enrichments: enrichmentResult.rows.length },
       };
     }, params);
   },

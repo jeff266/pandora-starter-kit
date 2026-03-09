@@ -518,6 +518,29 @@ export function startSkillScheduler(): void {
   scheduledSkills.push({ skillId: 'account-enrichment-batch', cronExpression: '0 2 * * 0', job: enrichmentJob });
   console.log('[Account Enrichment Scheduler] Registered account enrichment on cron 0 2 * * 0 (Sunday 2am UTC)');
 
+  // Conversation enrichment — Sunday 22:00 UTC (before Monday skill runs)
+  const convEnrichmentJob = cron.schedule('0 22 * * 0', async () => {
+    console.log('[ConversationEnrichment] Sunday 10pm cron triggered');
+    const { runConversationEnrichmentJob } = await import('../jobs/conversation-enrichment-job.js');
+    const workspacesRes = await query<{ id: string; name: string }>(
+      `SELECT DISTINCT w.id, w.name FROM workspaces w
+       INNER JOIN connections c ON c.workspace_id = w.id
+       WHERE c.status IN ('connected','synced','error')
+         AND w.status = 'active'
+       ORDER BY w.name`,
+    );
+    for (const ws of workspacesRes.rows) {
+      try {
+        const result = await runConversationEnrichmentJob(ws.id);
+        console.log(`[ConversationEnrichment] ✓ ${ws.name}: ${result.processed} processed, ${result.failed} failed`);
+      } catch (err: any) {
+        console.error(`[ConversationEnrichment] ✗ ${ws.name}:`, err.message);
+      }
+    }
+  }, { timezone: 'UTC' });
+  scheduledSkills.push({ skillId: 'conversation-enrichment-weekly', cronExpression: '0 22 * * 0', job: convEnrichmentJob });
+  console.log('[Conversation Enrichment] Registered weekly enrichment on cron 0 22 * * 0 (Sunday 10pm UTC)');
+
   // Account scoring cron: daily 3am UTC — re-score already-enriched accounts
   const scoringJob = cron.schedule(
     '0 3 * * *',

@@ -42,6 +42,7 @@ import { monteCarloForecastSkill } from './library/monte-carlo-forecast.js';
 import { pipelineContributionForecastSkill } from './library/pipeline-contribution-forecast.js';
 import { stageMismatchDetectorSkill } from './library/stage-mismatch-detector.js';
 import { behavioralWinningPathSkill } from './library/behavioral-winning-path.js';
+import { coachingSkill } from './library/coaching.js';
 
 // Types
 export type {
@@ -186,6 +187,7 @@ export function registerBuiltInSkills(): void {
   registry.register(pipelineContributionForecastSkill);
   registry.register(stageMismatchDetectorSkill);
   registry.register(behavioralWinningPathSkill);
+  registry.register(coachingSkill);
 
   // Register evidence builders for "Show the Work" evidence assembly
   registerAllEvidenceBuilders();
