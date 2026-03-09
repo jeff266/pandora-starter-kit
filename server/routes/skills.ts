@@ -15,6 +15,7 @@ import { logChatMessage } from '../lib/chat-logger.js';
 import { buildConversationHistory } from '../lib/conversation-history.js';
 import type { HistoryTurn } from '../lib/conversation-history.js';
 import { randomUUID } from 'crypto';
+import { probeBehavioralDataTier } from '../skills/compute/behavioral-milestones.js';
 
 const router = Router();
 
@@ -1443,6 +1444,64 @@ router.get('/:workspaceId/chat/history', async (req, res) => {
   } catch (err) {
     console.error('[chat-history] Error:', err);
     return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ============================================================================
+// Behavioral Winning Path — Dedicated Endpoints
+// ============================================================================
+
+/**
+ * GET /:workspaceId/skills/behavioral-winning-path/latest
+ * Returns the most recent completed run for this skill.
+ */
+router.get('/:workspaceId/skills/behavioral-winning-path/latest', async (req, res) => {
+  const { workspaceId } = req.params;
+  try {
+    const result = await query(
+      `SELECT run_id, skill_id, status, result, output, output_text, started_at, completed_at, duration_ms, error
+       FROM skill_runs
+       WHERE workspace_id = $1
+         AND skill_id = 'behavioral-winning-path'
+         AND status = 'completed'
+       ORDER BY completed_at DESC
+       LIMIT 1`,
+      [workspaceId]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'No completed runs found for behavioral-winning-path' });
+    }
+    const row = result.rows[0];
+    return res.json({
+      runId: row.run_id,
+      skillId: row.skill_id,
+      status: row.status,
+      result: row.result,
+      outputText: row.output_text,
+      startedAt: row.started_at,
+      completedAt: row.completed_at,
+      durationMs: row.duration_ms,
+    });
+  } catch (err: any) {
+    console.error('[behavioral-winning-path/latest] Error:', err.message);
+    return res.status(500).json({ error: 'Failed to fetch latest behavioral winning path run' });
+  }
+});
+
+/**
+ * GET /:workspaceId/skills/behavioral-winning-path/tier
+ * Fast data tier probe — no analysis, no LLM calls.
+ * Returns which tier is available and why, plus availability breakdown.
+ * Useful for the UI to show "Connect Gong to unlock full analysis."
+ */
+router.get('/:workspaceId/skills/behavioral-winning-path/tier', async (req, res) => {
+  const { workspaceId } = req.params;
+  try {
+    const probe = await probeBehavioralDataTier(workspaceId);
+    return res.json(probe);
+  } catch (err: any) {
+    console.error('[behavioral-winning-path/tier] Error:', err.message);
+    return res.status(500).json({ error: 'Failed to probe behavioral winning path data tier' });
   }
 });
 

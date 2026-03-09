@@ -59,6 +59,11 @@ import { computeAndStoreRFMScores, computeAndStoreTTEProbs } from '../analysis/r
 import { resolveContactRoles, type ResolutionResult } from './compute/contact-role-resolution.js';
 import { discoverICP, type ICPDiscoveryResult } from './compute/icp-discovery.js';
 import {
+  probeBehavioralDataTier,
+  extractBehavioralMilestones,
+  type DataTierProbe,
+} from './compute/behavioral-milestones.js';
+import {
   buildICPTaxonomy,
   enrichTopAccounts,
   compressForClassification,
@@ -4910,6 +4915,54 @@ ${newContacts > 0 ? `## New Discoveries
 }
 
 // ============================================================================
+// Behavioral Winning Path Tools
+// ============================================================================
+
+const bwpProbeTierTool: ToolDefinition = {
+  name: 'bwpProbeTier',
+  description: 'Probe available data tiers for behavioral winning path analysis (conversations, email, contact roles, stage history)',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('bwpProbeTier', async () => {
+      const result = await probeBehavioralDataTier(context.workspaceId);
+      console.log(`[BehavioralWinningPath] Data tier: ${result.tier} (${result.tierLabel})`);
+      return result;
+    }, params);
+  },
+};
+
+const bwpExtractMilestonesTool: ToolDefinition = {
+  name: 'bwpExtractMilestones',
+  description: 'Extract behavioral milestone matrix from won/lost deals using the appropriate data tier',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {
+      periodDays: {
+        type: 'number',
+        description: 'Analysis window in days (default 180)',
+      },
+    },
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('bwpExtractMilestones', async () => {
+      const periodDays = (params as { periodDays?: number }).periodDays ?? 180;
+      const tierProbe: DataTierProbe = context.stepResults?.['tier_probe'] as DataTierProbe
+        ?? await probeBehavioralDataTier(context.workspaceId);
+      const result = await extractBehavioralMilestones(context.workspaceId, tierProbe, periodDays);
+      console.log(`[BehavioralWinningPath] Extracted ${result.wonMilestones.length} milestones for ${result.totalWonDeals} won / ${result.totalLostDeals} lost deals`);
+      return result;
+    }, params);
+  },
+};
+
+// ============================================================================
 // ICP Discovery Tools
 // ============================================================================
 
@@ -8654,6 +8707,8 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['enrichDealsWithRfm', enrichDealsWithRfm],
   ['resolveContactRoles', resolveContactRolesTool],
   ['generateContactRoleReport', generateContactRoleReportTool],
+  ['bwpProbeTier', bwpProbeTierTool],
+  ['bwpExtractMilestones', bwpExtractMilestonesTool],
   ['discoverICP', discoverICPTool],
   ['buildICPTaxonomy', buildICPTaxonomyTool],
   ['enrichTopAccounts', enrichTopAccountsTool],
