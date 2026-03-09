@@ -113,17 +113,29 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
   if (n === 0) return null;
 
   // Use total deal throughput (startOfPeriod + entered) for bar height.
-  // startOfPeriod captures deals already in the stage at the period start that
-  // went on to advance — critical for a monotonically-decreasing funnel.
-  // Without it, a stage with many carry-over deals but few new entries appears
-  // artificially small, causing an inverted funnel (e.g. eval > qual).
+  // startOfPeriod captures deals already in the stage at the period start.
   // Fall back to deals/value if throughput fields are missing (old cached data).
   const getThroughput = (s: (typeof stages)[0]) => (s.startOfPeriod ?? 0) + (s.entered ?? s.deals ?? 0);
   const getEnteredValue = (s: (typeof stages)[0]) => s.enteredValue ?? s.value ?? 0;
 
-  const maxEntered = Math.max(...stages.map(s => getThroughput(s)), 1);
+  // Raw per-stage throughput (used for deal count labels — shows true count).
+  const rawThroughputs = stages.map(s => getThroughput(s));
 
-  const nodeH = stages.map(s => Math.max(MIN_H, (getThroughput(s) / maxEntered) * MAX_H));
+  // Monotonically non-increasing throughput for bar heights.
+  // A later funnel stage cannot visually exceed an earlier one — even if the
+  // data shows a genuine backlog accumulation (e.g. eval > qual due to stale
+  // carry-over deals), the bar is capped at the previous stage's height.
+  // The deal count label still shows the true number so the anomaly is visible.
+  const cappedThroughputs: number[] = [];
+  for (let i = 0; i < stages.length; i++) {
+    cappedThroughputs[i] = i === 0
+      ? rawThroughputs[i]
+      : Math.min(rawThroughputs[i], cappedThroughputs[i - 1]);
+  }
+
+  const maxEntered = Math.max(...cappedThroughputs, 1);
+
+  const nodeH = cappedThroughputs.map(t => Math.max(MIN_H, (t / maxEntered) * MAX_H));
 
   // Dynamic gap: always spread bars to fill the full container width.
   // No upper cap — bars stretch edge-to-edge regardless of stage count.
@@ -163,11 +175,12 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
     const x2 = nodeX[i + 1];
     const midX = (x1 + x2) / 2;
 
-    // Use pairwise flow data when available, fall back to min of adjacent throughputs.
-    // Proportion is computed against total throughput (startOfPeriod + entered).
+    // Use pairwise flow data when available, fall back to min of adjacent capped throughputs.
+    // Proportion is computed against the visually-capped bar height so ribbons
+    // don't overflow beyond the bar they originate from.
     const flow = flows.find(f => f.fromId === stages[i].id && f.toId === stages[i + 1].id);
-    const flowDeals = flow?.deals ?? Math.min(getThroughput(stages[i]), getThroughput(stages[i + 1]));
-    const srcEntered = Math.max(getThroughput(stages[i]), 1);
+    const flowDeals = flow?.deals ?? Math.min(cappedThroughputs[i], cappedThroughputs[i + 1]);
+    const srcEntered = Math.max(cappedThroughputs[i], 1);
     const proportion = Math.min(flowDeals / srcEntered, 1);
 
     // Constant bandH on both sides — the only butterfly-free guarantee

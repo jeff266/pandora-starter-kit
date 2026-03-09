@@ -415,16 +415,16 @@ export async function waterfallAnalysis(
       const toFlow = stageFlows.get(toStage!);
       const fromFlow = stageFlows.get(fromStage);
 
-      if (toFlow) {
-        toFlow.entered++;
-        toFlow.enteredValue += amount;
-      }
-
       if (fromFlow) {
         if (toIndex > fromIndex) {
-          // Advanced to a later stage.
+          // Advanced to a later stage — credit destination as entered.
           fromFlow.advanced++;
           fromFlow.advancedValue += amount;
+
+          if (toFlow) {
+            toFlow.entered++;
+            toFlow.enteredValue += amount;
+          }
 
           if (toIndex === fromIndex + 1) {
             // Direct sequential advance — single pairwise flow
@@ -466,7 +466,9 @@ export async function waterfallAnalysis(
             }
           }
         } else {
-          // Fell back to earlier stage
+          // Fell back to an earlier stage — do NOT count as entered at destination.
+          // Backward moves are already-counted deals regressing; including them in
+          // "entered" would inflate earlier-stage counts and distort the funnel.
           fromFlow.fellBack++;
         }
       }
