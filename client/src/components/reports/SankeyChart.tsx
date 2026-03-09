@@ -112,17 +112,18 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
   const n = stages.length;
   if (n === 0) return null;
 
-  // Use historical deal throughput (entered) for bar height.
-  // This gives a naturally decreasing funnel: early stages always see more
-  // deals entering than late stages, so bars taper left-to-right.
-  // entered/enteredValue are the historical throughput fields.
-  // Fall back to deals/value if entered is missing (old cached data).
-  const getEntered = (s: (typeof stages)[0]) => s.entered ?? s.deals ?? 0;
+  // Use total deal throughput (startOfPeriod + entered) for bar height.
+  // startOfPeriod captures deals already in the stage at the period start that
+  // went on to advance — critical for a monotonically-decreasing funnel.
+  // Without it, a stage with many carry-over deals but few new entries appears
+  // artificially small, causing an inverted funnel (e.g. eval > qual).
+  // Fall back to deals/value if throughput fields are missing (old cached data).
+  const getThroughput = (s: (typeof stages)[0]) => (s.startOfPeriod ?? 0) + (s.entered ?? s.deals ?? 0);
   const getEnteredValue = (s: (typeof stages)[0]) => s.enteredValue ?? s.value ?? 0;
 
-  const maxEntered = Math.max(...stages.map(s => getEntered(s)), 1);
+  const maxEntered = Math.max(...stages.map(s => getThroughput(s)), 1);
 
-  const nodeH = stages.map(s => Math.max(MIN_H, (getEntered(s) / maxEntered) * MAX_H));
+  const nodeH = stages.map(s => Math.max(MIN_H, (getThroughput(s) / maxEntered) * MAX_H));
 
   // Dynamic gap: always spread bars to fill the full container width.
   // No upper cap — bars stretch edge-to-edge regardless of stage count.
@@ -162,11 +163,11 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
     const x2 = nodeX[i + 1];
     const midX = (x1 + x2) / 2;
 
-    // Use pairwise flow data when available, fall back to min of adjacent entered counts.
-    // Proportion is computed against entered (historical throughput), not the snapshot count.
+    // Use pairwise flow data when available, fall back to min of adjacent throughputs.
+    // Proportion is computed against total throughput (startOfPeriod + entered).
     const flow = flows.find(f => f.fromId === stages[i].id && f.toId === stages[i + 1].id);
-    const flowDeals = flow?.deals ?? Math.min(getEntered(stages[i]), getEntered(stages[i + 1]));
-    const srcEntered = Math.max(getEntered(stages[i]), 1);
+    const flowDeals = flow?.deals ?? Math.min(getThroughput(stages[i]), getThroughput(stages[i + 1]));
+    const srcEntered = Math.max(getThroughput(stages[i]), 1);
     const proportion = Math.min(flowDeals / srcEntered, 1);
 
     // Constant bandH on both sides — the only butterfly-free guarantee
@@ -466,7 +467,7 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
                   {truncate(stageName, 14)}
                 </text>
 
-                {/* Entered deal count — one line below name */}
+                {/* Total deal throughput count — one line below name */}
                 <text
                   x={cx}
                   y={nodeY[i] - 12}
@@ -475,7 +476,7 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
                   fill={colors.textMuted as string}
                   fontFamily={fonts.sans}
                 >
-                  {getEntered(stage)} deal{getEntered(stage) !== 1 ? 's' : ''}
+                  {getThroughput(stage)} deal{getThroughput(stage) !== 1 ? 's' : ''}
                 </text>
 
                 {/* ARR value — just below baseline */}
@@ -523,7 +524,7 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
             <div style={{ width: 10, height: 10, borderRadius: 2, background: STAGE_COLORS[0], opacity: 0.85 }} />
-            <span style={{ fontSize: 11, color: colors.textMuted }}>Deals entered</span>
+            <span style={{ fontSize: 11, color: colors.textMuted }}>Deal throughput</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
             <div style={{ width: 10, height: 10, borderRadius: 2, background: LOST_BAR_COLOR }} />

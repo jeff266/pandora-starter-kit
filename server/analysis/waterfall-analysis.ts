@@ -365,6 +365,12 @@ export async function waterfallAnalysis(
     const fromStage = raw ? t.fromStage : t.fromStageNormalized;
     const toStage   = raw ? t.toStage   : t.toStageNormalized;
 
+    // Skip self-loop transitions (same stage before and after).
+    // These occur when multiple raw CRM stage IDs normalize to the same bucket,
+    // making a deal appear to move from e.g. "awareness" → "awareness".
+    // Counting them as entered/fellBack inflates both metrics incorrectly.
+    if (fromStage && fromStage === toStage) continue;
+
     // New pipeline created
     if (!fromStage) {
       newPipelineCount++;

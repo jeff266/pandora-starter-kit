@@ -97,6 +97,7 @@ export async function buildSankeyChartData(
         value: s.endOfPeriodValue,
         entered: s.entered,
         enteredValue: s.enteredValue,
+        startOfPeriod: s.startOfPeriod,
         won: s.won,
         wonValue: s.wonValue,
         lostCount: s.fellOut,
@@ -104,10 +105,12 @@ export async function buildSankeyChartData(
       };
     });
 
-  // Drop leading stages that have fewer historical entries than the next stage.
-  // These are bypass-able pre-funnel stages (e.g. 'Awareness' with 3 deals
-  // while 'Qualification' has 38) that would create an inverted funnel start.
-  while (stages.length >= 2 && stages[0].entered < stages[1].entered) {
+  // Drop leading stages that have fewer total deals than the next stage.
+  // Uses startOfPeriod + entered (total throughput) so that a stage with many
+  // carry-over deals from the prior period is not incorrectly trimmed due to
+  // low new-entry count alone.
+  const throughput = (s: (typeof stages)[0]) => (s.entered ?? 0) + (s.startOfPeriod ?? 0);
+  while (stages.length >= 2 && throughput(stages[0]) < throughput(stages[1])) {
     stages.shift();
   }
 
