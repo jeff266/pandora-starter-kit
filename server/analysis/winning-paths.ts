@@ -91,13 +91,27 @@ export async function computeWinningPaths(
         ${scopeClause}
     ),
     deal_sequences AS (
+      -- Deduplicate consecutive identical normalized stages within each deal's journey.
+      -- Multiple CRM stage IDs can map to the same normalized bucket (e.g. several
+      -- HubSpot numeric IDs all → 'qualification'). Without dedup, paths look like
+      -- "qualification → qualification → qualification → closed_won" which is noise.
       SELECT
         wd.id AS deal_id,
         wd.amount,
         wd.cycle_days,
-        array_agg(COALESCE(dsh.stage_normalized, dsh.stage) ORDER BY dsh.entered_at) AS stage_seq
+        array_agg(s.norm ORDER BY s.entered_at) AS stage_seq
       FROM won_deals wd
-      JOIN deal_stage_history dsh ON dsh.deal_id = wd.id AND dsh.workspace_id = $1
+      JOIN (
+        SELECT
+          dsh.deal_id,
+          dsh.entered_at,
+          COALESCE(dsh.stage_normalized, dsh.stage) AS norm,
+          LAG(COALESCE(dsh.stage_normalized, dsh.stage))
+            OVER (PARTITION BY dsh.deal_id ORDER BY dsh.entered_at) AS prev_norm
+        FROM deal_stage_history dsh
+        WHERE dsh.workspace_id = $1
+      ) s ON s.deal_id = wd.id
+      WHERE s.norm IS DISTINCT FROM s.prev_norm
       GROUP BY wd.id, wd.amount, wd.cycle_days
     )
     SELECT
@@ -161,8 +175,15 @@ export async function computeSimilarPaths(
   }
 
   const historyResult = await query<{ stage: string }>(
-    `SELECT COALESCE(stage_normalized, stage) AS stage FROM deal_stage_history
-     WHERE deal_id = $1 AND workspace_id = $2
+    `SELECT norm AS stage FROM (
+       SELECT
+         COALESCE(stage_normalized, stage) AS norm,
+         LAG(COALESCE(stage_normalized, stage)) OVER (ORDER BY entered_at) AS prev_norm,
+         entered_at
+       FROM deal_stage_history
+       WHERE deal_id = $1 AND workspace_id = $2
+     ) s
+     WHERE norm IS DISTINCT FROM prev_norm
      ORDER BY entered_at ASC`,
     [dealId, workspaceId]
   );
