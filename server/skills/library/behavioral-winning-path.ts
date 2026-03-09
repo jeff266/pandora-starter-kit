@@ -76,6 +76,12 @@ BIGGEST GAPS (milestones with highest lift, sorted desc):
 No milestone data available — insufficient closed deal history. Explain that more closed deals are needed to generate behavioral patterns (minimum ~10 won and ~10 lost in the analysis window).
 {{/if}}
 
+VOICE RULES:
+- Calm, specific, data-first. Write like a RevOps analyst reading a report.
+- Report what the data shows. If data coverage is limited, state the limitation once, plainly, then analyze what is available.
+- Never use fear language, urgency language, or implicit product CTAs.
+- Never say "flying blind", "alarming", "unlock", or "you need to".
+
 Write a Behavioral Winning Path analysis for this pipeline.
 3–4 paragraphs. No generic GTM advice. Everything you say must be grounded in the discovered milestones and pipeline data above.
 
@@ -88,7 +94,7 @@ Structure:
 Do not write bullet points. Do not use the phrase "it's important to". Write like a senior RevOps analyst who has read these transcripts.
 
 {{#unless milestone_matrix.isDiscovered}}
-Note: These milestones are structural proxies derived from {{milestone_matrix.tierLabel}}, not discovered from conversation transcripts. Connect Gong or Fireflies to unlock transcript-based discovery.
+Note: Milestones are structural proxies derived from {{milestone_matrix.tierLabel}}.
 {{/unless}}
 
 {{voiceBlock}}
@@ -106,6 +112,53 @@ Focus on the top 3 most actionable coaching or process insights.
 [{"action_type":"coach_rep","severity":"warning","title":"Enforce discovery call within first quarter of cycle","summary":"Won deals showed discovery call behavior at significantly higher rates than lost deals. Absence of this milestone early is the strongest predictor of loss.","recommended_steps":["Add discovery milestone to deal qualification checklist","Flag deals with no call activity after 25% of median cycle","Review open pipeline deals missing early discovery calls"],"urgency_label":"this_week"}]
 </actions>`,
       outputKey: 'narrative',
+    },
+
+    // Step 4: Compute Stage Progression
+    {
+      id: 'compute-stage-progression',
+      name: 'Compute Stage Progression',
+      tier: 'compute',
+      dependsOn: ['extract-milestones'],
+      computeFn: 'bwpComputeStageProgression',
+      computeArgs: {},
+      outputKey: 'stage_progression_matrix',
+    },
+
+    // Step 5: Synthesize Stage Progression
+    {
+      id: 'synthesize-stage-progression',
+      name: 'Synthesize Stage Progression',
+      tier: 'claude',
+      dependsOn: ['compute-stage-progression'],
+      claudePrompt: `You are a RevOps analyst synthesizing a Stage Progression analysis.
+
+Pipeline: {{#if stage_progression_matrix.pipelineId}}{{stage_progression_matrix.pipelineName}}{{else}}All Pipelines{{/if}}
+Analysis: {{stage_progression_matrix.meta.totalProgressors}} progressors vs {{stage_progression_matrix.meta.totalStallers}} stallers across {{stage_progression_matrix.meta.usableStages}} stages with transcript coverage
+
+STAGE RESULTS (ordered by signal gap, largest first):
+{{#each stage_progression_matrix.stages}}{{#unless this.coverageTooLow}}{{#unless this.insufficientSignal}}
+Stage: {{this.stageName}} | {{this.wonMedianDays}}d median | {{this.signalGapMultiplier}}× gap | {{this.progressorCount}} progressors / {{this.stallerCount}} stallers
+Top progression signals:
+{{#each this.progressionSignals}}  - {{this.title}}: {{this.progressorPct}}% of progressors, {{this.progressionLift}}× lift. Evidence: {{this.evidence.[0]}}
+{{/each}}Top warning signals:
+{{#each this.warningSignals}}  - {{this.title}}: {{this.description}} Evidence: {{this.evidence.[0]}}
+{{/each}}{{/unless}}{{/unless}}{{/each}}
+
+VOICE RULES:
+- Calm, specific, data-first.
+- Report what the data shows. State limitations once, plainly.
+- Never use fear language, urgency language, or CTAs.
+- Never say "flying blind", "alarming", "unlock", or "you need to".
+
+Write a Stage Progression analysis for this pipeline. 3 paragraphs.
+
+1. The stage with the largest signal gap — what are progressors actually doing that stallers aren't? Use the evidence phrases. Be specific about the behavior, not the outcome.
+2. The most consistent warning signal across stages — what buyer behavior predicts stalling? If it appears in multiple stages, say so.
+3. The single most actionable coaching implication for reps with deals currently in the highest-gap stage.
+
+Do not write bullet points. Write like a senior RevOps analyst who has read these transcripts.`,
+      outputKey: 'stage_progression_narrative',
     },
   ],
 

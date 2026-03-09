@@ -505,3 +505,198 @@ export async function getWonCyclePercentiles(
     sampleSize: parseInt(row.sample_size) || 0,
   };
 }
+
+/**
+ * Median days per stage specifically for deals that eventually closed won.
+ * Used for stall threshold computation in Stage Progression.
+ * Returns a map of stage_normalized → median days (raw stage names as fallback).
+ */
+export async function getWonStageMedianDays(
+  workspaceId: string,
+  pipeline?: string
+): Promise<Record<string, number>> {
+  const params: string[] = [workspaceId];
+  if (pipeline) params.push(pipeline);
+
+  const result = await query<{
+    stage: string;
+    median_days: string;
+    deal_count: string;
+  }>(`
+    SELECT
+      COALESCE(dsh.to_stage_normalized, dsh.to_stage) AS stage,
+      ROUND(
+        PERCENTILE_CONT(0.5) WITHIN GROUP (
+          ORDER BY dsh.duration_in_previous_stage_ms / 86400000.0
+        )::NUMERIC, 1
+      ) AS median_days,
+      COUNT(*) AS deal_count
+    FROM deal_stage_history dsh
+    JOIN deals d ON d.id = dsh.deal_id
+    WHERE dsh.workspace_id = $1
+      AND d.stage_normalized = 'closed_won'
+      AND dsh.duration_in_previous_stage_ms IS NOT NULL
+      AND dsh.duration_in_previous_stage_ms > 0
+      ${pipeline ? 'AND d.pipeline = $2' : ''}
+    GROUP BY COALESCE(dsh.to_stage_normalized, dsh.to_stage)
+  `, params);
+
+  const map: Record<string, number> = {};
+  for (const row of result.rows) {
+    const days = parseFloat(row.median_days);
+    if (!isNaN(days) && days > 0) {
+      map[row.stage] = days;
+    }
+  }
+  return map;
+}
+
+export interface StageCoverageItem {
+  stageName: string;
+  stageNormalized: string;
+  stageOrder: number;
+  wonMedianDays: number;
+  stallThresholdDays: number;
+  totalDealsEverInStage: number;
+  dealsWithTranscripts: number;
+  transcriptCoveragePct: number;
+  progressorCount: number;
+  stallerCount: number;
+}
+
+export interface StageTranscriptCoverageResult {
+  stages: StageCoverageItem[];
+  totalCoveragePct: number;
+  usableStages: number;
+}
+
+/**
+ * Coverage probe for Stage Progression.
+ * For each open/active stage, returns deal counts, transcript coverage,
+ * and a rough progressor/staller split. Fast — no LLM calls.
+ */
+export async function getStageTranscriptCoverage(
+  workspaceId: string,
+  pipeline?: string
+): Promise<StageTranscriptCoverageResult> {
+  const params: (string)[] = [workspaceId];
+  if (pipeline) params.push(pipeline);
+
+  const coverageQuery = `
+    WITH stage_entries AS (
+      SELECT
+        dsh.deal_id,
+        COALESCE(dsh.to_stage_normalized, dsh.to_stage) AS stage_normalized,
+        dsh.to_stage                                     AS stage_name,
+        dsh.changed_at                                   AS entered_at,
+        dsh.duration_in_previous_stage_ms,
+        LEAD(dsh.changed_at) OVER (
+          PARTITION BY dsh.deal_id ORDER BY dsh.changed_at
+        ) AS next_changed_at,
+        LEAD(COALESCE(dsh.to_stage_normalized, dsh.to_stage)) OVER (
+          PARTITION BY dsh.deal_id ORDER BY dsh.changed_at
+        ) AS next_stage_normalized
+      FROM deal_stage_history dsh
+      JOIN deals d ON d.id = dsh.deal_id
+      WHERE dsh.workspace_id = $1
+        ${pipeline ? 'AND d.pipeline = $2' : ''}
+        AND dsh.to_stage_normalized NOT IN ('closed_won', 'closed_lost')
+        AND dsh.to_stage NOT ILIKE '%closed%'
+        AND dsh.to_stage NOT ILIKE '%won%'
+        AND dsh.to_stage NOT ILIKE '%lost%'
+    ),
+    stage_with_convos AS (
+      SELECT
+        se.stage_normalized,
+        se.stage_name,
+        se.deal_id,
+        se.entered_at,
+        se.next_changed_at,
+        se.next_stage_normalized,
+        se.duration_in_previous_stage_ms,
+        COUNT(c.id) AS convo_count
+      FROM stage_entries se
+      LEFT JOIN conversations c
+        ON c.deal_id = se.deal_id
+        AND c.call_date >= se.entered_at
+        AND (se.next_changed_at IS NULL OR c.call_date < se.next_changed_at)
+        AND (c.is_internal = false OR c.is_internal IS NULL)
+        AND c.deal_id IS NOT NULL
+      GROUP BY se.stage_normalized, se.stage_name, se.deal_id,
+               se.entered_at, se.next_changed_at, se.next_stage_normalized,
+               se.duration_in_previous_stage_ms
+    )
+    SELECT
+      stage_normalized,
+      stage_name,
+      COUNT(*)                                                         AS total_deals,
+      COUNT(*) FILTER (WHERE convo_count > 0)                         AS deals_with_transcripts,
+      COUNT(*) FILTER (WHERE convo_count > 0 AND next_stage_normalized IS NOT NULL
+                         AND next_stage_normalized NOT IN ('closed_won','closed_lost')
+                         AND (duration_in_previous_stage_ms IS NULL
+                              OR duration_in_previous_stage_ms <= 0
+                              OR TRUE))                                AS progressor_est,
+      COUNT(*) FILTER (WHERE convo_count > 0
+                         AND (next_stage_normalized IS NULL
+                              OR next_stage_normalized IN ('closed_lost')))  AS staller_est
+    FROM stage_with_convos
+    GROUP BY stage_normalized, stage_name
+    ORDER BY MAX(entered_at) DESC
+  `;
+
+  const coverageResult = await query<{
+    stage_normalized: string;
+    stage_name: string;
+    total_deals: string;
+    deals_with_transcripts: string;
+    progressor_est: string;
+    staller_est: string;
+  }>(coverageQuery, params);
+
+  const wonMedianMap = await getWonStageMedianDays(workspaceId, pipeline);
+
+  const orderResult = await query<{
+    stage_name: string;
+    display_order: string;
+  }>(`
+    SELECT stage_name, display_order
+    FROM stage_configs
+    WHERE workspace_id = $1
+    ORDER BY display_order ASC
+  `, [workspaceId]);
+
+  const orderMap: Record<string, number> = {};
+  for (const row of orderResult.rows) {
+    orderMap[row.stage_name] = parseInt(row.display_order, 10);
+  }
+
+  const stages: StageCoverageItem[] = coverageResult.rows.map((row) => {
+    const totalDeals = parseInt(row.total_deals, 10) || 0;
+    const dealsWithTranscripts = parseInt(row.deals_with_transcripts, 10) || 0;
+    const wonMedianDays = wonMedianMap[row.stage_normalized] ?? 14;
+    const stallThresholdDays = Math.max(7, Math.round(wonMedianDays * 2));
+    return {
+      stageName: row.stage_name,
+      stageNormalized: row.stage_normalized,
+      stageOrder: orderMap[row.stage_name] ?? orderMap[row.stage_normalized] ?? 999,
+      wonMedianDays,
+      stallThresholdDays,
+      totalDealsEverInStage: totalDeals,
+      dealsWithTranscripts,
+      transcriptCoveragePct: totalDeals > 0 ? dealsWithTranscripts / totalDeals : 0,
+      progressorCount: parseInt(row.progressor_est, 10) || 0,
+      stallerCount: parseInt(row.staller_est, 10) || 0,
+    };
+  });
+
+  stages.sort((a, b) => a.stageOrder - b.stageOrder);
+
+  const totalDealsAll = stages.reduce((s, x) => s + x.totalDealsEverInStage, 0);
+  const totalWithTranscripts = stages.reduce((s, x) => s + x.dealsWithTranscripts, 0);
+
+  return {
+    stages,
+    totalCoveragePct: totalDealsAll > 0 ? totalWithTranscripts / totalDealsAll : 0,
+    usableStages: stages.filter(s => s.dealsWithTranscripts >= 5).length,
+  };
+}

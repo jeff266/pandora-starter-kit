@@ -73,10 +73,55 @@ interface TierProbe {
   };
 }
 
+interface StageSignal {
+  id: string;
+  title: string;
+  description: string;
+  evidence: string[];
+  absentInStallers: string;
+  type: 'progression' | 'warning';
+  progressorPct: number;
+  stallerPct: number;
+  progressionLift: number;
+  insufficientData: boolean;
+  confidence: 'high' | 'medium' | 'low';
+}
+
+interface StageProgressionResult {
+  stageName: string;
+  stageNormalized: string;
+  stageOrder: number;
+  wonMedianDays: number;
+  stallThresholdDays: number;
+  progressorCount: number;
+  stallerCount: number;
+  transcriptCoveragePct: number;
+  signalGapMultiplier: number;
+  progressionSignals: StageSignal[];
+  warningSignals: StageSignal[];
+  insufficientSignal: boolean;
+  coverageTooLow: boolean;
+}
+
+interface StageProgressionMatrix {
+  pipelineId: string | null;
+  pipelineName: string;
+  stages: StageProgressionResult[];
+  summary: string;
+  meta: {
+    totalStages: number;
+    usableStages: number;
+    totalProgressors: number;
+    totalStallers: number;
+    analysisPeriodDays: number;
+    generatedAt: string;
+  };
+}
+
 interface RunResult {
   runId: string;
   completedAt: string;
-  result?: { milestone_matrix?: MilestoneMatrix; narrative?: string };
+  result?: { milestone_matrix?: MilestoneMatrix; narrative?: string; stage_progression_matrix?: StageProgressionMatrix; stage_progression_narrative?: string };
   outputText?: string;
 }
 
@@ -485,6 +530,333 @@ function UpgradePrompt({ tier }: { tier: number }) {
   );
 }
 
+function gapColor(mult: number): string {
+  if (mult > 5) return '#f87171';
+  if (mult > 2) return '#fbbf24';
+  return '#94a3b8';
+}
+
+function StageSignalCard({
+  signal, selected, onClick,
+}: {
+  signal: StageSignal;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  const isProgression = signal.type === 'progression';
+  const bg     = isProgression ? 'rgba(74,222,128,0.06)' : 'rgba(248,113,113,0.06)';
+  const border  = selected
+    ? (isProgression ? 'rgba(74,222,128,0.6)' : 'rgba(248,113,113,0.6)')
+    : (isProgression ? 'rgba(74,222,128,0.22)' : 'rgba(248,113,113,0.22)');
+  const accentColor = isProgression ? '#4ade80' : '#f87171';
+
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        background: selected ? (isProgression ? 'rgba(74,222,128,0.10)' : 'rgba(248,113,113,0.10)') : bg,
+        border: `1px solid ${border}`,
+        borderRadius: 8, padding: '10px 12px', cursor: 'pointer',
+        transition: 'all 0.15s',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 5 }}>
+        <span style={{
+          fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 4,
+          background: isProgression ? 'rgba(74,222,128,0.14)' : 'rgba(248,113,113,0.14)',
+          color: accentColor, fontFamily: font, whiteSpace: 'nowrap',
+        }}>
+          {isProgression ? '↑ Progression' : '↓ Warning'}
+        </span>
+      </div>
+      <div style={{ fontSize: 13, fontWeight: 600, color: colors.text, fontFamily: font, lineHeight: 1.3, marginBottom: 4 }}>
+        {signal.title}
+      </div>
+      <div style={{ fontSize: 11, color: colors.textMuted, fontFamily: font, lineHeight: 1.4, marginBottom: 8 }}>
+        {signal.description}
+      </div>
+      {!signal.insufficientData && (
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: accentColor, fontFamily: mono }}>
+            {signal.progressorPct}%
+          </span>
+          <span style={{ fontSize: 11, color: colors.textMuted, fontFamily: font }}>of progressors</span>
+          {isProgression && (
+            <>
+              <span style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 700, color: '#fbbf24', fontFamily: mono }}>
+                {signal.progressionLift}×
+              </span>
+              <span style={{ fontSize: 11, color: colors.textMuted, fontFamily: font }}>lift</span>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StageSignalDetailPanel({
+  signal, onClose,
+}: {
+  signal: StageSignal;
+  onClose: () => void;
+}) {
+  const isProgression = signal.type === 'progression';
+  const accentColor   = isProgression ? '#4ade80' : '#f87171';
+  const borderColor   = isProgression ? 'rgba(74,222,128,0.25)' : 'rgba(248,113,113,0.25)';
+  const bgColor       = isProgression ? 'rgba(74,222,128,0.04)' : 'rgba(248,113,113,0.04)';
+
+  return (
+    <div style={{
+      background: bgColor, border: `1px solid ${borderColor}`,
+      borderRadius: 10, padding: '20px 24px', marginTop: 16,
+      boxShadow: `0 0 20px ${isProgression ? 'rgba(74,222,128,0.08)' : 'rgba(248,113,113,0.08)'}`,
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+        <div>
+          <div style={{ fontSize: 11, color: colors.textMuted, fontFamily: mono, marginBottom: 4 }}>
+            {isProgression ? '↑ Progression signal' : '↓ Warning signal'}
+          </div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: colors.text, fontFamily: font, marginBottom: 3 }}>
+            {signal.title}
+          </div>
+          <div style={{ fontSize: 13, color: colors.textMuted, fontFamily: font }}>
+            {signal.description}
+          </div>
+        </div>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', color: colors.textMuted, cursor: 'pointer', fontSize: 18, lineHeight: 1, padding: '0 4px' }}>×</button>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(120px,1fr))', gap: 10, marginBottom: 16 }}>
+        {[
+          { label: '% of progressors', value: `${signal.progressorPct}%`, color: '#4ade80' },
+          { label: '% of stallers',    value: `${signal.stallerPct}%`,    color: '#f87171' },
+          { label: 'Lift',             value: `${signal.progressionLift}×`, color: '#fbbf24' },
+          { label: 'Confidence',       value: signal.confidence,          color: colors.textSecondary },
+        ].map(s => (
+          <div key={s.label} style={{
+            background: colors.surfaceRaised, border: `1px solid ${colors.border}`,
+            borderRadius: 8, padding: '10px 12px',
+          }}>
+            <div style={{ fontSize: 18, fontWeight: 700, color: s.color, fontFamily: mono, marginBottom: 3 }}>{s.value}</div>
+            <div style={{ fontSize: 11, color: colors.textMuted, fontFamily: font }}>{s.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {signal.evidence.length > 0 && (
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: colors.textMuted, fontFamily: font, letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 8 }}>
+            From your transcripts
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {signal.evidence.map((e, i) => (
+              <div key={i} style={{
+                background: colors.surfaceRaised, border: `1px solid ${colors.borderLight}`,
+                borderLeft: `3px solid ${accentColor}`,
+                borderRadius: 6, padding: '8px 12px',
+                fontSize: 13, color: colors.textSecondary, fontFamily: font, lineHeight: 1.5,
+                fontStyle: 'italic',
+              }}>
+                "{e}"
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {signal.absentInStallers && (
+        <div style={{
+          background: 'rgba(248,113,113,0.06)', border: '1px solid rgba(248,113,113,0.18)',
+          borderRadius: 8, padding: '10px 14px',
+          fontSize: 13, color: '#e8a0a7', fontFamily: font, lineHeight: 1.5,
+        }}>
+          <strong style={{ color: '#f87171' }}>In stalling deals:</strong> {signal.absentInStallers}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StageProgressionGrid({
+  stageMatrix, stageNarrative, loading, error, noData,
+}: {
+  stageMatrix: StageProgressionMatrix | null;
+  stageNarrative: string | null;
+  loading: boolean;
+  error: string | null;
+  noData: boolean;
+}) {
+  const [selectedSignal, setSelectedSignal] = useState<StageSignal | null>(null);
+
+  const setSelected = (signal: StageSignal | null) => setSelectedSignal(prev => prev?.id === signal?.id ? null : signal);
+
+  if (loading) {
+    return (
+      <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10, padding: 20 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: `repeat(4, 1fr)`, gap: 12, marginBottom: 20 }}>
+          {[0,1,2,3].map(i => (
+            <div key={i}>
+              <SkeletonBlock h={14} w="70%" /><div style={{ marginTop: 6 }}><SkeletonBlock h={10} w="50%" /></div>
+            </div>
+          ))}
+        </div>
+        {[0,1].map(i => (
+          <div key={i} style={{ display: 'grid', gridTemplateColumns: `repeat(4, 1fr)`, gap: 12, marginBottom: 12 }}>
+            {[0,1,2,3].map(j => <SkeletonBlock key={j} h={80} radius={6} />)}
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div style={{ background: colors.redSoft, border: `1px solid rgba(239,68,68,0.25)`, borderRadius: 8, padding: '12px 18px', fontSize: 13, color: colors.red, fontFamily: font }}>
+        {error}
+      </div>
+    );
+  }
+
+  if (noData || !stageMatrix) {
+    return (
+      <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10, padding: '48px 32px', textAlign: 'center' }}>
+        <div style={{ fontSize: 28, marginBottom: 12 }}>◫</div>
+        <div style={{ fontSize: 15, fontWeight: 600, color: colors.textSecondary, marginBottom: 6, fontFamily: font }}>
+          No stage progression data yet
+        </div>
+        <div style={{ fontSize: 13, color: colors.textMuted, maxWidth: 400, margin: '0 auto', lineHeight: 1.6, fontFamily: font }}>
+          Run the Winning Path analysis to generate stage progression signals. Both analyses run together.
+        </div>
+      </div>
+    );
+  }
+
+  const stages = stageMatrix.stages;
+  const colCount = stages.length;
+  const gridCols = colCount > 0 ? `repeat(${colCount}, 1fr)` : '1fr';
+
+  return (
+    <>
+      <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' as any }}>
+        <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10, overflow: 'hidden', minWidth: Math.max(520, colCount * 200) }}>
+
+          {/* Column headers */}
+          <div style={{ display: 'grid', gridTemplateColumns: gridCols, borderBottom: `1px solid ${colors.border}` }}>
+            {stages.map((stage, ci) => (
+              <div key={stage.stageName} style={{
+                padding: '12px 14px',
+                borderRight: ci < stages.length - 1 ? `1px solid ${colors.border}` : undefined,
+                opacity: stage.coverageTooLow ? 0.55 : 1,
+              }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: colors.text, fontFamily: font, marginBottom: 3 }}>
+                  {stage.stageName}
+                </div>
+                <div style={{ fontSize: 11, color: colors.textMuted, fontFamily: font }}>
+                  {stage.wonMedianDays > 0 ? `${stage.wonMedianDays}d median` : '—'}
+                  {stage.signalGapMultiplier > 1 && (
+                    <span style={{ marginLeft: 5, color: gapColor(stage.signalGapMultiplier), fontWeight: 700 }}>
+                      {stage.signalGapMultiplier}× gap
+                    </span>
+                  )}
+                </div>
+                <div style={{ fontSize: 10, color: colors.textMuted, fontFamily: font, marginTop: 2 }}>
+                  {stage.progressorCount > 0 || stage.stallerCount > 0
+                    ? `${stage.progressorCount} progressors · ${stage.stallerCount} stallers`
+                    : `${Math.round(stage.transcriptCoveragePct * 100)}% coverage`}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Progression signals row */}
+          <div style={{ display: 'grid', gridTemplateColumns: gridCols, borderBottom: `1px solid ${colors.border}` }}>
+            {stages.map((stage, ci) => (
+              <div key={stage.stageName} style={{
+                padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8,
+                borderRight: ci < stages.length - 1 ? `1px solid ${colors.border}` : undefined,
+                minHeight: 80,
+              }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: '#4ade80', fontFamily: font, letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 2 }}>
+                  ↑ Progresses deals
+                </div>
+                {stage.coverageTooLow ? (
+                  <div style={{
+                    background: colors.surfaceRaised, border: `1px solid ${colors.borderLight}`,
+                    borderRadius: 7, padding: '10px 12px', fontSize: 12, color: colors.textMuted, fontFamily: font,
+                  }}>
+                    Coverage too low — fewer than 15% of deals in this stage have linked conversations
+                  </div>
+                ) : stage.insufficientSignal ? (
+                  <div style={{
+                    background: colors.surfaceRaised, border: `1px solid ${colors.borderLight}`,
+                    borderRadius: 7, padding: '10px 12px', fontSize: 12, color: colors.textMuted, fontFamily: font,
+                  }}>
+                    No distinguishing signals found — behaviors are similar across progressors and stallers in this stage
+                  </div>
+                ) : (
+                  stage.progressionSignals.map(signal => (
+                    <StageSignalCard
+                      key={signal.id}
+                      signal={signal}
+                      selected={selectedSignal?.id === signal.id}
+                      onClick={() => setSelected(signal)}
+                    />
+                  ))
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* Warning signals row */}
+          <div style={{ display: 'grid', gridTemplateColumns: gridCols }}>
+            {stages.map((stage, ci) => (
+              <div key={stage.stageName} style={{
+                padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8,
+                borderRight: ci < stages.length - 1 ? `1px solid ${colors.border}` : undefined,
+                minHeight: 60,
+              }}>
+                {!stage.coverageTooLow && !stage.insufficientSignal && stage.warningSignals.length > 0 && (
+                  <>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: '#f87171', fontFamily: font, letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 2 }}>
+                      ↓ Stalls deals
+                    </div>
+                    {stage.warningSignals.map(signal => (
+                      <StageSignalCard
+                        key={signal.id}
+                        signal={signal}
+                        selected={selectedSignal?.id === signal.id}
+                        onClick={() => setSelected(signal)}
+                      />
+                    ))}
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Detail panel */}
+      {selectedSignal && (
+        <StageSignalDetailPanel
+          signal={selectedSignal}
+          onClose={() => setSelectedSignal(null)}
+        />
+      )}
+
+      {/* Synthesis card */}
+      {stageNarrative && (
+        <SynthesisCard
+          text={stageNarrative}
+          completedAt={stageMatrix.meta.generatedAt}
+          periodDays={stageMatrix.meta.analysisPeriodDays}
+        />
+      )}
+    </>
+  );
+}
+
 // ============================================================================
 // Main Page
 // ============================================================================
@@ -507,6 +879,13 @@ export default function BehavioralWinningPathPage() {
   const [pipelines, setPipelines]           = useState<{ id: string; name: string }[]>([]);
   const [activePipeline, setActivePipeline] = useState<string | null>(null);
   const [baselineMatrix, setBaselineMatrix] = useState<MilestoneMatrix | null>(null);
+
+  const [activeView, setActiveView]             = useState<'win-path' | 'stage-progression'>('win-path');
+  const [stageMatrix, setStageMatrix]           = useState<StageProgressionMatrix | null>(null);
+  const [stageNarrative, setStageNarrative]     = useState<string | null>(null);
+  const [stageLoading, setStageLoading]         = useState(false);
+  const [stageError, setStageError]             = useState<string | null>(null);
+  const [stageNoData, setStageNoData]           = useState(false);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastCompletedAt = useRef<string | null>(null);
@@ -577,14 +956,42 @@ export default function BehavioralWinningPathPage() {
     setLoading(false);
   }, [workspaceId]);
 
-  // Single effect: re-runs when workspaceId or activePipeline changes
-  useEffect(() => {
+  const loadStageProgression = useCallback(async (pipeline: string | null) => {
     if (!workspaceId) return;
+    setStageLoading(true);
+    setStageError(null);
+    setStageNoData(false);
+    try {
+      const url = `/skills/behavioral-winning-path/stage-progression/latest${pipeline ? `?pipeline=${encodeURIComponent(pipeline)}` : ''}`;
+      const data = await api.get(url) as { stageProgressionMatrix: StageProgressionMatrix; narrative: string | null };
+      setStageMatrix(data.stageProgressionMatrix);
+      setStageNarrative(data.narrative);
+    } catch (err: any) {
+      if (err?.status === 404 || String(err?.message).includes('404') || String(err?.message).includes('No ')) {
+        setStageNoData(true);
+        setStageMatrix(null);
+      } else {
+        setStageError(err?.message ?? 'Failed to load stage progression data');
+      }
+    }
+    setStageLoading(false);
+  }, [workspaceId]);
+
+  // Effect for Win Path view
+  useEffect(() => {
+    if (!workspaceId || activeView !== 'win-path') return;
     if (activePipeline) loadPipelineMatrix(activePipeline);
     else loadData();
     return stopPoll;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspaceId, activePipeline]);
+  }, [workspaceId, activePipeline, activeView]);
+
+  // Effect for Stage Progression view
+  useEffect(() => {
+    if (!workspaceId || activeView !== 'stage-progression') return;
+    loadStageProgression(activePipeline);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceId, activePipeline, activeView]);
 
   const startRun = async () => {
     if (running) return;
@@ -742,6 +1149,33 @@ export default function BehavioralWinningPathPage() {
         </div>
       </div>
 
+      {/* ── View tab strip ──────────────────────────────────────────────────── */}
+      <div style={{
+        display: 'flex', gap: 4, marginBottom: 14,
+        borderBottom: `1px solid ${colors.border}`,
+      }}>
+        {(['win-path', 'stage-progression'] as const).map(view => {
+          const isActive = activeView === view;
+          const label = view === 'win-path' ? 'Win Path' : 'Stage Progression';
+          return (
+            <button
+              key={view}
+              onClick={() => setActiveView(view)}
+              style={{
+                background: 'none', border: 'none',
+                borderBottom: `2px solid ${isActive ? colors.accent : 'transparent'}`,
+                color: isActive ? colors.accent : colors.textMuted,
+                fontSize: 13, fontWeight: 600, padding: '8px 14px',
+                cursor: 'pointer', fontFamily: font, transition: 'all 0.15s',
+                marginBottom: -1,
+              }}
+            >
+              {label}
+            </button>
+          );
+        })}
+      </div>
+
       {/* ── Pipeline filter pills ───────────────────────────────────────────── */}
       {pipelines.length > 1 && (
         <div style={{
@@ -778,6 +1212,20 @@ export default function BehavioralWinningPathPage() {
           ))}
         </div>
       )}
+
+      {/* ── Stage Progression tab ───────────────────────────────────────────── */}
+      {activeView === 'stage-progression' && (
+        <StageProgressionGrid
+          stageMatrix={stageMatrix}
+          stageNarrative={stageNarrative}
+          loading={stageLoading}
+          error={stageError}
+          noData={stageNoData}
+        />
+      )}
+
+      {/* ── Win Path tab ──────────────────────────────────────────────────── */}
+      {activeView === 'win-path' && <>
 
       {/* ── Error ───────────────────────────────────────────────────────────── */}
       {error && (
@@ -983,6 +1431,7 @@ export default function BehavioralWinningPathPage() {
           <UpgradePrompt tier={matrix.tier} />
         </>
       )}
+      </>}
     </div>
   );
 }

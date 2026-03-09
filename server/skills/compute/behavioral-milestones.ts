@@ -325,6 +325,7 @@ async function getClosedDeals(
        AND d.stage_normalized IN ('closed_won','closed_lost')
        AND d.close_date >= $2
        ${pipeline ? 'AND d.pipeline = $3' : ''}
+     ORDER BY d.close_date DESC
      LIMIT 300`,
     params
   );
@@ -642,9 +643,8 @@ Only include milestones with at least 2 distinct evidence phrases. Return JSON a
     .sort((a, b) => recurrenceOrder[a.recurrence] - recurrenceOrder[b.recurrence])
     .slice(0, 5);
 
-  // Sample up to 25 won + 25 lost for scoring
-  const scoringWonIds  = wonIds.slice(0, 25);
-  const scoringLostIds = lostIds.slice(0, 25);
+  const scoringWonIds  = wonIds;
+  const scoringLostIds = lostIds;
   const scoringAllIds  = [...scoringWonIds, ...scoringLostIds];
 
   // Fetch transcripts for scoring pool (longest per deal, sales calls only)
@@ -1216,11 +1216,10 @@ export async function extractBehavioralMilestones(
   const percentiles = await getWonCyclePercentiles(workspaceId, pipeline);
   const wonMedianDays = percentiles?.p50 ?? avgWonCycleDays ?? 60;
 
-  const confidenceNotes: Record<number, string> = {
-    1: 'Behavioral milestones discovered from conversation intelligence (call recordings, transcripts). Highest confidence — signals reflect actual buyer behavior extracted from your transcripts.',
-    2: 'Behavioral milestones derived from email engagement patterns. Confidence: medium. Conversation intelligence (Gong or Fireflies) would produce higher-confidence signals based on transcript content and call participation.',
-    3: 'Behavioral milestones derived from CRM contact associations. Confidence: low-medium. These indicate stakeholder presence on record, not verified engagement. Email or conversation data would confirm whether those contacts were actually active.',
-    4: 'Stage-based milestones only. Confidence: low. These reflect CRM record movement, not verified buyer behavior. Connect Gong, Fireflies, or your email system to unlock behavioral signal analysis.',
+  const confidenceNotesTiers: Record<number, string> = {
+    2: 'Sourced from email activity records. Call recordings and transcript content are not available for this analysis.',
+    3: 'Sourced from CRM contact role records. No call or email engagement data is available for this analysis.',
+    4: 'Sourced from CRM stage movement only. No call, email, or contact engagement data is available for this workspace.',
   };
 
   let wonMilestones: BehavioralMilestone[] = [];
@@ -1269,7 +1268,9 @@ export async function extractBehavioralMilestones(
     avgLostCycleDays,
     wonMilestones,
     lostAbsences,
-    confidenceNote: confidenceNotes[tierProbe.tier],
+    confidenceNote: tierProbe.tier === 1
+      ? `Behavioral signals discovered from call recordings and transcripts. Reflects actual buyer language and participation extracted from ${transcriptsSampled} conversations.`
+      : (confidenceNotesTiers[tierProbe.tier] ?? 'Sourced from CRM data.'),
     // v2 fields
     isDiscovered,
     discoveryNote,

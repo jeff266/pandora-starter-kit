@@ -63,6 +63,7 @@ import {
   extractBehavioralMilestones,
   type DataTierProbe,
 } from './compute/behavioral-milestones.js';
+import { computeStageProgression } from './compute/stage-progression.js';
 import {
   buildICPTaxonomy,
   enrichTopAccounts,
@@ -4962,6 +4963,25 @@ const bwpExtractMilestonesTool: ToolDefinition = {
   },
 };
 
+const bwpComputeStageProgressionTool: ToolDefinition = {
+  name: 'bwpComputeStageProgression',
+  description: 'Compute stage progression signals — discovers buyer behaviors that distinguish progressors (deals that advanced through a stage) from stallers (deals that got stuck)',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('bwpComputeStageProgression', async () => {
+      const pipeline = (context.params?.pipeline as string | undefined) ?? null;
+      const result = await computeStageProgression(context.workspaceId, pipeline);
+      console.log(`[StageProgression] Tool done: ${result.meta.usableStages}/${result.meta.totalStages} usable stages`);
+      return result;
+    }, params);
+  },
+};
+
 // ============================================================================
 // ICP Discovery Tools
 // ============================================================================
@@ -8709,6 +8729,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['generateContactRoleReport', generateContactRoleReportTool],
   ['bwpProbeTier', bwpProbeTierTool],
   ['bwpExtractMilestones', bwpExtractMilestonesTool],
+  ['bwpComputeStageProgression', bwpComputeStageProgressionTool],
   ['discoverICP', discoverICPTool],
   ['buildICPTaxonomy', buildICPTaxonomyTool],
   ['enrichTopAccounts', enrichTopAccountsTool],

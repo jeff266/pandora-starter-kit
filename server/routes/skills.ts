@@ -16,6 +16,7 @@ import { buildConversationHistory } from '../lib/conversation-history.js';
 import type { HistoryTurn } from '../lib/conversation-history.js';
 import { randomUUID } from 'crypto';
 import { probeBehavioralDataTier, extractBehavioralMilestones } from '../skills/compute/behavioral-milestones.js';
+import { getStageTranscriptCoverage } from '../analysis/stage-history-queries.js';
 
 const router = Router();
 
@@ -1489,10 +1490,64 @@ router.get('/:workspaceId/skills/behavioral-winning-path/latest', async (req, re
 });
 
 /**
+ * GET /:workspaceId/skills/behavioral-winning-path/stage-progression/latest
+ * Returns the most recent Stage Progression matrix from the latest completed skill run.
+ */
+router.get('/:workspaceId/skills/behavioral-winning-path/stage-progression/latest', async (req, res) => {
+  const { workspaceId } = req.params;
+  try {
+    const result = await query(
+      `SELECT run_id, result, output_text, started_at, completed_at
+       FROM skill_runs
+       WHERE workspace_id = $1
+         AND skill_id = 'behavioral-winning-path'
+         AND status = 'completed'
+       ORDER BY completed_at DESC
+       LIMIT 1`,
+      [workspaceId]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'No completed runs found for behavioral-winning-path' });
+    }
+    const row = result.rows[0];
+    const runResult = row.result as any;
+    const matrix = runResult?.stage_progression_matrix;
+    if (!matrix) {
+      return res.status(404).json({ error: 'No stage progression data in latest run — re-run the skill to generate it' });
+    }
+    return res.json({
+      runId:                   row.run_id,
+      stageProgressionMatrix:  matrix,
+      narrative:               runResult?.stage_progression_narrative ?? null,
+      completedAt:             row.completed_at,
+    });
+  } catch (err: any) {
+    console.error('[stage-progression/latest] Error:', err.message);
+    return res.status(500).json({ error: 'Failed to fetch stage progression data' });
+  }
+});
+
+/**
+ * GET /:workspaceId/skills/behavioral-winning-path/stage-progression/coverage
+ * Fast coverage probe — no LLM calls. Returns per-stage transcript coverage.
+ * Query params: pipeline? (optional CRM pipeline name)
+ */
+router.get('/:workspaceId/skills/behavioral-winning-path/stage-progression/coverage', async (req, res) => {
+  const { workspaceId } = req.params;
+  const pipeline = req.query.pipeline as string | undefined;
+  try {
+    const coverage = await getStageTranscriptCoverage(workspaceId, pipeline || undefined);
+    return res.json(coverage);
+  } catch (err: any) {
+    console.error('[stage-progression/coverage] Error:', err.message);
+    return res.status(500).json({ error: 'Failed to compute stage transcript coverage' });
+  }
+});
+
+/**
  * GET /:workspaceId/skills/behavioral-winning-path/tier
  * Fast data tier probe — no analysis, no LLM calls.
  * Returns which tier is available and why, plus availability breakdown.
- * Useful for the UI to show "Connect Gong to unlock full analysis."
  */
 router.get('/:workspaceId/skills/behavioral-winning-path/tier', async (req, res) => {
   const { workspaceId } = req.params;
