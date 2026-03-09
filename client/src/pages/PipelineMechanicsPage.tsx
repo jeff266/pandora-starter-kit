@@ -19,11 +19,13 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'winning-paths', label: 'Winning Paths' },
 ];
 
-const PERIOD_PRESETS: { label: string; days: number | 'ytd' }[] = [
+const PERIOD_PRESETS: { label: string; days: number | 'ytd' | 'all' }[] = [
   { label: '30d', days: 30 },
   { label: '90d', days: 90 },
   { label: '180d', days: 180 },
   { label: 'YTD', days: 'ytd' },
+  { label: '365d', days: 365 },
+  { label: 'All Time', days: 'all' },
 ];
 
 function getYtdDays(): number {
@@ -32,8 +34,10 @@ function getYtdDays(): number {
   return Math.max(1, Math.ceil((now.getTime() - jan1.getTime()) / 86_400_000));
 }
 
-function resolveDays(preset: number | 'ytd'): number {
-  return preset === 'ytd' ? getYtdDays() : preset;
+function resolvePeriodParam(preset: number | 'ytd' | 'all'): string {
+  if (preset === 'all') return 'all';
+  if (preset === 'ytd') return String(getYtdDays());
+  return String(preset);
 }
 
 export default function PipelineMechanicsPage() {
@@ -160,22 +164,22 @@ export default function PipelineMechanicsPage() {
 // ── Pipeline History Tab ──────────────────────────────────────────────────────
 
 function PipelineHistoryTab({ pipeline }: { pipeline: string | null }) {
-  const [activePeriod, setActivePeriod] = useState<number | 'ytd'>(90);
+  const [activePeriod, setActivePeriod] = useState<number | 'ytd' | 'all'>(90);
   const [showRaw, setShowRaw] = useState(false);
   const [sankeyData, setSankeyData] = useState<SankeyChartData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const fetchSankey = useCallback(async (
-    period: number | 'ytd',
+    period: number | 'ytd' | 'all',
     activePipeline: string | null = null,
     raw = false,
   ) => {
     setLoading(true);
     setError(null);
     try {
-      const days = resolveDays(period);
-      let url = `/analysis/sankey?periodDays=${days}`;
+      const param = resolvePeriodParam(period);
+      let url = `/analysis/sankey?periodDays=${param}`;
       if (activePipeline) url += `&pipeline=${encodeURIComponent(activePipeline)}`;
       if (raw) url += `&raw=true`;
       const data = await api.get(url) as SankeyChartData;
@@ -191,7 +195,7 @@ function PipelineHistoryTab({ pipeline }: { pipeline: string | null }) {
     fetchSankey(activePeriod, pipeline, showRaw);
   }, [pipeline]);
 
-  function handlePeriod(preset: number | 'ytd') {
+  function handlePeriod(preset: number | 'ytd' | 'all') {
     setActivePeriod(preset);
     fetchSankey(preset, pipeline, showRaw);
   }

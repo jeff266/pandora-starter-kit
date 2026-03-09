@@ -248,12 +248,31 @@ router.get('/:workspaceId/analysis/sankey', requirePermission('data.deals_view')
   const { scopeId, pipeline, periodDays, raw } = req.query as Record<string, string | undefined>;
 
   try {
-    const days = Math.min(Math.max(parseInt(periodDays ?? '7', 10) || 7, 1), 365);
-
     const periodEnd = new Date();
-    const periodStart = new Date(periodEnd.getTime() - days * 24 * 60 * 60 * 1000);
-    const prevEnd = new Date(periodStart.getTime());
-    const prevStart = new Date(prevEnd.getTime() - days * 24 * 60 * 60 * 1000);
+    let periodStart: Date;
+    let prevStart: Date;
+    let prevEnd: Date;
+
+    if (periodDays === 'all') {
+      // All Time: use the workspace's earliest deal date as the period start
+      const earliestRow = await query<{ earliest: Date | null }>(
+        `SELECT MIN(created_at) AS earliest FROM deals WHERE workspace_id = $1`,
+        [workspaceId]
+      ).catch(() => ({ rows: [{ earliest: null }] }));
+      const earliest = earliestRow.rows[0]?.earliest;
+      periodStart = earliest
+        ? new Date(earliest)
+        : new Date(periodEnd.getTime() - 3 * 365 * 24 * 60 * 60 * 1000);
+      // Previous period = same span immediately before periodStart (for delta calculations)
+      const spanMs = periodEnd.getTime() - periodStart.getTime();
+      prevEnd = new Date(periodStart.getTime());
+      prevStart = new Date(prevEnd.getTime() - spanMs);
+    } else {
+      const days = Math.min(Math.max(parseInt(periodDays ?? '7', 10) || 7, 1), 1825);
+      periodStart = new Date(periodEnd.getTime() - days * 24 * 60 * 60 * 1000);
+      prevEnd = new Date(periodStart.getTime());
+      prevStart = new Date(prevEnd.getTime() - days * 24 * 60 * 60 * 1000);
+    }
 
     const filterParams = (scopeId || pipeline || raw)
       ? {

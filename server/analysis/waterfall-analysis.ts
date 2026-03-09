@@ -205,6 +205,23 @@ async function getDealsAtTimestamp(
     ? 'd.stage'
     : 'd.stage_normalized';
 
+  // In raw mode, deals with no stage_history fall back to d.stage (human-readable name,
+  // e.g. "Proposal Reviewed"). But stageFlows is keyed on CRM IDs ("proposalreviewed").
+  // We LATERAL-join stage_configs to map the human-readable name back to its CRM stage_id
+  // so the deal is counted in the correct startOfPeriod bucket.
+  const rawFallbackJoin = raw
+    ? `LEFT JOIN LATERAL (
+         SELECT stage_id
+         FROM stage_configs
+         WHERE workspace_id = $1
+           AND stage_name = d.stage
+         LIMIT 1
+       ) sc ON lt.stage_at_time IS NULL`
+    : '';
+  const rawFallbackCoalesce = raw
+    ? 'COALESCE(lt.stage_at_time, sc.stage_id, d.stage)'
+    : `COALESCE(lt.stage_at_time, ${fallbackExpr})`;
+
   const result = await query<{
     deal_id: string;
     deal_name: string;
@@ -224,9 +241,10 @@ async function getDealsAtTimestamp(
       d.id as deal_id,
       d.name as deal_name,
       d.amount,
-      COALESCE(lt.stage_at_time, ${fallbackExpr}) as stage_at_time
+      ${rawFallbackCoalesce} as stage_at_time
     FROM deals d
     LEFT JOIN latest_transition lt ON lt.deal_id = d.id
+    ${rawFallbackJoin}
     WHERE d.workspace_id = $1
       AND d.created_at < $2
       AND (d.close_date IS NULL OR d.close_date >= $2)
