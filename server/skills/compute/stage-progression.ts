@@ -114,6 +114,62 @@ async function buildStagePool(
   stallThresholdDays: number,
   pipeline: string | null
 ): Promise<StagePool> {
+  // --- Cache path: read from stage_tagged_conversations when populated ---
+  const cacheParams: (string)[] = [workspaceId, stageName];
+  if (pipeline) cacheParams.push(pipeline);
+  const cachePipelineClause = pipeline ? `AND d.pipeline = $${cacheParams.length}` : '';
+
+  const cacheResult = await query<{
+    transition_type: string;
+    deal_id: string;
+    deal_name: string;
+    entered_stage_at: string;
+    days_in_stage_at_call: string;
+    transcript_text: string;
+  }>(`
+    SELECT
+      stc.transition_type,
+      d.id   AS deal_id,
+      d.name AS deal_name,
+      stc.entered_stage_at,
+      stc.days_in_stage_at_call,
+      c.transcript_text
+    FROM stage_tagged_conversations stc
+    JOIN conversations c ON c.id = stc.conversation_id
+    JOIN deals d ON d.id = stc.deal_id
+    WHERE stc.workspace_id = $1
+      AND stc.stage_name = $2
+      AND stc.transition_type IN ('progressor', 'staller')
+      AND c.transcript_text IS NOT NULL
+      AND LENGTH(c.transcript_text) > 100
+      ${cachePipelineClause}
+    ORDER BY stc.resolved_at DESC
+  `, cacheParams).catch(() => ({ rows: [] as any[] }));
+
+  if (cacheResult.rows.length > 0) {
+    const progressors: DealInStage[] = [];
+    const stallers: DealInStage[] = [];
+
+    for (const row of cacheResult.rows) {
+      const entry: DealInStage = {
+        dealId:           row.deal_id,
+        dealName:         row.deal_name ?? 'Unnamed Deal',
+        classification:   row.transition_type === 'progressor' ? 'progressor' : 'staller',
+        enteredAt:        new Date(row.entered_stage_at),
+        daysInStage:      parseInt(row.days_in_stage_at_call, 10) || 0,
+        transcriptExcerpt: extractCustomerExcerpt(row.transcript_text, 300),
+      };
+      if (entry.classification === 'progressor') progressors.push(entry);
+      else stallers.push(entry);
+    }
+
+    console.log(`[StageProgression] Stage "${stageName}": ${progressors.length} progressor + ${stallers.length} staller deals from stage_tagged_conversations`);
+    return { progressors: progressors.slice(0, 20), stallers };
+  }
+
+  // --- Fallback: live three-table join (stage_tagged_conversations not yet populated) ---
+  console.log(`[StageProgression] stage_tagged_conversations empty for workspace ${workspaceId}, stage "${stageName}" — falling back to live query. Run StageConversationTagger to populate cache.`);
+
   const params: (string | number)[] = [workspaceId, stageNormalized, stageName];
   if (pipeline) params.push(pipeline);
   const pipelineClause = pipeline ? `AND d.pipeline = $${params.length}` : '';

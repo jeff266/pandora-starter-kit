@@ -55,6 +55,7 @@ All demo users (any user in the `users` table) are auto-granted `admin` access t
 ## Customer Billing Metering
 
 ### Database
+- **Migration runner**: `npm run migrate` → `tsx server/migrate.ts`. Reads SQL files from root `/migrations/` (NOT `server/migrations/`). Next number: **150**. Files in `server/migrations/` are NOT picked up by the runner.
 - `token_usage.key_source VARCHAR(10) DEFAULT 'pandora'` — added by migration `131_billing_meter.sql`.
 - `billing_meter` table: per-workspace monthly aggregates with pandora/byok token splits, markup multiplier, customer charge, invoice workflow (pending → invoiced → paid/waived). Unique constraint on `(workspace_id, billing_period)`.
 

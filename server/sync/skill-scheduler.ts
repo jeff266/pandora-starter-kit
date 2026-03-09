@@ -541,6 +541,30 @@ export function startSkillScheduler(): void {
   scheduledSkills.push({ skillId: 'conversation-enrichment-weekly', cronExpression: '0 22 * * 0', job: convEnrichmentJob });
   console.log('[Conversation Enrichment] Registered weekly enrichment on cron 0 22 * * 0 (Sunday 10pm UTC)');
 
+  // Stage conversation tagger — Sunday 21:00 UTC (1 hour before enrichment)
+  // Pre-labels conversations as progressor/staller so quarterly Stage Progression reads clean pools
+  const stageTaggerJob = cron.schedule('0 21 * * 0', async () => {
+    console.log('[StageConversationTagger] Sunday 9pm cron triggered');
+    const { runStageConversationTagger } = await import('../jobs/stage-conversation-tagger.js');
+    const workspacesRes = await query<{ id: string; name: string }>(
+      `SELECT DISTINCT w.id, w.name FROM workspaces w
+       INNER JOIN connections c ON c.workspace_id = w.id
+       WHERE c.status IN ('connected','synced','error')
+         AND w.status = 'active'
+       ORDER BY w.name`,
+    );
+    for (const ws of workspacesRes.rows) {
+      try {
+        const result = await runStageConversationTagger(ws.id);
+        console.log(`[StageConversationTagger] ✓ ${ws.name}: tagged=${result.tagged} resolved=${result.resolved} backfilled=${result.backfilled}`);
+      } catch (err: any) {
+        console.error(`[StageConversationTagger] ✗ ${ws.name}:`, err.message);
+      }
+    }
+  }, { timezone: 'UTC' });
+  scheduledSkills.push({ skillId: 'stage-conversation-tagger-weekly', cronExpression: '0 21 * * 0', job: stageTaggerJob });
+  console.log('[StageConversationTagger] Registered weekly tagging on cron 0 21 * * 0 (Sunday 9pm UTC)');
+
   // Account scoring cron: daily 3am UTC — re-score already-enriched accounts
   const scoringJob = cron.schedule(
     '0 3 * * *',

@@ -700,3 +700,53 @@ export async function getStageTranscriptCoverage(
     usableStages: stages.filter(s => s.dealsWithTranscripts >= 5).length,
   };
 }
+
+export interface StallThreshold {
+  wonMedianDays: number;
+  stallThresholdDays: number;
+}
+
+/**
+ * Returns stall thresholds per stage for use in the weekly
+ * StageConversationTagger job. Keyed by stage name (raw to_stage value).
+ * stallThresholdDays = MAX(wonMedianDays × 2, 7) — minimum 7 days prevents
+ * zero-threshold edge cases on very fast stages.
+ */
+export async function getStallThresholdsByStage(
+  workspaceId: string,
+  pipeline: string | null = null,
+): Promise<Map<string, StallThreshold>> {
+  const params: string[] = [workspaceId];
+  if (pipeline) params.push(pipeline);
+
+  const result = await query<{
+    stage_name: string;
+    won_median_days: string | null;
+  }>(`
+    SELECT
+      dsh.to_stage AS stage_name,
+      ROUND(
+        PERCENTILE_CONT(0.5) WITHIN GROUP (
+          ORDER BY dsh.duration_in_previous_stage_ms / 86400000.0
+        )::NUMERIC, 1
+      ) AS won_median_days
+    FROM deal_stage_history dsh
+    JOIN deals d ON d.id = dsh.deal_id
+    WHERE dsh.workspace_id = $1
+      AND d.stage_normalized = 'closed_won'
+      AND dsh.duration_in_previous_stage_ms IS NOT NULL
+      AND dsh.duration_in_previous_stage_ms > 0
+      ${pipeline ? 'AND d.pipeline = $2' : ''}
+    GROUP BY dsh.to_stage
+  `, params);
+
+  const thresholds = new Map<string, StallThreshold>();
+  for (const row of result.rows) {
+    const wonMedian = row.won_median_days ? Math.round(parseFloat(row.won_median_days)) : 0;
+    thresholds.set(row.stage_name, {
+      wonMedianDays: wonMedian,
+      stallThresholdDays: Math.max(wonMedian * 2, 7),
+    });
+  }
+  return thresholds;
+}
