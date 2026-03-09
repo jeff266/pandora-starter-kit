@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useWorkspace } from '../context/WorkspaceContext';
@@ -316,8 +316,22 @@ function DetailPanel({ milestone, onClose }: { milestone: BehavioralMilestone; o
   );
 }
 
+function renderInline(raw: string): ReactNode {
+  const cleaned = raw
+    .replace(/\*\*(.+?)\*\*/g, '\x02BOLD\x03$1\x02/BOLD\x03')
+    .replace(/\*(.+?)\*/g, '$1')
+    .replace(/_(.+?)_/g, '\x02EM\x03$1\x02/EM\x03');
+  const parts = cleaned.split(/(\x02BOLD\x03[\s\S]*?\x02\/BOLD\x03|\x02EM\x03[\s\S]*?\x02\/EM\x03)/);
+  return parts.map((p, i) => {
+    if (p.startsWith('\x02BOLD\x03')) return <strong key={i}>{p.replace(/\x02BOLD\x03|\x02\/BOLD\x03/g, '')}</strong>;
+    if (p.startsWith('\x02EM\x03')) return <em key={i}>{p.replace(/\x02EM\x03|\x02\/EM\x03/g, '')}</em>;
+    return p;
+  });
+}
+
 function SynthesisCard({ text, completedAt, periodDays }: { text: string; completedAt: string; periodDays: number }) {
-  const lines = text.split('\n').filter(l => l.trim());
+  const stripped = text.replace(/<actions>[\s\S]*?<\/actions>/gi, '').replace(/^\s*<\/?[a-z][a-z0-9]*>\s*$/gim, '');
+  const lines = stripped.split('\n').filter(l => l.trim());
   return (
     <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10, padding: '20px 24px', marginTop: 20 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
@@ -328,19 +342,22 @@ function SynthesisCard({ text, completedAt, periodDays }: { text: string; comple
       </div>
       <div style={{ fontSize: 13, color: colors.textSecondary, fontFamily: font, lineHeight: 1.7 }}>
         {lines.map((line, i) => {
-          const isHeader = /^#{1,3}\s/.test(line) || /^\*\*[^*]+\*\*[:.]?$/.test(line.trim());
-          const isBullet = /^[-*•]/.test(line.trim());
-          const clean = line.replace(/^#{1,3}\s/, '').replace(/\*\*(.+?)\*\*/g, '$1').trim();
+          const trimmed = line.trim();
+          const isHeader = /^#{1,3}\s/.test(trimmed) || /^\*\*[^*]+\*\*[:.]?\s*$/.test(trimmed);
+          const isBullet = /^[-•]\s/.test(trimmed) || /^[*]\s/.test(trimmed);
+          const withoutPrefix = trimmed.replace(/^#{1,3}\s/, '').replace(/^[-•*]\s*/, '');
           if (isHeader) return (
-            <div key={i} style={{ fontSize: 13, fontWeight: 700, color: colors.text, marginTop: i > 0 ? 14 : 0, marginBottom: 4, fontFamily: font }}>{clean}</div>
-          );
-          if (isBullet) return (
-            <div key={i} style={{ paddingLeft: 14, marginBottom: 2 }}>
-              <span style={{ color: colors.accent, marginRight: 6 }}>→</span>{clean.replace(/^[-*•]\s*/, '')}
+            <div key={i} style={{ fontSize: 13, fontWeight: 700, color: colors.text, marginTop: i > 0 ? 14 : 0, marginBottom: 4, fontFamily: font }}>
+              {renderInline(withoutPrefix)}
             </div>
           );
-          if (!clean) return <div key={i} style={{ height: 8 }} />;
-          return <div key={i} style={{ marginBottom: 2 }}>{clean}</div>;
+          if (isBullet) return (
+            <div key={i} style={{ paddingLeft: 14, marginBottom: 3 }}>
+              <span style={{ color: colors.accent, marginRight: 6 }}>→</span>{renderInline(withoutPrefix)}
+            </div>
+          );
+          if (!trimmed) return <div key={i} style={{ height: 8 }} />;
+          return <div key={i} style={{ marginBottom: 3 }}>{renderInline(trimmed)}</div>;
         })}
       </div>
     </div>
@@ -510,15 +527,20 @@ export default function BehavioralWinningPathPage() {
   }, [[], [], [], []]);
 
   return (
-    <div style={{ background: colors.bg, minHeight: '100vh', fontFamily: font, color: colors.text, padding: '28px 32px', maxWidth: 1280, margin: '0 auto' }}>
+    <div className="wp-page" style={{ background: colors.bg, minHeight: '100vh', fontFamily: font, color: colors.text, maxWidth: 1280, margin: '0 auto' }}>
       <style>{`
         @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
         @keyframes spin { to { transform: rotate(360deg); } }
+        .wp-page { padding: 28px 32px; }
+        @media (max-width: 640px) { .wp-page { padding: 16px 14px; } }
+        .wp-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; gap: 16px; flex-wrap: wrap; }
+        .wp-controls { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; flex-shrink: 0; }
+        @media (max-width: 640px) { .wp-controls { align-items: flex-start; width: 100%; } }
       `}</style>
 
       {/* ── Header ──────────────────────────────────────────────────────────── */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20, gap: 20 }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
+      <div className="wp-header">
+        <div style={{ flex: 1, minWidth: 200 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 5, flexWrap: 'wrap' }}>
             <div style={{ width: 28, height: 28, borderRadius: 7, background: 'rgba(15,217,162,0.12)', border: '1px solid rgba(15,217,162,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
               <span style={{ fontSize: 14 }}>◈</span>
@@ -528,7 +550,7 @@ export default function BehavioralWinningPathPage() {
             </h1>
             {tierProbe && <TierBadge tier={tierProbe.tier} label={tierProbe.tierLabel} />}
           </div>
-          <div style={{ fontSize: 13, color: colors.textMuted, fontFamily: font, marginBottom: 4 }}>
+          <div style={{ fontSize: 13, color: colors.textMuted, fontFamily: font, marginBottom: 4, lineHeight: 1.5 }}>
             Behavioral milestones that characterize won deals
             {tierProbe && <> — sourced from <span style={{ color: colors.textSecondary }}>{tierProbe.tierLabel}</span></>}
           </div>
@@ -545,8 +567,8 @@ export default function BehavioralWinningPathPage() {
         </div>
 
         {/* Right controls */}
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8, flexShrink: 0 }}>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+        <div className="wp-controls">
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             {matrix && (
               <button
                 onClick={() => setShowLost(v => !v)}
@@ -666,7 +688,8 @@ export default function BehavioralWinningPathPage() {
       {/* ── Main grid ───────────────────────────────────────────────────────── */}
       {!loading && matrix && (
         <>
-          <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10, overflow: 'hidden' }}>
+          <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' as any }}>
+          <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10, overflow: 'hidden', minWidth: 520 }}>
             {/* Column header row */}
             <div style={{ display: 'grid', gridTemplateColumns: '110px repeat(4, 1fr)', gap: 0, borderBottom: `1px solid ${colors.border}` }}>
               <div style={{ padding: '12px 14px', fontSize: 11, fontWeight: 600, color: colors.textMuted, fontFamily: font, letterSpacing: '0.06em', textTransform: 'uppercase', borderRight: `1px solid ${colors.border}` }}>
@@ -747,6 +770,7 @@ export default function BehavioralWinningPathPage() {
                 ))}
               </div>
             )}
+          </div>
           </div>
 
           {/* ── Detail panel ────────────────────────────────────────────────── */}
