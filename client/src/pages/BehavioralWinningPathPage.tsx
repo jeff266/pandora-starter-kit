@@ -160,10 +160,11 @@ function SourceBadge({ source, small }: { source: string; small?: boolean }) {
   );
 }
 
-function WonCard({ milestone, selected, onClick }: {
+function WonCard({ milestone, selected, onClick, deltaWonPct }: {
   milestone: BehavioralMilestone;
   selected: boolean;
   onClick: () => void;
+  deltaWonPct?: number;
 }) {
   const insuf = !!milestone.insufficientData;
   return (
@@ -197,7 +198,7 @@ function WonCard({ milestone, selected, onClick }: {
           Insufficient data
         </div>
       ) : (
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
           <span style={{ fontSize: 12, fontWeight: 700, color: '#4ade80', fontFamily: mono }}>
             {milestone.wonPct}%
           </span>
@@ -206,13 +207,22 @@ function WonCard({ milestone, selected, onClick }: {
             {milestone.lift}×
           </span>
           <span style={{ fontSize: 11, color: colors.textMuted, fontFamily: font }}>lift</span>
+          {deltaWonPct !== undefined && (
+            <span style={{
+              fontSize: 11, fontWeight: 700, fontFamily: mono,
+              color: deltaWonPct >= 0 ? '#4ade80' : '#f87171',
+              marginLeft: 2,
+            }}>
+              {deltaWonPct >= 0 ? `+${deltaWonPct}pp ↑` : `${deltaWonPct}pp ↓`}
+            </span>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-function LostCard({ absence }: { absence: LostAbsence }) {
+function LostCard({ absence, deltaLostPct }: { absence: LostAbsence; deltaLostPct?: number }) {
   return (
     <div style={{
       background: 'rgba(239,68,68,0.04)', border: '1px solid rgba(239,68,68,0.20)',
@@ -230,6 +240,15 @@ function LostCard({ absence }: { absence: LostAbsence }) {
         <span style={{ color: colors.textMuted }}> of lost deals missing · </span>
         <span style={{ color: '#fbbf24', fontWeight: 700, fontFamily: mono }}>{absence.liftIfPresent}×</span>
         <span style={{ color: colors.textMuted }}> more likely to lose</span>
+        {deltaLostPct !== undefined && (
+          <span style={{
+            fontSize: 11, fontWeight: 700, fontFamily: mono,
+            color: deltaLostPct >= 0 ? '#f87171' : '#4ade80',
+            marginLeft: 4,
+          }}>
+            {deltaLostPct >= 0 ? `+${deltaLostPct}pp ↑ absent` : `${deltaLostPct}pp ↓ absent`}
+          </span>
+        )}
       </div>
     </div>
   );
@@ -438,6 +457,7 @@ export default function BehavioralWinningPathPage() {
   const [selectedMilestone, setSelected]   = useState<BehavioralMilestone | null>(null);
   const [pipelines, setPipelines]           = useState<{ id: string; name: string }[]>([]);
   const [activePipeline, setActivePipeline] = useState<string | null>(null);
+  const [baselineMatrix, setBaselineMatrix] = useState<MilestoneMatrix | null>(null);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastCompletedAt = useRef<string | null>(null);
@@ -477,6 +497,7 @@ export default function BehavioralWinningPathPage() {
 
     if (latestRes.status === 'fulfilled') {
       applyRunResult(latestRes.value as RunResult);
+      setBaselineMatrix((latestRes.value as RunResult).result?.milestone_matrix ?? null);
     } else {
       const err = (latestRes.reason as any);
       if (err?.status === 404 || String(err?.message).includes('404') || String(err?.message).includes('No completed')) {
@@ -558,6 +579,17 @@ export default function BehavioralWinningPathPage() {
     acc[ci].push(a);
     return acc;
   }, [[], [], [], []]);
+
+  // Delta lookups — only populated when a pipeline filter is active and baseline exists
+  const baselineWonPctById: Record<string, number> | null =
+    activePipeline && baselineMatrix
+      ? Object.fromEntries(baselineMatrix.wonMilestones.map(m => [m.id, m.wonPct]))
+      : null;
+
+  const baselineLostPctById: Record<string, number> | null =
+    activePipeline && baselineMatrix
+      ? Object.fromEntries(baselineMatrix.lostAbsences.map(a => [a.milestoneId, a.lostDealPct]))
+      : null;
 
   return (
     <div className="wp-page" style={{ background: colors.bg, minHeight: '100vh', fontFamily: font, color: colors.text, maxWidth: 1280, margin: '0 auto' }}>
@@ -798,6 +830,11 @@ export default function BehavioralWinningPathPage() {
                       milestone={m}
                       selected={selectedMilestone?.id === m.id}
                       onClick={() => setSelected(prev => prev?.id === m.id ? null : m)}
+                      deltaWonPct={
+                        baselineWonPctById != null && !m.insufficientData
+                          ? m.wonPct - (baselineWonPctById[m.id] ?? m.wonPct)
+                          : undefined
+                      }
                     />
                   ))}
                   {(wonByCol[ci] ?? []).length === 0 && (
@@ -829,7 +866,15 @@ export default function BehavioralWinningPathPage() {
                     minHeight: 60,
                   }}>
                     {(lostByCol[ci] ?? []).map(a => (
-                      <LostCard key={a.milestoneId} absence={a} />
+                      <LostCard
+                        key={a.milestoneId}
+                        absence={a}
+                        deltaLostPct={
+                          baselineLostPctById != null
+                            ? a.lostDealPct - (baselineLostPctById[a.milestoneId] ?? a.lostDealPct)
+                            : undefined
+                        }
+                      />
                     ))}
                     {(lostByCol[ci] ?? []).length === 0 && (
                       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
