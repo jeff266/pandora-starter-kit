@@ -81,7 +81,7 @@ export async function computeWinningPaths(
     avg_cycle_days: string;
   }>(
     `WITH won_deals AS (
-      SELECT d.id, d.amount,
+      SELECT d.id, d.amount, d.pipeline,
              EXTRACT(EPOCH FROM (d.close_date - d.created_at)) / 86400 AS cycle_days
       FROM deals d
       WHERE d.workspace_id = $1
@@ -90,28 +90,35 @@ export async function computeWinningPaths(
         ${sizeClause}
         ${scopeClause}
     ),
+    labeled_history AS (
+      -- Attach stage_configs display names; keep normalized key for deduplication.
+      -- Display: stage_configs.stage_name → stage_normalized → raw stage (fallback).
+      -- Dedup key: stage_normalized → raw stage (so "Closed Won" and "closed_won"
+      --   from different raw IDs are treated as the same transition and collapsed).
+      SELECT
+        dsh.deal_id,
+        dsh.entered_at,
+        COALESCE(sc.stage_name, dsh.stage_normalized, dsh.stage)       AS label,
+        COALESCE(dsh.stage_normalized, dsh.stage)                       AS norm_key,
+        LAG(COALESCE(dsh.stage_normalized, dsh.stage))
+          OVER (PARTITION BY dsh.deal_id ORDER BY dsh.entered_at)       AS prev_norm_key
+      FROM deal_stage_history dsh
+      JOIN won_deals wd_inner ON wd_inner.id = dsh.deal_id
+      LEFT JOIN stage_configs sc
+        ON  sc.workspace_id  = $1
+        AND sc.pipeline_name = wd_inner.pipeline
+        AND sc.stage_id      = dsh.stage
+      WHERE dsh.workspace_id = $1
+    ),
     deal_sequences AS (
-      -- Deduplicate consecutive identical normalized stages within each deal's journey.
-      -- Multiple CRM stage IDs can map to the same normalized bucket (e.g. several
-      -- HubSpot numeric IDs all → 'qualification'). Without dedup, paths look like
-      -- "qualification → qualification → qualification → closed_won" which is noise.
       SELECT
         wd.id AS deal_id,
         wd.amount,
         wd.cycle_days,
-        array_agg(s.norm ORDER BY s.entered_at) AS stage_seq
+        array_agg(lh.label ORDER BY lh.entered_at) AS stage_seq
       FROM won_deals wd
-      JOIN (
-        SELECT
-          dsh.deal_id,
-          dsh.entered_at,
-          COALESCE(dsh.stage_normalized, dsh.stage) AS norm,
-          LAG(COALESCE(dsh.stage_normalized, dsh.stage))
-            OVER (PARTITION BY dsh.deal_id ORDER BY dsh.entered_at) AS prev_norm
-        FROM deal_stage_history dsh
-        WHERE dsh.workspace_id = $1
-      ) s ON s.deal_id = wd.id
-      WHERE s.norm IS DISTINCT FROM s.prev_norm
+      JOIN labeled_history lh ON lh.deal_id = wd.id
+      WHERE lh.norm_key IS DISTINCT FROM lh.prev_norm_key
       GROUP BY wd.id, wd.amount, wd.cycle_days
     )
     SELECT
@@ -175,15 +182,22 @@ export async function computeSimilarPaths(
   }
 
   const historyResult = await query<{ stage: string }>(
-    `SELECT norm AS stage FROM (
+    `SELECT label AS stage FROM (
        SELECT
-         COALESCE(stage_normalized, stage) AS norm,
-         LAG(COALESCE(stage_normalized, stage)) OVER (ORDER BY entered_at) AS prev_norm,
-         entered_at
-       FROM deal_stage_history
-       WHERE deal_id = $1 AND workspace_id = $2
+         COALESCE(sc.stage_name, dsh.stage_normalized, dsh.stage)        AS label,
+         COALESCE(dsh.stage_normalized, dsh.stage)                        AS norm_key,
+         LAG(COALESCE(dsh.stage_normalized, dsh.stage))
+           OVER (ORDER BY dsh.entered_at)                                 AS prev_norm_key,
+         dsh.entered_at
+       FROM deal_stage_history dsh
+       JOIN deals d ON d.id = dsh.deal_id AND d.workspace_id = $2
+       LEFT JOIN stage_configs sc
+         ON  sc.workspace_id  = $2
+         AND sc.pipeline_name = d.pipeline
+         AND sc.stage_id      = dsh.stage
+       WHERE dsh.deal_id = $1 AND dsh.workspace_id = $2
      ) s
-     WHERE norm IS DISTINCT FROM prev_norm
+     WHERE norm_key IS DISTINCT FROM prev_norm_key
      ORDER BY entered_at ASC`,
     [dealId, workspaceId]
   );
