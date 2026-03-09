@@ -788,3 +788,41 @@ Prevents false-confidence analysis for new workspaces without reliable benchmark
 - **`pipeline.ts`**: Tier 1 — skips Phase 1 hypothesis engine entirely, routes directly to `buildTier1EarlyStagePrompt()`, returns `'tier1_early_stage'` route. History assessment, evidence harvest, and whale signals run in parallel via `Promise.all()`.
 - **`hypothesis-engine.ts`**: Tier 2 — passes `HISTORY_TIER: 2` context block into DeepSeek prompt; applies −0.15 confidence reduction for `variance_decomposition` and `process_vs_luck` layers; adds proxy benchmark note to supporting signals.
 - **`synthesis-prompts.ts`**: `buildTier1EarlyStagePrompt()` — no anomaly language, observations only, answers win/loss patterns + forward pipeline. `buildEarlyStageBanner()` — user-facing banner naming closed deals, months of data, and estimated unlock milestone. Tier 2 forces Option A/B framing regardless of confidence score.
+
+## Behavioral Winning Path — Full Implementation (Skill + UI)
+
+### Backend skill (`server/skills/library/behavioral-winning-path.ts`)
+4-step pipeline: (1) tier probe, (2) milestone extraction, (3) DeepSeek transcript classification, (4) Claude narrative synthesis. Cron: `0 6 * * 1` (Mondays 6 AM UTC). Registered as skill #32.
+
+### Compute layer (`server/skills/compute/behavioral-milestones.ts`)
+- `probeBehavioralDataTier()` — probes conversations, email_activities, deal_contacts, stage_history tables; returns Tier 1–4 + full availability struct.
+- `extractBehavioralMilestones()` — 4-tier branching: Tier 1 = CI transcript signals (participant-based + keyword), Tier 2 = email engagement proxies, Tier 3 = CRM contact role milestones, Tier 4 = stage progression proxies. Returns normalized `MilestoneMatrix`. Lift math suppresses milestones with < 3 deals per cohort (`insufficientData: true`).
+
+### API endpoints (`server/routes/skills.ts`)
+- `GET /:workspaceId/skills/behavioral-winning-path/latest` — most recent completed run (returns `{ runId, result: { milestone_matrix, narrative }, outputText, completedAt, ... }`)
+- `GET /:workspaceId/skills/behavioral-winning-path/tier` — fast tier probe, no LLM (returns `{ tier, tierLabel, availability }`)
+
+### UI page (`client/src/pages/BehavioralWinningPathPage.tsx`)
+Route: `/winning-path`. Sidebar: INTELLIGENCE section, label "Winning Path", icon ◈.
+- Parallel fetch on mount: `/tier` (fast tier badge) + `/latest` (full matrix)
+- Empty state (404 from `/latest`) → "Run Now" CTA
+- Skeleton: header + 2 rows × 4 columns during load
+- Amber confidence banner for Tiers 2–4
+- 5-column grid (110px label col + 4 time windows) with sticky column headers
+- Won row (green): milestone cards with source badge, wonPct%, lift×, insufficientData greyed-out variant
+- Lost row (toggleable, red): lostAbsence cards with liftIfPresent
+- Detail panel: appears below grid on milestone click; signal breakdown table + 3 stat cards; X to close
+- Synthesis card: Claude narrative rendered with header/bullet formatting
+- Upgrade prompts: tier-specific copy linking to `/connectors`
+- Run Now: POST → poll `/latest` every 5s → refresh on new `completedAt`; success toast
+
+### Column assignment (windowStart → col index)
+- < 15 → col 0 (Day 0–30, Opening motion)
+- 15–44 → col 1 (Day 31–60, Champion & use case)
+- 45–74 → col 2 (Day 61–90, Technical validation)
+- ≥ 75 → col 3 (Day 91–120+, Executive & close)
+
+### Source badge colors
+- CI → teal `#22d3ee`
+- Email / CRM Roles → purple `#a78bfa`
+- Stage History → amber `#fbbf24`

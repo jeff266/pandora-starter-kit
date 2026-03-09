@@ -42,6 +42,7 @@ import ConsultantDashboard from './pages/ConsultantDashboard';
 import IcpProfilePage from './pages/IcpProfilePage';
 import BenchmarksGrid from './pages/BenchmarksGrid';
 import CompetitiveIntelligencePage from './pages/intelligence/CompetitiveIntelligencePage';
+import BehavioralWinningPathPage from './pages/BehavioralWinningPathPage';
 import ProspectsPage from './pages/ProspectsPage';
 import AdminScopesPage from './pages/AdminScopesPage';
 import TokenUsagePage from './pages/admin/TokenUsagePage';
@@ -341,6 +342,7 @@ export default function App() {
             <Route path="/pipeline-mechanics" element={<PipelineMechanicsPage />} />
             <Route path="/stage-velocity" element={<Navigate to="/pipeline-mechanics" replace />} />
             <Route path="/competition" element={<CompetitiveIntelligencePage />} />
+            <Route path="/winning-path" element={<BehavioralWinningPathPage />} />
             <Route path="/prospects" element={<ProspectsPage />} />
             <Route path="/admin/scopes" element={<AdminScopesPage />} />
             <Route path="/admin/token-usage" element={<TokenUsagePage />} />
