@@ -1,0 +1,134 @@
+  📦 What Was Pushed                                
+                                                    
+  Commit 1: feat: implement role-based data scoping 
+  for deals API (T1-T2)                             
+  - server/middleware/apply-data-scope.ts - Scope   
+  filter helper                                     
+  - server/routes/data.ts - Applied scoping to GET  
+  /api/deals                                        
+                                                    
+  Commit 2: test: add role-based data scoping test  
+  suite                                             
+  - server/scripts/test-data-scoping.ts - Automated 
+  TypeScript test                                   
+  - server/scripts/test-data-scoping-curl.sh - Quick
+   curl test                                        
+  - server/scripts/TEST-DATA-SCOPING.md - Full      
+  documentation                                     
+                                                    
+  ---                                               
+  🧪 Test Scripts (3 options)                       
+                                                    
+  Option 1: Automated Test (Recommended)            
+                                                    
+  Tests all workspace members against expected      
+  behavior:                                         
+                                                    
+  npx tsx server/scripts/test-data-scoping.ts       
+  <workspace_id>                                    
+                                                    
+  What it tests:                                    
+  - ✅ Admin sees all deals                         
+  - ✅ Rep/Viewer sees only own deals               
+  - ✅ Email normalization works                    
+  - ✅ SQL filters are correct                      
+                                                    
+  Expected output:                                  
+  ✅ admin@company.com (admin)                      
+     Expected: See all deals (admin)                
+     Returned: 45 / 45 deals                        
+                                                    
+  ✅ diego@company.com (viewer)                     
+     Expected: See only deals where owner_email =   
+  'diego@company.com'                               
+     Returned: 12 / 45 deals                        
+                                                    
+  ✅ ALL TESTS PASSED                               
+                                                    
+  ---                                               
+  Option 2: Quick curl Test                         
+                                                    
+  Interactive API testing with JWT tokens:          
+                                                    
+  ./server/scripts/test-data-scoping-curl.sh        
+                                                    
+  Prompts for:                                      
+  1. Workspace ID                                   
+  2. Admin JWT token (from browser local storage)   
+  3. Rep JWT token                                  
+                                                    
+  Compares results side-by-side.                    
+                                                    
+  ---                                               
+  Option 3: SQL Verification                        
+                                                    
+  Direct database check (no API):                   
+                                                    
+  -- Check that owner_email is populated            
+  SELECT                                            
+    COUNT(*) as total_deals,                        
+    COUNT(owner_email) as deals_with_owner,         
+    COUNT(DISTINCT owner_email) as unique_owners    
+  FROM deals                                        
+  WHERE workspace_id = '<workspace_id>';            
+                                                    
+  -- Simulate admin query (no filter)               
+  SELECT COUNT(*) FROM deals WHERE workspace_id =   
+  '<workspace_id>';                                 
+                                                    
+  -- Simulate rep query (with filter)               
+  SELECT COUNT(*) FROM deals                        
+  WHERE workspace_id = '<workspace_id>'             
+    AND owner_email = 'diego@company.com';          
+                                                    
+  ---                                               
+  📋 Prerequisites                                  
+                                                    
+  Before running tests:                             
+                                                    
+  1. Check email consistency:                       
+  npx tsx server/scripts/check-email-consistency.ts 
+  <workspace_id>                                    
+  1. Should output: ✅ Email consistency check      
+  PASSED                                            
+  2. Ensure test data exists:                       
+    - At least one admin user                       
+    - At least one rep/viewer user                  
+    - Multiple deals with owner_email populated     
+    - Deals owned by different users                
+  3. Start the server:                              
+  npm run dev                                       
+                                                    
+  ---                                               
+  🎯 Quick Start                                    
+                                                    
+  # 1. Check prerequisites                          
+  npx tsx server/scripts/check-email-consistency.ts 
+  <your_workspace_id>                               
+                                                    
+  # 2. Run automated test                           
+  npx tsx server/scripts/test-data-scoping.ts       
+  <your_workspace_id>                               
+                                                    
+  # 3. If all tests pass, you're ready for T3-T5!   
+                                                    
+  ---                                               
+  📚 Full Documentation                             
+                                                    
+  See server/scripts/TEST-DATA-SCOPING.md for:      
+  - Detailed test instructions                      
+  - Troubleshooting guide                           
+  - Test coverage checklist                         
+  - Next steps after testing                        
+                                                    
+  ---                                               
+  ✅ T1-T2 Complete!                                
+                                                    
+  What works now:                                   
+  - GET /api/workspaces/:id/deals enforces          
+  role-based scoping                                
+  - Admin users see all deals                       
+  - Rep/Viewer users see only their own deals (where
+   owner_email matches)                             
+  - Email normalization (case-insensitive, strips   
+  +addressing) 
