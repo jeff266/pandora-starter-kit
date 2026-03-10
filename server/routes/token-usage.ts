@@ -341,33 +341,73 @@ function mapPhaseToFeature(phase: string | null, stepName: string | null, skillI
     return 'ask_pandora';
   }
 
-  // Skills - map to feature names
+  // Skills - comprehensive mapping
   if (skillId) {
-    if (skillId.includes('pipeline-hygiene') || skillId.includes('pipeline_hygiene')) {
-      return 'pipeline_hygiene';
-    }
-    if (skillId.includes('deal-risk') || skillId.includes('deal_risk')) {
-      return 'deal_risk_review';
-    }
-    if (skillId.includes('rep-scorecard') || skillId.includes('rep_scorecard')) {
-      return 'rep_scorecard';
-    }
-    if (skillId.includes('forecast') || skillId.includes('rollup')) {
-      return 'forecast_rollup';
-    }
-    if (skillId.includes('conversation-intelligence') || skillId.includes('conversation_intelligence')) {
-      return 'conversation_intelligence';
-    }
+    // Command Center / Dashboard
+    if (skillId.includes('pipeline-hygiene')) return 'pipeline_hygiene';
+    if (skillId.includes('deal-risk')) return 'deal_risk_review';
+    if (skillId.includes('rep-scorecard')) return 'rep_scorecard';
+    if (skillId.includes('forecast-rollup')) return 'forecast_rollup';
+    if (skillId.includes('conversation-intelligence')) return 'conversation_intelligence';
+
+    // Forecasting & Planning
+    if (skillId.includes('forecast-model')) return 'forecast_model';
+    if (skillId.includes('forecast-accuracy')) return 'forecast_accuracy';
+    if (skillId.includes('monte-carlo')) return 'monte_carlo_forecast';
+    if (skillId.includes('pipeline-gen-forecast')) return 'pipeline_gen_forecast';
+    if (skillId.includes('pipeline-contribution')) return 'pipeline_contribution';
+    if (skillId.includes('pipeline-goals')) return 'pipeline_goals';
+
+    // Analysis & Intelligence
+    if (skillId.includes('bowtie')) return 'bowtie_analysis';
+    if (skillId.includes('pipeline-waterfall')) return 'pipeline_waterfall';
+    if (skillId.includes('winning-path')) return 'winning_path';
+    if (skillId.includes('competitive-intelligence')) return 'competitive_intelligence';
+    if (skillId.includes('strategy-insights')) return 'strategy_insights';
+
+    // Data Quality & Discovery
+    if (skillId.includes('custom-field-discovery')) return 'custom_field_discovery';
+    if (skillId.includes('data-quality')) return 'data_quality';
+    if (skillId.includes('workspace-config')) return 'workspace_config';
+
+    // Scoring & Enrichment
+    if (skillId.includes('deal-rfm')) return 'deal_rfm_scoring';
+    if (skillId.includes('deal-scoring')) return 'deal_scoring';
+    if (skillId.includes('lead-scoring')) return 'lead_scoring';
+    if (skillId.includes('icp-discovery')) return 'icp_discovery';
+    if (skillId.includes('icp-taxonomy')) return 'icp_taxonomy';
+
+    // Engagement & Coverage
+    if (skillId.includes('contact-role')) return 'contact_role_resolution';
+    if (skillId.includes('single-thread')) return 'single_thread_alert';
+    if (skillId.includes('stage-mismatch')) return 'stage_mismatch_detector';
+    if (skillId.includes('stage-velocity')) return 'stage_velocity';
+    if (skillId.includes('pipeline-coverage')) return 'pipeline_coverage';
+
+    // Reporting & Recaps
+    if (skillId.includes('weekly-recap')) return 'weekly_recap';
+    if (skillId.includes('project-recap')) return 'project_recap';
+    if (skillId.includes('coaching')) return 'coaching';
   }
 
-  // ICP Discovery
+  // ICP Discovery (step-level)
   if (stepName?.includes('icp') || phase === 'icp_discovery') {
     return 'icp_discovery';
   }
 
-  // Lead Scoring
-  if (stepName?.includes('lead-scor') || stepName?.includes('lead_scor')) {
+  // Lead Scoring (step-level)
+  if (stepName?.includes('lead-scor')) {
     return 'lead_scoring';
+  }
+
+  // Document synthesis
+  if (phase === 'synthesis' || stepName?.includes('synthesis') || stepName?.includes('synthesize')) {
+    return 'synthesis';
+  }
+
+  // Briefing
+  if (phase === 'briefing' || stepName?.includes('brief')) {
+    return 'briefing';
   }
 
   // Default: use phase if available, otherwise 'other'
