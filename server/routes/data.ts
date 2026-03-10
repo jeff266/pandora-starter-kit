@@ -124,7 +124,9 @@ router.get('/:id/deals/closing-in-range', async (req: Request, res: Response): P
 
 router.get('/:id/deals/pipeline-summary', async (req: Request, res: Response): Promise<void> => {
   try {
-    const result = await getPipelineSummary(req.params.id as string);
+    // Apply role-based data scoping
+    const scopeFilter = buildDealScopeFilter(req, 0);
+    const result = await getPipelineSummary(req.params.id as string, scopeFilter);
     res.json({ data: result });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

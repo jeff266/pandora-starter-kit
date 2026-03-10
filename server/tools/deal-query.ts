@@ -257,26 +257,41 @@ export async function getDealsClosingInRange(workspaceId: string, startDate: Dat
   return result.rows;
 }
 
-export async function getPipelineSummary(workspaceId: string): Promise<{
+export async function getPipelineSummary(
+  workspaceId: string,
+  scopeFilter?: { sql: string; params: any[] }
+): Promise<{
   totalPipeline: number;
   dealCount: number;
   avgDealSize: number;
   weightedPipeline: number;
   byForecastCategory: { category: string; count: number; totalAmount: number }[];
 }> {
+  // Build WHERE clause with optional scope filter
+  let summaryWhere = 'workspace_id = $1';
+  let summaryParams: any[] = [workspaceId];
+
+  if (scopeFilter && scopeFilter.sql) {
+    // Renumber scope filter params to start after workspace_id
+    const renumberedSQL = scopeFilter.sql.replace(/\$(\d+)/g, (_, num) => `$${parseInt(num, 10) + 1}`);
+    summaryWhere += ` ${renumberedSQL}`;
+    summaryParams.push(...scopeFilter.params);
+  }
+
   const summaryResult = await query<{
     total_pipeline: string;
     deal_count: string;
     avg_deal_size: string;
     weighted_pipeline: string;
   }>(
-    `SELECT COALESCE(SUM(amount), 0) AS total_pipeline, COUNT(*) AS deal_count, COALESCE(AVG(amount), 0) AS avg_deal_size, COALESCE(SUM(amount * COALESCE(probability, 0) / 100), 0) AS weighted_pipeline FROM deals WHERE workspace_id = $1`,
-    [workspaceId],
+    `SELECT COALESCE(SUM(amount), 0) AS total_pipeline, COUNT(*) AS deal_count, COALESCE(AVG(amount), 0) AS avg_deal_size, COALESCE(SUM(amount * COALESCE(probability, 0) / 100), 0) AS weighted_pipeline FROM deals WHERE ${summaryWhere}`,
+    summaryParams,
   );
 
+  // Same scope filter for forecast breakdown
   const forecastResult = await query<{ category: string; count: string; total_amount: string }>(
-    `SELECT forecast_category AS category, COUNT(*) AS count, COALESCE(SUM(amount), 0) AS total_amount FROM deals WHERE workspace_id = $1 GROUP BY forecast_category`,
-    [workspaceId],
+    `SELECT forecast_category AS category, COUNT(*) AS count, COALESCE(SUM(amount), 0) AS total_amount FROM deals WHERE ${summaryWhere} GROUP BY forecast_category`,
+    summaryParams,
   );
 
   const s = summaryResult.rows[0];
