@@ -1,0 +1,46 @@
+✅ Pushed to GitHub main!                                               
+                                                                          
+  Commit: 2ee33c4f                                                        
+                                                                          
+  Summary:                                                                
+  - 🔒 2 critical security vulnerabilities fixed (backend permission      
+  checks added)                                                           
+  - 🎨 5 frontend pages updated with permission checks                    
+  - ✅ Analysts granted skill execution rights                            
+  - 📄 2 documentation files created                                      
+                                                                          
+  ---                                                                     
+  📊 What Replit Will Receive                                             
+                                                                          
+  Backend Changes (3 files)                                               
+                                                                          
+  1. server/permissions/system-roles.ts - Analyst now has                 
+  skills.run_manual = true                                                
+  2. server/routes/scoring-state.ts - ICP Discovery protected             
+  3. server/routes/agents.ts - Agent execution protected                  
+                                                                          
+  Frontend Changes (6 files)                                              
+                                                                          
+  1. client/src/hooks/usePermissions.ts - NEW permission hook             
+  2. client/src/pages/IcpProfilePage.tsx - Buttons hidden from Viewers    
+  3. client/src/pages/ForecastPage.tsx - Buttons hidden from Viewers      
+  4. client/src/pages/Playbooks.tsx - Buttons hidden from Viewers         
+  5. client/src/pages/SkillsPage.tsx - Buttons hidden from Viewers        
+  6. client/src/pages/AgentBuilder.tsx - Button hidden from Viewers       
+                                                                          
+  Documentation (2 files)                                                 
+                                                                          
+  1. CREDIT-CONTROL-AUDIT.md - Complete vulnerability audit               
+  2. RBAC-CREDIT-CONTROL-IMPLEMENTATION.md - Implementation guide +       
+  testing instructions                                                    
+                                                                          
+  ---                                                                     
+  🧪 Next: Replit Testing                                                 
+                                                                          
+  Replit can now:                                                         
+  1. Pull from GitHub main                                                
+  2. Follow testing guide in RBAC-CREDIT-CONTROL-IMPLEMENTATION.md        
+  3. Verify backend permissions (curl tests)                              
+  4. Verify frontend UI (login as Viewer/Analyst/Admin)                   
+                                                                          
+  All done! 🎉
