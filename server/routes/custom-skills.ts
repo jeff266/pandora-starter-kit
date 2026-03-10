@@ -12,6 +12,7 @@ import { registerCustomSkill, unregisterCustomSkill } from '../skills/index.js';
 import { getSkillRegistry } from '../skills/registry.js';
 import { getSkillRuntime } from '../skills/runtime.js';
 import { registerCustomSkillCron, unregisterCustomSkillCron } from '../sync/skill-scheduler.js';
+import { requirePermission } from '../middleware/permissions.js';
 
 const router = Router();
 
