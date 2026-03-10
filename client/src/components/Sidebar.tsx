@@ -13,6 +13,7 @@ interface NavItem {
   icon: string;
   badge?: number;
   adminOnly?: boolean;
+  allowedRoles?: ('admin' | 'manager' | 'analyst' | 'member' | 'viewer')[];
 }
 
 interface NavSection {
@@ -38,44 +39,44 @@ const sections: NavSection[] = [
   {
     title: 'INTELLIGENCE',
     items: [
-      { label: 'ICP Profile', path: '/icp-profile', icon: '\u2605' },
-      { label: 'Pipeline Mechanics', path: '/pipeline-mechanics', icon: '\u25C8' },
-      { label: 'Competition', path: '/competition', icon: '\u229B' },
-      { label: 'Winning Path', path: '/winning-path', icon: '\u25C8' },
-      { label: 'Agents', path: '/agents', icon: '\u25C8' },
+      { label: 'ICP Profile', path: '/icp-profile', icon: '\u2605', allowedRoles: ['admin', 'manager', 'analyst'] },
+      { label: 'Pipeline Mechanics', path: '/pipeline-mechanics', icon: '\u25C8', allowedRoles: ['admin', 'manager', 'analyst'] },
+      { label: 'Competition', path: '/competition', icon: '\u229B', allowedRoles: ['admin', 'manager', 'analyst'] },
+      { label: 'Winning Path', path: '/winning-path', icon: '\u25C8', allowedRoles: ['admin', 'manager', 'analyst'] },
+      { label: 'Agents', path: '/agents', icon: '\u25C8', allowedRoles: ['admin', 'manager', 'analyst'] },
       { label: 'Agent Builder', path: '/agent-builder', icon: '\u29C6', adminOnly: true },
       { label: 'Skills', path: '/skills', icon: '\u2699', adminOnly: true },
       { label: 'Tools', path: '/tools', icon: '\u29EB', adminOnly: true },
-      { label: 'Governance', path: '/governance', icon: '\u2696' },
+      { label: 'Governance', path: '/governance', icon: '\u2696', allowedRoles: ['admin', 'manager'] },
     ],
   },
   {
     title: 'OPERATIONS',
     items: [
-      { label: 'Targets', path: '/targets', icon: '\u25CE' },
-      { label: 'Playbooks', path: '/playbooks', icon: '\u25B6' },
-      { label: 'Forecast', path: '/forecast', icon: '\uD83D\uDCC8' },
-      { label: 'Pipeline', path: '/pipeline', icon: '\u29C6' },
-      { label: 'Push', path: '/push', icon: '\uD83D\uDD14' },
-      { label: 'Reports', path: '/reports', icon: '\uD83D\uDCC4' },
-      { label: 'Insights Feed', path: '/insights', icon: '\u25C9' },
-      { label: 'Actions', path: '/actions', icon: '\u26A1' },
+      { label: 'Targets', path: '/targets', icon: '\u25CE', allowedRoles: ['admin', 'manager', 'analyst', 'member'] },
+      { label: 'Playbooks', path: '/playbooks', icon: '\u25B6', allowedRoles: ['admin', 'manager'] },
+      { label: 'Forecast', path: '/forecast', icon: '\uD83D\uDCC8', allowedRoles: ['admin', 'manager', 'analyst'] },
+      { label: 'Pipeline', path: '/pipeline', icon: '\u29C6', allowedRoles: ['admin', 'manager', 'analyst', 'member'] },
+      { label: 'Push', path: '/push', icon: '\uD83D\uDD14', allowedRoles: ['admin', 'manager'] },
+      { label: 'Reports', path: '/reports', icon: '\uD83D\uDCC4', allowedRoles: ['admin', 'manager', 'analyst'] },
+      { label: 'Insights Feed', path: '/insights', icon: '\u25C9', allowedRoles: ['admin', 'manager', 'analyst', 'member'] },
+      { label: 'Actions', path: '/actions', icon: '\u26A1', allowedRoles: ['admin', 'manager', 'analyst', 'member'] },
     ],
   },
   {
     title: 'DATA',
     items: [
       { label: 'Connectors', path: '/connectors', icon: '\u229E', adminOnly: true },
-      { label: 'Enrichment', path: '/enrichment', icon: '\u2B22' },
-      { label: 'Dictionary', path: '/dictionary', icon: '\uD83D\uDCD6' },
+      { label: 'Enrichment', path: '/enrichment', icon: '\u2B22', allowedRoles: ['admin'] },
+      { label: 'Dictionary', path: '/dictionary', icon: '\uD83D\uDCD6', allowedRoles: ['admin', 'manager', 'analyst'] },
     ],
   },
   {
     title: 'WORKSPACE',
     items: [
-      { label: 'Members', path: '/members', icon: '\u2295' },
-      { label: 'Marketplace', path: '/marketplace', icon: '\u25EB' },
-      { label: 'Settings', path: '/settings', icon: '\u229B' },
+      { label: 'Members', path: '/members', icon: '\u2295', allowedRoles: ['admin', 'manager'] },
+      { label: 'Marketplace', path: '/marketplace', icon: '\u25EB', allowedRoles: ['admin'] },
+      { label: 'Settings', path: '/settings', icon: '\u229B', allowedRoles: ['admin'] },
     ],
   },
 ];
@@ -102,6 +103,21 @@ export default function Sidebar({ badges, showAllClients, collapsed = false, onT
   const [unassignedCount, setUnassignedCount] = useState(0);
 
   const isAdmin = currentWorkspace?.role === 'admin';
+  const userRole = currentWorkspace?.role as 'admin' | 'manager' | 'analyst' | 'member' | 'viewer' | undefined;
+
+  // Helper to check if user has access to a nav item
+  const hasAccess = (item: NavItem): boolean => {
+    // adminOnly is legacy - kept for backwards compatibility
+    if (item.adminOnly && !isAdmin) return false;
+
+    // If allowedRoles is defined, check if user's role is in the list
+    if (item.allowedRoles && userRole) {
+      return item.allowedRoles.includes(userRole);
+    }
+
+    // If no restrictions, allow access
+    return true;
+  };
 
   const activeSection = sections.find(s => s.title && s.items.some(i => i.path !== '/' ? location.pathname.startsWith(i.path) : location.pathname === '/'))?.title ?? null;
 
@@ -324,7 +340,7 @@ export default function Sidebar({ badges, showAllClients, collapsed = false, onT
             {collapsed && section.title && (
               <div style={{ height: 1, background: colors.border, margin: '6px 10px' }} />
             )}
-            {!isSectionCollapsed && section.items.filter(item => !item.adminOnly || isAdmin).map(item => {
+            {!isSectionCollapsed && section.items.filter(hasAccess).map(item => {
               const active = isActive(item.path);
               const badgeCount = badges[item.label.toLowerCase()];
               return (
