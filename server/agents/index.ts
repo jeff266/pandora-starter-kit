@@ -5,6 +5,8 @@ import { bowtieReviewAgent } from './definitions/bowtie-review.js';
 import { attainmentVsGoalAgent } from './definitions/attainment-vs-goal.js';
 import { fridayRecapAgent } from './definitions/friday-recap.js';
 import { strategyInsightsAgent } from './definitions/strategy-insights.js';
+import { dealRiskSweepAgent } from './definitions/deal-risk-sweep.js';
+import { repCoachingDigestAgent } from './definitions/rep-coaching-digest.js';
 
 export { AgentRegistry, getAgentRegistry } from './registry.js';
 export { AgentRuntime, getAgentRuntime } from './runtime.js';
@@ -26,5 +28,7 @@ export function registerBuiltInAgents(): void {
   registry.register(attainmentVsGoalAgent);
   registry.register(fridayRecapAgent);
   registry.register(strategyInsightsAgent);
+  registry.register(dealRiskSweepAgent);
+  registry.register(repCoachingDigestAgent);
   console.log(`[Agents] Registered ${registry.list().length} agents`);
 }

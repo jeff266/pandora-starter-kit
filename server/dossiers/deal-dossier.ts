@@ -201,7 +201,8 @@ async function getActivitiesForDeal(workspaceId: string, dealId: string) {
 
 async function getStageHistoryForDeal(workspaceId: string, dealId: string) {
   const result = await query(
-    `SELECT stage, stage_normalized, entered_at, exited_at, duration_days
+    `SELECT stage, stage_normalized, entered_at, exited_at,
+            COALESCE(duration_days, ROUND(EXTRACT(EPOCH FROM (now() - entered_at)) / 86400)::int) AS days_in_stage
      FROM deal_stage_history
      WHERE workspace_id = $1 AND deal_id = $2
      ORDER BY entered_at ASC`,
@@ -568,7 +569,7 @@ export async function assembleDealDossier(
       stage_label: formatStageLabel(sh.stage, sh.stage_normalized),
       entered_at: sh.entered_at ? new Date(sh.entered_at).toISOString() : '',
       exited_at: sh.exited_at ? new Date(sh.exited_at).toISOString() : null,
-      days_in_stage: sh.duration_days ?? 0,
+      days_in_stage: sh.days_in_stage ?? sh.duration_days ?? 0,
     })),
     findings: findings.map((f: any) => ({
       id: f.id,

@@ -34,6 +34,7 @@ import { estimateTradeoffs } from '../agents/tradeoffs.js';
 import { detectConflicts } from '../agents/conflicts.js';
 import { AGENT_TEMPLATES } from '../agents/templates.js';
 import { getAgentTemplates } from '../agents/agent-templates.js';
+import { getAgentRegistry } from '../agents/registry.js';
 import { query } from '../db.js';
 import { assembleFindingsForRule, type DeliveryRuleRow } from '../push/finding-assembler.js';
 import { interpretFreeText, getWorkspaceCopilotContext } from '../copilot/agent-copilot-interpreter.js';
@@ -64,8 +65,33 @@ router.get('/:workspaceId/agents-v2', async (req, res) => {
     const activeFilter =
       activeParam === 'true' ? true :
       activeParam === 'false' ? false : null;
-    const agents = await listAgents(workspaceId, activeFilter);
-    return res.json(agents);
+
+    const [dbAgents, registry] = await Promise.all([
+      listAgents(workspaceId, activeFilter),
+      Promise.resolve(getAgentRegistry()),
+    ]);
+
+    const builtInAgents = registry.listForWorkspace(workspaceId).map(def => ({
+      id: def.id,
+      workspace_id: workspaceId,
+      name: def.name,
+      description: def.description,
+      goal: def.goal,
+      is_active: def.enabled !== false,
+      is_builtin: true,
+      skill_ids: def.skills?.map((s: any) => s.skillId) ?? [],
+      standing_questions: def.standing_questions ?? [],
+      trigger_config: def.trigger ?? null,
+      delivery_config: def.delivery ?? null,
+      output_formats: def.delivery?.format ? [def.delivery.format] : [],
+      created_at: def.createdAt ?? new Date(),
+      updated_at: def.updatedAt ?? new Date(),
+    }));
+
+    const dbAgentIds = new Set(dbAgents.map((a: any) => a.id));
+    const dedupedBuiltIns = builtInAgents.filter(a => !dbAgentIds.has(a.id));
+
+    return res.json([...dedupedBuiltIns, ...dbAgents]);
   } catch (err: any) {
     return res.status(500).json({ error: err.message || String(err) });
   }

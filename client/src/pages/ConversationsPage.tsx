@@ -10,6 +10,31 @@ import { useDemoMode } from '../contexts/DemoModeContext';
 
 const CONVERSATIONS_THRESHOLD = 500;
 
+const HUBSPOT_STAGE_LABELS: Record<string, string> = {
+  appointmentscheduled: 'Appointment Scheduled',
+  qualifiedtobuy: 'Qualified to Buy',
+  presentationscheduled: 'Presentation Scheduled',
+  decisionmakerboughtin: 'Decision Maker Bought In',
+  contractsent: 'Contract Sent',
+  closedwon: 'Closed Won',
+  closedlost: 'Closed Lost',
+  qualification: 'Qualification',
+  evaluation: 'Evaluation',
+  decision: 'Decision',
+  negotiation: 'Negotiation',
+  closed_won: 'Closed Won',
+  closed_lost: 'Closed Lost',
+};
+
+function formatStageLabel(stage: string | null): string {
+  if (!stage) return '—';
+  if (HUBSPOT_STAGE_LABELS[stage]) return HUBSPOT_STAGE_LABELS[stage];
+  return stage
+    .replace(/_/g, ' ')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/\b\w/g, c => c.toUpperCase());
+}
+
 interface Conversation {
   id: string;
   title: string;
@@ -590,7 +615,7 @@ export default function ConversationsPage() {
                         )}
                       </div>
                       <div style={{ fontSize: 12, color: colors.textSecondary }}>{anon.person(gap.deal_owner)}</div>
-                      <div style={{ fontSize: 12, color: colors.textSecondary }}>{gap.deal_stage}</div>
+                      <div style={{ fontSize: 12, color: colors.textSecondary }}>{formatStageLabel(gap.deal_stage)}</div>
                       <div style={{ fontSize: 12, color: colors.textSecondary }}>
                         {gap.last_call_title ? anon.text(gap.last_call_title) : formatDate(gap.last_call_date)}
                       </div>
@@ -1721,7 +1746,7 @@ export default function ConversationsPage() {
                             {conv.account_name ? anon.company(conv.account_name) : '—'}
                           </div>
                           <div style={{ fontSize: 12, color: colors.textSecondary, fontFamily: fonts.sans, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {conv.deal_stage ?? '—'}
+                            {formatStageLabel(conv.deal_stage)}
                           </div>
                           <div style={{ fontSize: 12, color: colors.textSecondary, fontFamily: fonts.sans, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {conv.deal_owner ? anon.person(conv.deal_owner) : '—'}

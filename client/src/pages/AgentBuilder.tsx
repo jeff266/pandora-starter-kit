@@ -62,6 +62,7 @@ interface Agent {
   skill_ids: string[];
   template_id: string | null;
   is_active: boolean;
+  is_builtin?: boolean;
   audience: AudienceConfig;
   focus_questions: string[];
   data_window: DataWindowConfig;
@@ -427,31 +428,36 @@ export default function AgentBuilder() {
           </button>
         </div>
 
-        {agents.length === 0 ? (
-          <div style={{ ...card, textAlign: 'center', padding: 48 }}>
-            <div style={{ fontSize: 48, marginBottom: 16 }}>🤖</div>
-            <h3 style={{ font: `500 16px ${fonts.sans}`, color: colors.text, margin: '0 0 8px' }}>No agents yet</h3>
-            <p style={{ font: `400 14px ${fonts.sans}`, color: colors.textSecondary, margin: '0 0 20px' }}>
-              Create your first agent from a template or start from scratch
-            </p>
-            <button onClick={() => setPickerOpen(true)} style={btnPrimary}>
-              <Plus size={16} /> Create Agent
-            </button>
-          </div>
-        ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 16 }}>
-            {agents.map(a => (
-              <div key={a.id} onClick={() => populateFromAgent(a)} style={{ ...card, cursor: 'pointer' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-                  <AvatarDisplay value={a.icon} size={36} fallbackEmoji={a.icon} borderRadius={8} />
-                  <div style={{ flex: 1 }}>
-                    <div style={{ font: `500 15px ${fonts.sans}`, color: colors.text }}>{a.name}</div>
-                    {a.template_id && (
-                      <div style={{ font: `400 11px ${fonts.sans}`, color: colors.accent, marginTop: 2 }}>
-                        From template
-                      </div>
-                    )}
-                  </div>
+        {(() => {
+          const builtInAgents = agents.filter((a: any) => a.is_builtin);
+          const userAgents = agents.filter((a: any) => !a.is_builtin);
+
+          const renderAgentCard = (a: Agent, readonly = false) => (
+            <div
+              key={a.id}
+              onClick={() => !readonly && populateFromAgent(a)}
+              style={{ ...card, cursor: readonly ? 'default' : 'pointer', opacity: readonly ? 0.92 : 1 }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+                <AvatarDisplay value={a.icon} size={36} fallbackEmoji={a.icon} borderRadius={8} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ font: `500 15px ${fonts.sans}`, color: colors.text }}>{a.name}</div>
+                  {a.template_id && (
+                    <div style={{ font: `400 11px ${fonts.sans}`, color: colors.accent, marginTop: 2 }}>
+                      From template
+                    </div>
+                  )}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  {readonly && (
+                    <div style={{
+                      padding: '2px 8px', borderRadius: 9999, font: `500 11px ${fonts.sans}`,
+                      background: colors.surfaceHover, color: colors.textMuted,
+                      border: `1px solid ${colors.border}`,
+                    }}>
+                      System
+                    </div>
+                  )}
                   <div style={{
                     padding: '2px 8px', borderRadius: 9999, font: `500 11px ${fonts.sans}`,
                     background: a.is_active ? colors.greenSoft : colors.surfaceHover,
@@ -460,31 +466,81 @@ export default function AgentBuilder() {
                     {a.is_active ? 'Active' : 'Draft'}
                   </div>
                 </div>
-                {a.description && (
-                  <p style={{ font: `400 13px ${fonts.sans}`, color: colors.textSecondary, margin: '0 0 12px', lineHeight: 1.4 }}>
-                    {a.description}
-                  </p>
-                )}
-                {(a as any).goal && (
-                  <p style={{ font: `400 12px ${fonts.sans}`, color: colors.textMuted, margin: '0 0 8px', lineHeight: 1.4, fontStyle: 'italic' }}>
-                    Goal: {(a as any).goal}
-                  </p>
-                )}
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                  {a.audience?.role && <span style={badge}>{a.audience.role}</span>}
-                  <span style={{ ...badge, background: colors.purpleSoft, color: colors.purple }}>{a.skill_ids?.length || 0} skills</span>
-                  {(a as any).standing_questions?.length > 0 && (
-                    <span style={{ ...badge, background: colors.accentSoft, color: colors.accent }}>{(a as any).standing_questions.length} questions</span>
-                  )}
-                  {(a as any).created_from === 'conversation' && (
-                    <span style={{ ...badge, background: '#1a2a1a', color: '#4ade80' }}>from chat</span>
-                  )}
-                  {(a.output_formats || []).map(f => <span key={f} style={{ ...badge, background: colors.surfaceHover, color: colors.textSecondary }}>{f}</span>)}
-                </div>
               </div>
-            ))}
-          </div>
-        )}
+              {a.description && (
+                <p style={{ font: `400 13px ${fonts.sans}`, color: colors.textSecondary, margin: '0 0 12px', lineHeight: 1.4 }}>
+                  {a.description}
+                </p>
+              )}
+              {(a as any).goal && (
+                <p style={{ font: `400 12px ${fonts.sans}`, color: colors.textMuted, margin: '0 0 8px', lineHeight: 1.4, fontStyle: 'italic' }}>
+                  Goal: {(a as any).goal}
+                </p>
+              )}
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {a.audience?.role && <span style={badge}>{a.audience.role}</span>}
+                <span style={{ ...badge, background: colors.purpleSoft, color: colors.purple }}>{a.skill_ids?.length || 0} skills</span>
+                {(a as any).standing_questions?.length > 0 && (
+                  <span style={{ ...badge, background: colors.accentSoft, color: colors.accent }}>{(a as any).standing_questions.length} questions</span>
+                )}
+                {(a as any).created_from === 'conversation' && (
+                  <span style={{ ...badge, background: '#1a2a1a', color: '#4ade80' }}>from chat</span>
+                )}
+                {(a.output_formats || []).map(f => <span key={f} style={{ ...badge, background: colors.surfaceHover, color: colors.textSecondary }}>{f}</span>)}
+              </div>
+            </div>
+          );
+
+          return (
+            <>
+              {builtInAgents.length > 0 && (
+                <div style={{ marginBottom: 32 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                    <h3 style={{ font: `600 13px ${fonts.sans}`, color: colors.textMuted, margin: 0, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                      System Agents
+                    </h3>
+                    <div style={{ flex: 1, height: 1, background: colors.border }} />
+                    <span style={{ font: `400 12px ${fonts.sans}`, color: colors.textMuted }}>
+                      Managed by Pandora · read-only
+                    </span>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 16 }}>
+                    {builtInAgents.map(a => renderAgentCard(a, true))}
+                  </div>
+                </div>
+              )}
+
+              {userAgents.length > 0 && (
+                <div>
+                  {builtInAgents.length > 0 && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                      <h3 style={{ font: `600 13px ${fonts.sans}`, color: colors.textMuted, margin: 0, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                        Custom Agents
+                      </h3>
+                      <div style={{ flex: 1, height: 1, background: colors.border }} />
+                    </div>
+                  )}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 16 }}>
+                    {userAgents.map(a => renderAgentCard(a, false))}
+                  </div>
+                </div>
+              )}
+
+              {agents.length === 0 && (
+                <div style={{ ...card, textAlign: 'center', padding: 48 }}>
+                  <div style={{ fontSize: 48, marginBottom: 16 }}>🤖</div>
+                  <h3 style={{ font: `500 16px ${fonts.sans}`, color: colors.text, margin: '0 0 8px' }}>No agents yet</h3>
+                  <p style={{ font: `400 14px ${fonts.sans}`, color: colors.textSecondary, margin: '0 0 20px' }}>
+                    Create your first agent from a template or start from scratch
+                  </p>
+                  <button onClick={() => setPickerOpen(true)} style={btnPrimary}>
+                    <Plus size={16} /> Create Agent
+                  </button>
+                </div>
+              )}
+            </>
+          );
+        })()}
 
         {/* ─── Creation Path Picker Modal ─── */}
       {pickerOpen && (

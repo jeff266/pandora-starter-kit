@@ -385,6 +385,7 @@ interface ConvSpec {
   acctN: number;
   daysAgoN: number;
   durationSeconds: number;
+  title: string;
   summary: string;
   actionItems: string[];
   sentimentScore: number;
@@ -395,6 +396,7 @@ const CONVERSATIONS: ConvSpec[] = [
   // Deal 9 — Dynamo Commerce Platform
   {
     n: 1, dealN: 9, acctN: 4, daysAgoN: 28, durationSeconds: 2700,
+    title: 'Discovery — Dynamo Commerce Platform',
     summary: 'Initial discovery call with Carlos Rivera and Mei Zhang. Prospect confirmed Vantora is the current incumbent and highlighted integration pain points with their existing commerce stack. TechScale demoed the API layer; both contacts showed strong interest.',
     actionItems: ['Send integration architecture doc by Friday', 'Schedule technical deep-dive with Dynamo engineering team', 'Share Vantora migration case study'],
     sentimentScore: 0.78,
@@ -402,6 +404,7 @@ const CONVERSATIONS: ConvSpec[] = [
   },
   {
     n: 2, dealN: 9, acctN: 4, daysAgoN: 7, durationSeconds: 3600,
+    title: 'Contract Negotiation — Dynamo Commerce Platform',
     summary: 'Contract negotiation call with SVP Technology Carlos Rivera. Discussed redline on SLA terms and Clausepoint overlap for contract workflows. Carlos confirmed internal buy-in and target go-live of next quarter.',
     actionItems: ['Return redlined MSA within 48 hours', 'Confirm Clausepoint integration roadmap', 'Loop in Dynamo legal team for sign-off'],
     sentimentScore: 0.85,
@@ -410,6 +413,7 @@ const CONVERSATIONS: ConvSpec[] = [
   // Deal 10 — BlueSky API Access Tier
   {
     n: 3, dealN: 10, acctN: 2, daysAgoN: 22, durationSeconds: 2400,
+    title: 'Product Demo — BlueSky API Access Tier',
     summary: 'Demo call with David Kim (CTO) and Priya Nair. David pushed back on Vantora lock-in and expressed interest in best-of-breed API tier. Meridian Analytics was mentioned as a competing evaluation; we highlighted our superior connector library.',
     actionItems: ['Send connector library comparison vs Meridian', 'Provide customer reference in fintech vertical', 'Follow up on timeline for Q2 budget approval'],
     sentimentScore: 0.72,
@@ -417,6 +421,7 @@ const CONVERSATIONS: ConvSpec[] = [
   },
   {
     n: 4, dealN: 10, acctN: 2, daysAgoN: 5, durationSeconds: 1800,
+    title: 'Evaluation Check-in — BlueSky API Access Tier',
     summary: 'Evaluation check-in with Priya Nair. She confirmed the Meridian Analytics POC ended without a strong outcome on data lineage. TechScale is now the frontrunner; decision criteria narrowed to pricing and onboarding speed.',
     actionItems: ['Submit revised pricing proposal by EOD', 'Schedule onboarding overview with BlueSky data team', 'Send NPS references from similar-size accounts'],
     sentimentScore: 0.81,
@@ -425,6 +430,7 @@ const CONVERSATIONS: ConvSpec[] = [
   // Deal 11 — Granite IT Automation Suite
   {
     n: 5, dealN: 11, acctN: 6, daysAgoN: 30, durationSeconds: 3000,
+    title: 'Re-engagement Call — Granite IT Automation Suite',
     summary: 'Re-engagement call with Steve Olsen (VP IT). Granite ran a failed Vantora POC six months ago; Steve is now the internal champion for switching. Meridian Analytics was evaluated briefly but dropped due to lack of IT automation modules.',
     actionItems: ['Share IT automation feature roadmap', 'Arrange reference call with similar IT services customer', 'Submit POC scope document'],
     sentimentScore: 0.74,
@@ -432,6 +438,7 @@ const CONVERSATIONS: ConvSpec[] = [
   },
   {
     n: 6, dealN: 11, acctN: 6, daysAgoN: 8, durationSeconds: 2400,
+    title: 'Proposal Review — Granite IT Automation Suite',
     summary: 'Proposal review with Steve Olsen and Alicia Fonseca (CFO). Alicia raised budget constraint; Steve advocated for the full suite. We agreed on a phased rollout starting with core IT automation. Vantora was not in active consideration.',
     actionItems: ['Prepare phased implementation pricing', 'Send CFO-level ROI deck', 'Confirm procurement timeline for Q2 close'],
     sentimentScore: 0.80,
@@ -440,6 +447,7 @@ const CONVERSATIONS: ConvSpec[] = [
   // Deal 12 — Echo Health Provider Portal
   {
     n: 7, dealN: 12, acctN: 5, daysAgoN: 18, durationSeconds: 2100,
+    title: 'Discovery — Echo Health Provider Portal',
     summary: 'Discovery call with Kevin Grant (Director of IT). Nexlify pitched Echo Health last month with a 30% price reduction; Kevin is cautious but values our HIPAA compliance depth and existing EMR integration. Dr. Susan Park has budget authority.',
     actionItems: ['Send HIPAA compliance documentation', 'Arrange call with Dr. Susan Park on ROI', 'Prepare competitive pricing analysis vs Nexlify'],
     sentimentScore: 0.65,
@@ -447,6 +455,7 @@ const CONVERSATIONS: ConvSpec[] = [
   },
   {
     n: 8, dealN: 12, acctN: 5, daysAgoN: 4, durationSeconds: 1800,
+    title: 'Executive Follow-up — Echo Health Provider Portal',
     summary: 'Follow-up with Kevin Grant and Dr. Susan Park. Dr. Park acknowledged Nexlify is cheaper but expressed concern about their healthcare compliance track record. TechScale positioned on total cost of ownership and reduced compliance risk.',
     actionItems: ['Send Nexlify compliance gap analysis', 'Provide reference from healthcare customer', 'Follow up with proposal by end of week'],
     sentimentScore: 0.70,
@@ -455,6 +464,7 @@ const CONVERSATIONS: ConvSpec[] = [
   // Deal 13 — Apex Financial Seat Expansion
   {
     n: 9, dealN: 13, acctN: 1, daysAgoN: 40, durationSeconds: 2400,
+    title: 'Expansion Planning — Apex Financial Seat Expansion',
     summary: 'Expansion planning call with Rachel Torres (VP Finance). Apex wants to add 50 seats to the Enterprise Suite. Clausepoint is being evaluated by the compliance team for an adjacent workflow; Rachel confirmed TechScale is preferred for the core expansion.',
     actionItems: ['Submit seat expansion quote', 'Clarify Clausepoint integration scope with Apex IT', 'Schedule executive sponsor call with James Whitmore'],
     sentimentScore: 0.79,
@@ -462,6 +472,7 @@ const CONVERSATIONS: ConvSpec[] = [
   },
   {
     n: 10, dealN: 13, acctN: 1, daysAgoN: 10, durationSeconds: 2700,
+    title: 'Executive Negotiation — Apex Financial Seat Expansion',
     summary: 'Negotiation call with James Whitmore (CFO) and Rachel Torres. James approved the expansion budget but requested a multi-year pricing option. Claire Donnelly flagged a Clausepoint pilot but confirmed it is separate from the seat expansion decision.',
     actionItems: ['Prepare 2- and 3-year pricing options', 'Confirm multi-year discount framework with finance', 'Send updated order form'],
     sentimentScore: 0.83,
@@ -470,6 +481,7 @@ const CONVERSATIONS: ConvSpec[] = [
   // Deal 14 — BlueSky Premium Tier Upgrade
   {
     n: 11, dealN: 14, acctN: 2, daysAgoN: 35, durationSeconds: 2700,
+    title: 'Upgrade Evaluation — BlueSky Premium Tier',
     summary: 'Upgrade evaluation call with David Kim. BlueSky is comparing our Premium tier against Vantora Enterprise on data lineage depth. David prefers TechScale connector breadth but wants proof on lineage tracing for regulated datasets.',
     actionItems: ['Provide lineage tracing deep-dive documentation', 'Set up sandboxed POC environment', 'Share fintech data lineage case study'],
     sentimentScore: 0.71,
@@ -477,6 +489,7 @@ const CONVERSATIONS: ConvSpec[] = [
   },
   {
     n: 12, dealN: 14, acctN: 2, daysAgoN: 9, durationSeconds: 3000,
+    title: 'POC Results Review — BlueSky Premium Tier',
     summary: 'POC results review with David Kim and Priya Nair. The lineage POC exceeded expectations. Vantora was unable to match the connector depth. David confirmed he is recommending TechScale to the board; Priya is coordinating procurement.',
     actionItems: ['Prepare executive summary of POC results', 'Draft order form for Premium tier', 'Coordinate with Priya on procurement process'],
     sentimentScore: 0.88,
@@ -485,6 +498,7 @@ const CONVERSATIONS: ConvSpec[] = [
   // Deal 15 — CloudBridge Growth Package
   {
     n: 13, dealN: 15, acctN: 3, daysAgoN: 14, durationSeconds: 2100,
+    title: 'Growth Package Discovery — CloudBridge Systems',
     summary: 'Growth package discovery with Omar Hassan (VP Engineering). Nexlify offered CloudBridge a bundled expansion rate that is 25% cheaper. Omar is price-sensitive but highlighted concerns about Nexlify migration complexity and lack of dedicated support.',
     actionItems: ['Prepare migration risk analysis vs Nexlify', 'Quantify dedicated support SLA value', 'Offer a competitive retention discount'],
     sentimentScore: 0.62,
@@ -492,6 +506,7 @@ const CONVERSATIONS: ConvSpec[] = [
   },
   {
     n: 14, dealN: 15, acctN: 3, daysAgoN: 3, durationSeconds: 1800,
+    title: 'Retention Call — CloudBridge Growth Package',
     summary: 'Retention call with Lisa Chen (CISO) and Omar Hassan. Lisa flagged that Nexlify has no SOC 2 Type II certification, which is a blocker for CloudBridge. TechScale is now strongly favored; Lisa is coordinating with procurement for fast close.',
     actionItems: ['Share SOC 2 Type II certification documentation', 'Submit final pricing with retention discount', 'Request PO by end of next week'],
     sentimentScore: 0.76,
@@ -500,6 +515,7 @@ const CONVERSATIONS: ConvSpec[] = [
   // Deal 16 — Granite License Expansion
   {
     n: 15, dealN: 16, acctN: 6, daysAgoN: 25, durationSeconds: 2400,
+    title: 'License Expansion Scoping — Granite Technologies',
     summary: 'License expansion scoping call with Steve Olsen and Raj Mehta (IT Manager). Synaptix is positioned as a platform-layer alternative by the Granite IT team; Raj is familiar with them from a prior integration project. Steve prefers TechScale for support consistency.',
     actionItems: ['Document integration platform comparison vs Synaptix', 'Share support case resolution SLA data', 'Prepare license expansion options'],
     sentimentScore: 0.68,
@@ -507,6 +523,7 @@ const CONVERSATIONS: ConvSpec[] = [
   },
   {
     n: 16, dealN: 16, acctN: 6, daysAgoN: 6, durationSeconds: 2700,
+    title: 'CFO Proposal Review — Granite License Expansion',
     summary: 'Proposal call with Alicia Fonseca (CFO) and Steve Olsen. Alicia asked for a cost-benefit analysis vs Synaptix. Steve confirmed Synaptix lacks dedicated account management; TechScale white-glove support model is a differentiator for Granite.',
     actionItems: ['Send Synaptix comparison one-pager', 'Prepare CFO-level ROI breakdown', 'Follow up with final proposal by Monday'],
     sentimentScore: 0.74,
@@ -544,13 +561,26 @@ export async function seedDemoWorkspace(): Promise<void> {
     [WS_ID, WS_NAME, WS_SLUG]
   );
 
-  // 2. Grant all existing users access
+  // 2. Grant all existing users access (legacy auth + RBAC)
   const allUsers = await query<{ id: string }>(`SELECT id FROM users`);
   for (const u of allUsers.rows) {
     await query(
       `INSERT INTO user_workspaces (user_id, workspace_id, role) VALUES ($1, $2, 'admin') ON CONFLICT DO NOTHING`,
       [u.id, WS_ID]
     );
+    // Also ensure workspace_members row exists (RBAC system)
+    const adminRole = await query<{ id: string }>(
+      `SELECT id FROM workspace_roles WHERE workspace_id = $1 AND system_type = 'admin' LIMIT 1`,
+      [WS_ID]
+    );
+    if (adminRole.rows.length > 0) {
+      await query(
+        `INSERT INTO workspace_members (workspace_id, user_id, role_id, status, pandora_role, accepted_at)
+         VALUES ($1, $2, $3, 'active', 'admin', now())
+         ON CONFLICT (workspace_id, user_id) DO NOTHING`,
+        [WS_ID, u.id, adminRole.rows[0].id]
+      );
+    }
   }
 
   if (!workspaceExists) {
@@ -688,14 +718,15 @@ export async function seedDemoWorkspace(): Promise<void> {
 
     await query(
       `INSERT INTO conversations (id, workspace_id, source, source_id, call_date, duration_seconds,
-         deal_id, account_id, summary, action_items, sentiment_score, participants, competitor_mentions,
+         deal_id, account_id, title, summary, action_items, sentiment_score, participants, competitor_mentions,
          created_at, updated_at)
-       VALUES ($1,$2,'demo',$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11::jsonb,$12::jsonb,$13,$14)
+       VALUES ($1,$2,'demo',$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12::jsonb,$13::jsonb,$14,$15)
        ON CONFLICT (workspace_id, source, source_id) DO NOTHING`,
       [
         convId(conv.n), WS_ID, `demo-conv-${conv.n}`,
         daysAgo(conv.daysAgoN), conv.durationSeconds,
         dealId(conv.dealN), acctId(conv.acctN),
+        conv.title,
         conv.summary,
         JSON.stringify(conv.actionItems),
         conv.sentimentScore,
@@ -1055,4 +1086,101 @@ export async function seedDemoWorkspace(): Promise<void> {
     `  ${actCounter - 1} email activities\n` +
     `  ${insightCounter - 1} deal insights (MEDDPIC qualification)`
   );
+}
+
+/**
+ * Refresh demo workspace dates so they stay plausible relative to today.
+ *
+ * Conversation call_dates are shifted so the oldest is 30d ago and the
+ * newest is 2d ago. Also updates deal_stage_history entered_at/exited_at
+ * proportionally so stage durations remain coherent.
+ *
+ * Guard: only runs if the most recent demo conversation is >3 days stale.
+ */
+export async function refreshDemoDates(): Promise<void> {
+  try {
+    const latest = await query<{ call_date: Date }>(
+      `SELECT call_date FROM conversations
+       WHERE workspace_id = $1 AND source = 'demo'
+       ORDER BY call_date DESC LIMIT 1`,
+      [WS_ID]
+    );
+    if (latest.rows.length === 0) return;
+
+    const latestDate = new Date(latest.rows[0].call_date);
+    const staleThreshold = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+    if (latestDate >= staleThreshold) return;
+
+    const conversations = await query<{ id: string; call_date: Date }>(
+      `SELECT id, call_date FROM conversations
+       WHERE workspace_id = $1 AND source = 'demo'
+       ORDER BY call_date ASC`,
+      [WS_ID]
+    );
+    if (conversations.rows.length === 0) return;
+
+    const oldest = new Date(conversations.rows[0].call_date).getTime();
+    const newest = new Date(conversations.rows[conversations.rows.length - 1].call_date).getTime();
+    const range = newest - oldest || 1;
+    const targetOldest = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    const targetNewest = Date.now() - 2 * 24 * 60 * 60 * 1000;
+    const targetRange = targetNewest - targetOldest;
+
+    for (const conv of conversations.rows) {
+      const t = new Date(conv.call_date).getTime();
+      const pct = (t - oldest) / range;
+      const newDate = new Date(targetOldest + pct * targetRange);
+      await query(
+        `UPDATE conversations SET call_date = $1, updated_at = now()
+         WHERE id = $2 AND workspace_id = $3`,
+        [newDate, conv.id, WS_ID]
+      );
+    }
+
+    // Refresh deal_stage_history: find oldest and newest entered_at for open deals
+    const stageRows = await query<{ id: string; entered_at: Date; exited_at: Date | null }>(
+      `SELECT dsh.id, dsh.entered_at, dsh.exited_at
+       FROM deal_stage_history dsh
+       JOIN deals d ON d.id = dsh.deal_id
+       WHERE dsh.workspace_id = $1
+         AND d.source = 'demo'
+         AND (d.stage_normalized NOT IN ('closed_won','closed_lost') OR d.stage_normalized IS NULL)
+       ORDER BY dsh.entered_at ASC`,
+      [WS_ID]
+    );
+
+    if (stageRows.rows.length > 0) {
+      const sOldest = new Date(stageRows.rows[0].entered_at).getTime();
+      const sNewest = new Date(stageRows.rows[stageRows.rows.length - 1].entered_at).getTime();
+      const sRange = sNewest - sOldest || 1;
+      const sTargetOldest = Date.now() - 75 * 24 * 60 * 60 * 1000;
+      const sTargetNewest = Date.now() - 5 * 24 * 60 * 60 * 1000;
+      const sTargetRange = sTargetNewest - sTargetOldest;
+
+      for (const row of stageRows.rows) {
+        const t = new Date(row.entered_at).getTime();
+        const pct = (t - sOldest) / sRange;
+        const newEntered = new Date(sTargetOldest + pct * sTargetRange);
+        if (row.exited_at) {
+          const exitedPct = (new Date(row.exited_at).getTime() - sOldest) / sRange;
+          const newExited = new Date(sTargetOldest + exitedPct * sTargetRange);
+          const newDuration = Math.max(1, Math.round((newExited.getTime() - newEntered.getTime()) / 86400000));
+          await query(
+            `UPDATE deal_stage_history SET entered_at = $1, exited_at = $2, duration_days = $3
+             WHERE id = $4`,
+            [newEntered, newExited, newDuration, row.id]
+          );
+        } else {
+          await query(
+            `UPDATE deal_stage_history SET entered_at = $1 WHERE id = $2`,
+            [newEntered, row.id]
+          );
+        }
+      }
+    }
+
+    console.log(`[DemoSeed] Refreshed demo dates (${conversations.rows.length} conversations, ${stageRows.rows.length} stage history rows)`);
+  } catch (err) {
+    console.warn('[DemoSeed] Date refresh failed (non-fatal):', err instanceof Error ? err.message : err);
+  }
 }
