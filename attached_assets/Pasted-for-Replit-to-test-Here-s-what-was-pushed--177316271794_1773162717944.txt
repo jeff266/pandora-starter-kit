@@ -1,0 +1,113 @@
+for Replit to test. Here's    
+  what was pushed:                                  
+                                                    
+  ---                                               
+  📦 Latest Commits                                 
+                                                    
+  1. feat: complete RBAC Phase 2 core implementation
+   (T4-T8)                                          
+    - Applied scoping to accounts endpoint          
+    - Added skill execution permissions             
+    - Verified impersonation infrastructure         
+  2. test: add comprehensive RBAC Phase 2           
+  integration test for Replit                       
+    - 6 test suites covering all RBAC features      
+    - 430 lines of comprehensive validation         
+  3. docs: add RBAC Phase 2 test guide for Replit   
+    - Step-by-step instructions                     
+    - Troubleshooting guide                         
+    - Expected output examples                      
+                                                    
+  ---                                               
+  🧪 Test Script for Replit                         
+                                                    
+  Quick Start                                       
+                                                    
+  npx tsx server/scripts/test-rbac-phase2-replit.ts 
+  <workspace_id>                                    
+                                                    
+  Example with demo workspace:                      
+  npx tsx server/scripts/test-rbac-phase2-replit.ts 
+  00000000-0000-0000-0000-000000000002              
+                                                    
+  What It Tests                                     
+                                                    
+  1. ✅ Permission Configuration - Verifies Option B
+   (member/viewer restricted)                       
+  2. ✅ DataScope Computation - Verifies            
+  dealsFilter: 'own' for non-admins                 
+  3. ✅ SQL Filter Generation - Verifies AND        
+  owner_email = $1 syntax                           
+  4. ✅ Database Scoping - Real queries with actual 
+  workspace data                                    
+  5. ✅ Migration 154 - Verifies database           
+  permissions updated                               
+  6. ✅ Skill Permissions - Confirms routes are     
+  protected                                         
+                                                    
+  Expected Result                                   
+                                                    
+  Tests run: 18                                     
+  ✅ Passed: 18                                     
+  ❌ Failed: 0                                      
+                                                    
+  🎉 ALL TESTS PASSED - RBAC Phase 2 is working     
+  correctly!                                        
+                                                    
+  ---                                               
+  📄 Documentation                                  
+                                                    
+  Full test guide: RBAC-TEST-REPLIT.md              
+                                                    
+  Includes:                                         
+  - Detailed test explanations                      
+  - Troubleshooting for common issues               
+  - Manual API testing instructions                 
+  - Success criteria checklist                      
+                                                    
+  ---                                               
+  🎯 What's Implemented (T1-T8)                     
+                                                    
+  Core Infrastructure                               
+                                                    
+  - ✅ T1: apply-data-scope.ts helper with filter   
+  builders                                          
+  - ✅ T2: GET /api/deals scoping                   
+  - ✅ T3: GET /api/deals/pipeline-summary scoping  
+                                                    
+  Permission Model (Option B)                       
+                                                    
+  - ✅ Member: See only own deals                   
+  - ✅ Viewer: See only own deals                   
+  - ✅ Manager: See all deals (team visibility)     
+  - ✅ Analyst: See all deals (reporting needs)     
+  - ✅ Admin: See all + edit all                    
+                                                    
+  Additional Features                               
+                                                    
+  - ✅ T4: GET /api/accounts scoping                
+  - ✅ T5: Impersonation verified (works            
+  automatically)                                    
+  - ✅ T7: Export infrastructure ready              
+  - ✅ T8: Skill execution permissions added        
+                                                    
+  Deferred (Not Critical)                           
+                                                    
+  - ⏸️ T6: Frontend navigation visibility           
+  - ⏸️ T9: Brief assembly scoping                   
+  - ⏸️ T10: Ask Pandora scoping                     
+                                                    
+  ---                                               
+  🚀 Ready for Replit Testing                       
+                                                    
+  Replit should:                                    
+  1. Pull latest from main                          
+  2. Run migrations (if not auto-applied)           
+  3. Run test script with demo workspace ID         
+  4. Verify all 18 tests pass                       
+                                                    
+  If any tests fail, the test output will show      
+  exactly what's wrong with detailed error messages.
+                                                    
+  ---                                               
+  All code pushed! Ready for Replit to validate. 🎉
