@@ -1,0 +1,61 @@
+Read REPLIT_CONTEXT.md before starting.
+
+## T6: Frontend Navigation Visibility by Role
+
+RBAC Phase 2 backend is complete and tested (21/21 passing). 
+This task wires role visibility into the frontend sidebar navigation.
+
+## Role Model
+Two roles only: Admin and Rep (no Manager tier).
+
+## Nav Visibility Rules
+
+| Nav Item         | Admin        | Rep           |
+|-----------------|--------------|---------------|
+| Command Center  | ✅ Show       | ✅ Show        |
+| Ask Pandora     | ✅ Show       | ✅ Show        |
+| Agents          | ✅ Show       | ✅ Show        |
+| Agent Builder   | ✅ Show       | ❌ Hide        |
+| Skills          | ✅ Show       | ❌ Hide        |
+| Tools           | ✅ Show       | ❌ Hide        |
+| Deals           | ✅ Show       | ✅ Show        |
+| Accounts        | ✅ Show       | ✅ Show        |
+| Forecasting     | ✅ Show       | ✅ Show        |
+| Connectors      | ✅ Show       | ❌ Hide        |
+| Settings        | ✅ All tabs   | ✅ Profile only|
+
+## Implementation
+
+1. Pull the current user's role from workspace context (already available 
+   from the auth/workspace session — check how SettingsPage.tsx reads 
+   `currentWorkspace?.role`).
+
+2. Create a simple `useRole()` hook or helper that returns `isAdmin: boolean`.
+
+3. In the sidebar component, conditionally render nav items based on 
+   `isAdmin`. Use the table above as the spec.
+
+4. Add a role badge in the sidebar footer next to the user's name/avatar:
+   - Admin → teal badge "Admin"
+   - Rep → muted badge "Rep"
+   Use the existing design system colors (desaturated semantic colors, 
+   dark teal palette).
+
+5. Settings tabs: Rep users should only see the Profile tab. All other 
+   tabs (setup, members, sales-roster, roles, notifications, features, 
+   crm-sync, webhooks, billing, dimensions, token-usage, ai-keys) remain 
+   admin-only. This is already partially implemented — verify it's 
+   consistent with the role from workspace context, not a separate check.
+
+## What NOT to build
+- No "View as Rep" impersonation toggle (Phase 3, deferred)
+- No manager-tier visibility logic
+- No data scoping changes — that's already handled in Phase 2 backend
+
+## Acceptance
+- Rep user sees only their allowed nav items (no Skills, Connectors, 
+  Agent Builder, Tools)
+- Admin user sees full nav
+- Role badge visible in sidebar footer
+- Settings tabs correctly gated for Rep
+- No console errors from missing role context

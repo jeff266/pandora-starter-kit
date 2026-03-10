@@ -12,6 +12,7 @@ interface NavItem {
   path: string;
   icon: string;
   badge?: number;
+  adminOnly?: boolean;
 }
 
 interface NavSection {
@@ -42,8 +43,9 @@ const sections: NavSection[] = [
       { label: 'Competition', path: '/competition', icon: '\u229B' },
       { label: 'Winning Path', path: '/winning-path', icon: '\u25C8' },
       { label: 'Agents', path: '/agents', icon: '\u25C8' },
-      { label: 'Skills', path: '/skills', icon: '\u2699' },
-      { label: 'Tools', path: '/tools', icon: '\u29EB' },
+      { label: 'Agent Builder', path: '/agent-builder', icon: '\u29C6', adminOnly: true },
+      { label: 'Skills', path: '/skills', icon: '\u2699', adminOnly: true },
+      { label: 'Tools', path: '/tools', icon: '\u29EB', adminOnly: true },
       { label: 'Governance', path: '/governance', icon: '\u2696' },
     ],
   },
@@ -63,7 +65,7 @@ const sections: NavSection[] = [
   {
     title: 'DATA',
     items: [
-      { label: 'Connectors', path: '/connectors', icon: '\u229E' },
+      { label: 'Connectors', path: '/connectors', icon: '\u229E', adminOnly: true },
       { label: 'Enrichment', path: '/enrichment', icon: '\u2B22' },
       { label: 'Dictionary', path: '/dictionary', icon: '\uD83D\uDCD6' },
     ],
@@ -98,6 +100,8 @@ export default function Sidebar({ badges, showAllClients, collapsed = false, onT
   const [showWsDropdown, setShowWsDropdown] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [unassignedCount, setUnassignedCount] = useState(0);
+
+  const isAdmin = currentWorkspace?.role === 'admin';
 
   const activeSection = sections.find(s => s.title && s.items.some(i => i.path !== '/' ? location.pathname.startsWith(i.path) : location.pathname === '/'))?.title ?? null;
 
@@ -320,7 +324,7 @@ export default function Sidebar({ badges, showAllClients, collapsed = false, onT
             {collapsed && section.title && (
               <div style={{ height: 1, background: colors.border, margin: '6px 10px' }} />
             )}
-            {!isSectionCollapsed && section.items.map(item => {
+            {!isSectionCollapsed && section.items.filter(item => !item.adminOnly || isAdmin).map(item => {
               const active = isActive(item.path);
               const badgeCount = badges[item.label.toLowerCase()];
               return (
@@ -504,8 +508,16 @@ export default function Sidebar({ badges, showAllClients, collapsed = false, onT
               <div style={{ fontSize: 12, fontWeight: 500, color: colors.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {user?.name || 'User'}
               </div>
-              <div style={{ fontSize: 11, color: colors.textMuted, textTransform: 'capitalize' }}>
-                {currentWorkspace?.role || ''}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                <span style={{
+                  fontSize: 9, fontWeight: 700, letterSpacing: '0.05em',
+                  padding: '1px 6px', borderRadius: 4,
+                  background: isAdmin ? colors.accentSoft : colors.surfaceHover,
+                  color: isAdmin ? colors.accent : colors.textMuted,
+                  textTransform: 'uppercase',
+                }}>
+                  {isAdmin ? 'Admin' : 'Rep'}
+                </span>
               </div>
             </div>
           )}
