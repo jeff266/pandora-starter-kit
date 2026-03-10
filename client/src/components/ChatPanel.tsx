@@ -7,7 +7,6 @@ import { Icon } from './icons';
 import ChartRenderer from './shared/ChartRenderer';
 import type { ChartSpec } from './shared/ChartRenderer';
 import ChatDocBar from './ChatDocBar';
-import SaveAsAgentModal from './SaveAsAgentModal';
 import SaveAsAgentBanner from './chat/SaveAsAgentBanner';
 import { useSaveAsAgentTrigger } from '../hooks/useSaveAsAgentTrigger';
 
@@ -57,6 +56,7 @@ interface ChatPanelProps {
   isOpen: boolean;
   onClose: () => void;
   scope?: ChatScope;
+  initialSessionId?: string;
 }
 
 interface ChatSessionPreview {
@@ -86,7 +86,7 @@ function getStoredWidth(): number {
   return CHAT_DEFAULT_WIDTH;
 }
 
-export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
+export default function ChatPanel({ isOpen, onClose, scope, initialSessionId }: ChatPanelProps) {
   const isMobile = useIsMobile();
   const navigate = useNavigate();
   const { anon } = useDemoMode();
@@ -116,9 +116,7 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
   const [agentBannerDismissed, setAgentBannerDismissed] = useState(false);
   const [extractedAgentData, setExtractedAgentData] = useState<any>(null);
   const [extractionLoading, setExtractionLoading] = useState(false);
-  const [showAgentModal, setShowAgentModal] = useState(false);
-  const [modalPendingOpen, setModalPendingOpen] = useState(false);
-  const [savedAgentToast, setSavedAgentToast] = useState<{ name: string; id: string } | null>(null);
+  const [navPendingOpen, setNavPendingOpen] = useState(false);
 
   const hasTableContent = messages.some(m => m.role === 'assistant' && m.content.split('\n').some(l => isTableRow(l)));
 
@@ -229,10 +227,11 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
       api.post('/chat/extract-agent', { conversation_id: threadId })
         .then((data: any) => {
           setExtractedAgentData(data);
-          // If user clicked "Save" while extraction was in flight, open modal now
-          setModalPendingOpen(pending => {
+          // If user clicked "Save" while extraction was in flight, navigate now
+          setNavPendingOpen(pending => {
             if (pending) {
-              setShowAgentModal(true);
+              setAgentSaved(true);
+              navigate('/agent-builder', { state: { chatPrefill: data, threadId } });
               return false;
             }
             return false;
@@ -243,12 +242,6 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
     }
   }, [showAgentBanner, threadId, extractedAgentData, extractionLoading]);
 
-  // Dismiss toast after 6 seconds
-  useEffect(() => {
-    if (!savedAgentToast) return;
-    const timer = setTimeout(() => setSavedAgentToast(null), 6000);
-    return () => clearTimeout(timer);
-  }, [savedAgentToast]);
 
   const submitFeedback = async (responseId: string, signalType: 'thumbs_up' | 'thumbs_down') => {
     try {
@@ -320,6 +313,12 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
   useEffect(() => {
     startNewChat();
   }, [scope?.type, scope?.entity_id, startNewChat]);
+
+  useEffect(() => {
+    if (isOpen && initialSessionId) {
+      loadSession(initialSessionId);
+    }
+  }, [isOpen, initialSessionId]);
 
   const sendMessage = async (overrideText?: string) => {
     const text = (overrideText || input).trim();
@@ -705,62 +704,15 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
             isLoading={extractionLoading}
             onSave={() => {
               if (extractedAgentData) {
-                setShowAgentModal(true);
+                setAgentSaved(true);
+                navigate('/agent-builder', { state: { chatPrefill: extractedAgentData, threadId } });
               } else {
-                // Extraction still in flight — open modal as soon as it lands
-                setModalPendingOpen(true);
+                // Extraction still in flight — navigate as soon as it lands
+                setNavPendingOpen(true);
               }
             }}
             onDismiss={() => setAgentBannerDismissed(true)}
           />
-        )}
-
-        {/* Open modal automatically once data arrives if user clicked while loading */}
-        {showAgentModal && extractedAgentData && threadId && (
-          <SaveAsAgentModal
-            extraction={extractedAgentData}
-            threadId={threadId}
-            onSave={(agentId, agentName) => {
-              setShowAgentModal(false);
-              setAgentSaved(true);
-              setSavedAgentToast({ name: agentName, id: agentId });
-            }}
-            onClose={() => setShowAgentModal(false)}
-          />
-        )}
-
-        {/* Post-save inline toast */}
-        {savedAgentToast && (
-          <div style={{
-            margin: '0 12px 8px',
-            background: 'rgba(74, 222, 128, 0.1)',
-            border: '1px solid rgba(74, 222, 128, 0.25)',
-            borderRadius: 8,
-            padding: '10px 14px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 8,
-            fontSize: 12,
-          }}>
-            <span style={{ color: '#4ade80' }}>
-              ✓ Agent saved
-            </span>
-            <button
-              onClick={() => { setSavedAgentToast(null); navigate('/agents'); }}
-              style={{
-                background: 'none',
-                border: 'none',
-                color: '#6488ea',
-                cursor: 'pointer',
-                fontSize: 12,
-                textDecoration: 'underline',
-                padding: 0,
-              }}
-            >
-              View "{savedAgentToast.name}" →
-            </button>
-          </div>
         )}
 
         {!isHistoryView && (

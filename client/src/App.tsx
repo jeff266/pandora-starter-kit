@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useMemo, lazy, Suspense } from 'react';
-import { Routes, Route, useLocation, Navigate } from 'react-router-dom';
+import { Routes, Route, useLocation, useNavigate, Navigate } from 'react-router-dom';
 import { useWorkspace } from './context/WorkspaceContext';
 import { useDemoMode } from './contexts/DemoModeContext';
 import { setApiCredentials, api } from './lib/api';
@@ -146,6 +146,7 @@ export default function App() {
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [chatScope, setChatScope] = useState<{ type: string; entity_id?: string; entity_name?: string; rep_email?: string } | undefined>(undefined);
+  const [chatInitialSession, setChatInitialSession] = useState<string | null>(null);
   const isMobile = useIsMobile();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
@@ -165,6 +166,16 @@ export default function App() {
 
   // Close mobile menu on route change
   useEffect(() => { setMobileMenuOpen(false); }, [location.pathname]);
+
+  // Open a specific chat session when navigated here via router state (e.g. from Agent Builder)
+  const navigate = useNavigate();
+  useEffect(() => {
+    const sessionId = location.state?.openChatSession;
+    if (!sessionId) return;
+    setChatInitialSession(sessionId);
+    setChatOpen(true);
+    navigate(location.pathname, { replace: true, state: {} });
+  }, [location.state?.openChatSession]);
 
   const handleViewChange = useCallback((v: 'command' | 'assistant') => {
     setActiveView(v);
@@ -406,8 +417,9 @@ export default function App() {
       )}
       <ChatPanel
         isOpen={chatOpen}
-        onClose={() => setChatOpen(false)}
+        onClose={() => { setChatOpen(false); setChatInitialSession(null); }}
         scope={chatScope}
+        initialSessionId={chatInitialSession || undefined}
       />
       <style>{`
         @keyframes skeleton-pulse {

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { api, getWorkspaceId } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
 import Skeleton from '../components/Skeleton';
@@ -112,6 +113,8 @@ interface NamedFilterOption {
 }
 
 export default function AgentBuilder() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [view, setView] = useState<ViewState>('list');
   const [templates, setTemplates] = useState<AgentTemplate[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -157,6 +160,9 @@ export default function AgentBuilder() {
   const [modalExtraction, setModalExtraction] = useState<any>(null);
   const [modalConversationId, setModalConversationId] = useState<string | null>(null);
 
+  const [seedConversationId, setSeedConversationId] = useState<string | null>(null);
+  const [fromChat, setFromChat] = useState(false);
+
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
@@ -186,6 +192,34 @@ export default function AgentBuilder() {
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  useEffect(() => {
+    const prefill = location.state?.chatPrefill;
+    const threadId = location.state?.threadId;
+    if (!prefill) return;
+    setSelectedTemplate(null);
+    setName(prefill.suggested_name || '');
+    setDescription(prefill.goal || '');
+    setIcon(AVATAR_GALLERY[0].src);
+    setGoal(prefill.goal || '');
+    setStandingQuestions(prefill.standing_questions || []);
+    setSkills(prefill.detected_skills || []);
+    setOutputFormats(prefill.suggested_delivery?.format ? [prefill.suggested_delivery.format] : ['slack']);
+    setSchedule(
+      prefill.suggested_schedule?.cron
+        ? { type: 'cron', cron: prefill.suggested_schedule.cron }
+        : { type: 'manual' }
+    );
+    setScopeFilters([]);
+    setFocusQuestions([]);
+    setDataWindow({ primary: 'current_week', comparison: 'previous_period' });
+    setAudience({ role: 'VP Sales', detail_preference: 'manager' });
+    setEditingAgentId(null);
+    setSeedConversationId(threadId || null);
+    setFromChat(true);
+    setView('builder');
+    setActiveTab('goals');
+  }, []);  
 
   useEffect(() => {
     if (activeTab !== 'skills') return;
@@ -243,6 +277,8 @@ export default function AgentBuilder() {
     setScopeFilters(a.scope_filters || []);
     setSchedule({ type: 'manual' });
     setEditingAgentId(a.id);
+    setSeedConversationId((a as any).seed_conversation_id ?? null);
+    setFromChat(false);
     setView('builder');
     setActiveTab('audience');
   }
@@ -323,6 +359,8 @@ export default function AgentBuilder() {
           scope_filters: scopeFilters,
           goal: goal || undefined,
           standing_questions: standingQuestions.length > 0 ? standingQuestions : undefined,
+          created_from: seedConversationId ? 'conversation' : undefined,
+          seed_conversation_id: seedConversationId || undefined,
           event_config: schedule.type === 'event_prep' ? {
             event_name: schedule.event_name,
             prep_days_before: schedule.prep_days_before,
@@ -785,6 +823,45 @@ export default function AgentBuilder() {
       {selectedTemplate && (
         <div style={{ ...badge, marginTop: 12, background: colors.accentSoft, color: colors.accent, fontSize: 12, padding: '4px 10px' }}>
           Based on {selectedTemplate.name}
+        </div>
+      )}
+
+      {fromChat && (
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          marginTop: 12, marginBottom: 4,
+          background: colors.accentSoft,
+          border: `1px solid ${colors.accent}33`,
+          borderRadius: 8,
+          padding: '8px 12px',
+          gap: 8,
+        }}>
+          <span style={{ fontSize: 12, color: colors.accent }}>
+            ✦ Pre-filled from your Ask Pandora conversation — review and adjust below
+          </span>
+          <button
+            onClick={() => setFromChat(false)}
+            style={{ background: 'none', border: 'none', color: colors.textMuted, cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: '0 2px' }}
+            title="Dismiss"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
+      {seedConversationId && (
+        <div style={{ marginTop: fromChat ? 4 : 12, marginBottom: 4 }}>
+          <button
+            onClick={() => navigate('/', { state: { openChatSession: seedConversationId } })}
+            style={{
+              background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+              fontSize: 12, color: colors.accent, display: 'flex', alignItems: 'center', gap: 5,
+              textDecoration: 'none',
+            }}
+          >
+            <span style={{ fontSize: 14 }}>💬</span>
+            <span style={{ textDecoration: 'underline' }}>View originating Ask Pandora conversation →</span>
+          </button>
         </div>
       )}
 
