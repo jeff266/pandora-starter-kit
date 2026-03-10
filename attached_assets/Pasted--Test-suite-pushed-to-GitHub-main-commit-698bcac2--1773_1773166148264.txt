@@ -1,0 +1,63 @@
+✅ Test suite pushed to GitHub main (commit       
+  698bcac2)                                         
+                                                    
+  ---                                               
+  🧪 Test Suite Ready for Replit                    
+                                                    
+  I've created a comprehensive test script          
+  specifically for validating Ask Pandora role      
+  scoping on Replit.                                
+                                                    
+  Quick Start                                       
+                                                    
+  npx tsx server/scripts/test-ask-pandora-scoping.ts
+   <workspace_id>                                   
+                                                    
+  What It Tests                                     
+                                                    
+  19+ automated tests covering:                     
+                                                    
+  1. RBAC Permissions (5 tests)                     
+    - Verifies member/viewer have data.deals_view = 
+  false                                             
+    - Verifies admin/manager/analyst have           
+  data.deals_view = true                            
+  2. Pipeline Resolver (5 tests)                    
+    - Member/Viewer → owner_only=true (scoped to own
+   deals)                                           
+    - Admin/Manager/Analyst → owner_only=false (see 
+  all deals)                                        
+  3. SessionContext Integration (3 tests)           
+    - userId field stored correctly                 
+    - userRole field stored correctly               
+    - activeScope with repEmail                     
+  4. Real Data Scoping (N tests, one per workspace  
+  member)                                           
+    - Counts total deals in workspace               
+    - Verifies each role sees correct subset        
+  5. Slack User Resolution (2 tests)                
+    - Checks Slack user → workspace user mapping    
+    - Tests role resolution query                   
+  6. Interface Updates (2 tests)                    
+    - ConversationTurnInput has userId              
+    - ConversationTurnInput has userRole            
+                                                    
+  Documentation                                     
+                                                    
+  Full guide at: ASK-PANDORA-SCOPING-TEST.md        
+  - Expected output                                 
+  - Troubleshooting guide                           
+  - Manual testing instructions                     
+  - Integration with existing RBAC tests            
+                                                    
+  Run Both Tests for Complete Validation            
+                                                    
+  # Test API endpoint scoping (existing)            
+  npx tsx server/scripts/test-rbac-phase2-replit.ts 
+  <workspace_id>                                    
+                                                    
+  # Test Ask Pandora scoping (new)                  
+  npx tsx server/scripts/test-ask-pandora-scoping.ts
+   <workspace_id>                                   
+                                                    
+  All ready to test on Replit! 🚀   
