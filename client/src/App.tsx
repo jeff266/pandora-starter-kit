@@ -65,6 +65,7 @@ import PipelineMechanicsPage from './pages/PipelineMechanicsPage';
 import InvestigationHistoryPage from './pages/InvestigationHistoryPage';
 import { colors, fonts } from './styles/theme';
 import { useIsMobile } from './hooks/useIsMobile';
+import ImpersonationBanner from './components/ImpersonationBanner';
 
 const pageTitles: Record<string, string> = {
   '/': 'Command Center',
@@ -297,6 +298,7 @@ export default function App() {
     <div style={{ display: 'flex', height: '100vh', background: colors.bg }}>
       <Sidebar badges={badges} showAllClients={hasMultipleWorkspaces} collapsed={sidebarCollapsed} onToggleCollapse={toggleSidebar} mobileOpen={mobileMenuOpen} onMobileClose={() => setMobileMenuOpen(false)} mode={activeView} onModeChange={handleViewChange} />
       <main style={{ marginLeft: isMobile ? 0 : (sidebarCollapsed ? 56 : 220), flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', transition: 'margin-left 0.2s ease' }}>
+        <ImpersonationBanner />
         <DemoModeBanner />
         <TopBar title={title} lastRefreshed={lastRefreshed} onRefresh={fetchBadges} onMenuToggle={isMobile ? () => setMobileMenuOpen(true) : undefined} governancePending={governancePending} actions={currentWorkspace?.id ? <NotificationBell workspaceId={currentWorkspace.id} /> : undefined} />
         <div style={{ flex: 1, overflow: 'auto', padding: isMobile ? '16px 12px' : '24px 28px' }}>

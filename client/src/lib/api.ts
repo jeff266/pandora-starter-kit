@@ -1,3 +1,5 @@
+import { getImpersonationToken } from '../components/ImpersonationBanner';
+
 let _workspaceId = '';
 let _token = '';
 let _activeLens: string | null = null;
@@ -23,10 +25,14 @@ export function getActiveLens(): string | null {
   return _activeLens;
 }
 
+function getEffectiveToken(): string {
+  return getImpersonationToken() || _token;
+}
+
 async function request(method: string, path: string, body?: any, signal?: AbortSignal) {
   const url = `/api/workspaces/${_workspaceId}${path}`;
   const headers: Record<string, string> = {
-    'Authorization': `Bearer ${_token}`,
+    'Authorization': `Bearer ${getEffectiveToken()}`,
   };
   if (_activeLens) {
     headers['X-Pandora-Lens'] = _activeLens;
@@ -62,7 +68,7 @@ export const api = {
   delete: (path: string) => request('DELETE', path),
   upload: (path: string, formData: FormData) => {
     const url = `/api/workspaces/${_workspaceId}${path}`;
-    const uploadHeaders: Record<string, string> = { 'Authorization': `Bearer ${_token}` };
+    const uploadHeaders: Record<string, string> = { 'Authorization': `Bearer ${getEffectiveToken()}` };
     if (_activeLens) uploadHeaders['X-Pandora-Lens'] = _activeLens;
     return fetch(url, {
       method: 'POST',

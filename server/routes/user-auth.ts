@@ -10,6 +10,7 @@ import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { query } from '../db.js';
 import { sendPasswordResetEmail } from '../services/email.js';
+import { getDataVisibilityScope } from '../permissions/data-visibility.js';
 import {
   generateAccessToken,
   generateRefreshToken,
@@ -579,6 +580,7 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
       connector_count: string;
       deal_count: string;
       last_sync: string | null;
+      permissions: any;
     }>(`
       SELECT
         w.id,
@@ -587,9 +589,12 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
         uw.role,
         COALESCE(cr.cnt, 0) as connector_count,
         COALESCE(d.cnt, 0) as deal_count,
-        sl.last_sync
+        sl.last_sync,
+        wr.permissions
       FROM user_workspaces uw
       JOIN workspaces w ON w.id = uw.workspace_id
+      LEFT JOIN workspace_members wm ON wm.workspace_id = uw.workspace_id AND wm.user_id = uw.user_id
+      LEFT JOIN workspace_roles wr ON wr.id = wm.role_id
       LEFT JOIN LATERAL (
         SELECT COUNT(*)::int as cnt FROM connections WHERE workspace_id = w.id
       ) cr ON true
@@ -612,15 +617,22 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
         anonymize_mode: user.anonymize_mode,
         avatar_url: user.avatar_url,
       },
-      workspaces: wsResult.rows.map(w => ({
-        id: w.id,
-        name: w.name,
-        slug: w.slug,
-        role: w.role,
-        connector_count: Number(w.connector_count),
-        deal_count: Number(w.deal_count),
-        last_sync: w.last_sync || null,
-      })),
+      workspaces: wsResult.rows.map(w => {
+        let permissions: Record<string, boolean> = {};
+        if (w.permissions) {
+          permissions = typeof w.permissions === 'string' ? JSON.parse(w.permissions) : w.permissions;
+        }
+        return {
+          id: w.id,
+          name: w.name,
+          slug: w.slug,
+          role: w.role,
+          connector_count: Number(w.connector_count),
+          deal_count: Number(w.deal_count),
+          last_sync: w.last_sync || null,
+          dataScope: getDataVisibilityScope(permissions),
+        };
+      }),
     });
   } catch (err) {
     console.error('[auth] /me error:', err instanceof Error ? err.message : err);

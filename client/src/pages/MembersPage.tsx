@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { useWorkspace } from '../context/WorkspaceContext';
-import { api } from '../lib/api';
+import { api, getAuthToken } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
 import Skeleton from '../components/Skeleton';
 import { useDemoMode } from '../contexts/DemoModeContext';
 import { useIsMobile } from '../hooks/useIsMobile';
+import { setImpersonation } from '../components/ImpersonationBanner';
 
 type PandoraRole = 'cro' | 'manager' | 'ae' | 'revops' | 'admin' | null;
 
@@ -27,6 +28,7 @@ const PANDORA_ROLE_COLORS: Record<string, string> = {
 
 interface Member {
   id: string;
+  user_id: string;
   name: string;
   email: string;
   role: { id: string; name: string } | string;
@@ -88,6 +90,8 @@ export default function MembersPage() {
   const [inviteError, setInviteError] = useState('');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [roles, setRoles] = useState<WorkspaceRole[]>([]);
+
+  const [impersonatingId, setImpersonatingId] = useState<string | null>(null);
 
   const isAdmin = currentWorkspace?.role === 'admin';
   const adminCount = members.filter(m => getRoleName(m.role) === 'admin').length;
@@ -194,6 +198,43 @@ export default function MembersPage() {
     }
   };
 
+  const handleImpersonate = async (member: Member) => {
+    if (!currentWorkspace?.id) return;
+    setImpersonatingId(member.id);
+    try {
+      const data = await fetch(`/api/workspaces/${currentWorkspace.id}/members/impersonate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${getAuthToken()}`,
+        },
+        body: JSON.stringify({ targetUserId: member.user_id }),
+      }).then(r => r.json());
+
+      if (data.error) throw new Error(data.error);
+
+      setImpersonation({
+        targetName: data.targetUser.name,
+        targetRole: data.targetUser.role,
+        targetEmail: data.targetUser.email,
+        workspaceId: currentWorkspace.id,
+        adminToken: getAuthToken(),
+        impersonationToken: data.token,
+      });
+
+      window.location.reload();
+    } catch (err: any) {
+      showToast(err.message || 'Failed to start impersonation', 'error');
+      setImpersonatingId(null);
+    }
+  };
+
+  const canImpersonate = (member: Member) => {
+    if (!isAdmin) return false;
+    const roleName = getRoleName(member.role).toLowerCase();
+    return roleName !== 'admin';
+  };
+
   const canModify = (member: Member) => {
     if (!isAdmin) return false;
     if (member.id === user?.id && adminCount <= 1) return false;
@@ -289,7 +330,7 @@ export default function MembersPage() {
       <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10, overflow: 'hidden' }}>
         {!isMobile && (
           <div style={{
-            display: 'grid', gridTemplateColumns: isAdmin ? '2fr 2fr 1fr 1fr 80px' : '2fr 2fr 1fr 1fr',
+            display: 'grid', gridTemplateColumns: isAdmin ? '2fr 2fr 1fr 1fr 140px' : '2fr 2fr 1fr 1fr',
             padding: '10px 16px', borderBottom: `1px solid ${colors.border}`,
             fontSize: 11, fontWeight: 600, color: colors.textDim, textTransform: 'uppercase', letterSpacing: '0.05em',
           }}>
@@ -310,7 +351,7 @@ export default function MembersPage() {
           </div>
         ) : (
           <div key={member.id} style={{
-            display: 'grid', gridTemplateColumns: isAdmin ? '2fr 2fr 1fr 1fr 80px' : '2fr 2fr 1fr 1fr',
+            display: 'grid', gridTemplateColumns: isAdmin ? '2fr 2fr 1fr 1fr 140px' : '2fr 2fr 1fr 1fr',
             padding: '12px 16px', borderBottom: `1px solid ${colors.border}`, alignItems: 'center',
           }}>
             <span style={{ fontSize: 13, fontWeight: 500, color: colors.text }}>{member.name ? anon.person(member.name) : '--'}</span>
@@ -333,7 +374,26 @@ export default function MembersPage() {
               {(member.joined_at || member.created_at) ? new Date(member.joined_at || member.created_at!).toLocaleDateString() : '--'}
             </span>
             {isAdmin && (
-              <div style={{ textAlign: 'right' }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 4 }}>
+                {canImpersonate(member) && (
+                  <button
+                    onClick={() => handleImpersonate(member)}
+                    disabled={impersonatingId === member.id}
+                    title={`View as ${member.name}`}
+                    style={{
+                      fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 4,
+                      background: impersonatingId === member.id ? `${colors.accent}20` : 'transparent',
+                      border: `1px solid ${colors.border}`,
+                      color: colors.textSecondary,
+                      cursor: impersonatingId === member.id ? 'not-allowed' : 'pointer',
+                      opacity: impersonatingId === member.id ? 0.6 : 1,
+                      whiteSpace: 'nowrap',
+                    }}
+                    onMouseEnter={e => { if (impersonatingId !== member.id) e.currentTarget.style.borderColor = colors.accent; }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = colors.border; }}>
+                    {impersonatingId === member.id ? '...' : 'View as'}
+                  </button>
+                )}
                 {canModify(member) && (
                   <button onClick={() => handleRemove(member.id)}
                     style={{ fontSize: 11, color: colors.textMuted, background: 'none', border: 'none', cursor: 'pointer', padding: '2px 6px', borderRadius: 4 }}

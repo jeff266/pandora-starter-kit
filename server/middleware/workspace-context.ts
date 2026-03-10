@@ -1,16 +1,17 @@
 /**
  * Workspace Context Middleware
- * Attaches workspace and member data to all workspace-scoped requests
+ * Attaches workspace, member, and data-visibility scope to all workspace-scoped requests.
  */
 
 import { Request, Response, NextFunction } from 'express';
 import { query } from '../db.js';
+import { getDataVisibilityScope, DataScope } from '../permissions/data-visibility.js';
 
-// Extend Express Request with workspace context
 declare global {
   namespace Express {
     interface Request {
-      workspace?: { id: string; name: string; };
+      workspace?: { id: string; name: string };
+      dataScope?: DataScope;
     }
   }
 }
@@ -23,20 +24,21 @@ interface WorkspaceRow {
   created_at: Date;
 }
 
-interface WorkspaceMemberRow {
+interface WorkspaceMemberWithPerms {
   id: string;
   user_id: string;
-  role: string;
-  display_name: string;
-  is_active: boolean;
+  role_id: string;
+  pandora_role: string;
+  status: string;
+  permissions: any;
 }
 
 /**
- * Middleware: Attach workspace context to request
- * Runs on all /api/workspaces/:workspaceId/* routes
- * 
- * Does NOT enforce permissions - that's requirePermission's job
- * Just makes workspace data available to downstream handlers
+ * Middleware: Attach workspace context + data-visibility scope to request.
+ * Runs on all /api/workspaces/:workspaceId/* routes.
+ *
+ * Does NOT enforce permissions — that is requirePermission's job.
+ * Sets req.workspace and req.dataScope for downstream handlers.
  */
 export async function attachWorkspaceContext(
   req: Request,
@@ -46,16 +48,12 @@ export async function attachWorkspaceContext(
   const workspaceId = req.params.workspaceId;
 
   if (!workspaceId) {
-    // This middleware should only run on routes with :workspaceId param
     return next();
   }
 
   try {
-    // Query workspace
     const workspaceResult = await query<WorkspaceRow>(
-      `SELECT id, name, slug, plan, created_at 
-       FROM workspaces 
-       WHERE id = $1`,
+      `SELECT id, name, slug, plan, created_at FROM workspaces WHERE id = $1`,
       [workspaceId]
     );
 
@@ -64,32 +62,37 @@ export async function attachWorkspaceContext(
       return;
     }
 
-    const workspace = workspaceResult.rows[0];
+    req.workspace = { id: workspaceResult.rows[0].id, name: workspaceResult.rows[0].name } as any;
 
-    // Attach to request
-    req.workspace = { id: workspace.id, name: workspace.name } as any;
-
-    // If user is authenticated, check if they're a member (any status)
-    // This is informational only - doesn't block access
     if (req.user?.user_id) {
-      const memberResult = await query<WorkspaceMemberRow>(
-        `SELECT id, user_id, pandora_role AS role, NULL::text AS display_name,
-                (status = 'active') AS is_active, role_id
-         FROM workspace_members
-         WHERE workspace_id = $1 AND user_id = $2`,
+      const memberResult = await query<WorkspaceMemberWithPerms>(
+        `SELECT wm.id, wm.user_id, wm.role_id, wm.pandora_role, wm.status, wr.permissions
+         FROM workspace_members wm
+         LEFT JOIN workspace_roles wr ON wr.id = wm.role_id
+         WHERE wm.workspace_id = $1 AND wm.user_id = $2`,
         [workspaceId, req.user.user_id]
       );
 
       if (memberResult.rows.length > 0) {
         const member = memberResult.rows[0];
+
         req.workspaceMember = {
           id: member.id,
           userId: member.user_id,
-          roleId: (member as any).role_id || '',
-          role: member.role,
-          displayName: member.display_name,
-          isActive: member.is_active,
+          roleId: member.role_id || '',
+          role: member.pandora_role,
+          displayName: '',
+          isActive: member.status === 'active',
         };
+
+        let permissions: Record<string, boolean> = {};
+        if (member.permissions) {
+          permissions = typeof member.permissions === 'string'
+            ? JSON.parse(member.permissions)
+            : member.permissions;
+        }
+
+        req.dataScope = getDataVisibilityScope(permissions);
       }
     }
 

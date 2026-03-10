@@ -28,9 +28,33 @@ All demo users (any user in the `users` table) are auto-granted `admin` access t
 
 ### RBAC (Role-Based Access Control)
 - Permission middleware: `requirePermission(key)` and `requireAnyPermission(keys[])` in `server/middleware/permissions.ts`.
-- 33-key permission schema defined in `server/permissions/types.ts`. Three system roles: `admin`, `member`, `viewer`.
+- 33-key permission schema defined in `server/permissions/types.ts`. Five system roles: `admin`, `manager`, `member`, `analyst`, `viewer`.
 - Every mutating route in `workspaceApiRouter` must carry a `requirePermission` guard — workspace membership alone (enforced by `requireWorkspaceAccess`) is not sufficient.
 - Role summaries and permission assignments: `server/permissions/system-roles.ts`.
+
+### Admin Impersonation
+- Admins can "view as" any non-admin member via `POST /api/workspaces/:workspaceId/members/impersonate` with `{ targetUserId }`.
+- Returns a short-lived JWT (2 hours) for the target user, stored in `user_sessions`.
+- Stop via `POST /api/workspaces/:workspaceId/members/impersonate/stop`.
+- All impersonation events (start/stop) are recorded in the `audit_log` table.
+- Frontend: admins see a "View as" button on each non-admin member row in the Members page. An amber `ImpersonationBanner` appears at the top of the layout during an impersonation session. The API client (`client/src/lib/api.ts`) auto-uses the impersonation token when present in localStorage.
+- Safety guards: cannot impersonate another admin; cannot impersonate yourself; sensitive mutations can check `req.impersonation.active` to block impersonated requests.
+- localStorage keys: `pandora_impersonation_session` (token), `pandora_impersonation_meta` (JSON with targetName, targetRole, targetEmail, workspaceId, adminToken, impersonationToken).
+
+### Data Visibility Scope
+- `server/permissions/data-visibility.ts` exports `getDataVisibilityScope(permissions)` → `DataScope`.
+- `DataScope: { dealsFilter: 'all'|'own', repsFilter: 'all'|'team'|'own', canExport: boolean }`.
+- Computed from workspace_roles.permissions and attached as `req.dataScope` by `attachWorkspaceContext` middleware.
+- Returned in `GET /api/auth/me` response inside each workspace object as `dataScope`.
+- Viewer role example: `{ dealsFilter: 'all', repsFilter: 'own', canExport: false }`.
+- This establishes the RLS contract — subsequent work uses `req.dataScope` to filter query results.
+
+### Test Users (Dev Only)
+- 4 fictional `@pandora-test.local` users exist across the 4 main workspaces for role-gated UI testing.
+- Password for all: `Pandora123!`. Jeff's password was also set to `Pandora123!` for admin testing.
+- Cast: `sarah.chen` (Manager), `marcus.hill` (Member), `priya.nair` (Analyst), `diego.reyes` (Viewer).
+- Deterministic UUIDs: `a0000000-0000-0000-0000-00000000000{1-4}`.
+- Added by `migrations/150_seed_dummy_users.sql`.
 
 ### Prompt Injection Defense
 - CRM-sourced strings (deal names, account names, contact names, annotation content, finding messages, conversation titles) must be sanitized before interpolation into AI prompts.
@@ -55,7 +79,7 @@ All demo users (any user in the `users` table) are auto-granted `admin` access t
 ## Customer Billing Metering
 
 ### Database
-- **Migration runner**: `npm run migrate` → `tsx server/migrate.ts`. Reads SQL files from root `/migrations/` (NOT `server/migrations/`). Next number: **150**. Files in `server/migrations/` are NOT picked up by the runner.
+- **Migration runner**: `npm run migrate` → `tsx server/migrate.ts`. Reads SQL files from root `/migrations/` (NOT `server/migrations/`). Next number: **153**. Files in `server/migrations/` are NOT picked up by the runner.
 - `token_usage.key_source VARCHAR(10) DEFAULT 'pandora'` — added by migration `131_billing_meter.sql`.
 - `billing_meter` table: per-workspace monthly aggregates with pandora/byok token splits, markup multiplier, customer charge, invoice workflow (pending → invoiced → paid/waived). Unique constraint on `(workspace_id, billing_period)`.
 

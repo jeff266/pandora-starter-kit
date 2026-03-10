@@ -12,7 +12,7 @@ import { query } from '../db.js';
 import { ensureNotLastAdmin, validateRoleInWorkspace, isAdminRole } from '../permissions/guards.js';
 import { notificationService } from '../notifications/service.js';
 import { sendWorkspaceInvite, sendInviteRequestNotification, sendInviteRequestResolved } from '../notifications/email.js';
-import { generateInviteToken, verifyInviteToken } from '../auth/tokens.js';
+import { generateInviteToken, verifyInviteToken, generateAccessToken } from '../auth/tokens.js';
 
 const router = Router({ mergeParams: true });
 
@@ -885,6 +885,117 @@ router.post('/accept-invite/:token', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('[members] Error accepting invite:', err instanceof Error ? err.message : err);
     res.status(500).json({ error: 'Failed to accept invite' });
+  }
+});
+
+/**
+ * POST /impersonate
+ * Admin-only. Creates a short-lived session for a workspace member so the admin
+ * can view the product as that user. Refuses to impersonate other admins.
+ * Logs to audit_log.
+ */
+router.post('/impersonate', async (req: Request, res: Response) => {
+  try {
+    const workspaceId = req.params.workspaceId as string;
+    const actorId = req.user?.user_id;
+    if (!actorId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    const { targetUserId } = req.body as { targetUserId?: string };
+    if (!targetUserId) {
+      return res.status(400).json({ error: 'targetUserId is required' });
+    }
+    if (targetUserId === actorId) {
+      return res.status(400).json({ error: 'Cannot impersonate yourself' });
+    }
+
+    const actorRow = await query<{ system_type: string }>(
+      `SELECT wr.system_type
+       FROM workspace_members wm
+       JOIN workspace_roles wr ON wr.id = wm.role_id
+       WHERE wm.workspace_id = $1 AND wm.user_id = $2 AND wm.status = 'active'
+       LIMIT 1`,
+      [workspaceId, actorId]
+    );
+    if (actorRow.rows.length === 0 || actorRow.rows[0].system_type !== 'admin') {
+      return res.status(403).json({ error: 'Only workspace admins can impersonate members' });
+    }
+
+    const targetRow = await query<{ system_type: string; name: string; email: string; account_type: string }>(
+      `SELECT wr.system_type, u.name, u.email, u.account_type
+       FROM workspace_members wm
+       JOIN workspace_roles wr ON wr.id = wm.role_id
+       JOIN users u ON u.id = wm.user_id
+       WHERE wm.workspace_id = $1 AND wm.user_id = $2 AND wm.status = 'active'
+       LIMIT 1`,
+      [workspaceId, targetUserId]
+    );
+    if (targetRow.rows.length === 0) {
+      return res.status(404).json({ error: 'Target user is not an active member of this workspace' });
+    }
+    if (targetRow.rows[0].system_type === 'admin') {
+      return res.status(403).json({ error: 'Cannot impersonate another admin' });
+    }
+
+    const { name: targetName, email: targetEmail, system_type: targetRole, account_type } = targetRow.rows[0];
+
+    const sessionToken = generateAccessToken({ id: targetUserId, email: targetEmail, account_type });
+    const expiresAt = new Date(Date.now() + 2 * 60 * 60 * 1000);
+
+    await query(
+      `INSERT INTO user_sessions (user_id, token, expires_at)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (token) DO UPDATE SET expires_at = $3`,
+      [targetUserId, sessionToken, expiresAt]
+    );
+
+    await query(
+      `INSERT INTO audit_log (workspace_id, actor_id, action, target_id, metadata)
+       VALUES ($1, $2, 'impersonation.start', $3, $4)`,
+      [workspaceId, actorId, targetUserId, JSON.stringify({ targetEmail, targetName, targetRole })]
+    );
+
+    console.log(`[Impersonation] Admin ${actorId} started impersonating ${targetUserId} (${targetEmail}) in workspace ${workspaceId}`);
+
+    return res.json({
+      token: sessionToken,
+      expiresAt: expiresAt.toISOString(),
+      targetUser: { id: targetUserId, name: targetName, email: targetEmail, role: targetRole },
+    });
+  } catch (err) {
+    console.error('[members] Impersonate error:', err instanceof Error ? err.message : err);
+    return res.status(500).json({ error: 'Failed to start impersonation' });
+  }
+});
+
+/**
+ * POST /impersonate/stop
+ * Ends an impersonation session. Deletes the impersonation token from user_sessions
+ * and logs to audit_log.
+ */
+router.post('/impersonate/stop', async (req: Request, res: Response) => {
+  try {
+    const workspaceId = req.params.workspaceId as string;
+    const { impersonationToken, adminId } = req.body as { impersonationToken?: string; adminId?: string };
+
+    if (impersonationToken) {
+      await query(`DELETE FROM user_sessions WHERE token = $1`, [impersonationToken]);
+    }
+
+    if (adminId) {
+      const userId = req.user?.user_id;
+      await query(
+        `INSERT INTO audit_log (workspace_id, actor_id, action, target_id, metadata)
+         VALUES ($1, $2, 'impersonation.stop', $3, $4)`,
+        [workspaceId, adminId, userId || null, JSON.stringify({ stoppedAt: new Date().toISOString() })]
+      ).catch(() => {});
+    }
+
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[members] Impersonate stop error:', err instanceof Error ? err.message : err);
+    return res.status(500).json({ error: 'Failed to stop impersonation' });
   }
 });
 
