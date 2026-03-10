@@ -3,6 +3,7 @@ import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
 import Toast from '../components/Toast';
 import { useDemoMode } from '../contexts/DemoModeContext';
+import { usePermissions } from '../hooks/usePermissions';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -255,6 +256,7 @@ function SourceCard({
 // ─── Step 1: Data Readiness ───────────────────────────────────────────────────
 
 function DataReadinessStep({ onActivate }: { onActivate: () => void }) {
+  const { canRunSkills } = usePermissions();
   const [readiness, setReadiness] = useState<ReadinessResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [activating, setActivating] = useState(false);
@@ -355,24 +357,26 @@ function DataReadinessStep({ onActivate }: { onActivate: () => void }) {
         </div>
       )}
 
-      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-        <button
-          onClick={handleRun}
-          disabled={!canRun || activating}
-          style={{
-            padding: '10px 24px',
-            background: canRun ? colors.accent : colors.surfaceHover,
-            color: canRun ? '#fff' : colors.textMuted,
-            border: 'none', borderRadius: 8,
-            fontSize: 14, fontWeight: 600,
-            cursor: canRun && !activating ? 'pointer' : 'not-allowed',
-            opacity: activating ? 0.7 : 1,
-            transition: 'all 0.2s',
-          }}
-        >
-          {activating ? 'Starting...' : 'Run ICP Discovery →'}
-        </button>
-      </div>
+      {canRunSkills && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <button
+            onClick={handleRun}
+            disabled={!canRun || activating}
+            style={{
+              padding: '10px 24px',
+              background: canRun ? colors.accent : colors.surfaceHover,
+              color: canRun ? '#fff' : colors.textMuted,
+              border: 'none', borderRadius: 8,
+              fontSize: 14, fontWeight: 600,
+              cursor: canRun && !activating ? 'pointer' : 'not-allowed',
+              opacity: activating ? 0.7 : 1,
+              transition: 'all 0.2s',
+            }}
+          >
+            {activating ? 'Starting...' : 'Run ICP Discovery →'}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -1136,6 +1140,7 @@ function TaxonomyProView({ addToast, anon }: { addToast: (msg: string, type: 'su
 // ─── Dossier View ─────────────────────────────────────────────────────────────
 
 function DossierView({ addToast, conversationsConnected, anon }: { addToast: (msg: string, type: 'success' | 'error' | 'info') => void; conversationsConnected: boolean; anon: ReturnType<typeof useDemoMode>['anon'] }) {
+  const { canRunSkills } = usePermissions();
   const [profile, setProfile] = useState<IcpProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [rerunning, setRerunning] = useState(false);
@@ -1288,26 +1293,28 @@ function DossierView({ addToast, conversationsConnected, anon }: { addToast: (ms
             v{profile.version} · {versionDate} · Tier {tier} of 3
           </span>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button
-              onClick={handleRerun}
-              disabled={rerunning}
-              style={{
-                padding: '6px 14px', border: `1px solid ${rerunning ? colors.accent : colors.border}`,
-                background: 'transparent', color: rerunning ? colors.accent : colors.textSecondary,
-                borderRadius: 6, fontSize: 12, cursor: rerunning ? 'not-allowed' : 'pointer',
-                display: 'flex', alignItems: 'center', gap: 6,
-              }}
-            >
-              {rerunning && (
-                <span style={{
-                  width: 8, height: 8, borderRadius: '50%',
-                  background: colors.accent,
-                  display: 'inline-block',
-                  animation: 'skeleton-pulse 1.2s ease-in-out infinite',
-                }} />
-              )}
-              {rerunning ? 'Running...' : 'Re-run'}
-            </button>
+            {canRunSkills && (
+              <button
+                onClick={handleRerun}
+                disabled={rerunning}
+                style={{
+                  padding: '6px 14px', border: `1px solid ${rerunning ? colors.accent : colors.border}`,
+                  background: 'transparent', color: rerunning ? colors.accent : colors.textSecondary,
+                  borderRadius: 6, fontSize: 12, cursor: rerunning ? 'not-allowed' : 'pointer',
+                  display: 'flex', alignItems: 'center', gap: 6,
+                }}
+              >
+                {rerunning && (
+                  <span style={{
+                    width: 8, height: 8, borderRadius: '50%',
+                    background: colors.accent,
+                    display: 'inline-block',
+                    animation: 'skeleton-pulse 1.2s ease-in-out infinite',
+                  }} />
+                )}
+                {rerunning ? 'Running...' : 'Re-run'}
+              </button>
+            )}
             <button
               onClick={() => setShowChangelog(true)}
               style={{

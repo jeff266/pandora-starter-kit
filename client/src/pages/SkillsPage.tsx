@@ -6,6 +6,7 @@ import { formatTimeAgo, formatSchedule } from '../lib/format';
 import Skeleton from '../components/Skeleton';
 import IntelligenceNav from '../components/IntelligenceNav';
 import SlackSetupNudge from '../components/SlackSetupNudge';
+import { usePermissions } from '../hooks/usePermissions';
 
 interface SkillStats {
   runs30d: number;
@@ -146,6 +147,7 @@ function MetricCard({ label, value, sub, color: c }: { label: string; value: str
 }
 
 export default function SkillsPage() {
+  const { canRunSkills } = usePermissions();
   const navigate = useNavigate();
   const [skills, setSkills] = useState<Skill[]>([]);
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
@@ -484,20 +486,22 @@ export default function SkillsPage() {
                     </div>
                   )}
                   {skill.id === 'strategy-insights' && skill.lastRunStatus === 'skipped_insufficient_data' && (
-                    <div
-                      onClick={e => e.stopPropagation()}
-                      style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 5, padding: '5px 8px', borderRadius: 6, background: '#78350F22', border: '1px solid #78350F44', flexWrap: 'wrap' }}
-                    >
-                      <span style={{ fontSize: 11, color: '#F59E0B' }}>Waiting for fresh inputs — run Pipeline Hygiene and Forecast Rollup first</span>
-                      <button
-                        onClick={e => { e.stopPropagation(); runSkill('pipeline-hygiene', 'Pipeline Hygiene', e); }}
-                        style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, border: '1px solid #F59E0B44', background: '#78350F33', color: '#F59E0B', cursor: 'pointer', fontWeight: 500 }}
-                      >Run now</button>
-                      <button
-                        onClick={e => { e.stopPropagation(); runSkill('forecast-rollup', 'Forecast Rollup', e); }}
-                        style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, border: '1px solid #F59E0B44', background: '#78350F33', color: '#F59E0B', cursor: 'pointer', fontWeight: 500 }}
-                      >Run now</button>
-                    </div>
+                    {canRunSkills && (
+                      <div
+                        onClick={e => e.stopPropagation()}
+                        style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 5, padding: '5px 8px', borderRadius: 6, background: '#78350F22', border: '1px solid #78350F44', flexWrap: 'wrap' }}
+                      >
+                        <span style={{ fontSize: 11, color: '#F59E0B' }}>Waiting for fresh inputs — run Pipeline Hygiene and Forecast Rollup first</span>
+                        <button
+                          onClick={e => { e.stopPropagation(); runSkill('pipeline-hygiene', 'Pipeline Hygiene', e); }}
+                          style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, border: '1px solid #F59E0B44', background: '#78350F33', color: '#F59E0B', cursor: 'pointer', fontWeight: 500 }}
+                        >Run now</button>
+                        <button
+                          onClick={e => { e.stopPropagation(); runSkill('forecast-rollup', 'Forecast Rollup', e); }}
+                          style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, border: '1px solid #F59E0B44', background: '#78350F33', color: '#F59E0B', cursor: 'pointer', fontWeight: 500 }}
+                        >Run now</button>
+                      </div>
+                    )}
                   )}
                 </div>
                 <div style={{ fontSize: 12, color: colors.textMuted }}>
@@ -540,12 +544,13 @@ export default function SkillsPage() {
                       }}
                     >Delete</button>
                   )}
-                  <button
-                    onClick={e => runSkill(skill.id, skill.name, e)}
-                    disabled={isRunning || isQueued}
-                    style={{
-                      fontSize: 11, fontWeight: 600, padding: '4px 10px',
-                      borderRadius: 6,
+                  {canRunSkills && (
+                    <button
+                      onClick={e => runSkill(skill.id, skill.name, e)}
+                      disabled={isRunning || isQueued}
+                      style={{
+                        fontSize: 11, fontWeight: 600, padding: '4px 10px',
+                        borderRadius: 6,
                       background: isRunning ? colors.surfaceHover : isQueued ? colors.surfaceRaised : colors.accent,
                       color: isQueued ? colors.yellow : '#fff',
                       opacity: isRunning ? 0.6 : 1,
@@ -565,6 +570,7 @@ export default function SkillsPage() {
                     )}
                     {isRunning ? 'Running' : isQueued ? 'Queued' : 'Run ▶'}
                   </button>
+                  )}
                 </div>
               </div>
             );
@@ -685,6 +691,7 @@ export default function SkillsPage() {
                   )}
                   {runningSkills.has(selectedSkill.id) ? 'Running...' : 'Run Now ▶'}
                 </button>
+                )}
               </div>
 
               {/* Governance Callout */}

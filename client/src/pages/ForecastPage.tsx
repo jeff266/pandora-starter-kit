@@ -6,6 +6,7 @@ import { useWorkspace } from '../context/WorkspaceContext';
 import { useForecastAnnotations } from '../hooks/useForecastAnnotations';
 import { useDemoMode } from '../contexts/DemoModeContext';
 import { useIsMobile } from '../hooks/useIsMobile';
+import { usePermissions } from '../hooks/usePermissions';
 import SectionErrorBoundary from '../components/SectionErrorBoundary';
 import {
   MetricCards,
@@ -56,6 +57,7 @@ function formatCurrency(val: number): string {
 export default function ForecastPage() {
   const { currentWorkspace, user } = useWorkspace();
   const { anon } = useDemoMode();
+  const { canRunSkills } = usePermissions();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const wsId = currentWorkspace?.id || '';
@@ -888,7 +890,7 @@ export default function ForecastPage() {
               : `Last snapshot was ${daysSinceLastSnapshot} days ago — refreshing forecast data...`}
         </p>
       </div>
-      {!runningForecast && (
+      {!runningForecast && canRunSkills && (
         <button
           onClick={runForecastSkills}
           style={{
@@ -1013,7 +1015,7 @@ export default function ForecastPage() {
             </select>
           )}
           {/* MC trigger — visible when a pipeline is filtered but no scoped MC result exists yet */}
-          {selectedPipeline !== 'all' && !pipelineMc && (
+          {selectedPipeline !== 'all' && !pipelineMc && canRunSkills && (
             <button
               onClick={runMcForPipeline}
               disabled={runningMc}
@@ -1106,9 +1108,10 @@ export default function ForecastPage() {
           color: colors.textMuted,
         }}>
           <span>MC P50 and MC Range require a simulation run scoped to this pipeline.</span>
-          <button
-            onClick={runMcForPipeline}
-            style={{
+          {canRunSkills && (
+            <button
+              onClick={runMcForPipeline}
+              style={{
               padding: '4px 12px',
               fontSize: 11,
               fontFamily: fonts.sans,
@@ -1124,6 +1127,7 @@ export default function ForecastPage() {
           >
             Run simulation ▶
           </button>
+          )}
         </div>
       )}
 

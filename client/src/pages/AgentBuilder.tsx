@@ -8,6 +8,7 @@ import LearnedPreferences from '../components/agents/LearnedPreferences';
 import RunHistoryPanel from '../components/agents/RunHistoryPanel';
 import GuidedAgentChat from '../components/agents/GuidedAgentChat';
 import SaveAsAgentModal from '../components/SaveAsAgentModal';
+import { usePermissions } from '../hooks/usePermissions';
 import AgentCopilot from '../components/copilot/AgentCopilot';
 import AvatarPicker from '../components/avatars/AvatarPicker';
 import AvatarDisplay from '../components/avatars/AvatarDisplay';
@@ -113,6 +114,7 @@ interface NamedFilterOption {
 }
 
 export default function AgentBuilder() {
+  const { canRunSkills } = usePermissions();
   const location = useLocation();
   const navigate = useNavigate();
   const [view, setView] = useState<ViewState>('list');
@@ -888,7 +890,7 @@ export default function AgentBuilder() {
           placeholder="Agent name"
           style={{ ...input, flex: 1, font: `600 20px ${fonts.sans}`, background: 'transparent', border: 'none', padding: 0, color: colors.text }}
         />
-        {editingAgentId && (
+        {editingAgentId && canRunSkills && (
           <button onClick={handleRunNow} disabled={isGenerating} style={{
             ...btnPrimary,
             opacity: isGenerating ? 0.6 : 1,

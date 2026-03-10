@@ -118,10 +118,10 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<string, PermissionSet> = {
     'connectors.disconnect': false,
     'connectors.trigger_sync': false,
 
-    // Skills: view + request (no manual run, no configure)
+    // Skills: view + manual run + request (no configure)
     'skills.view_results': true,
     'skills.view_evidence': true,
-    'skills.run_manual': false,
+    'skills.run_manual': true,
     'skills.run_request': true,
     'skills.configure': false,
 

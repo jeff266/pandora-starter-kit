@@ -5,6 +5,7 @@ import Skeleton from '../components/Skeleton';
 import SectionErrorBoundary from '../components/SectionErrorBoundary';
 import { useDemoMode } from '../contexts/DemoModeContext';
 import SlackSetupNudge from '../components/SlackSetupNudge';
+import { usePermissions } from '../hooks/usePermissions';
 
 interface PlaybookStats {
   totalRuns: number;
@@ -263,6 +264,7 @@ function PlaybookCard({ playbook, isRunning, onClick, onRunNow }: {
   onClick: () => void;
   onRunNow: (e: React.MouseEvent) => void;
 }) {
+  const { canRunSkills } = usePermissions();
   const lastStatus = playbook.lastRun?.status || 'completed';
   const dot = statusDot[lastStatus] || statusDot.completed;
 
@@ -292,7 +294,7 @@ function PlaybookCard({ playbook, isRunning, onClick, onRunNow }: {
             {playbook.description}
           </p>
         </div>
-        {playbook.skills.length > 0 ? (
+        {playbook.skills.length > 0 && canRunSkills ? (
           <button
             onClick={onRunNow}
             disabled={isRunning}
@@ -306,7 +308,7 @@ function PlaybookCard({ playbook, isRunning, onClick, onRunNow }: {
           >
             {isRunning ? 'Running...' : 'Run Now'}
           </button>
-        ) : (
+        ) : playbook.skills.length === 0 ? (
           <span style={{
             padding: '6px 14px', borderRadius: 6,
             background: colors.surfaceRaised, color: colors.textDim,
@@ -314,7 +316,7 @@ function PlaybookCard({ playbook, isRunning, onClick, onRunNow }: {
           }}>
             Agent-only
           </span>
-        )}
+        ) : null}
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
@@ -389,6 +391,7 @@ function PlaybookDetailView({ detail, detailLoading, runningId, onBack, onRunNow
   toast: { message: string; type: 'success' | 'error' } | null;
 }) {
   const { anon } = useDemoMode();
+  const { canRunSkills } = usePermissions();
   const pb = detail.playbook;
   const lastStatus = pb.lastRun?.status || 'completed';
   const dot = statusDot[lastStatus] || statusDot.completed;
@@ -431,7 +434,7 @@ function PlaybookDetailView({ detail, detailLoading, runningId, onBack, onRunNow
           </div>
           <p style={{ fontSize: 13, color: colors.textMuted, marginTop: 4 }}>{pb.schedule}</p>
         </div>
-        {pb.skills.length > 0 ? (
+        {pb.skills.length > 0 && canRunSkills ? (
           <button
             onClick={() => onRunNow(pb.id)}
             disabled={runningId === pb.id}
@@ -444,7 +447,7 @@ function PlaybookDetailView({ detail, detailLoading, runningId, onBack, onRunNow
           >
             {runningId === pb.id ? 'Running...' : 'Run Now'}
           </button>
-        ) : (
+        ) : pb.skills.length === 0 ? (
           <span style={{
             padding: '8px 18px', borderRadius: 8,
             background: colors.surfaceRaised, color: colors.textDim,
@@ -452,7 +455,7 @@ function PlaybookDetailView({ detail, detailLoading, runningId, onBack, onRunNow
           }}>
             Agent-only — runs automatically on schedule
           </span>
-        )}
+        ) : null}
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>

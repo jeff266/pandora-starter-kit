@@ -79,7 +79,7 @@ router.get('/:workspaceId/scoring/state/poll', async (req, res) => {
  * Triggers ICP Discovery → account enrichment → scoring pipeline.
  * Only valid when state = 'ready'.
  */
-router.post('/:workspaceId/scoring/activate', async (req, res) => {
+router.post('/:workspaceId/scoring/activate', requirePermission('skills.run_manual'), async (req, res) => {
   try {
     const { workspaceId } = req.params;
 

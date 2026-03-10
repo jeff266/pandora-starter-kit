@@ -96,7 +96,7 @@ agentsGlobalRouter.delete('/agents/:agentId', requireAdmin, (req: Request, res: 
   res.json({ ok: true });
 });
 
-agentsWorkspaceRouter.post('/:workspaceId/agents/:agentId/run', async (req: Request, res: Response) => {
+agentsWorkspaceRouter.post('/:workspaceId/agents/:agentId/run', requirePermission('skills.run_manual'), async (req: Request, res: Response) => {
   const workspaceId = req.params.workspaceId as string;
   const agentId = req.params.agentId as string;
   const { dryRun } = req.body || {};
