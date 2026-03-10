@@ -1,0 +1,72 @@
+Summary: Email Normalization for RBAC (Built)     
+                                                    
+  What I Built                                      
+                                                    
+  1. Database Migration (027_add_owner_email.sql)   
+  - Added owner_email column to deals, accounts,    
+  contacts tables                                   
+  - Added indexes for efficient filtering by        
+  owner_email                                       
+  - Existing records will have NULL until next sync 
+                                                    
+  2. Email Normalization Utility                    
+  (server/utils/email-normalization.ts)             
+  - normalizeEmail(): lowercase + trim + strip plus 
+  addressing                                        
+  - areEmailsEquivalent(): compare two emails after 
+  normalization                                     
+  - getAllEmailsForUser(): get all email variants   
+  (ready for future email_aliases table if needed)  
+                                                    
+  3. HubSpot Connector Updates                      
+  - buildOwnerMap() now returns {name, email}       
+  instead of just name                              
+  - Added resolveOwnerEmail() function in           
+  transform.ts                                      
+  - Updated NormalizedDeal interface to include     
+  owner_email                                       
+  - Updated INSERT statement to store owner_email   
+  - Email is normalized (lowercased) at sync time   
+                                                    
+  4. Diagnostic Script                              
+  (server/scripts/check-email-consistency.ts)       
+  - Run before Phase 2 to validate email consistency
+  - Checks each workspace member has matching deals 
+  - Detects email variants and unknown owners       
+  - Gives clear go/no-go signal for Phase 2         
+                                                    
+  Not Built (Deferred)                              
+                                                    
+  - ❌ email_aliases table - only needed if         
+  lowercase normalization isn't enough              
+  - ❌ Admin diagnostic UI - build when a client    
+  reports "can't see my deals"                      
+  - ❌ Salesforce connector updates - do when       
+  Salesforce is actively used                       
+                                                    
+  Gate Before Phase 2                               
+                                                    
+  Run this diagnostic:                              
+  npx tsx server/scripts/check-email-consistency.ts 
+                                                    
+  If output shows:                                  
+  - ✅ All members have matching deals → Ship Phase 
+  2                                                 
+  - ⚠️ Email variants detected → Build email_aliases
+   table, then ship Phase 2                         
+  - ⚠️ Deals without owner_email → Run a sync, then 
+  re-check                                          
+                                                    
+  Next Steps                                        
+                                                    
+  1. Run migration: Apply 027_add_owner_email.sql   
+  2. Trigger HubSpot sync for each workspace to     
+  populate owner_email                              
+  3. Run diagnostic to validate                     
+  4. If clean, proceed to Phase 1 RBAC (navigation +
+   settings visibility)                             
+                                                    
+  The scoped solution unblocks Phase 2 without      
+  over-investing in edge cases we haven't           
+  encountered. Ship this, learn from real data,     
+  iterate.                 
