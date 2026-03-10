@@ -30,6 +30,7 @@ import { configLoader } from '../config/workspace-config-loader.js';
 import { query } from '../db.js';
 import { setDealScopeOverride } from '../config/scope-stamper.js';
 import { computeAccountRFM, persistAccountRFM } from '../analysis/account-rfm.js';
+import { buildDealScopeFilter } from '../middleware/apply-data-scope.js';
 
 const router = Router();
 const filterResolver = new FilterResolver();
@@ -276,6 +277,10 @@ router.get('/:id/deals', async (req: Request, res: Response): Promise<void> => {
   try {
     const q = req.query;
     const lens = await resolveLens(req, 'deals');
+
+    // Apply role-based data scoping
+    const scopeFilter = buildDealScopeFilter(req, 0);
+
     const result = await queryDeals(req.params.id as string, {
       stage: q.stage as string | string[] | undefined,
       stageNormalized: q.stageNormalized as string | string[] | undefined,
@@ -295,7 +300,8 @@ router.get('/:id/deals', async (req: Request, res: Response): Promise<void> => {
       sortDir: q.sortDir as any,
       limit: parseNum(q.limit),
       offset: parseNum(q.offset),
-      ...lens,
+      additionalWhere: [lens.additionalWhere, scopeFilter.sql].filter(Boolean).join(' '),
+      additionalParams: [...(lens.additionalParams || []), ...scopeFilter.params],
     });
     res.json({ data: result.deals, total: result.total, limit: result.limit, offset: result.offset });
   } catch (err) {
