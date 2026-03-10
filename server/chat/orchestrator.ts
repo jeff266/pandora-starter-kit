@@ -33,6 +33,7 @@ import { getWorkspaceContext, type WorkspaceContext } from './workspace-context.
 import { synthesizeDocuments, formatDocumentResponse } from './document-synthesizer.js';
 import { formatCurrency } from '../utils/format-currency.js';
 import { runRetroPipeline } from '../retro/pipeline.js';
+import { createSessionContext, type SessionContext } from '../agents/session-context.js';
 
 export interface ConversationTurnInput {
   surface: 'slack_thread' | 'slack_dm' | 'in_app';
@@ -40,6 +41,8 @@ export interface ConversationTurnInput {
   threadId: string;
   channelId: string;
   message: string;
+  userId?: string;
+  userRole?: 'admin' | 'manager' | 'rep' | 'analyst' | 'viewer' | 'member';
   scope?: {
     type: string;
     entity_id?: string;
@@ -96,7 +99,7 @@ function isConversationQuestion(message: string): boolean {
 }
 
 export async function handleConversationTurn(input: ConversationTurnInput): Promise<ConversationTurnResult> {
-  const { workspaceId, channelId, threadId, message, surface, anchor, scope: inputScope } = input;
+  const { workspaceId, channelId, threadId, message, surface, anchor, scope: inputScope, userId, userRole } = input;
 
   let state = await getConversationState(workspaceId, channelId, threadId);
   const isFollowUp = !!state && (state.messages || []).length > 0;
@@ -155,6 +158,18 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
   if (!inputScope?.type && scopeType === 'workspace' && isConversationQuestion(message)) {
     scopeType = 'conversations';
   }
+
+  // Create SessionContext with user role for RBAC data scoping (T10)
+  const sessionContext = createSessionContext(
+    {
+      type: scopeType as any,
+      entityId,
+      repEmail,
+    },
+    workspaceId
+  );
+  sessionContext.userId = userId;
+  sessionContext.userRole = userRole;
 
   let routerDecision = 'unknown';
   let dataStrategy = 'unknown';
@@ -523,7 +538,7 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
               agentMessage = `[Context: viewing ${scopeType} id=${entityId}] ${message}`;
             }
 
-            pandoraResult = await runPandoraAgent(workspaceId, agentMessage, history);
+            pandoraResult = await runPandoraAgent(workspaceId, agentMessage, history, undefined, sessionContext);
             chatResponse = pandoraResult.answer;
             toolResults = pandoraResult.evidence.tool_calls.map((tc: any) => ({
               tool: tc.tool,
@@ -633,7 +648,7 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
         }
       }
 
-      const pandoraResult = await runPandoraAgent(workspaceId, agentMessage, history);
+      const pandoraResult = await runPandoraAgent(workspaceId, agentMessage, history, undefined, sessionContext);
 
       answer = pandoraResult.answer;
       tokensUsed = pandoraResult.tokens_used;

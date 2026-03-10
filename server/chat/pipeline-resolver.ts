@@ -10,6 +10,7 @@
  */
 
 import { query } from '../db.js';
+import { SYSTEM_ROLE_PERMISSIONS } from '../permissions/system-roles.js';
 
 // ============================================================================
 // Types
@@ -379,7 +380,12 @@ export async function resolveDefaultPipeline(
   userRole: 'admin' | 'manager' | 'rep' | 'analyst' | 'viewer' | 'member',
   _requestingUserId: string
 ): Promise<PipelineResolution> {
-  if (userRole === 'rep' || intent === 'rep_scoped') {
+  // Use RBAC permissions to determine data visibility (T10)
+  // Members, viewers, and reps without data.deals_view permission see only their own deals
+  const rolePermissions = SYSTEM_ROLE_PERMISSIONS[userRole] || SYSTEM_ROLE_PERMISSIONS.rep;
+  const canViewAllDeals = rolePermissions['data.deals_view'] === true;
+
+  if (!canViewAllDeals || intent === 'rep_scoped') {
     return {
       scope_ids: null,
       owner_only: true,

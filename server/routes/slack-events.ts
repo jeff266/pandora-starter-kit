@@ -22,6 +22,37 @@ import { logChatMessage } from '../lib/chat-logger.js';
 
 const router = Router();
 
+/**
+ * Resolve Slack user ID to workspace user ID and role (T10)
+ */
+async function resolveSlackUser(workspaceId: string, slackUserId: string): Promise<{ userId?: string; userRole?: string }> {
+  try {
+    const result = await query(
+      `SELECT u.id as user_id, wr.system_type
+       FROM users u
+       JOIN workspace_members wm ON wm.user_id = u.id
+       JOIN workspace_roles wr ON wr.id = wm.role_id
+       WHERE wm.workspace_id = $1
+         AND u.slack_user_id = $2
+         AND wm.status = 'active'
+       LIMIT 1`,
+      [workspaceId, slackUserId]
+    );
+
+    if (result.rows.length === 0) {
+      return {};
+    }
+
+    return {
+      userId: result.rows[0].user_id,
+      userRole: result.rows[0].system_type || 'rep',
+    };
+  } catch (err) {
+    console.error('[slack-events] Failed to resolve Slack user:', err);
+    return {};
+  }
+}
+
 router.post('/', async (req, res) => {
   console.log('[slack-events] Incoming event:', req.body?.type, req.body?.event?.type || 'no-event');
   const signingSecretConfigured = !!process.env.SLACK_SIGNING_SECRET;
@@ -134,6 +165,12 @@ async function handleThreadedReply(event: any, teamId: string): Promise<void> {
     if (existingState) {
       const wid = existingState.workspace_id;
       const sessionId = event.thread_ts ?? event.ts;
+
+      // Resolve Slack user to workspace user for RBAC (T10)
+      const { userId, userRole } = event.user
+        ? await resolveSlackUser(wid, event.user)
+        : {};
+
       await logChatMessage({ workspaceId: wid, sessionId, surface: 'slack', role: 'user', content: event.text || '', scope: { type: 'slack_thread', channelId: event.channel, threadTs: event.thread_ts ?? event.ts } });
       const result = await handleConversationTurn({
         surface: 'slack_thread',
@@ -141,6 +178,8 @@ async function handleThreadedReply(event: any, teamId: string): Promise<void> {
         threadId: event.thread_ts,
         channelId: event.channel,
         message: event.text || '',
+        userId,
+        userRole: userRole as any,
       });
       await logChatMessage({ workspaceId: wid, sessionId, surface: 'slack', role: 'assistant', content: result.answer, scope: { type: 'slack_thread', channelId: event.channel, threadTs: event.thread_ts ?? event.ts } });
       const client = getSlackAppClient();
@@ -231,6 +270,12 @@ async function handleThreadedReply(event: any, teamId: string): Promise<void> {
   } else {
     const sessionId = event.thread_ts ?? event.ts;
     await logChatMessage({ workspaceId, sessionId, surface: 'slack', role: 'user', content: event.text || '', scope: { type: 'slack_thread', channelId: event.channel, threadTs: event.thread_ts ?? event.ts } });
+
+    // Resolve Slack user to workspace user for RBAC (T10)
+    const { userId, userRole } = event.user
+      ? await resolveSlackUser(workspaceId, event.user)
+      : {};
+
     const anchorPayload = anchor.brief_context
       ? { report_type: 'brief', result: anchor.brief_context }
       : anchor.agent_run_id
@@ -243,6 +288,8 @@ async function handleThreadedReply(event: any, teamId: string): Promise<void> {
       threadId: event.thread_ts,
       channelId: event.channel,
       message: event.text || '',
+      userId,
+      userRole: userRole as any,
       anchor: anchorPayload,
     });
     await logChatMessage({ workspaceId, sessionId, surface: 'slack', role: 'assistant', content: result.answer, scope: { type: 'slack_thread', channelId: event.channel, threadTs: event.thread_ts ?? event.ts } });
@@ -276,6 +323,12 @@ async function handleAppMention(event: any, teamId: string): Promise<void> {
     const existingState = await getConversationState(workspaceId, event.channel, event.thread_ts);
     if (existingState) {
       const sessionId = event.thread_ts;
+
+      // Resolve Slack user to workspace user for RBAC (T10)
+      const { userId, userRole } = event.user
+        ? await resolveSlackUser(workspaceId, event.user)
+        : {};
+
       await logChatMessage({ workspaceId, sessionId, surface: 'slack', role: 'user', content: question, scope: { type: 'slack_thread', channelId: event.channel, threadTs: event.thread_ts } });
       const result = await handleConversationTurn({
         surface: 'slack_thread',
@@ -283,6 +336,8 @@ async function handleAppMention(event: any, teamId: string): Promise<void> {
         threadId: event.thread_ts,
         channelId: event.channel,
         message: question,
+        userId,
+        userRole: userRole as any,
       });
       await logChatMessage({ workspaceId, sessionId, surface: 'slack', role: 'assistant', content: result.answer, scope: { type: 'slack_thread', channelId: event.channel, threadTs: event.thread_ts } });
       const client = getSlackAppClient();
@@ -302,6 +357,11 @@ async function handleAppMention(event: any, teamId: string): Promise<void> {
     elements: [{ type: 'mrkdwn', text: `_Thinking..._` }],
   }], { thread_ts: threadTs });
 
+  // Resolve Slack user to workspace user for RBAC (T10)
+  const { userId, userRole } = event.user
+    ? await resolveSlackUser(workspaceId, event.user)
+    : {};
+
   await logChatMessage({ workspaceId, sessionId: threadTs, surface: 'slack', role: 'user', content: question, scope: { type: 'slack_thread', channelId: event.channel, threadTs } });
   const result = await handleConversationTurn({
     surface: 'slack_dm',
@@ -309,6 +369,8 @@ async function handleAppMention(event: any, teamId: string): Promise<void> {
     threadId: threadTs,
     channelId: event.channel,
     message: question,
+    userId,
+    userRole: userRole as any,
   });
   await logChatMessage({ workspaceId, sessionId: threadTs, surface: 'slack', role: 'assistant', content: result.answer, scope: { type: 'slack_thread', channelId: event.channel, threadTs } });
 

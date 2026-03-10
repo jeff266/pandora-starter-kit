@@ -5,6 +5,21 @@ import { formatBriefForSlack } from '../briefing/brief-formatter.js';
 import { getSlackAppClient } from '../connectors/slack/slack-app-client.js';
 import type { BriefType } from '../briefing/brief-types.js';
 
+/**
+ * Helper to get user's workspace role (T9)
+ */
+async function getUserRole(workspaceId: string, userId: string): Promise<string> {
+  const result = await query(
+    `SELECT wr.system_type
+     FROM workspace_members wm
+     JOIN workspace_roles wr ON wm.role_id = wr.id
+     WHERE wm.workspace_id = $1 AND wm.user_id = $2 AND wm.status = 'active'
+     LIMIT 1`,
+    [workspaceId, userId]
+  );
+  return result.rows[0]?.system_type || 'rep';
+}
+
 const router = Router();
 
 // GET /:workspaceId/brief — fetch latest ready brief
@@ -45,8 +60,21 @@ router.get('/:workspaceId/brief', async (req: Request, res: Response): Promise<v
 router.post('/:workspaceId/brief/assemble', async (req: Request, res: Response): Promise<void> => {
   const workspaceId = req.params.workspaceId as string;
   const { force = false, brief_type } = req.body as { force?: boolean; brief_type?: BriefType };
+
+  // Get requesting user's role for RBAC scoping (T9)
+  const userId = req.user?.user_id;
+  let userRole: string | undefined;
+  if (userId) {
+    userRole = await getUserRole(workspaceId, userId);
+  }
+
   try {
-    const brief = await assembleBrief(workspaceId, { force, brief_type });
+    const brief = await assembleBrief(workspaceId, {
+      force,
+      brief_type,
+      userId,
+      userRole: userRole as any,
+    });
     res.json({ ok: true, brief });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

@@ -25,7 +25,13 @@ import { getToolDefinitionsContext } from '../skills/tool-context.js';
 
 export async function assembleBrief(
   workspaceId: string,
-  options: { brief_type?: BriefType; force?: boolean; emitter?: BriefSSEEmitter } = {}
+  options: {
+    brief_type?: BriefType;
+    force?: boolean;
+    emitter?: BriefSSEEmitter;
+    userId?: string;
+    userRole?: 'admin' | 'manager' | 'rep' | 'analyst' | 'viewer' | 'member';
+  } = {}
 ): Promise<AssembledBrief> {
   const startTime = Date.now();
   const now = new Date();

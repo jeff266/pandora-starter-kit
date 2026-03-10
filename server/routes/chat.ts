@@ -49,6 +49,9 @@ router.post('/:workspaceId/chat', async (req: Request, res: Response): Promise<v
       return;
     }
 
+    // Fetch user's workspace role for RBAC data scoping (T10)
+    const userRole = await getUserRole(workspaceId, userId);
+
     const threadTs = thread_id || `web_${randomUUID()}`;
 
     const result = await handleConversationTurn({
@@ -57,6 +60,8 @@ router.post('/:workspaceId/chat', async (req: Request, res: Response): Promise<v
       threadId: threadTs,
       channelId: 'web',
       message: message.trim(),
+      userId,
+      userRole: userRole as any,
       scope: scope || undefined,
     });
 

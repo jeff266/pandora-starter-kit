@@ -29,6 +29,37 @@ async function isFirstDM(workspaceId: string, channelId: string): Promise<boolea
   return result.rows.length === 0;
 }
 
+/**
+ * Resolve Slack user ID to workspace user ID and role (T10)
+ */
+async function resolveSlackUser(workspaceId: string, slackUserId: string): Promise<{ userId?: string; userRole?: string }> {
+  try {
+    const result = await query(
+      `SELECT u.id as user_id, wr.system_type
+       FROM users u
+       JOIN workspace_members wm ON wm.user_id = u.id
+       JOIN workspace_roles wr ON wr.id = wm.role_id
+       WHERE wm.workspace_id = $1
+         AND u.slack_user_id = $2
+         AND wm.status = 'active'
+       LIMIT 1`,
+      [workspaceId, slackUserId]
+    );
+
+    if (result.rows.length === 0) {
+      return {};
+    }
+
+    return {
+      userId: result.rows[0].user_id,
+      userRole: result.rows[0].system_type || 'rep',
+    };
+  } catch (err) {
+    console.error('[dm-handler] Failed to resolve Slack user:', err);
+    return {};
+  }
+}
+
 async function postOnboarding(workspaceId: string, channelId: string): Promise<void> {
   const client = getSlackAppClient();
   const onboardingBlocks = [
@@ -83,6 +114,11 @@ export async function handleDMMessage(event: SlackMessageEvent & { team_id?: str
     },
   ] as any);
 
+  // Resolve Slack user to workspace user for RBAC (T10)
+  const { userId, userRole } = event.user
+    ? await resolveSlackUser(workspaceId, event.user)
+    : {};
+
   try {
     const result = await handleConversationTurn({
       surface: 'slack_dm',
@@ -90,6 +126,8 @@ export async function handleDMMessage(event: SlackMessageEvent & { team_id?: str
       channelId,
       threadId: DM_THREAD_ID,
       message: event.text,
+      userId,
+      userRole: userRole as any,
     });
 
     if (thinkingRef.ts) {
