@@ -37,17 +37,17 @@ interface TestResult {
 async function getWorkspaceMembers(workspaceId: string): Promise<TestUser[]> {
   const result = await query<{
     email: string;
-    role: string;
+    system_type: string;
     pandora_role: string;
     permissions: any;
   }>(
     `SELECT
        u.email,
-       wm.role,
+       wr.system_type,
        wm.pandora_role,
        wr.permissions
      FROM workspace_members wm
-     JOIN users u ON u.user_id = wm.user_id
+     JOIN users u ON u.id = wm.user_id
      LEFT JOIN workspace_roles wr ON wr.id = wm.role_id
      WHERE wm.workspace_id = $1 AND wm.status = 'active'
      ORDER BY wm.pandora_role DESC`,
@@ -56,7 +56,7 @@ async function getWorkspaceMembers(workspaceId: string): Promise<TestUser[]> {
 
   return result.rows.map(row => ({
     email: row.email,
-    role: row.role,
+    role: row.system_type,
     pandora_role: row.pandora_role,
     permissions: typeof row.permissions === 'string'
       ? JSON.parse(row.permissions)
