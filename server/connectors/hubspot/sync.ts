@@ -93,14 +93,15 @@ async function getForecastConfig(workspaceId: string): Promise<ForecastConfig> {
   return { commit_threshold: 0.90, best_case_threshold: 0.60, forecasted_pipelines: null };
 }
 
-async function buildOwnerMap(client: HubSpotClient): Promise<Map<string, string>> {
-  const ownerMap = new Map<string, string>();
+async function buildOwnerMap(client: HubSpotClient): Promise<Map<string, { name: string; email: string }>> {
+  const ownerMap = new Map<string, { name: string; email: string }>();
   try {
     const owners = await client.getOwners();
     for (const owner of owners) {
       const name = `${owner.firstName} ${owner.lastName}`.trim();
-      if (name) {
-        ownerMap.set(owner.id, name);
+      const email = owner.email?.toLowerCase().trim();  // Normalize email
+      if (name && email) {
+        ownerMap.set(owner.id, { name, email });
       }
     }
     console.log(`[HubSpot Sync] Built owner map: ${ownerMap.size} owners`);
@@ -441,14 +442,14 @@ async function upsertDeals(deals: NormalizedDeal[]): Promise<number> {
         await client.query(
           `INSERT INTO deals (
             workspace_id, source, source_id, source_data,
-            name, amount, stage, stage_normalized, close_date, owner,
+            name, amount, stage, stage_normalized, close_date, owner, owner_email,
             probability, forecast_category, forecast_category_source, pipeline,
             last_activity_date, custom_fields, next_steps, lead_source, created_at, updated_at
           ) VALUES (
             $1, $2, $3, $4,
-            $5, $6, $7, $8, $9, $10,
-            $11, $12, $13, $14,
-            $15, $16, $17, $18, COALESCE($19::timestamptz, NOW()), NOW()
+            $5, $6, $7, $8, $9, $10, $11,
+            $12, $13, $14, $15,
+            $16, $17, $18, $19, COALESCE($20::timestamptz, NOW()), NOW()
           )
           ON CONFLICT (workspace_id, source, source_id) DO UPDATE SET
             source_data = EXCLUDED.source_data,
@@ -458,6 +459,7 @@ async function upsertDeals(deals: NormalizedDeal[]): Promise<number> {
             stage_normalized = EXCLUDED.stage_normalized,
             close_date = EXCLUDED.close_date,
             owner = EXCLUDED.owner,
+            owner_email = EXCLUDED.owner_email,
             probability = EXCLUDED.probability,
             forecast_category = EXCLUDED.forecast_category,
             forecast_category_source = EXCLUDED.forecast_category_source,
@@ -469,7 +471,7 @@ async function upsertDeals(deals: NormalizedDeal[]): Promise<number> {
             updated_at = NOW()`,
           [
             deal.workspace_id, deal.source, deal.source_id, JSON.stringify(deal.source_data),
-            deal.name, deal.amount, deal.stage, deal.stage_normalized, deal.close_date, deal.owner,
+            deal.name, deal.amount, deal.stage, deal.stage_normalized, deal.close_date, deal.owner, deal.owner_email,
             deal.probability, deal.forecast_category, deal.forecast_category_source, deal.pipeline,
             deal.last_activity_date, JSON.stringify(deal.custom_fields), deal.next_steps, deal.lead_source,
             deal.source_created_at,

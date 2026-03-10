@@ -59,8 +59,19 @@ export default function NotificationsTab() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
+  // Slack webhook state
+  const [slackWebhookUrl, setSlackWebhookUrl] = useState('');
+  const [slackConnected, setSlackConnected] = useState(false);
+  const [slackTesting, setSlackTesting] = useState(false);
+  const [slackSaving, setSlackSaving] = useState(false);
+  const [slackError, setSlackError] = useState<string | null>(null);
+  const [slackSuccess, setSlackSuccess] = useState<string | null>(null);
+
   useEffect(() => {
-    if (workspaceId) loadPrefs();
+    if (workspaceId) {
+      loadPrefs();
+      loadSlackWebhook();
+    }
   }, [workspaceId]);
 
   async function loadPrefs() {
@@ -76,6 +87,73 @@ export default function NotificationsTab() {
       console.error('Failed to load notification preferences:', err);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadSlackWebhook() {
+    if (!workspaceId) return;
+    try {
+      const workspace = await api.get(`/workspaces/${workspaceId}`);
+      const webhookUrl = workspace?.settings?.slack_webhook_url || '';
+      setSlackWebhookUrl(webhookUrl);
+      setSlackConnected(!!webhookUrl);
+    } catch (err) {
+      console.error('Failed to load Slack webhook:', err);
+    }
+  }
+
+  async function saveSlackWebhook() {
+    if (!workspaceId) return;
+    setSlackSaving(true);
+    setSlackError(null);
+    setSlackSuccess(null);
+    try {
+      await api.post(`/workspaces/${workspaceId}/settings/slack`, {
+        webhook_url: slackWebhookUrl.trim(),
+      });
+      setSlackConnected(!!slackWebhookUrl.trim());
+      setSlackSuccess('Slack webhook saved successfully');
+      setTimeout(() => setSlackSuccess(null), 3000);
+    } catch (err: any) {
+      setSlackError(err?.message || 'Failed to save Slack webhook');
+    } finally {
+      setSlackSaving(false);
+    }
+  }
+
+  async function testSlackWebhook() {
+    if (!workspaceId) return;
+    setSlackTesting(true);
+    setSlackError(null);
+    setSlackSuccess(null);
+    try {
+      await api.post(`/workspaces/${workspaceId}/settings/slack/test`);
+      setSlackSuccess('Test message sent successfully! Check your Slack channel.');
+      setTimeout(() => setSlackSuccess(null), 5000);
+    } catch (err: any) {
+      setSlackError(err?.message || 'Test failed. Check your webhook URL and try again.');
+    } finally {
+      setSlackTesting(false);
+    }
+  }
+
+  async function disconnectSlack() {
+    if (!workspaceId) return;
+    setSlackSaving(true);
+    setSlackError(null);
+    setSlackSuccess(null);
+    try {
+      await api.post(`/workspaces/${workspaceId}/settings/slack`, {
+        webhook_url: '',
+      });
+      setSlackWebhookUrl('');
+      setSlackConnected(false);
+      setSlackSuccess('Slack disconnected');
+      setTimeout(() => setSlackSuccess(null), 3000);
+    } catch (err: any) {
+      setSlackError(err?.message || 'Failed to disconnect Slack');
+    } finally {
+      setSlackSaving(false);
     }
   }
 
@@ -142,6 +220,219 @@ export default function NotificationsTab() {
       <p style={{ fontSize: 14, color: colors.textSecondary, marginBottom: 32 }}>
         Control how and when Pandora sends Slack notifications to your workspace.
       </p>
+
+      {/* Slack Connection */}
+      <div style={{
+        background: colors.surface,
+        border: `1px solid ${slackConnected ? colors.green : colors.border}`,
+        borderRadius: 8,
+        padding: 20,
+        marginBottom: 24,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+          <div style={{ fontSize: 32 }}>💬</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 16, fontWeight: 600, color: colors.text }}>
+              Slack Connection
+            </div>
+            <div style={{ fontSize: 13, color: colors.textSecondary, marginTop: 2 }}>
+              {slackConnected
+                ? 'Connected — notifications will be sent to your Slack channel'
+                : 'Connect a Slack webhook to receive notifications'}
+            </div>
+          </div>
+          {slackConnected && (
+            <div style={{
+              padding: '4px 12px',
+              borderRadius: 6,
+              background: `${colors.green}15`,
+              border: `1px solid ${colors.green}40`,
+              fontSize: 12,
+              fontWeight: 600,
+              color: colors.green,
+            }}>
+              Connected ✓
+            </div>
+          )}
+        </div>
+
+        {!slackConnected ? (
+          <div>
+            <div style={{ fontSize: 13, color: colors.textMuted, marginBottom: 12, lineHeight: 1.6 }}>
+              To get started, create an incoming webhook in Slack:
+              <ol style={{ marginTop: 8, paddingLeft: 20 }}>
+                <li>Go to your Slack workspace settings → Incoming Webhooks</li>
+                <li>Create a webhook for the channel where you want notifications</li>
+                <li>Copy the webhook URL and paste it below</li>
+              </ol>
+            </div>
+
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 500, color: colors.textSecondary, marginBottom: 6 }}>
+                Webhook URL
+              </label>
+              <input
+                type="url"
+                value={slackWebhookUrl}
+                onChange={(e) => setSlackWebhookUrl(e.target.value)}
+                placeholder="https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+                style={{
+                  width: '100%',
+                  padding: '10px 12px',
+                  background: colors.surfaceRaised,
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: 6,
+                  color: colors.text,
+                  fontSize: 13,
+                  fontFamily: 'monospace',
+                  outline: 'none',
+                  boxSizing: 'border-box',
+                }}
+                onFocus={(e) => { e.target.style.borderColor = colors.borderFocus; }}
+                onBlur={(e) => { e.target.style.borderColor = colors.border; }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                onClick={testSlackWebhook}
+                disabled={!slackWebhookUrl.trim() || slackTesting}
+                style={{
+                  padding: '8px 16px',
+                  fontSize: 13,
+                  fontWeight: 500,
+                  fontFamily: fonts.sans,
+                  borderRadius: 6,
+                  border: `1px solid ${colors.border}`,
+                  background: colors.surfaceRaised,
+                  color: colors.text,
+                  cursor: !slackWebhookUrl.trim() || slackTesting ? 'not-allowed' : 'pointer',
+                  opacity: !slackWebhookUrl.trim() || slackTesting ? 0.6 : 1,
+                }}
+              >
+                {slackTesting ? 'Testing...' : 'Test Connection'}
+              </button>
+              <button
+                onClick={saveSlackWebhook}
+                disabled={!slackWebhookUrl.trim() || slackSaving}
+                style={{
+                  padding: '8px 20px',
+                  fontSize: 13,
+                  fontWeight: 500,
+                  fontFamily: fonts.sans,
+                  borderRadius: 6,
+                  border: 'none',
+                  background: colors.accent,
+                  color: '#fff',
+                  cursor: !slackWebhookUrl.trim() || slackSaving ? 'not-allowed' : 'pointer',
+                  opacity: !slackWebhookUrl.trim() || slackSaving ? 0.6 : 1,
+                }}
+              >
+                {slackSaving ? 'Saving...' : 'Save & Connect'}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div>
+            <div style={{
+              padding: '10px 14px',
+              background: colors.surfaceRaised,
+              borderRadius: 6,
+              fontSize: 12,
+              fontFamily: 'monospace',
+              color: colors.textMuted,
+              marginBottom: 12,
+              wordBreak: 'break-all',
+            }}>
+              {slackWebhookUrl}
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                onClick={testSlackWebhook}
+                disabled={slackTesting}
+                style={{
+                  padding: '8px 16px',
+                  fontSize: 13,
+                  fontWeight: 500,
+                  fontFamily: fonts.sans,
+                  borderRadius: 6,
+                  border: `1px solid ${colors.accent}`,
+                  background: 'transparent',
+                  color: colors.accent,
+                  cursor: slackTesting ? 'not-allowed' : 'pointer',
+                  opacity: slackTesting ? 0.6 : 1,
+                }}
+              >
+                {slackTesting ? 'Testing...' : 'Send Test Message'}
+              </button>
+              <button
+                onClick={disconnectSlack}
+                disabled={slackSaving}
+                style={{
+                  padding: '8px 16px',
+                  fontSize: 13,
+                  fontWeight: 500,
+                  fontFamily: fonts.sans,
+                  borderRadius: 6,
+                  border: `1px solid ${colors.border}`,
+                  background: 'transparent',
+                  color: colors.textSecondary,
+                  cursor: slackSaving ? 'not-allowed' : 'pointer',
+                  opacity: slackSaving ? 0.6 : 1,
+                }}
+              >
+                Disconnect
+              </button>
+            </div>
+          </div>
+        )}
+
+        {slackError && (
+          <div style={{
+            marginTop: 12,
+            padding: '10px 14px',
+            background: `${colors.red}10`,
+            border: `1px solid ${colors.red}30`,
+            borderRadius: 6,
+            fontSize: 13,
+            color: colors.red,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}>
+            <span>{slackError}</span>
+            <button
+              onClick={() => setSlackError(null)}
+              style={{ background: 'none', border: 'none', color: colors.red, cursor: 'pointer', fontSize: 16 }}
+            >
+              ×
+            </button>
+          </div>
+        )}
+
+        {slackSuccess && (
+          <div style={{
+            marginTop: 12,
+            padding: '10px 14px',
+            background: `${colors.green}10`,
+            border: `1px solid ${colors.green}30`,
+            borderRadius: 6,
+            fontSize: 13,
+            color: colors.green,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}>
+            <span>{slackSuccess}</span>
+            <button
+              onClick={() => setSlackSuccess(null)}
+              style={{ background: 'none', border: 'none', color: colors.green, cursor: 'pointer', fontSize: 16 }}
+            >
+              ×
+            </button>
+          </div>
+        )}
+      </div>
 
       {/* Master Toggle + Pause */}
       <div style={{

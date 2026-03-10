@@ -14,6 +14,7 @@ export interface NormalizedDeal {
   stage_normalized: string | null;
   close_date: string | null;
   owner: string | null;
+  owner_email: string | null;
   probability: number | null;
   forecast_category: string | null;
   forecast_category_source: 'native' | 'derived' | null;
@@ -194,7 +195,7 @@ function extractCustomFields(
 export interface DealTransformOptions {
   stageMap?: Map<string, string>;
   pipelineMap?: Map<string, string>;
-  ownerMap?: Map<string, string>;
+  ownerMap?: Map<string, { name: string; email: string }>;
   forecastThresholds?: {
     commit_threshold: number;    // Decimal 0-1 (e.g. 0.90). Normalized from DB percentages at read time.
     best_case_threshold: number; // Decimal 0-1 (e.g. 0.60). Normalized from DB percentages at read time.
@@ -204,7 +205,7 @@ export interface DealTransformOptions {
 }
 
 export interface ContactTransformOptions {
-  ownerMap?: Map<string, string>;
+  ownerMap?: Map<string, { name: string; email: string }>;
 }
 
 function extractCompanyAssociationId(associations: any): string | null {
@@ -215,9 +216,14 @@ function extractCompanyAssociationId(associations: any): string | null {
   return null;
 }
 
-function resolveOwnerName(ownerId: string | null, ownerMap?: Map<string, string>): string | null {
+function resolveOwnerName(ownerId: string | null, ownerMap?: Map<string, { name: string; email: string }>): string | null {
   if (!ownerId || !ownerMap) return ownerId;
-  return ownerMap.get(ownerId) ?? ownerId;
+  return ownerMap.get(ownerId)?.name ?? ownerId;
+}
+
+function resolveOwnerEmail(ownerId: string | null, ownerMap?: Map<string, { name: string; email: string }>): string | null {
+  if (!ownerId || !ownerMap) return null;
+  return ownerMap.get(ownerId)?.email ?? null;
 }
 
 /**
@@ -387,6 +393,7 @@ export function transformDeal(
     stage_normalized: normalizeStage(resolvedStage, options?.customStageMapping),
     close_date: sanitizeDate(props.closedate),
     owner: resolveOwnerName(sanitizeText(props.hubspot_owner_id), options?.ownerMap),
+    owner_email: resolveOwnerEmail(sanitizeText(props.hubspot_owner_id), options?.ownerMap),
     probability,
     forecast_category: forecastCategory,
     forecast_category_source: forecastCategorySource,

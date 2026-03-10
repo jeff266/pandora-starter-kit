@@ -18,6 +18,7 @@ import BriefEmptyState from '../components/assistant/BriefEmptyState';
 import AnnotatedText from '../components/assistant/AnnotatedText';
 import QuickActionPills from '../components/assistant/QuickActionPills';
 import DocumentPill from '../components/assistant/DocumentPill';
+import SlackSetupNudge from '../components/SlackSetupNudge';
 
 type ViewMode = 'home' | 'conversation';
 
@@ -419,6 +420,7 @@ export default function AssistantView() {
       }}
     >
       <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 120 }}>
+        <SlackSetupNudge variant="assistant" layout="card" />
         {greeting?.proactive_briefing && phase !== 'blank' ? (
           <ProactiveBriefing
             greeting={greeting}

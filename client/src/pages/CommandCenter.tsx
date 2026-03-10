@@ -25,6 +25,7 @@ import AnnotatedPipelineChart from '../components/command-center/AnnotatedPipeli
 import ConnectorStatusStrip from '../components/command-center/ConnectorStatusStrip';
 import AgentConversationFeed, { type ToolCallEvent } from '../components/assistant/AgentConversationFeed';
 import { useBriefStream } from '../components/assistant/useBriefStream';
+import SlackSetupNudge from '../components/SlackSetupNudge';
 
 interface FindingAssumption {
   label: string;
@@ -674,6 +675,7 @@ export default function CommandCenter() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <PushBanner />
+      <SlackSetupNudge variant="command-center" layout="card" />
 
       {/* Combined greeting + controls row */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
