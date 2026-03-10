@@ -51,8 +51,8 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<string, PermissionSet> = {
     // Flags: none
     'flags.toggle': false,
 
-    // Data: view deals/accounts, own data, export
-    'data.deals_view': true,
+    // Data: see only own deals/accounts, own data, export
+    'data.deals_view': false, // Changed: members see only their own deals (dealsFilter: 'own')
     'data.accounts_view': true,
     'data.reps_view_own': true,
     'data.reps_view_team': false,
@@ -204,8 +204,8 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<string, PermissionSet> = {
     // Flags: none
     'flags.toggle': false,
 
-    // Data: view deals/accounts, own reps only
-    'data.deals_view': true,
+    // Data: see only own deals/accounts, own reps only
+    'data.deals_view': false, // Changed: viewers see only their own deals (dealsFilter: 'own')
     'data.accounts_view': true,
     'data.reps_view_own': true,
     'data.reps_view_team': false,
