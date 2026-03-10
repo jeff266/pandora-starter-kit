@@ -238,7 +238,7 @@ router.delete('/:workspaceId/skills/custom/:skillId', async (req, res) => {
  * POST /:workspaceId/skills/custom/:skillId/run
  * Trigger an on-demand run of a custom skill
  */
-router.post('/:workspaceId/skills/custom/:skillId/run', async (req, res) => {
+router.post('/:workspaceId/skills/custom/:skillId/run', requirePermission('skills.run_manual'), async (req, res) => {
   try {
     const { workspaceId, skillId } = req.params;
     const registry = getSkillRegistry();

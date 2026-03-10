@@ -30,7 +30,7 @@ import { configLoader } from '../config/workspace-config-loader.js';
 import { query } from '../db.js';
 import { setDealScopeOverride } from '../config/scope-stamper.js';
 import { computeAccountRFM, persistAccountRFM } from '../analysis/account-rfm.js';
-import { buildDealScopeFilter } from '../middleware/apply-data-scope.js';
+import { buildDealScopeFilter, buildAccountScopeFilter } from '../middleware/apply-data-scope.js';
 
 const router = Router();
 const filterResolver = new FilterResolver();
@@ -679,6 +679,10 @@ router.get('/:id/accounts', async (req: Request, res: Response): Promise<void> =
   try {
     const q = req.query;
     const lens = await resolveLens(req, 'accounts');
+
+    // Apply role-based data scoping
+    const scopeFilter = buildAccountScopeFilter(req, 0);
+
     const result = await queryAccounts(req.params.id as string, {
       domain: q.domain as string | undefined,
       industry: q.industry as string | undefined,
@@ -693,7 +697,8 @@ router.get('/:id/accounts', async (req: Request, res: Response): Promise<void> =
       limit: parseNum(q.limit),
       offset: parseNum(q.offset),
       hasOpenDeals: parseBool(q.hasOpenDeals),
-      ...lens,
+      additionalWhere: [lens.additionalWhere, scopeFilter.sql].filter(Boolean).join(' '),
+      additionalParams: [...(lens.additionalParams || []), ...scopeFilter.params],
     });
     res.json({
       data: result.accounts,

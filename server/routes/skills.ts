@@ -133,7 +133,7 @@ router.post('/skills/:skillId/run', requireAuth, async (req, res) => {
   }
 });
 
-router.post('/:workspaceId/skills/:skillId/run', async (req, res) => {
+router.post('/:workspaceId/skills/:skillId/run', requirePermission('skills.run_manual'), async (req, res) => {
   try {
     const { workspaceId, skillId } = req.params;
     const { params } = req.body || {};
@@ -551,7 +551,7 @@ router.get('/:workspaceId/skills/:skillId/runs/:runId', async (req, res) => {
  * POST /api/workspaces/:workspaceId/skills/run-all
  * Run all (or filtered) skills for a workspace in staggered sequence
  */
-router.post('/:workspaceId/skills/run-all', async (req, res) => {
+router.post('/:workspaceId/skills/run-all', requirePermission('skills.run_manual'), async (req, res) => {
   try {
     const { workspaceId } = req.params;
     const { skills } = req.body || {};
