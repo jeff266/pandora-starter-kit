@@ -132,7 +132,7 @@ export default function DealList() {
         if (s.critical > 0) criticalCounts.set(dealId, s.critical);
       }
 
-      const riskDeals: DealRow[] = (riskData?.deals || []).map((d: any) => ({
+      const riskDeals: DealRow[] = (riskData?.data?.deals || riskData?.deals || []).map((d: any) => ({
         id: d.deal_id,
         name: d.deal_name || '',
         amount: Number(d.amount) || 0,

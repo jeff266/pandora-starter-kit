@@ -2089,24 +2089,6 @@ export default function DealDetail() {
 
       </div>{/* end Tier 3 accordions */}
 
-      {/* Floating Ask button */}
-      <button
-        onClick={() => setAnalysisOpen(true)}
-        style={{
-          position: 'fixed', bottom: 24, right: 24, zIndex: 50,
-          display: 'inline-flex', alignItems: 'center', gap: 8,
-          padding: '12px 20px', borderRadius: 100,
-          background: colors.accent, color: '#fff',
-          border: 'none', cursor: 'pointer',
-          fontSize: 13, fontWeight: 600,
-          boxShadow: `0 4px 20px ${colors.accent}50`,
-          transition: 'transform 0.15s, box-shadow 0.15s',
-        }}
-        onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.05)'; e.currentTarget.style.boxShadow = `0 6px 28px ${colors.accent}70`; }}
-        onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = `0 4px 20px ${colors.accent}50`; }}
-      >
-        ✦ Ask about this deal
-      </button>
 
       {dealId && (
         <AnalysisModal
