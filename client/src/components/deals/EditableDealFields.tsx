@@ -40,7 +40,7 @@ export default function EditableDealFields({ dealId, deal, onFieldUpdate }: Edit
   const fetchFields = async () => {
     try {
       setLoading(true);
-      const data = await api.get(`/workspaces/${workspaceId}/editable-fields`);
+      const data = await api.get(`/editable-fields`);
       setFields(data.fields || []);
     } catch (err: any) {
       console.error('Failed to fetch editable fields:', err);
@@ -71,7 +71,7 @@ export default function EditableDealFields({ dealId, deal, onFieldUpdate }: Edit
     setError(null);
 
     try {
-      await api.patch(`/workspaces/${workspaceId}/deals/${dealId}/field`, {
+      await api.patch(`/deals/${dealId}/field`, {
         field_name: field.field_name,
         value: editValue,
       });
