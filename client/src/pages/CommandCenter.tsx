@@ -10,6 +10,7 @@ import { useWorkspace } from '../context/WorkspaceContext';
 import SectionErrorBoundary from '../components/SectionErrorBoundary';
 import MonteCarloPanel from '../components/MonteCarloPanel';
 import StageAdvancementPanel from '../components/command-center/StageAdvancementPanel';
+import PendingActions from '../components/command-center/PendingActions';
 import { useDemoMode } from '../contexts/DemoModeContext';
 import { useLens } from '../contexts/LensContext';
 import { useIsMobile } from '../hooks/useIsMobile';
@@ -829,6 +830,10 @@ export default function CommandCenter() {
 
       <SectionErrorBoundary fallbackMessage="Failed to load alerts.">
         <CompactAlerts workspaceId={wsId} />
+      </SectionErrorBoundary>
+
+      <SectionErrorBoundary fallbackMessage="Failed to load pending actions." sectionName="Pending Actions">
+        <PendingActions />
       </SectionErrorBoundary>
 
       {/* Top row: Critical Findings + Skill Activity side by side */}
