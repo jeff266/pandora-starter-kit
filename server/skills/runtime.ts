@@ -48,6 +48,8 @@ import { goalService } from '../goals/goal-service.js';
 import { motionService } from '../goals/motion-service.js';
 import pool from '../db.js';
 import { buildQueryScope } from '../context/query-scope.js';
+import { getMethodologyConfigResolver } from '../methodology/config-resolver.js';
+import crypto from 'crypto';
 
 // ============================================================================
 // Skill Runtime
@@ -140,6 +142,118 @@ export class SkillRuntime {
       console.warn(`[Skill Runtime] Failed to load consultant context for ${workspaceId}`);
     }
 
+    // Resolve methodology config (non-blocking, non-fatal)
+    let methodologyBlock = '';
+    let methodologyConfigId: string | null = null;
+    let methodologyConfigVersion: number | null = null;
+    let methodologyContextSnapshot: any = null;
+
+    try {
+      const configResolver = getMethodologyConfigResolver();
+
+      // Try to resolve based on deal context if available in params
+      const deal = params?.deal;
+      const methodologyConfig = await configResolver.resolve(workspaceId, {
+        segment: deal?.segment,
+        product: deal?.product
+      });
+
+      if (methodologyConfig) {
+        methodologyConfigId = methodologyConfig.id;
+        methodologyConfigVersion = methodologyConfig.version;
+
+        const mergedConfig = await configResolver.getMergedConfig(methodologyConfig.id);
+
+        // Build METHODOLOGY_CONTEXT block
+        const sections: string[] = [];
+        sections.push('\n\nMETHODOLOGY_CONTEXT:');
+        sections.push(`Framework: ${mergedConfig.base_methodology} (${mergedConfig.display_name || 'Standard'})`);
+        sections.push(`Version: ${mergedConfig.version} | Scope: ${mergedConfig.scope_type}`);
+        sections.push('');
+
+        if (mergedConfig.config?.problem_definition) {
+          sections.push('PROBLEM DEFINITION:');
+          sections.push(mergedConfig.config.problem_definition);
+          sections.push('');
+        }
+
+        if (mergedConfig.config?.champion_signals) {
+          sections.push('CHAMPION SIGNALS:');
+          sections.push(mergedConfig.config.champion_signals);
+          sections.push('');
+        }
+
+        if (mergedConfig.config?.economic_buyer_signals) {
+          sections.push('ECONOMIC BUYER SIGNALS:');
+          sections.push(mergedConfig.config.economic_buyer_signals);
+          sections.push('');
+        }
+
+        if (mergedConfig.config?.disqualifying_signals) {
+          sections.push('DISQUALIFYING SIGNALS:');
+          sections.push(mergedConfig.config.disqualifying_signals);
+          sections.push('');
+        }
+
+        if (mergedConfig.config?.qualifying_questions?.length > 0) {
+          sections.push('QUALIFYING QUESTIONS:');
+          sections.push(mergedConfig.config.qualifying_questions.join('\n'));
+          sections.push('');
+        }
+
+        if (mergedConfig.config?.stage_criteria && Object.keys(mergedConfig.config.stage_criteria).length > 0) {
+          sections.push('STAGE ADVANCEMENT CRITERIA:');
+          sections.push(JSON.stringify(mergedConfig.config.stage_criteria, null, 2));
+          sections.push('');
+        }
+
+        if (mergedConfig.config?.framework_fields && Object.keys(mergedConfig.config.framework_fields).length > 0) {
+          sections.push('FRAMEWORK FIELD DETECTION HINTS:');
+          for (const [fieldKey, fieldConfig] of Object.entries(mergedConfig.config.framework_fields as any)) {
+            if (fieldConfig?.detection_hints) {
+              sections.push(`${fieldKey}: ${fieldConfig.detection_hints}`);
+            }
+          }
+          sections.push('');
+        }
+
+        methodologyBlock = sections.join('\n');
+
+        // Token cap enforcement (2000 token limit, ~4 chars per token)
+        const estimatedTokens = Math.ceil(methodologyBlock.length / 4);
+        if (estimatedTokens > 2000) {
+          const tokenOverage = estimatedTokens - 2000;
+          const maxChars = 2000 * 4; // ~8000 chars
+          methodologyBlock = methodologyBlock.slice(0, maxChars) +
+            `\n\n[Methodology config truncated — ${tokenOverage} tokens over limit. Edit in Settings → Methodology to reduce.]`;
+          console.warn(`[Skill Runtime] Methodology config truncated for ${workspaceId}: ${estimatedTokens} tokens → 2000 tokens`);
+        }
+
+        // Build context snapshot for skill_runs stamping
+        const configHash = crypto.createHash('sha256')
+          .update(JSON.stringify(mergedConfig.config))
+          .digest('hex')
+          .slice(0, 8);
+
+        methodologyContextSnapshot = {
+          base_methodology: mergedConfig.base_methodology,
+          scope: mergedConfig.scope_type,
+          version: mergedConfig.version,
+          display_name: mergedConfig.display_name,
+          config_hash: configHash
+        };
+
+        console.log(`[Skill Runtime] Methodology config resolved: ${mergedConfig.base_methodology} v${mergedConfig.version} (${mergedConfig.scope_type})`);
+      }
+    } catch (err) {
+      console.warn(`[Skill Runtime] Failed to load methodology config for ${workspaceId}, continuing without it:`, err instanceof Error ? err.message : err);
+      // Fallback: use static methodology from context_layer.definitions if available
+      const staticMethodology = contextData?.definitions?.onboarding_Q11_methodology?.value?.methodology;
+      if (staticMethodology) {
+        methodologyBlock = `\n\nMETHODOLOGY: ${staticMethodology} (system default — no custom config)`;
+      }
+    }
+
     const businessContext: Record<string, any> = {
       business_model: contextData?.business_model || {},
       team_structure: contextData?.team_structure || {},
@@ -151,7 +265,10 @@ export class SkillRuntime {
       voiceBlock,
       consultantContext: consultantContextBlock,
       active_targets: (activeTargetsResult as any).rows ?? [],
-      workspaceContextBlock,
+      workspaceContextBlock: workspaceContextBlock + methodologyBlock,
+      methodologyConfigId,
+      methodologyConfigVersion,
+      methodologyContextSnapshot,
     };
 
     // Structured goal context (goal-aware skill prompts)
@@ -236,7 +353,22 @@ export class SkillRuntime {
       },
     };
 
-    await this.logSkillRun(runId, skill.id, workspaceId, 'running');
+    await this.logSkillRun(
+      runId,
+      skill.id,
+      workspaceId,
+      'running',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      methodologyConfigId,
+      methodologyConfigVersion,
+      methodologyContextSnapshot
+    );
 
     const stepResults: SkillStepResult[] = [];
     let finalOutput: any = null;
@@ -325,7 +457,22 @@ export class SkillRuntime {
         console.log(`[Skill Runtime] Storing ${annotationsList.length} annotations in output`);
       }
 
-      await this.logSkillRun(runId, skill.id, workspaceId, 'completed', finalOutput, undefined, context.metadata.tokenUsage, evidence, annotationsList, annotationsMetadata, Date.now() - startTime);
+      await this.logSkillRun(
+        runId,
+        skill.id,
+        workspaceId,
+        'completed',
+        finalOutput,
+        undefined,
+        context.metadata.tokenUsage,
+        evidence,
+        annotationsList,
+        annotationsMetadata,
+        Date.now() - startTime,
+        methodologyConfigId,
+        methodologyConfigVersion,
+        methodologyContextSnapshot
+      );
 
       try {
         const findings = await extractFindings(skill.id, runId, workspaceId, context.stepResults);
@@ -469,7 +616,22 @@ export class SkillRuntime {
       const errorMsg = error instanceof Error ? error.message : String(error);
       console.error(`[Skill Runtime] Skill ${skill.id} failed:`, errorMsg);
 
-      await this.logSkillRun(runId, skill.id, workspaceId, 'failed', null, errorMsg, undefined, undefined, undefined, undefined, Date.now() - startTime);
+      await this.logSkillRun(
+        runId,
+        skill.id,
+        workspaceId,
+        'failed',
+        null,
+        errorMsg,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        Date.now() - startTime,
+        methodologyConfigId,
+        methodologyConfigVersion,
+        methodologyContextSnapshot
+      );
 
       return {
         runId,
@@ -1038,15 +1200,30 @@ Important:
     evidence?: SkillEvidence,
     annotations?: any,
     annotationsMetadata?: any,
-    durationMs?: number
+    durationMs?: number,
+    methodologyConfigId?: string | null,
+    methodologyConfigVersion?: number | null,
+    methodologyContextSnapshot?: any
   ): Promise<void> {
     try {
       if (status === 'running') {
+        // Initial insert with methodology config stamping
         await query(
-          `INSERT INTO skill_runs (run_id, skill_id, workspace_id, status, started_at)
-           VALUES ($1, $2, $3, $4, NOW())
+          `INSERT INTO skill_runs (
+            run_id, skill_id, workspace_id, status, started_at,
+            methodology_config_id, methodology_config_version, context_snapshot
+          )
+           VALUES ($1, $2, $3, $4, NOW(), $5, $6, $7)
            ON CONFLICT (run_id) DO NOTHING`,
-          [runId, skillId, workspaceId, status]
+          [
+            runId,
+            skillId,
+            workspaceId,
+            status,
+            methodologyConfigId || null,
+            methodologyConfigVersion || null,
+            methodologyContextSnapshot ? JSON.stringify(methodologyContextSnapshot) : null
+          ]
         );
       } else {
         const enhancedTokenUsage = tokenUsageData ? {
