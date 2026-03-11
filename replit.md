@@ -858,3 +858,30 @@ Route: `/winning-path`. Sidebar: INTELLIGENCE section, label "Winning Path", ico
 - CI → teal `#22d3ee`
 - Email / CRM Roles → purple `#a78bfa`
 - Stage History → amber `#fbbf24`
+
+## openAskPandora Universal Utility (March 2026)
+
+### `client/src/lib/askPandora.ts`
+Universal utility for opening the Ask Pandora chat panel with structured context from any surface. All consumer surfaces use this instead of ad-hoc `navigate` calls.
+
+- **`PandoraContext`** type: `source`, `label`, `value` (required); `section`, `dealId`, `dealName`, `accountId`, `accountName`, `repId`, `skillId`, `skillRunId`, `evidenceRows`, `evidenceSummary`, `anomaly`, `benchmark`, `priorValue` (optional).
+- **`PandoraContextSource`** union: `report_block`, `finding_card`, `metric_tile`, `deal_finding`, `deal_metric`, `account_health`, `forecast_line`, `rep_scorecard_tile`, `slack_deeplink`.
+- **`buildContextMessage(ctx)`**: builds a structured natural-language string from context fields.
+- **`openAskPandora(ctx, navigate, targetPath='.')`**: calls `navigate(targetPath, { state: { openChatWithMessage, pandoraContext } })`.  `targetPath='.'` keeps the user on the current page; App.tsx picks up `openChatWithMessage` and opens the ChatPanel.
+
+### `client/src/hooks/useSkillEvidence.ts`
+Fetches evidence rows for a skill run. Returns `{ evidenceRows, loading }`. No-ops when `skillRunId` is undefined. Backed by `GET /:workspaceId/skill-runs/:skillRunId/evidence` in `server/routes/skills.ts`.
+
+### Consumer wiring
+| Surface | Source | File |
+|---|---|---|
+| ReportViewer context menu | `report_block` | `client/src/pages/ReportViewer.tsx` |
+| CommandCenter metric tiles | `metric_tile` | `client/src/pages/CommandCenter.tsx` via MetricsRow → MetricCard |
+| CommandCenter FindingCard (via FindingsFeed) | `finding_card` | `client/src/components/shared/FindingCard.tsx` (onAskPandora prop) |
+| DealDetail findings | `deal_finding` | `client/src/pages/DealDetail.tsx` (inline Ask → button per finding) |
+| ForecastPage metric tiles | `metric_tile` | `client/src/pages/ForecastPage.tsx` via MetricCards (onMetricAskPandora prop) |
+| AccountDetail health | `account_health` | `client/src/pages/AccountDetail.tsx` (Ask Pandora → button in Relationship Health header) |
+
+### Slack deeplink (feature-flagged)
+- **Client**: `App.tsx` reads `?pandoraContext=<base64 JSON>` on route load and fires `openAskPandora`. Gated on `VITE_FEATURE_SLACK_DEEPLINK_CONTEXT`.
+- **Server**: `server/routes/slack.ts` — `appendPandoraContext(url, ctx)` utility appends the encoded param. Gated on `FEATURE_SLACK_DEEPLINK_CONTEXT=true`. Import this in any Slack route that builds action button URLs.

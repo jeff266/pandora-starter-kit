@@ -27,6 +27,7 @@ interface Finding {
 interface FindingCardProps {
   finding: Finding;
   onClick?: (finding: Finding) => void;
+  onAskPandora?: (finding: Finding) => void;
 }
 
 const GRADE_COLORS: Record<string, string> = {
@@ -85,7 +86,7 @@ function TriSignalBadges({ sig }: { sig: TriSignal }) {
   );
 }
 
-export default function FindingCard({ finding, onClick }: FindingCardProps) {
+export default function FindingCard({ finding, onClick, onAskPandora }: FindingCardProps) {
   const [isHovered, setIsHovered] = React.useState(false);
   const isClickable = !!(finding.deal_id || finding.account_id || onClick);
 
@@ -133,6 +134,35 @@ export default function FindingCard({ finding, onClick }: FindingCardProps) {
             </span>
           </div>
           {finding.tri_signal && <TriSignalBadges sig={finding.tri_signal} />}
+          {onAskPandora && (
+            <div style={{ marginTop: 6 }}>
+              <button
+                onClick={(e) => { e.stopPropagation(); onAskPandora(finding); }}
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  padding: '3px 10px',
+                  borderRadius: 4,
+                  border: `1px solid ${colors.accent}44`,
+                  background: 'transparent',
+                  color: colors.accent,
+                  cursor: 'pointer',
+                  fontFamily: fonts.mono,
+                  transition: 'background 0.12s, border-color 0.12s',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = `${colors.accent}18`;
+                  e.currentTarget.style.borderColor = colors.accent;
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'transparent';
+                  e.currentTarget.style.borderColor = `${colors.accent}44`;
+                }}
+              >
+                Ask Pandora →
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -10,6 +10,7 @@ import OverallBriefingFeedback from '../components/reports/OverallBriefingFeedba
 import SankeyChart from '../components/reports/SankeyChart';
 import ReportAnnotationEditor, { type Annotation } from '../components/reports/ReportAnnotationEditor';
 import ReportContextMenu, { type ReportContextTarget } from '../components/reports/ReportContextMenu';
+import { openAskPandora } from '../lib/askPandora';
 import { usePermissions } from '../hooks/usePermissions';
 import { useWorkspace } from '../context/WorkspaceContext';
 
@@ -225,11 +226,17 @@ export default function ReportViewer() {
   }, []);
 
   const handleAskPandora = useCallback((target: ReportContextTarget) => {
-    const contextMsg = `I'm reviewing a report section titled "${target.sectionTitle}". ` +
-      `I'd like to understand: ${target.label}${target.value ? ` = ${target.value}` : ''}. ` +
-      (target.evidence?.length ? `Backing data: ${JSON.stringify(target.evidence.slice(0, 3))}. ` : '') +
-      `Can you help me understand this figure and investigate further?`;
-    navigate('/', { state: { openChatWithMessage: contextMsg } });
+    openAskPandora({
+      source: 'report_block',
+      label: target.label,
+      value: target.value || '',
+      section: target.sectionTitle,
+      evidenceRows: target.evidence?.slice(0, 10).map((e: Record<string, any>) => ({
+        label: String(e.label ?? e.type ?? 'Finding'),
+        value: e.value ?? '',
+        meta: e.meta ?? e.deal_name ?? undefined,
+      })),
+    }, navigate, '/');
   }, [navigate]);
 
   const handleSaveV2 = useCallback(async (annotations: Annotation[], mergedSections: SectionContent[]) => {

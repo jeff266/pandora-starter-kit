@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback, useMemo, lazy, Suspense } from 'react';
-import { Routes, Route, useLocation, useNavigate, Navigate } from 'react-router-dom';
+import { Routes, Route, useLocation, useNavigate, useSearchParams, Navigate } from 'react-router-dom';
+import { openAskPandora } from './lib/askPandora';
 import { useWorkspace } from './context/WorkspaceContext';
 import { useDemoMode } from './contexts/DemoModeContext';
 import { setApiCredentials, api } from './lib/api';
@@ -170,6 +171,7 @@ export default function App() {
 
   // Open a specific chat session when navigated here via router state (e.g. from Agent Builder)
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   useEffect(() => {
     const sessionId = location.state?.openChatSession;
     if (!sessionId) return;
@@ -187,6 +189,21 @@ export default function App() {
     setChatOpen(true);
     navigate(location.pathname, { replace: true, state: {} });
   }, [location.state?.openChatWithMessage]);
+
+  // Slack deeplink: ?pandoraContext=<base64-encoded PandoraContext JSON>
+  // Feature-flagged via VITE_FEATURE_SLACK_DEEPLINK_CONTEXT
+  useEffect(() => {
+    if (!import.meta.env.VITE_FEATURE_SLACK_DEEPLINK_CONTEXT) return;
+    const raw = searchParams.get('pandoraContext');
+    if (!raw) return;
+    try {
+      const ctx = JSON.parse(atob(raw));
+      openAskPandora(ctx, navigate, '.');
+      const next = new URLSearchParams(searchParams);
+      next.delete('pandoraContext');
+      navigate({ pathname: location.pathname, search: next.toString() }, { replace: true });
+    } catch {}
+  }, [searchParams]);
 
   const handleViewChange = useCallback((v: 'command' | 'assistant') => {
     setActiveView(v);

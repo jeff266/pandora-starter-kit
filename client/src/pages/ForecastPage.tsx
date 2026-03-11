@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { openAskPandora } from '../lib/askPandora';
 import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
 import { useWorkspace } from '../context/WorkspaceContext';
@@ -1135,6 +1136,9 @@ export default function ForecastPage() {
         <MetricCards
           current={currentMetrics}
           previous={previousMetrics}
+          onMetricAskPandora={(metricKey, label, value) => {
+            openAskPandora({ source: 'metric_tile', label, value, section: 'Forecast', skillId: 'forecast-rollup' }, navigate, '.');
+          }}
           onMetricClick={(metric, value, context) => {
             // For pipe_gen, show all deals created this quarter (QTD)
             if (metric === 'pipe_gen') {

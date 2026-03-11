@@ -30,9 +30,10 @@ interface MetricsRowProps {
   loading?: boolean;
   activeMetric?: string | null;
   onMetricToggle?: (metricId: string | null) => void;
+  onMetricAskPandora?: (metricId: string, label: string, value: string) => void;
 }
 
-export function MetricsRow({ metrics, evidence, visibleCards, onToggleCard, onShowData, loading = false, activeMetric, onMetricToggle }: MetricsRowProps) {
+export function MetricsRow({ metrics, evidence, visibleCards, onToggleCard, onShowData, loading = false, activeMetric, onMetricToggle, onMetricAskPandora }: MetricsRowProps) {
   const [showConfigPopover, setShowConfigPopover] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
 
@@ -133,6 +134,7 @@ export function MetricsRow({ metrics, evidence, visibleCards, onToggleCard, onSh
               onShowData={onShowData ? () => onShowData(config.id) : undefined}
               isExpanded={activeMetric === config.id}
               onToggle={onMetricToggle ? () => onMetricToggle(activeMetric === config.id ? null : config.id) : undefined}
+              onAskPandora={onMetricAskPandora ? () => onMetricAskPandora(config.id, config.label, config.getValue()) : undefined}
             />
           ))}
       </div>

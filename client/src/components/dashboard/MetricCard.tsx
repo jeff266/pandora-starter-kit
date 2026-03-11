@@ -19,6 +19,7 @@ interface MetricCardProps {
   onShowData?: () => void;
   isExpanded?: boolean;
   onToggle?: () => void;
+  onAskPandora?: () => void;
 }
 
 export function MetricCard({
@@ -33,7 +34,9 @@ export function MetricCard({
   onShowData,
   isExpanded = false,
   onToggle,
+  onAskPandora,
 }: MetricCardProps) {
+  const [hovered, setHovered] = React.useState(false);
   const getTrendColor = () => {
     if (trendDirection === 'flat') return colors.textSecondary;
     if (trendDirection === 'up') return trendPositive ? colors.green : colors.red;
@@ -52,6 +55,8 @@ export function MetricCard({
 
   return (
     <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       style={{
         flex: '1 1 200px',
         minWidth: 200,
@@ -60,6 +65,7 @@ export function MetricCard({
         borderRadius: 10,
         padding: 16,
         transition: 'all 0.15s ease',
+        cursor: onAskPandora ? 'pointer' : 'default',
       }}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
@@ -207,6 +213,44 @@ export function MetricCard({
             </button>
           )}
         </div>
+      )}
+
+      {onAskPandora && !loading && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onAskPandora(); }}
+          title="Ask Pandora about this →"
+          style={{
+            marginTop: 10,
+            width: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 4,
+            padding: '5px 10px',
+            border: `1px solid ${colors.accent}44`,
+            borderRadius: 6,
+            background: hovered ? `${colors.accent}18` : 'transparent',
+            color: colors.accent,
+            fontSize: 11,
+            fontWeight: 600,
+            cursor: 'pointer',
+            fontFamily: fonts.body,
+            transition: 'background 0.15s, border-color 0.15s',
+            opacity: hovered ? 1 : 0.6,
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = `${colors.accent}28`;
+            e.currentTarget.style.borderColor = colors.accent;
+            e.currentTarget.style.opacity = '1';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = hovered ? `${colors.accent}18` : 'transparent';
+            e.currentTarget.style.borderColor = `${colors.accent}44`;
+            e.currentTarget.style.opacity = hovered ? '1' : '0.6';
+          }}
+        >
+          ⓘ Ask Pandora →
+        </button>
       )}
     </div>
   );

@@ -26,6 +26,7 @@ interface MetricCardsProps {
   current: Snapshot | null;
   previous?: Snapshot | null;
   onMetricClick?: (metric: string, value: number, context: MathContext) => void;
+  onMetricAskPandora?: (metricKey: string, label: string, value: string) => void;
 }
 
 function pctChange(curr: number | undefined, prev: number | undefined): { label: string; trend: 'up' | 'down' | 'stable' } | null {
@@ -118,7 +119,7 @@ const cards: CardDef[] = [
   },
 ];
 
-export default function MetricCards({ current, previous, onMetricClick }: MetricCardsProps) {
+export default function MetricCards({ current, previous, onMetricClick, onMetricAskPandora }: MetricCardsProps) {
   const isMobile = useIsMobile();
 
   if (!current) {
@@ -279,6 +280,35 @@ export default function MetricCards({ current, previous, onMetricClick }: Metric
               >
                 → {formulaLine}
               </div>
+            )}
+            {onMetricAskPandora && val != null && Number.isFinite(val) && (
+              <button
+                onClick={(e) => { e.stopPropagation(); onMetricAskPandora(card.metricKey, card.label, displayValue); }}
+                style={{
+                  marginTop: 8,
+                  width: '100%',
+                  padding: '4px 0',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  border: `1px solid ${colors.accent}44`,
+                  borderRadius: 5,
+                  background: 'transparent',
+                  color: colors.accent,
+                  cursor: 'pointer',
+                  fontFamily: fonts.mono,
+                  transition: 'background 0.12s, border-color 0.12s',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = `${colors.accent}18`;
+                  e.currentTarget.style.borderColor = colors.accent;
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'transparent';
+                  e.currentTarget.style.borderColor = `${colors.accent}44`;
+                }}
+              >
+                Ask Pandora →
+              </button>
             )}
           </div>
         );

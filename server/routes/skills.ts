@@ -1585,4 +1585,43 @@ router.get('/:workspaceId/skills/behavioral-winning-path/matrix', async (req, re
   }
 });
 
+/**
+ * GET /:workspaceId/skill-runs/:skillRunId/evidence
+ * Returns structured evidence rows from a specific skill run's output.
+ * Used by the Ask Pandora pre-seed utility to attach backing data to context messages.
+ * Skill run evidence never changes after completion, so responses are immutable-cacheable.
+ */
+router.get('/:workspaceId/skill-runs/:skillRunId/evidence', async (req, res) => {
+  const { workspaceId, skillRunId } = req.params;
+
+  try {
+    const result = await query(
+      `SELECT output FROM skill_runs
+       WHERE workspace_id = $1 AND (run_id = $2 OR id::text = $2::text)
+         AND status = 'completed'
+       LIMIT 1`,
+      [workspaceId, skillRunId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Skill run not found' });
+    }
+
+    const output = result.rows[0].output;
+    const evidence = output?.evidence || {};
+    const claims: any[] = evidence.claims || evidence.evaluated_records || [];
+
+    const rows = claims.slice(0, 50).map((claim: any) => ({
+      label: claim.label || claim.type || claim.field || 'Finding',
+      value: claim.value ?? claim.actual ?? claim.score ?? '',
+      meta: claim.meta || claim.deal_name || claim.account_name || claim.owner || undefined,
+    }));
+
+    res.set('Cache-Control', 'immutable, max-age=86400');
+    return res.json({ rows });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to fetch evidence' });
+  }
+});
+
 export default router;

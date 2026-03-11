@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { openAskPandora } from '../lib/askPandora';
 import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
 import { formatCurrency, formatNumber, formatPercent, formatTimeAgo, severityColor } from '../lib/format';
@@ -818,6 +819,9 @@ export default function CommandCenter() {
             loading={authLoading || loading.pipeline || loading.summary}
             activeMetric={activeMetric}
             onMetricToggle={setActiveMetric}
+            onMetricAskPandora={(metricId, label, value) => {
+              openAskPandora({ source: 'metric_tile', label, value, section: 'Command Center', skillId: metricId }, navigate, '.');
+            }}
           />
         </CollapsibleSection>
       </SectionErrorBoundary>

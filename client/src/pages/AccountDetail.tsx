@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
+import { openAskPandora } from '../lib/askPandora';
 import { ExternalLink } from 'lucide-react';
 import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
@@ -384,16 +385,24 @@ export default function AccountDetail() {
             <h3 style={{ fontSize: 14, fontWeight: 600, color: colors.text }}>
               Relationship Health
             </h3>
-            {relHealth.engagement_trend && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ fontSize: 18, color: trendColor(relHealth.engagement_trend) }}>
-                  {trendArrow(relHealth.engagement_trend)}
-                </span>
-                <span style={{ fontSize: 11, color: trendColor(relHealth.engagement_trend), fontWeight: 500, textTransform: 'capitalize' }}>
-                  {relHealth.engagement_trend}
-                </span>
-              </div>
-            )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              {relHealth.engagement_trend && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontSize: 18, color: trendColor(relHealth.engagement_trend) }}>
+                    {trendArrow(relHealth.engagement_trend)}
+                  </span>
+                  <span style={{ fontSize: 11, color: trendColor(relHealth.engagement_trend), fontWeight: 500, textTransform: 'capitalize' }}>
+                    {relHealth.engagement_trend}
+                  </span>
+                </div>
+              )}
+              <button
+                onClick={() => openAskPandora({ source: 'account_health', label: 'Relationship Health', value: badge.label, accountId: dossier.account?.id, accountName: dossier.account?.name, anomaly: relHealth.engagement_trend }, navigate, '.')}
+                style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 6, border: `1px solid ${colors.accent}55`, background: 'transparent', color: colors.accent, cursor: 'pointer', fontFamily: fonts.mono, transition: 'background 0.12s' }}
+                onMouseEnter={e => { e.currentTarget.style.background = `${colors.accent}18`; e.currentTarget.style.borderColor = colors.accent; }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = `${colors.accent}55`; }}
+              >Ask Pandora →</button>
+            </div>
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 16 }}>
