@@ -10,6 +10,9 @@ import { query as dbQuery } from '../db.js';
 import dbPool from '../db.js';
 import { executeAction } from '../actions/executor.js';
 import { resolveStageToCRM } from '../actions/stage-resolver.js';
+import { getCredentials } from '../connectors/adapters/credentials.js';
+import { HubSpotClient } from '../connectors/hubspot/client.js';
+import { SalesforceClient } from '../connectors/salesforce/client.js';
 
 const router = Router();
 
@@ -104,6 +107,11 @@ router.get(
       }
 
       // Fetch actions for this deal
+      const includeNextSteps = req.query.include_next_steps === 'true';
+      const severityFilter = includeNextSteps
+        ? `AND a.execution_status = 'open'`
+        : `AND a.execution_status = 'open' AND a.severity IN ('critical', 'warning')`;
+
       const result = await dbQuery(
         `SELECT a.*,
                 d.name as deal_name,
@@ -114,8 +122,7 @@ router.get(
          LEFT JOIN deals d ON a.target_deal_id = d.id
          WHERE a.workspace_id = $1
            AND a.target_deal_id = $2
-           AND a.execution_status = 'open'
-           AND a.severity IN ('critical', 'warning')
+           ${severityFilter}
          ORDER BY
            CASE a.severity WHEN 'critical' THEN 1 WHEN 'warning' THEN 2 ELSE 3 END,
            a.created_at DESC
@@ -178,9 +185,10 @@ router.post(
   async (req: Request<WorkspaceParams & { actionId: string }>, res: Response) => {
     try {
       const { workspaceId, actionId } = req.params;
-      const { override_value, user_id } = req.body as {
+      const { override_value, user_id, mode } = req.body as {
         override_value?: string;
         user_id: string;
+        mode?: 'task_create' | 'note_create';
       };
 
       if (!user_id) {
@@ -189,7 +197,7 @@ router.post(
 
       // Load the action to check if override handling is needed
       const actionResult = await dbQuery(
-        `SELECT a.*, d.source as deal_source
+        `SELECT a.*, d.source as deal_source, d.source_id as deal_source_id, d.owner as deal_owner
          FROM actions a
          LEFT JOIN deals d ON a.target_deal_id = d.id
          WHERE a.id = $1 AND a.workspace_id = $2`,
@@ -201,6 +209,56 @@ router.post(
       }
 
       const action = actionResult.rows[0];
+
+      // Next-step action: handle task_create / note_create directly
+      if (mode && action.action_type === 'next_step') {
+        const crmSource = action.deal_source as 'hubspot' | 'salesforce' | undefined;
+        const externalId = action.deal_source_id as string | undefined;
+
+        if (!crmSource || !externalId) {
+          return res.status(400).json({ error: 'Deal has no CRM source — cannot create task/note' });
+        }
+
+        const connection = await getCredentials(workspaceId, crmSource).catch(() => null);
+        if (!connection) {
+          return res.status(400).json({ error: `No ${crmSource} connector configured` });
+        }
+
+        const creds = connection.credentials;
+        let execResult: { success: boolean; error?: string } = { success: false };
+
+        if (crmSource === 'hubspot') {
+          const hs = new HubSpotClient(creds.access_token || creds.accessToken, workspaceId);
+          if (mode === 'task_create') {
+            execResult = await hs.createDealTask(externalId, action.title, action.summary || action.title);
+          } else {
+            execResult = await hs.addDealNote(externalId, `Pandora next step: ${action.title}`);
+          }
+        } else if (crmSource === 'salesforce') {
+          const sf = new SalesforceClient({
+            accessToken: creds.access_token || creds.accessToken,
+            instanceUrl: creds.instance_url || creds.instanceUrl,
+            apiVersion: 'v62.0',
+          });
+          if (mode === 'task_create') {
+            execResult = await sf.createOpportunityTask(externalId, action.title, action.summary || action.title);
+          } else {
+            execResult = await sf.addOpportunityNote(externalId, 'Pandora next step', `Pandora next step: ${action.title}`);
+          }
+        }
+
+        if (!execResult.success) {
+          return res.status(400).json({ success: false, error: execResult.error || 'CRM write failed' });
+        }
+
+        await dbQuery(
+          `UPDATE actions SET execution_status = 'executed', executed_at = now(), executed_by = $3, updated_at = now()
+           WHERE id = $1 AND workspace_id = $2`,
+          [actionId, workspaceId, user_id]
+        );
+
+        return res.json({ success: true, executed_at: new Date().toISOString() });
+      }
 
       // If override_value is provided and action is update_stage, resolve it
       if (override_value && action.action_type === 'update_stage') {
@@ -379,6 +437,114 @@ router.get(
       res.json(summary);
     } catch (err) {
       console.error('[Summary By Deal API]', err);
+      res.status(500).json({ error: (err as Error).message });
+    }
+  }
+);
+
+/**
+ * POST /api/workspaces/:workspaceId/deals/:dealId/actions/sync
+ *
+ * Upserts next-step actions from the frontend into the actions table.
+ * Uses md5(workspace_id||'::'||deal_id||'::'||title) as dedup key.
+ * Skips steps where a dismissed record exists with same hash.
+ * Returns { actions: [{ id, title, priority, source, suggested_crm_action }] }
+ */
+router.post(
+  '/:workspaceId/deals/:dealId/actions/sync',
+  async (req: Request<WorkspaceParams & { dealId: string }>, res: Response) => {
+    try {
+      const { workspaceId, dealId } = req.params;
+      const { steps } = req.body as {
+        steps: Array<{
+          title: string;
+          priority: 'P0' | 'P1' | 'P2';
+          source: 'dossier' | 'client_rule' | 'meddic' | 'coaching';
+          category?: string;
+          suggested_crm_action?: 'task_create' | 'note_create' | 'field_write' | null;
+        }>;
+      };
+
+      if (!Array.isArray(steps) || steps.length === 0) {
+        return res.json({ actions: [] });
+      }
+
+      const results: Array<{ id: string; title: string; priority: string; source: string; suggested_crm_action: string | null }> = [];
+
+      for (const step of steps) {
+        if (!step.title?.trim()) continue;
+
+        // Compute dedup hash (match the index predicate: WHERE execution_status != 'dismissed')
+        const upsertResult = await dbQuery(
+          `INSERT INTO actions (
+             workspace_id, target_deal_id, action_type, severity,
+             title, summary, source, category, suggested_crm_action,
+             dedup_hash, execution_status, source_skill
+           )
+           VALUES (
+             $1, $2, 'next_step', 'info',
+             $3, $3, $4, $5, $6,
+             md5($1 || '::' || $2 || '::' || $3),
+             'open', 'recommended_next_steps'
+           )
+           ON CONFLICT (workspace_id, dedup_hash) WHERE execution_status != 'dismissed'
+           DO UPDATE SET updated_at = now()
+           RETURNING id, title, source, suggested_crm_action`,
+          [
+            workspaceId,
+            dealId,
+            step.title.trim(),
+            step.source || 'client_rule',
+            step.category || null,
+            step.suggested_crm_action || 'task_create',
+          ]
+        );
+
+        if (upsertResult.rows.length > 0) {
+          results.push({
+            id: upsertResult.rows[0].id,
+            title: upsertResult.rows[0].title,
+            priority: step.priority || 'P1',
+            source: upsertResult.rows[0].source,
+            suggested_crm_action: upsertResult.rows[0].suggested_crm_action,
+          });
+        }
+      }
+
+      res.json({ actions: results });
+    } catch (err) {
+      console.error('[Actions Sync API]', err);
+      res.status(500).json({ error: (err as Error).message });
+    }
+  }
+);
+
+/**
+ * GET /api/workspaces/:workspaceId/deals/:dealId/actions/next-steps
+ *
+ * Returns persisted open next-step actions for a deal (source = next_step pattern).
+ * Used on page load to check if sync is needed.
+ */
+router.get(
+  '/:workspaceId/deals/:dealId/actions/next-steps',
+  async (req: Request<WorkspaceParams & { dealId: string }>, res: Response) => {
+    try {
+      const { workspaceId, dealId } = req.params;
+
+      const result = await dbQuery(
+        `SELECT id, title, source, category, suggested_crm_action, created_at
+         FROM actions
+         WHERE workspace_id = $1
+           AND target_deal_id = $2
+           AND action_type = 'next_step'
+           AND execution_status = 'open'
+         ORDER BY created_at ASC`,
+        [workspaceId, dealId]
+      );
+
+      res.json({ actions: result.rows });
+    } catch (err) {
+      console.error('[Next Steps API]', err);
       res.status(500).json({ error: (err as Error).message });
     }
   }

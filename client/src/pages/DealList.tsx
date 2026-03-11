@@ -548,9 +548,10 @@ export default function DealList() {
                     {deal.divergence_flag && (
                       <span
                         onClick={(e) => {
-                          e.stopPropagation(); // Prevent row click
+                          e.stopPropagation();
                           navigate(`/deals/${deal.id}`);
                         }}
+                        title="AI score exceeds CRM health score — stage may lag recent activity"
                         style={{
                           fontSize: 9,
                           fontWeight: 700,
@@ -562,7 +563,7 @@ export default function DealList() {
                           cursor: 'pointer',
                         }}
                       >
-                        ADVANCE
+                        Score gap ↑
                       </span>
                     )}
                   </div>
@@ -648,7 +649,7 @@ export default function DealList() {
                       {deal.divergence_flag && (
                         <button
                           onClick={(e) => {
-                            e.stopPropagation(); // Prevent row click
+                            e.stopPropagation();
                             navigate(`/deals/${deal.id}`);
                           }}
                           style={{
@@ -665,9 +666,9 @@ export default function DealList() {
                             alignItems: 'center',
                             gap: 4,
                           }}
-                          title="Stage may be outdated — click to review"
+                          title="AI score exceeds CRM health score — stage may lag recent activity"
                         >
-                          Advance Stage →
+                          Score gap ↑
                         </button>
                       )}
                     </>

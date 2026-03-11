@@ -28,7 +28,7 @@ export interface ExecutionResult {
   success: boolean;
   dry_run: boolean;
   operations: Array<{
-    type: 'crm_update' | 'crm_note' | 'slack_notify';
+    type: 'crm_update' | 'crm_note' | 'crm_task' | 'slack_notify';
     target: string;
     result: any;
     error?: string;

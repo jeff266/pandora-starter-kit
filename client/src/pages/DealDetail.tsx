@@ -15,6 +15,7 @@ import { useWorkspace } from '../context/WorkspaceContext';
 import { useInlineActions } from '../hooks/useInlineActions';
 import StageRecCard from '../components/actions/StageRecCard';
 import EditableDealFields from '../components/deals/EditableDealFields';
+import { ActionCard, type ActionCardItem } from '../components/deals/ActionCard';
 import type { SimilarPathsData } from '../components/reports/types';
 
 const SEVERITY_LABELS: Record<string, string> = {
@@ -468,6 +469,8 @@ export default function DealDetail() {
   const [meddicCoverage, setMeddicCoverage] = useState<{ covered_fields: string[]; field_signal_counts?: Record<string, number> } | null>(null);
   const [meddicCoverageData, setMeddicCoverageData] = useState<any>(null);
   const [meddicCoverageLoading, setMeddicCoverageLoading] = useState(false);
+  const [actionCards, setActionCards] = useState<(ActionCardItem & { priority: 'P0' | 'P1' | 'P2' })[]>([]);
+  const [actionCardsSynced, setActionCardsSynced] = useState(false);
   const { actions: inlineActions, executeAction, dismissAction } = useInlineActions(dealId);
   const [showSignals, setShowSignals] = useState<boolean | null>(null);
 
@@ -571,6 +574,62 @@ export default function DealDetail() {
       setScopes(confirmed.map((s: any) => ({ scope_id: s.scope_id, name: s.name || s.scope_id })));
     }).catch(() => {});
   }, [dealId]);
+
+  // Sync next-step actions to DB on dossier load
+  useEffect(() => {
+    if (!dealId || !dossier || actionCardsSynced) return;
+    setActionCardsSynced(true);
+
+    (async () => {
+      try {
+        // 1. Check for existing persisted next-step actions
+        const existing = await api.get(`/deals/${dealId}/actions/next-steps`).catch(() => ({ actions: [] })) as any;
+        if (existing?.actions?.length > 0) {
+          const PRIORITY_FOR_SOURCE: Record<string, 'P0' | 'P1' | 'P2'> = {
+            dossier: 'P1', client_rule: 'P1', meddic: 'P1', coaching: 'P2',
+          };
+          setActionCards(existing.actions.map((a: any) => ({
+            id: a.id,
+            title: a.title,
+            priority: PRIORITY_FOR_SOURCE[a.source] || 'P1',
+            source: a.source || 'client_rule',
+            suggested_crm_action: a.suggested_crm_action || 'task_create',
+          })));
+          return;
+        }
+
+        // 2. Assemble steps from available sources and sync
+        const steps: Array<{ title: string; priority: 'P0' | 'P1' | 'P2'; source: 'dossier' | 'client_rule' | 'meddic' | 'coaching'; category?: string; suggested_crm_action: 'task_create' | 'note_create' }> = [];
+
+        // From dossier recommended_actions
+        const recActions: string[] = dossier.recommended_actions || [];
+        recActions.slice(0, 3).forEach((a: string) => steps.push({ title: a, priority: 'P1', source: 'dossier', suggested_crm_action: 'task_create' }));
+
+        // From deal data — client-side rules (same logic as nextSteps below, simplified)
+        const deal = dossier.deal;
+        if (deal && !recActions.length) {
+          const ebContacts = (dossier.contacts || []).filter((c: any) => c.buying_role === 'economic_buyer' || c.buying_role === 'Economic Buyer');
+          const eb0 = ebContacts.find((c: any) => !c.engaged_at && !c.last_call_date);
+          if (eb0) steps.push({ title: `Multi-thread into ${eb0.name || eb0.email || 'the economic buyer'}${eb0.title ? ` (${eb0.title})` : ''} — schedule introductory meeting.`, priority: 'P0', source: 'client_rule', category: 'economic_buyer', suggested_crm_action: 'task_create' });
+        }
+
+        if (steps.length === 0) return;
+
+        const syncRes = await api.post(`/deals/${dealId}/actions/sync`, { steps }) as any;
+        if (syncRes?.actions?.length > 0) {
+          setActionCards(syncRes.actions.map((a: any) => ({
+            id: a.id,
+            title: a.title,
+            priority: a.priority || 'P1',
+            source: a.source || 'client_rule',
+            suggested_crm_action: a.suggested_crm_action || 'task_create',
+          })));
+        }
+      } catch (err) {
+        console.warn('[ActionCards] Sync failed:', err);
+      }
+    })();
+  }, [dealId, dossier, actionCardsSynced]);
 
   const canEditPipeline = (() => {
     if (!user || !dossier?.deal) return false;
@@ -1093,15 +1152,6 @@ export default function DealDetail() {
                 }}>
                   {deal.stage || deal.stage_normalized?.replace(/_/g, ' ') || 'Unknown'}
                 </span>
-                {deal.stage && deal.stage_normalized && deal.stage.toLowerCase().replace(/\s+/g, '') !== deal.stage_normalized.toLowerCase().replace(/_/g, '') && (
-                  <span style={{
-                    fontSize: 10,
-                    color: colors.textMuted,
-                    textTransform: 'capitalize',
-                  }}>
-                    → {deal.stage_normalized.replace(/_/g, ' ')}
-                  </span>
-                )}
               </div>
               {daysInStage != null && (
                 <span style={{
@@ -1472,32 +1522,67 @@ export default function DealDetail() {
         </div>
       )}
 
-      {/* Recommended Next Steps */}
-      {nextSteps.length > 0 && (
+      {/* Recommended Next Steps — Action Cards */}
+      {(actionCards.length > 0 || nextSteps.length > 0) && (
         <div style={{
           background: colors.surface,
           border: `1px solid ${colors.border}`,
           borderRadius: 10,
           padding: '14px 20px',
         }}>
-          <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.07em', color: colors.textMuted, marginBottom: 12 }}>
-            Recommended Next Steps
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.07em', color: colors.textMuted }}>
+              Recommended Next Steps
+            </div>
+            {actionCards.filter(c => c.priority === 'P1' || c.priority === 'P0').length > 1 && (
+              <button
+                onClick={async () => {
+                  const p1s = actionCards.filter(c => c.priority === 'P1' || c.priority === 'P0');
+                  for (const card of p1s) {
+                    try {
+                      await api.post(`/actions/${card.id}/execute-inline`, { mode: 'task_create', user_id: 'rep' });
+                      setActionCards(prev => prev.filter(c => c.id !== card.id));
+                    } catch {}
+                  }
+                }}
+                style={{
+                  fontSize: 11, fontWeight: 600, padding: '4px 10px', borderRadius: 5,
+                  background: colors.accent, color: '#fff', border: 'none', cursor: 'pointer',
+                  fontFamily: fonts.sans,
+                }}
+              >
+                Apply All P1s ▶
+              </button>
+            )}
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {nextSteps.slice(0, 5).map((step, i) => {
-              const pm = priorityMeta[step.priority];
-              return (
-                <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-                  <span style={{
-                    fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 4,
-                    background: pm.bg, color: pm.color,
-                    flexShrink: 0, marginTop: 1,
-                  }}>{step.priority}</span>
-                  <span style={{ fontSize: 13, color: colors.text, lineHeight: 1.5 }}>{step.action}</span>
-                </div>
-              );
-            })}
-          </div>
+
+          {actionCards.length > 0 ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {actionCards.map(card => (
+                <ActionCard
+                  key={card.id}
+                  item={card}
+                  crmSource={dossier?.deal?.source}
+                  onRemove={(id) => setActionCards(prev => prev.filter(c => c.id !== id))}
+                />
+              ))}
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {nextSteps.slice(0, 5).map((step, i) => {
+                const pm = priorityMeta[step.priority];
+                return (
+                  <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                    <span style={{
+                      fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 4,
+                      background: pm.bg, color: pm.color, flexShrink: 0, marginTop: 1,
+                    }}>{step.priority}</span>
+                    <span style={{ fontSize: 13, color: colors.text, lineHeight: 1.5 }}>{step.action}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -1692,15 +1777,53 @@ export default function DealDetail() {
                             const confidence = extraction?.confidence;
                             const evidenceText = extraction?.evidence_text;
 
+                            const MEDDIC_TASK_TITLES: Record<string, string> = {
+                              economic_buyer: 'Confirm economic buyer and schedule introductory call',
+                              champion: 'Identify internal champion and confirm authority to advocate',
+                              metrics: 'Quantify ROI and establish success metrics with prospect',
+                              decision_criteria: 'Capture vendor evaluation criteria and decision factors',
+                              decision_process: 'Map evaluation steps from POC to signed contract',
+                              identify_pain: 'Document core business problem and get agreement on pain',
+                            };
+
                             return (
                               <div key={key} style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
                                 <span style={{ fontSize: 14 }}>{getStatusIcon(status, confidence)}</span>
                                 <div style={{ flex: 1 }}>
-                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
                                     <span style={{ fontSize: 12, fontWeight: 500, color: colors.text }}>{label}</span>
-                                    <span style={{ fontSize: 11, color: colors.textMuted }}>
-                                      {getStatusText(status, confidence)}
-                                    </span>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                      <span style={{ fontSize: 11, color: colors.textMuted }}>
+                                        {getStatusText(status, confidence)}
+                                      </span>
+                                      {(status === 'missing' || status === 'partial') && dealId && (
+                                        <button
+                                          onClick={async () => {
+                                            if (!dealId) return;
+                                            const taskTitle = MEDDIC_TASK_TITLES[key] || `MEDDIC: Address ${label}`;
+                                            try {
+                                              const syncRes = await api.post(`/deals/${dealId}/actions/sync`, {
+                                                steps: [{ title: taskTitle, priority: 'P1', source: 'meddic', category: key, suggested_crm_action: 'task_create' }],
+                                              }) as any;
+                                              if (syncRes?.actions?.[0]) {
+                                                const a = syncRes.actions[0];
+                                                setActionCards(prev => {
+                                                  if (prev.find(c => c.id === a.id)) return prev;
+                                                  return [...prev, { id: a.id, title: a.title, priority: 'P1', source: 'meddic', suggested_crm_action: 'task_create' }];
+                                                });
+                                              }
+                                            } catch {}
+                                          }}
+                                          style={{
+                                            fontSize: 10, fontWeight: 500, padding: '2px 7px', borderRadius: 4,
+                                            border: `1px solid ${colors.border}`, background: 'transparent',
+                                            color: colors.accent, cursor: 'pointer', fontFamily: fonts.sans,
+                                          }}
+                                        >
+                                          + Task
+                                        </button>
+                                      )}
+                                    </div>
                                   </div>
                                   {evidenceText && (
                                     <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 4, lineHeight: 1.5 }}>

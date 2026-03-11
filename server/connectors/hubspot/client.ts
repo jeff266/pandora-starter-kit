@@ -893,6 +893,60 @@ export class HubSpotClient {
   }
 
   /**
+   * Create a task associated with a deal in HubSpot
+   * Step 1: POST /crm/v3/objects/tasks (create task)
+   * Step 2: Associate with deal via associations API
+   */
+  async createDealTask(
+    dealId: string,
+    subject: string,
+    body: string,
+    dueDateMs?: number
+  ): Promise<{ success: boolean; taskId?: string; error?: string }> {
+    try {
+      if (!dealId || !subject) {
+        return { success: false, error: 'Deal ID and subject are required' };
+      }
+
+      const dueTs = dueDateMs ?? (Date.now() + 3 * 24 * 60 * 60 * 1000);
+
+      const taskResponse = await this.request<{ id: string }>('/crm/v3/objects/tasks', {
+        method: 'POST',
+        body: JSON.stringify({
+          properties: {
+            hs_task_subject: subject,
+            hs_task_body: body,
+            hs_timestamp: dueTs.toString(),
+            hs_task_status: 'NOT_STARTED',
+            hs_task_priority: 'HIGH',
+            hs_task_type: 'TODO',
+          },
+        }),
+      });
+
+      const taskId = taskResponse.id;
+
+      try {
+        await this.request(
+          `/crm/v3/objects/tasks/${taskId}/associations/deals/${dealId}/task_to_deal`,
+          { method: 'PUT' }
+        );
+      } catch (assocError) {
+        console.warn(`[HubSpot] Task created (${taskId}) but association with deal ${dealId} failed:`,
+          assocError instanceof Error ? assocError.message : String(assocError));
+        return { success: true, taskId, error: 'Task created but association failed' };
+      }
+
+      return { success: true, taskId };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  /**
    * Get HubSpot portal ID (needed for deep links)
    */
   async getPortalId(): Promise<number | null> {
