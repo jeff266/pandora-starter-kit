@@ -35,6 +35,7 @@ interface Member {
   pandora_role?: PandoraRole;
   joined_at: string;
   created_at?: string;
+  status?: string;
 }
 
 function getRoleName(role: { id: string; name: string } | string): string {
@@ -189,12 +190,33 @@ export default function MembersPage() {
     }
   };
 
-  const handleRemove = async (memberId: string) => {
+  const handleDeactivate = async (memberId: string) => {
     try {
       await api.delete(`/members/${memberId}`);
+      setMembers(prev => prev.map(m => m.id === memberId ? { ...m, status: 'suspended' } : m));
+      setConfirmRemove(null);
+      showToast('Member deactivated', 'success');
+    } catch (err: any) {
+      showToast(err.message || 'Failed to deactivate member', 'error');
+    }
+  };
+
+  const handleReactivate = async (memberId: string) => {
+    try {
+      await api.patch(`/members/${memberId}/reactivate`, {});
+      setMembers(prev => prev.map(m => m.id === memberId ? { ...m, status: 'active' } : m));
+      showToast('Member reactivated', 'success');
+    } catch (err: any) {
+      showToast(err.message || 'Failed to reactivate member', 'error');
+    }
+  };
+
+  const handlePermanentRemove = async (memberId: string) => {
+    try {
+      await api.delete(`/members/${memberId}/permanent`);
       setMembers(prev => prev.filter(m => m.id !== memberId));
       setConfirmRemove(null);
-      showToast('Member removed', 'success');
+      showToast('Member permanently removed', 'success');
     } catch (err: any) {
       showToast(err.message || 'Failed to remove member', 'error');
     }
@@ -258,6 +280,9 @@ export default function MembersPage() {
       </div>
     );
   }
+
+  const activeMembers = members.filter(m => m.status !== 'suspended');
+  const deactivatedMembers = members.filter(m => m.status === 'suspended');
 
   const memberEmails = new Set(members.map(m => m.email?.toLowerCase()));
   const unclaimedStubs = rosterStubs.filter(r => !r.invited && !(r.rep_email && memberEmails.has(r.rep_email.toLowerCase())));
@@ -341,7 +366,7 @@ export default function MembersPage() {
           </div>
         )}
 
-        {members.map(member => isMobile ? (
+        {activeMembers.map(member => isMobile ? (
           <div key={member.id} style={{ padding: '12px 14px', borderBottom: `1px solid ${colors.border}` }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
               <span style={{ fontSize: 14, fontWeight: 500, color: colors.text }}>{member.name ? anon.person(member.name) : '--'}</span>
@@ -397,17 +422,23 @@ export default function MembersPage() {
                   </button>
                 )}
                 {canModify(member) && confirmRemove?.id === member.id ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ fontSize: 11, color: colors.textSecondary }}>Remove {member.name}?</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                    <span style={{ fontSize: 11, color: colors.textSecondary }}>Deactivate {member.name}?</span>
                     <button
-                      onClick={() => handleRemove(member.id)}
+                      onClick={() => handleDeactivate(member.id)}
                       style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 4, background: 'rgba(239,68,68,0.15)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)', cursor: 'pointer' }}>
-                      Remove
+                      Deactivate
                     </button>
                     <button
                       onClick={() => setConfirmRemove(null)}
                       style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, background: 'transparent', color: colors.textMuted, border: `1px solid ${colors.border}`, cursor: 'pointer' }}>
                       Cancel
+                    </button>
+                    <button
+                      onClick={() => handlePermanentRemove(member.id)}
+                      style={{ fontSize: 10, padding: '2px 6px', borderRadius: 4, background: 'transparent', color: colors.textMuted, border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
+                      title="Permanently remove — cannot be undone">
+                      Remove permanently
                     </button>
                   </div>
                 ) : canModify(member) ? (
@@ -423,10 +454,55 @@ export default function MembersPage() {
           </div>
         ))}
 
-        {members.length === 0 && (
-          <div style={{ padding: 24, textAlign: 'center', color: colors.textMuted, fontSize: 13 }}>No members found</div>
+        {activeMembers.length === 0 && (
+          <div style={{ padding: 24, textAlign: 'center', color: colors.textMuted, fontSize: 13 }}>No active members</div>
         )}
       </div>
+
+      {/* Deactivated Members */}
+      {deactivatedMembers.length > 0 && (
+        <div style={{ marginTop: 24 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: colors.textSecondary, marginBottom: 8 }}>
+            Deactivated Members
+          </div>
+          <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10, overflow: 'hidden', opacity: 0.85 }}>
+            {deactivatedMembers.map(member => (
+              <div key={member.id} style={{
+                display: 'flex', alignItems: 'center', gap: 16,
+                padding: '11px 16px', borderBottom: `1px solid ${colors.border}`, fontSize: 13,
+              }}>
+                <span style={{ flex: 1, fontWeight: 500, color: colors.textSecondary }}>{anon.person(member.name)}</span>
+                <span style={{ flex: 1, color: colors.textMuted, fontSize: 12 }}>{anon.email(member.email)}</span>
+                <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 4, background: `${colors.textMuted}15`, color: colors.textMuted }}>
+                  {getRoleName(member.role).charAt(0).toUpperCase() + getRoleName(member.role).slice(1)}
+                </span>
+                <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 4, background: 'rgba(239,68,68,0.1)', color: '#ef4444' }}>
+                  Deactivated
+                </span>
+                {isAdmin && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <button
+                      onClick={() => handleReactivate(member.id)}
+                      style={{ fontSize: 11, fontWeight: 600, padding: '2px 10px', borderRadius: 4, background: `${colors.accent}15`, color: colors.accent, border: `1px solid ${colors.accent}40`, cursor: 'pointer', whiteSpace: 'nowrap' }}
+                      onMouseEnter={e => { e.currentTarget.style.background = `${colors.accent}25`; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = `${colors.accent}15`; }}>
+                      Reactivate
+                    </button>
+                    <button
+                      onClick={() => handlePermanentRemove(member.id)}
+                      style={{ fontSize: 11, color: colors.textMuted, background: 'none', border: 'none', cursor: 'pointer', padding: '2px 6px', borderRadius: 4 }}
+                      title="Permanently remove"
+                      onMouseEnter={e => (e.currentTarget.style.color = colors.red)}
+                      onMouseLeave={e => (e.currentTarget.style.color = colors.textMuted)}>
+                      &#10005;
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Sales Roster — Pending Invites */}
       {invitedStubs.length > 0 && (

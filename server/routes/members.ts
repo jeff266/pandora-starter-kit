@@ -749,23 +749,20 @@ router.patch('/:memberId/status', async (req: Request, res: Response) => {
 
 /**
  * DELETE /:memberId
- * Remove a member from the workspace
+ * Soft-deactivate a member (sets status = 'suspended').
+ * Their data, agent runs, and skill history are preserved and can be restored.
  */
 router.delete('/:memberId', async (req: Request, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId as string;
     const memberId = req.params.memberId as string;
 
-    // Get member info
     const memberResult = await query<{
       user_id: string;
       role_type: string;
       status: string;
     }>(`
-      SELECT
-        wm.user_id,
-        wr.system_type as role_type,
-        wm.status
+      SELECT wm.user_id, wr.system_type as role_type, wm.status
       FROM workspace_members wm
       JOIN workspace_roles wr ON wr.id = wm.role_id
       WHERE wm.id = $1 AND wm.workspace_id = $2
@@ -777,25 +774,104 @@ router.delete('/:memberId', async (req: Request, res: Response) => {
 
     const member = memberResult.rows[0];
 
-    // If removing an active Admin, ensure not last Admin
     if (member.status === 'active' && member.role_type === 'admin') {
       await ensureNotLastAdmin(workspaceId, member.user_id);
     }
 
-    // Delete the workspace_members row
-    // Their agents, skill runs etc. remain — owner_id is preserved
-    await query<Record<string, never>>(`
-      DELETE FROM workspace_members
+    await query(`
+      UPDATE workspace_members
+      SET status = 'suspended', updated_at = now()
       WHERE id = $1
     `, [memberId]);
 
-    res.json({ removed: true });
+    res.json({ deactivated: true });
   } catch (err) {
-    console.error('[members] Error removing member:', err instanceof Error ? err.message : err);
+    console.error('[members] Error deactivating member:', err instanceof Error ? err.message : err);
     if (err instanceof Error && err.message.includes('last Admin')) {
       return res.status(400).json({ error: err.message });
     }
-    res.status(500).json({ error: 'Failed to remove member' });
+    res.status(500).json({ error: 'Failed to deactivate member' });
+  }
+});
+
+/**
+ * PATCH /:memberId/reactivate
+ * Restore a deactivated (suspended) member to active status.
+ */
+router.patch('/:memberId/reactivate', async (req: Request, res: Response) => {
+  try {
+    const workspaceId = req.params.workspaceId as string;
+    const memberId = req.params.memberId as string;
+
+    const memberResult = await query<{ id: string; status: string }>(`
+      SELECT id, status
+      FROM workspace_members
+      WHERE id = $1 AND workspace_id = $2
+    `, [memberId, workspaceId]);
+
+    if (memberResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Member not found' });
+    }
+
+    if (memberResult.rows[0].status !== 'suspended') {
+      return res.status(400).json({ error: 'Member is not deactivated' });
+    }
+
+    await query(`
+      UPDATE workspace_members
+      SET status = 'active',
+          accepted_at = COALESCE(accepted_at, now()),
+          updated_at = now()
+      WHERE id = $1
+    `, [memberId]);
+
+    res.json({ reactivated: true });
+  } catch (err) {
+    console.error('[members] Error reactivating member:', err instanceof Error ? err.message : err);
+    res.status(500).json({ error: 'Failed to reactivate member' });
+  }
+});
+
+/**
+ * DELETE /:memberId/permanent
+ * Hard-delete a member row permanently. Use only when the member should be
+ * fully removed (e.g. erroneous addition). Their owned data is preserved.
+ */
+router.delete('/:memberId/permanent', async (req: Request, res: Response) => {
+  try {
+    const workspaceId = req.params.workspaceId as string;
+    const memberId = req.params.memberId as string;
+
+    const memberResult = await query<{
+      user_id: string;
+      role_type: string;
+      status: string;
+    }>(`
+      SELECT wm.user_id, wr.system_type as role_type, wm.status
+      FROM workspace_members wm
+      JOIN workspace_roles wr ON wr.id = wm.role_id
+      WHERE wm.id = $1 AND wm.workspace_id = $2
+    `, [memberId, workspaceId]);
+
+    if (memberResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Member not found' });
+    }
+
+    const member = memberResult.rows[0];
+
+    if (member.status === 'active' && member.role_type === 'admin') {
+      await ensureNotLastAdmin(workspaceId, member.user_id);
+    }
+
+    await query(`DELETE FROM workspace_members WHERE id = $1`, [memberId]);
+
+    res.json({ removed: true });
+  } catch (err) {
+    console.error('[members] Error permanently removing member:', err instanceof Error ? err.message : err);
+    if (err instanceof Error && err.message.includes('last Admin')) {
+      return res.status(400).json({ error: err.message });
+    }
+    res.status(500).json({ error: 'Failed to permanently remove member' });
   }
 });
 

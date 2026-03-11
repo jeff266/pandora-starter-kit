@@ -76,6 +76,12 @@ export async function attachWorkspaceContext(
       if (memberResult.rows.length > 0) {
         const member = memberResult.rows[0];
 
+        // Block deactivated (suspended) members from all workspace-scoped routes
+        if (member.status === 'suspended') {
+          res.status(403).json({ error: 'Your access to this workspace has been deactivated. Contact your workspace admin.' });
+          return;
+        }
+
         req.workspaceMember = {
           id: member.id,
           userId: member.user_id,
