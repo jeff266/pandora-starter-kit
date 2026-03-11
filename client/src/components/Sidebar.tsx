@@ -316,6 +316,10 @@ export default function Sidebar({ badges, showAllClients, collapsed = false, onT
           </div>
         )}
         {sections.map((section, si) => {
+          // Hide section if no items are accessible
+          const visibleItems = section.items.filter(hasAccess);
+          if (visibleItems.length === 0) return null;
+
           const isSectionCollapsed = !collapsed && !!section.title && collapsedSections.has(section.title);
           return (
           <div key={si} style={{ marginBottom: 4 }}>
@@ -340,7 +344,7 @@ export default function Sidebar({ badges, showAllClients, collapsed = false, onT
             {collapsed && section.title && (
               <div style={{ height: 1, background: colors.border, margin: '6px 10px' }} />
             )}
-            {!isSectionCollapsed && section.items.filter(hasAccess).map(item => {
+            {!isSectionCollapsed && visibleItems.map(item => {
               const active = isActive(item.path);
               const badgeCount = badges[item.label.toLowerCase()];
               return (
