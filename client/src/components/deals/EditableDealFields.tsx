@@ -4,6 +4,11 @@ import { api } from '../../lib/api';
 import { useWorkspace } from '../../context/WorkspaceContext';
 import { Check, X, Edit2, AlertCircle } from 'lucide-react';
 
+interface PicklistOption {
+  value: string;
+  label: string;
+}
+
 interface EditableField {
   id: string;
   field_name: string;
@@ -12,12 +17,27 @@ interface EditableField {
   crm_property_name: string;
   is_required: boolean;
   help_text: string | null;
+  field_options?: PicklistOption[] | null;
 }
 
 interface EditableDealFieldsProps {
   dealId: string;
   deal: any;
   onFieldUpdate?: (fieldName: string, newValue: any) => void;
+}
+
+function parseCRMError(raw: string): string {
+  try {
+    const match = raw.match(/^\S+ API \d+: (.+)$/s);
+    if (match) {
+      const parsed = JSON.parse(match[1]);
+      if (Array.isArray(parsed) && parsed[0]?.message) {
+        return parsed[0].message;
+      }
+    }
+  } catch {
+  }
+  return raw;
 }
 
 export default function EditableDealFields({ dealId, deal, onFieldUpdate }: EditableDealFieldsProps) {
@@ -30,6 +50,7 @@ export default function EditableDealFields({ dealId, deal, onFieldUpdate }: Edit
   const [editValue, setEditValue] = useState<any>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [crmWarnings, setCrmWarnings] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (workspaceId) {
@@ -53,6 +74,11 @@ export default function EditableDealFields({ dealId, deal, onFieldUpdate }: Edit
     setEditingField(field.field_name);
     setEditValue(deal[field.field_name] ?? '');
     setError(null);
+    setCrmWarnings((prev) => {
+      const next = { ...prev };
+      delete next[field.field_name];
+      return next;
+    });
   };
 
   const handleCancelEdit = () => {
@@ -62,7 +88,7 @@ export default function EditableDealFields({ dealId, deal, onFieldUpdate }: Edit
   };
 
   const handleSaveEdit = async (field: EditableField) => {
-    if (field.is_required && !editValue) {
+    if (field.is_required && (editValue === null || editValue === undefined || editValue === '')) {
       setError('This field is required');
       return;
     }
@@ -71,18 +97,24 @@ export default function EditableDealFields({ dealId, deal, onFieldUpdate }: Edit
     setError(null);
 
     try {
-      await api.patch(`/deals/${dealId}/field`, {
+      const result = await api.patch(`/deals/${dealId}/field`, {
         field_name: field.field_name,
         value: editValue,
       });
 
-      // Update local state
       if (onFieldUpdate) {
         onFieldUpdate(field.field_name, editValue);
       }
 
       setEditingField(null);
       setEditValue(null);
+
+      if (result?.warning) {
+        setCrmWarnings((prev) => ({
+          ...prev,
+          [field.field_name]: parseCRMError(result.crm_error || result.warning),
+        }));
+      }
     } catch (err: any) {
       const errorMsg = err.response?.data?.error || err.response?.data?.crm_error || 'Failed to update field';
       setError(errorMsg);
@@ -115,7 +147,7 @@ export default function EditableDealFields({ dealId, deal, onFieldUpdate }: Edit
   }
 
   if (fields.length === 0) {
-    return null; // Don't show section if no fields configured
+    return null;
   }
 
   return (
@@ -146,6 +178,7 @@ export default function EditableDealFields({ dealId, deal, onFieldUpdate }: Edit
             editValue={editValue}
             saving={saving}
             error={error}
+            crmWarning={crmWarnings[field.field_name] ?? null}
             onStartEdit={() => handleStartEdit(field)}
             onCancelEdit={handleCancelEdit}
             onSaveEdit={() => handleSaveEdit(field)}
@@ -164,6 +197,7 @@ interface FieldRowProps {
   editValue: any;
   saving: boolean;
   error: string | null;
+  crmWarning: string | null;
   onStartEdit: () => void;
   onCancelEdit: () => void;
   onSaveEdit: () => void;
@@ -177,12 +211,13 @@ function FieldRow({
   editValue,
   saving,
   error,
+  crmWarning,
   onStartEdit,
   onCancelEdit,
   onSaveEdit,
   onValueChange,
 }: FieldRowProps) {
-  const displayValue = formatFieldValue(value, field.field_type);
+  const displayValue = formatFieldValue(value, field.field_type, field.field_options);
   const isEmpty = value === null || value === undefined || value === '';
 
   return (
@@ -225,6 +260,7 @@ function FieldRow({
               value={editValue}
               onChange={onValueChange}
               disabled={saving}
+              options={field.field_options}
             />
             {error && (
               <div style={{
@@ -241,12 +277,32 @@ function FieldRow({
             )}
           </div>
         ) : (
-          <div style={{
-            fontSize: 13,
-            color: isEmpty ? colors.textMuted : colors.text,
-            fontStyle: isEmpty ? 'italic' : 'normal',
-          }}>
-            {isEmpty ? 'Not set' : displayValue}
+          <div>
+            <div style={{
+              fontSize: 13,
+              color: isEmpty ? colors.textMuted : colors.text,
+              fontStyle: isEmpty ? 'italic' : 'normal',
+            }}>
+              {isEmpty ? 'Not set' : displayValue}
+            </div>
+            {crmWarning && (
+              <div style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 5,
+                marginTop: 5,
+                padding: '5px 8px',
+                background: '#fef3c7',
+                border: '1px solid #fcd34d',
+                borderRadius: 4,
+                fontSize: 11,
+                color: '#92400e',
+                lineHeight: 1.4,
+              }}>
+                <AlertCircle size={12} style={{ flexShrink: 0, marginTop: 1, color: '#b45309' }} />
+                <span><strong>CRM sync failed:</strong> {crmWarning}</span>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -335,10 +391,11 @@ interface FieldInputProps {
   value: any;
   onChange: (value: any) => void;
   disabled: boolean;
+  options?: PicklistOption[] | null;
 }
 
-function FieldInput({ type, value, onChange, disabled }: FieldInputProps) {
-  const baseStyle = {
+function FieldInput({ type, value, onChange, disabled, options }: FieldInputProps) {
+  const baseStyle: React.CSSProperties = {
     width: '100%',
     padding: '8px 10px',
     fontSize: 13,
@@ -348,9 +405,38 @@ function FieldInput({ type, value, onChange, disabled }: FieldInputProps) {
     border: `1px solid ${colors.border}`,
     borderRadius: 4,
     outline: 'none',
+    boxSizing: 'border-box',
   };
 
   switch (type) {
+    case 'picklist':
+      if (options && options.length > 0) {
+        return (
+          <select
+            value={value || ''}
+            onChange={(e) => onChange(e.target.value || null)}
+            disabled={disabled}
+            style={{ ...baseStyle, cursor: disabled ? 'not-allowed' : 'pointer' }}
+          >
+            <option value="">— select —</option>
+            {options.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        );
+      }
+      return (
+        <input
+          type="text"
+          value={value || ''}
+          onChange={(e) => onChange(e.target.value)}
+          disabled={disabled}
+          style={baseStyle}
+        />
+      );
+
     case 'textarea':
       return (
         <textarea
@@ -428,18 +514,25 @@ function FieldInput({ type, value, onChange, disabled }: FieldInputProps) {
   }
 }
 
-function formatFieldValue(value: any, type: string): string {
+function formatFieldValue(value: any, type: string, options?: PicklistOption[] | null): string {
   if (value === null || value === undefined || value === '') {
     return '';
   }
 
   switch (type) {
+    case 'picklist': {
+      if (options && options.length > 0) {
+        const match = options.find((o) => o.value === String(value));
+        if (match) return match.label;
+      }
+      return String(value);
+    }
     case 'date':
       return new Date(value).toLocaleDateString();
     case 'boolean':
       return value ? 'Yes' : 'No';
     case 'number':
-      return value.toLocaleString();
+      return typeof value === 'number' ? value.toLocaleString() : String(value);
     default:
       return String(value);
   }

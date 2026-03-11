@@ -21,6 +21,7 @@ interface DealProperty {
   label: string;
   crm_property_name: string;
   field_type: string;
+  options?: { value: string; label: string }[] | null;
 }
 
 interface EditableField {
@@ -592,6 +593,7 @@ function FieldModal({
   const [crmPropertyLabel, setCrmPropertyLabel] = useState(field?.crm_property_label || '');
   const [isRequired, setIsRequired] = useState(field?.is_required || false);
   const [helpText, setHelpText] = useState(field?.help_text || '');
+  const [fieldOptions, setFieldOptions] = useState<{ value: string; label: string }[] | null>(null);
   const [saving, setSaving] = useState(false);
   const [dealProperties, setDealProperties] = useState<DealProperty[]>([]);
   const [propertiesSource, setPropertiesSource] = useState<'crm' | 'fallback' | null>(null);
@@ -634,6 +636,7 @@ function FieldModal({
           crm_property_label: crmPropertyLabel || null,
           is_required: isRequired,
           help_text: helpText || null,
+          field_options: fieldOptions || null,
         });
       }
       onSuccess();
@@ -840,10 +843,13 @@ function FieldModal({
                         if (!fieldName) setFieldName(chosen.field_name);
                         if (!fieldLabel) setFieldLabel(chosen.label);
                         if (!fieldType || fieldType === 'text') setFieldType((chosen.field_type as FieldType) || 'text');
+                        setFieldOptions(chosen.options && chosen.options.length > 0 ? chosen.options : null);
                       } else if (e.target.value === '__other__') {
                         setCrmPropertyName('');
+                        setFieldOptions(null);
                       } else {
                         setCrmPropertyName(e.target.value);
+                        setFieldOptions(null);
                       }
                     }}
                     style={{

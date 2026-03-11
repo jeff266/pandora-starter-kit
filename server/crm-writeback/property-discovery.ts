@@ -12,12 +12,18 @@ import type { CRMObjectType } from './pandora-fields.js';
 
 const logger = createLogger('PropertyDiscovery');
 
+export interface CRMPropertyOption {
+  value: string;
+  label: string;
+}
+
 export interface CRMProperty {
   name: string;       // internal API name
   label: string;      // human label
-  type: string;       // 'number' | 'text' | 'textarea' | 'checkbox' | 'date' | etc.
+  type: string;       // 'number' | 'text' | 'textarea' | 'checkbox' | 'date' | 'picklist' | etc.
   object_type: string; // 'deal' | 'company' | 'contact' | etc.
   is_custom: boolean;
+  options?: CRMPropertyOption[]; // allowed values for picklist/enumeration fields
 }
 
 // In-memory cache: workspaceId:objectType -> { properties, timestamp }
@@ -67,13 +73,23 @@ export async function fetchHubSpotProperties(
     return true;
   });
 
-  const properties: CRMProperty[] = filtered.map((prop: any) => ({
-    name: prop.name,
-    label: prop.label || prop.name,
-    type: mapHubSpotFieldType(prop.type),
-    object_type: objectType === 'deals' ? 'deal' : objectType === 'companies' ? 'company' : 'contact',
-    is_custom: !prop.name.startsWith('hs_') && prop.name !== 'dealname' && prop.name !== 'amount' && prop.name !== 'closedate',
-  }));
+  const properties: CRMProperty[] = filtered.map((prop: any) => {
+    const type = mapHubSpotFieldType(prop.type);
+    const options: CRMPropertyOption[] | undefined =
+      type === 'picklist' && Array.isArray(prop.options)
+        ? prop.options
+            .filter((o: any) => !o.hidden)
+            .map((o: any) => ({ value: o.value, label: o.label || o.value }))
+        : undefined;
+    return {
+      name: prop.name,
+      label: prop.label || prop.name,
+      type,
+      object_type: objectType === 'deals' ? 'deal' : objectType === 'companies' ? 'company' : 'contact',
+      is_custom: !prop.name.startsWith('hs_') && prop.name !== 'dealname' && prop.name !== 'amount' && prop.name !== 'closedate',
+      ...(options !== undefined ? { options } : {}),
+    };
+  });
 
   // Sort: custom fields first, then standard, alphabetical within each group
   properties.sort((a, b) => {
@@ -90,10 +106,10 @@ function mapHubSpotFieldType(hsType: string): string {
   const typeMap: Record<string, string> = {
     number: 'number',
     string: 'text',
-    enumeration: 'text',
+    enumeration: 'picklist',
     date: 'date',
     datetime: 'datetime',
-    bool: 'checkbox',
+    bool: 'boolean',
   };
   return typeMap[hsType] || 'text';
 }
@@ -130,13 +146,23 @@ export async function fetchSalesforceFields(
     return field.updateable === true && field.createable === true;
   });
 
-  const properties: CRMProperty[] = filtered.map((field: any) => ({
-    name: field.name,
-    label: field.label || field.name,
-    type: mapSalesforceFieldType(field.type),
-    object_type: sobjectName === 'Opportunity' ? 'deal' : sobjectName.toLowerCase(),
-    is_custom: field.custom === true,
-  }));
+  const properties: CRMProperty[] = filtered.map((field: any) => {
+    const type = mapSalesforceFieldType(field.type);
+    const options: CRMPropertyOption[] | undefined =
+      type === 'picklist' && Array.isArray(field.picklistValues)
+        ? field.picklistValues
+            .filter((v: any) => v.active !== false)
+            .map((v: any) => ({ value: v.value, label: v.label || v.value }))
+        : undefined;
+    return {
+      name: field.name,
+      label: field.label || field.name,
+      type,
+      object_type: sobjectName === 'Opportunity' ? 'deal' : sobjectName.toLowerCase(),
+      is_custom: field.custom === true,
+      ...(options !== undefined ? { options } : {}),
+    };
+  });
 
   // Sort: custom fields first, then standard, alphabetical within each group
   properties.sort((a, b) => {
@@ -156,10 +182,11 @@ function mapSalesforceFieldType(sfType: string): string {
     int: 'number',
     string: 'text',
     textarea: 'textarea',
-    picklist: 'text',
+    picklist: 'picklist',
+    multipicklist: 'picklist',
     date: 'date',
     datetime: 'datetime',
-    boolean: 'checkbox',
+    boolean: 'boolean',
   };
   return typeMap[sfType] || 'text';
 }

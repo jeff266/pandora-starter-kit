@@ -67,6 +67,7 @@ router.get('/:workspaceId/editable-fields/deal-properties',
         label: p.label,
         crm_property_name: p.name,
         field_type: p.type,
+        options: p.options ?? null,
       }));
       res.json({ properties, source: 'crm' });
     } catch {
@@ -115,7 +116,8 @@ router.post('/:workspaceId/editable-fields',
         crm_property_name,
         crm_property_label,
         is_required,
-        help_text
+        help_text,
+        field_options,
       } = req.body;
 
       if (!field_name || !field_label || !field_type || !crm_property_name) {
@@ -145,8 +147,9 @@ router.post('/:workspaceId/editable-fields',
       const result = await query(
         `INSERT INTO editable_deal_fields
           (workspace_id, field_name, field_label, field_type, crm_property_name,
-           crm_property_label, is_required, help_text, display_order, created_by_user_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+           crm_property_label, is_required, help_text, display_order, created_by_user_id,
+           field_options)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          RETURNING *`,
         [
           workspaceId,
@@ -158,7 +161,8 @@ router.post('/:workspaceId/editable-fields',
           is_required || false,
           help_text || null,
           displayOrder,
-          userId || null
+          userId || null,
+          field_options ? JSON.stringify(field_options) : null,
         ]
       );
 
