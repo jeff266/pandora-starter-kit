@@ -62,6 +62,7 @@ export default function StageRecCard({
   const [editing, setEditing] = useState(false);
   const [customStage, setCustomStage] = useState(action.to_value || '');
   const [executing, setExecuting] = useState(false);
+  const [resolveFindingsToo, setResolveFindingsToo] = useState(true);
 
   const isUpdateStage = action.action_type === 'update_stage';
 
@@ -122,7 +123,7 @@ export default function StageRecCard({
 
   const handleDismiss = async () => {
     try {
-      await onDismiss();
+      await onDismiss(resolveFindingsToo);
       setState('dismissed');
     } catch (err) {
       console.error('[StageRecCard] Dismiss failed:', err);
@@ -298,13 +299,33 @@ export default function StageRecCard({
       <div style={{
         padding: compact ? '8px 12px' : '10px 14px',
         display: 'flex',
+        flexDirection: 'column',
         gap: 8,
-        alignItems: 'center',
         background: 'rgba(0,0,0,0.15)',
       }}>
-        <button
-          onClick={handleExecute}
-          disabled={executing || loading}
+        {/* Checkbox for findings resolution */}
+        <label style={{
+          fontSize: 11,
+          color: colors.textMuted,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          cursor: 'pointer',
+        }}>
+          <input
+            type="checkbox"
+            checked={resolveFindingsToo}
+            onChange={(e) => setResolveFindingsToo(e.target.checked)}
+            style={{ cursor: 'pointer' }}
+          />
+          Also resolve related findings
+        </label>
+
+        {/* Buttons row */}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button
+            onClick={handleExecute}
+            disabled={executing || loading}
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -365,6 +386,7 @@ export default function StageRecCard({
         }}>
           {formatTimeAgo(action.created_at)}
         </span>
+        </div>
       </div>
     </div>
   );

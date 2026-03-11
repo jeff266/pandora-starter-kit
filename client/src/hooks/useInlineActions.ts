@@ -66,9 +66,11 @@ export function useInlineActions(dealId?: string) {
     }
   };
 
-  const dismissAction = async (actionId: string) => {
+  const dismissAction = async (actionId: string, resolveFindingsToo: boolean = true) => {
     try {
-      await api.post(`/actions/${actionId}/dismiss`);
+      await api.post(`/actions/${actionId}/dismiss`, {
+        resolve_findings: resolveFindingsToo,
+      });
       // Remove dismissed action from list
       setActions((prev) => prev.filter((a) => a.id !== actionId));
     } catch (err: any) {

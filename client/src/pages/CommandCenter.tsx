@@ -9,6 +9,7 @@ import { SeverityDot } from '../components/shared';
 import { useWorkspace } from '../context/WorkspaceContext';
 import SectionErrorBoundary from '../components/SectionErrorBoundary';
 import MonteCarloPanel from '../components/MonteCarloPanel';
+import StageAdvancementPanel from '../components/command-center/StageAdvancementPanel';
 import { useDemoMode } from '../contexts/DemoModeContext';
 import { useLens } from '../contexts/LensContext';
 import { useIsMobile } from '../hooks/useIsMobile';
@@ -940,6 +941,10 @@ export default function CommandCenter() {
 
       <SectionErrorBoundary fallbackMessage="Failed to load forecast panel.">
         <MonteCarloPanel wsId={wsId} activePipeline={selectedPipeline} />
+      </SectionErrorBoundary>
+
+      <SectionErrorBoundary fallbackMessage="Failed to load stage advancement panel." sectionName="Stage Advancement">
+        <StageAdvancementPanel />
       </SectionErrorBoundary>
 
       <SectionErrorBoundary fallbackMessage="Failed to load recent findings.">

@@ -51,6 +51,58 @@ router.get(
     try {
       const { workspaceId, dealId } = req.params;
 
+      // Lazy-seed stage action if phase_divergence=true and no open update_stage action exists
+      const dealResult = await dbQuery(
+        `SELECT phase_divergence, inferred_phase, phase_confidence, phase_signals, stage
+         FROM deals
+         WHERE id = $1 AND workspace_id = $2`,
+        [dealId, workspaceId]
+      );
+
+      const deal = dealResult.rows[0];
+
+      if (deal?.phase_divergence) {
+        // Check if update_stage action already exists (open)
+        const existingAction = await dbQuery(
+          `SELECT id FROM actions
+           WHERE workspace_id = $1
+             AND target_deal_id = $2
+             AND action_type = 'update_stage'
+             AND execution_status = 'open'
+           LIMIT 1`,
+          [workspaceId, dealId]
+        );
+
+        if (existingAction.rows.length === 0) {
+          // Auto-create action
+          const confidence = deal.phase_confidence || 70;
+          const signals = deal.phase_signals || {};
+
+          await dbQuery(
+            `INSERT INTO actions (
+               workspace_id, target_deal_id, action_type, severity,
+               title, summary, execution_payload, execution_status
+             ) VALUES (
+               $1, $2, 'update_stage', $3,
+               $4, $5, $6, 'open'
+             )`,
+            [
+              workspaceId,
+              dealId,
+              confidence >= 80 ? 'critical' : 'warning',
+              'Stage Mismatch Detected',
+              `Deal shows signals of ${deal.inferred_phase} phase but CRM stage is ${deal.stage}`,
+              JSON.stringify({
+                from_value: deal.stage,
+                to_value: deal.inferred_phase,
+                confidence: confidence,
+                evidence: buildEvidenceFromSignals(signals),
+              }),
+            ]
+          );
+        }
+      }
+
       // Fetch actions for this deal
       const result = await dbQuery(
         `SELECT a.*,
@@ -199,6 +251,18 @@ router.post(
         });
       }
 
+      // Resolve related findings after successful execution (T5)
+      await dbQuery(
+        `UPDATE findings
+         SET resolved_at = NOW(),
+             resolution_method = 'action_executed'
+         WHERE workspace_id = $1
+           AND deal_id = (SELECT target_deal_id FROM actions WHERE id = $2)
+           AND category = 'stage_mismatch'
+           AND resolved_at IS NULL`,
+        [workspaceId, actionId]
+      );
+
       // Return success with CRM record URL if available
       const crmRecordUrl = action.deal_source === 'hubspot'
         ? `https://app.hubspot.com/contacts/${action.execution_payload?.portal_id || ''}/deal/${action.execution_payload?.deal_external_id || ''}`
@@ -228,7 +292,10 @@ router.post(
   async (req: Request<WorkspaceParams & { actionId: string }>, res: Response) => {
     try {
       const { workspaceId, actionId } = req.params;
-      const { reason } = req.body as { reason?: string };
+      const { reason, resolve_findings } = req.body as {
+        reason?: string;
+        resolve_findings?: boolean;
+      };
 
       const result = await dbQuery(
         `UPDATE actions
@@ -242,6 +309,20 @@ router.post(
 
       if (result.rows.length === 0) {
         return res.status(404).json({ error: 'Action not found' });
+      }
+
+      // Resolve related findings if requested (T5)
+      if (resolve_findings) {
+        await dbQuery(
+          `UPDATE findings
+           SET resolved_at = NOW(),
+               resolution_method = 'dismissed_with_action'
+           WHERE workspace_id = $1
+             AND deal_id = (SELECT target_deal_id FROM actions WHERE id = $2)
+             AND category = 'stage_mismatch'
+             AND resolved_at IS NULL`,
+          [workspaceId, actionId]
+        );
       }
 
       res.json({ success: true, action: result.rows[0] });
@@ -418,6 +499,36 @@ function mapSignalType(type: string): Evidence['signal_type'] {
   if (lower.includes('timing') || lower.includes('date') || lower.includes('velocity'))
     return 'timing';
   return 'keyword';
+}
+
+function buildEvidenceFromSignals(signals: any): Evidence[] {
+  const evidence: Evidence[] = [];
+
+  if (signals.keyword_matches && Array.isArray(signals.keyword_matches)) {
+    evidence.push({
+      label: 'Keywords Detected',
+      value: signals.keyword_matches.join(', '),
+      signal_type: 'keyword',
+    });
+  }
+
+  if (signals.conversation_count) {
+    evidence.push({
+      label: 'Conversation Activity',
+      value: `${signals.conversation_count} conversations analyzed`,
+      signal_type: 'conversation',
+    });
+  }
+
+  if (signals.last_conversation_date) {
+    evidence.push({
+      label: 'Last Activity',
+      value: new Date(signals.last_conversation_date).toLocaleDateString(),
+      signal_type: 'timing',
+    });
+  }
+
+  return evidence.slice(0, 3); // Max 3 evidence items
 }
 
 export default router;

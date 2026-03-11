@@ -648,6 +648,38 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
         }
       }
 
+      // Intent-gated divergent deals context injection (T4)
+      // Only inject when question is pipeline-related to save tokens
+      const pipelineIntents = ['attainment', 'coverage', 'pipeline_health', 'deal_progression', 'forecast', 'analytical'];
+      if (intentClassification && pipelineIntents.includes(intentClassification.category as string)) {
+        try {
+          const divergentDealsResult = await query(
+            `SELECT id, name, stage, inferred_phase, phase_confidence, amount
+             FROM deals
+             WHERE workspace_id = $1
+               AND phase_divergence = true
+               AND stage_normalized NOT IN ('closed_won', 'closed_lost')
+             ORDER BY phase_confidence DESC, amount DESC
+             LIMIT 5`,
+            [workspaceId]
+          );
+
+          const divergentDeals = divergentDealsResult.rows;
+
+          if (divergentDeals.length > 0) {
+            let divergenceContext = `\n\n[Stage Mismatch Alerts: ${divergentDeals.length} deal(s) show activity signals ahead of their CRM stage:\n`;
+            for (const deal of divergentDeals) {
+              divergenceContext += `- ${deal.name}: Currently in "${deal.stage}" but signals indicate "${deal.inferred_phase}" (${deal.phase_confidence}% confidence, $${Number(deal.amount).toLocaleString()})\n`;
+            }
+            divergenceContext += 'Recommendation: Mention these opportunities if relevant to the user\'s question about pipeline health or deal progression.]';
+            agentMessage = agentMessage + divergenceContext;
+          }
+        } catch (err) {
+          console.error('[Orchestrator] Failed to fetch divergent deals for context:', err);
+          // Non-fatal: continue without divergent deals context
+        }
+      }
+
       const pandoraResult = await runPandoraAgent(workspaceId, agentMessage, history, undefined, sessionContext);
 
       answer = pandoraResult.answer;
