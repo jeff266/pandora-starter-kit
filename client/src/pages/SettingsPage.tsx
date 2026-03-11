@@ -20,10 +20,11 @@ import DimensionBuilder from './DimensionBuilder';
 import TokenUsagePage from './admin/TokenUsagePage';
 import AIKeysTab from '../components/settings/AIKeysTab';
 import DealFieldsTab from '../components/settings/DealFieldsTab';
+import AutomationsSettings from '../components/settings/AutomationsSettings';
 
-type SettingsTab = 'profile' | 'security' | 'preferences' | 'workspaces' | 'setup' | 'members' | 'sales-roster' | 'roles' | 'notifications' | 'features' | 'crm-sync' | 'deal-fields' | 'webhooks' | 'billing' | 'dimensions' | 'token-usage' | 'ai-keys';
+type SettingsTab = 'profile' | 'security' | 'preferences' | 'workspaces' | 'setup' | 'members' | 'sales-roster' | 'roles' | 'notifications' | 'features' | 'crm-sync' | 'deal-fields' | 'automations' | 'webhooks' | 'billing' | 'dimensions' | 'token-usage' | 'ai-keys';
 
-const adminTabs: SettingsTab[] = ['setup', 'members', 'sales-roster', 'roles', 'notifications', 'features', 'crm-sync', 'deal-fields', 'webhooks', 'billing', 'dimensions', 'token-usage', 'ai-keys'];
+const adminTabs: SettingsTab[] = ['setup', 'members', 'sales-roster', 'roles', 'notifications', 'features', 'crm-sync', 'deal-fields', 'automations', 'webhooks', 'billing', 'dimensions', 'token-usage', 'ai-keys'];
 
 export default function SettingsPage() {
   const { tab } = useParams<{ tab?: string }>();
@@ -50,7 +51,7 @@ export default function SettingsPage() {
   }, [tab, navigate]);
 
   const isValidTab = (tabKey: string): boolean => {
-    const validTabs: SettingsTab[] = ['profile', 'security', 'preferences', 'workspaces', 'setup', 'members', 'sales-roster', 'roles', 'notifications', 'features', 'crm-sync', 'deal-fields', 'webhooks', 'billing', 'dimensions', 'token-usage', 'ai-keys'];
+    const validTabs: SettingsTab[] = ['profile', 'security', 'preferences', 'workspaces', 'setup', 'members', 'sales-roster', 'roles', 'notifications', 'features', 'crm-sync', 'deal-fields', 'automations', 'webhooks', 'billing', 'dimensions', 'token-usage', 'ai-keys'];
     return validTabs.includes(tabKey as SettingsTab);
   };
 
@@ -89,6 +90,8 @@ export default function SettingsPage() {
         return isAdmin ? <CRMSyncTab /> : null;
       case 'deal-fields':
         return isAdmin ? <DealFieldsTab /> : null;
+      case 'automations':
+        return isAdmin ? <AutomationsSettings /> : null;
       case 'webhooks':
         return isAdmin ? <WebhooksTab /> : null;
       case 'billing':
