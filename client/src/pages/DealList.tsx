@@ -549,9 +549,18 @@ export default function DealList() {
                       <span
                         onClick={(e) => {
                           e.stopPropagation();
+                          api.post(`/deals/${deal.id}/actions/sync`, {
+                            steps: [{
+                              title: 'Review stage currency — AI score exceeds CRM health',
+                              priority: 'P2',
+                              source: 'score_divergence',
+                              category: 'stage',
+                              suggested_crm_action: 'task_create',
+                            }],
+                          }).catch(() => {});
                           navigate(`/deals/${deal.id}`);
                         }}
-                        title="AI score exceeds CRM health score — stage may lag recent activity"
+                        title={`AI score (${deal.grade}) exceeds CRM health (${deal.mechanical_grade || '—'}) — stage may lag recent activity`}
                         style={{
                           fontSize: 9,
                           fontWeight: 700,
@@ -650,6 +659,15 @@ export default function DealList() {
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
+                            api.post(`/deals/${deal.id}/actions/sync`, {
+                              steps: [{
+                                title: 'Review stage currency — AI score exceeds CRM health',
+                                priority: 'P2',
+                                source: 'score_divergence',
+                                category: 'stage',
+                                suggested_crm_action: 'task_create',
+                              }],
+                            }).catch(() => {});
                             navigate(`/deals/${deal.id}`);
                           }}
                           style={{
@@ -666,7 +684,7 @@ export default function DealList() {
                             alignItems: 'center',
                             gap: 4,
                           }}
-                          title="AI score exceeds CRM health score — stage may lag recent activity"
+                          title={`AI score (${deal.grade}) exceeds CRM health (${deal.mechanical_grade || '—'}) — stage may lag recent activity`}
                         >
                           Score gap ↑
                         </button>
