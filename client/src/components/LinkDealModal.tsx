@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
 
@@ -36,31 +36,37 @@ export default function LinkDealModal({
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDealId, setSelectedDealId] = useState<string | null>(null);
+  const [isSearching, setIsSearching] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const fetchDeals = useCallback(async (search?: string) => {
+    try {
+      search ? setIsSearching(true) : setLoading(true);
+      const params = new URLSearchParams({ limit: '50' });
+      if (search) params.set('search', search);
+      const response = await api.get(`/deals?${params}`);
+      setDeals(response.data || []);
+    } catch (err) {
+      console.error('Failed to load deals:', err);
+      setDeals([]);
+    } finally {
+      setLoading(false);
+      setIsSearching(false);
+    }
+  }, []);
 
   useEffect(() => {
     fetchDeals();
-  }, [workspaceId]);
+  }, [fetchDeals]);
 
-  async function fetchDeals() {
-    try {
-      setLoading(true);
-      // Fetch open deals from the workspace
-      const response = await api.get(`/deals`);
-      const openDeals = (response.deals || []).filter(
-        (d: any) => !['closed_won', 'closed_lost'].includes(d.stage_normalized?.toLowerCase())
-      );
-      setDeals(openDeals);
-    } catch (err) {
-      console.error('Failed to load deals:', err);
-    } finally {
-      setLoading(false);
-    }
+  function handleSearchChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const q = e.target.value;
+    setSearchQuery(q);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      fetchDeals(q.trim() || undefined);
+    }, 250);
   }
-
-  const filteredDeals = deals.filter(d =>
-    d.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    d.owner.toLowerCase().includes(searchQuery.toLowerCase())
-  );
 
   function handleLink() {
     if (!selectedDealId) return;
@@ -70,6 +76,9 @@ export default function LinkDealModal({
   function handleDismiss() {
     onDismiss(conversation.id);
   }
+
+  const showInitialHint = !searchQuery && !loading;
+  const busy = loading || isSearching;
 
   return (
     <div
@@ -140,9 +149,10 @@ export default function LinkDealModal({
         <div style={{ padding: '16px 24px', borderBottom: `1px solid ${colors.border}` }}>
           <input
             type="text"
-            placeholder="Search deals..."
+            placeholder="Search deals by name or owner…"
             value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
+            onChange={handleSearchChange}
+            autoFocus
             style={{
               width: '100%',
               padding: '8px 12px',
@@ -152,8 +162,15 @@ export default function LinkDealModal({
               background: colors.surface,
               color: colors.text,
               fontFamily: fonts.sans,
+              outline: 'none',
+              boxSizing: 'border-box',
             }}
           />
+          {showInitialHint && (
+            <div style={{ marginTop: 6, fontSize: 11, color: colors.textMuted }}>
+              Showing recent deals · type to search all
+            </div>
+          )}
         </div>
 
         {/* Deal List */}
@@ -164,16 +181,16 @@ export default function LinkDealModal({
             padding: '12px 24px',
           }}
         >
-          {loading ? (
+          {busy ? (
             <div style={{ padding: 32, textAlign: 'center', fontSize: 13, color: colors.textMuted }}>
-              Loading deals...
+              {loading ? 'Loading deals…' : 'Searching…'}
             </div>
-          ) : filteredDeals.length === 0 ? (
+          ) : deals.length === 0 ? (
             <div style={{ padding: 32, textAlign: 'center', fontSize: 13, color: colors.textMuted }}>
-              No deals found
+              {searchQuery ? `No deals found for "${searchQuery}"` : 'No deals found'}
             </div>
           ) : (
-            filteredDeals.map(deal => (
+            deals.map(deal => (
               <div
                 key={deal.id}
                 onClick={() => setSelectedDealId(deal.id)}
@@ -203,7 +220,7 @@ export default function LinkDealModal({
                       {deal.name}
                     </div>
                     <div style={{ fontSize: 11, color: colors.textMuted }}>
-                      {deal.owner} • {deal.stage}
+                      {deal.owner} · {deal.stage}
                     </div>
                   </div>
                   {deal.amount != null && (
