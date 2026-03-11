@@ -1024,12 +1024,11 @@ router.post('/:id/conversations/:conversationId/link', async (req: Request, res:
       await query(
         `UPDATE conversations
          SET custom_data = jsonb_set(
-           COALESCE(custom_data, '{}'::jsonb),
-           '{link_dismissed}',
-           'true'::jsonb
-         ),
-         custom_data = jsonb_set(
-           COALESCE(custom_data, '{}'::jsonb),
+           jsonb_set(
+             COALESCE(custom_data, '{}'::jsonb),
+             '{link_dismissed}',
+             'true'::jsonb
+           ),
            '{link_dismissed_at}',
            to_jsonb(NOW()::text)
          )
@@ -1049,12 +1048,11 @@ router.post('/:id/conversations/:conversationId/link', async (req: Request, res:
       `UPDATE conversations
        SET deal_id = $1,
            custom_data = jsonb_set(
-             COALESCE(custom_data, '{}'::jsonb),
-             '{link_method}',
-             $2::jsonb
-           ),
-           custom_data = jsonb_set(
-             COALESCE(custom_data, '{}'::jsonb),
+             jsonb_set(
+               COALESCE(custom_data, '{}'::jsonb),
+               '{link_method}',
+               $2::jsonb
+             ),
              '{linked_at}',
              to_jsonb(NOW()::text)
            )
