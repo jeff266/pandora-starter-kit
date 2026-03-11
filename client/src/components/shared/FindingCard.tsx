@@ -1,7 +1,9 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { colors, fonts } from '../../styles/theme';
 import SeverityDot from './SeverityDot';
 import TimeAgo from './TimeAgo';
+import MethodologyAttribution from './MethodologyAttribution';
+import { api } from '../../lib/api';
 
 interface TriSignal {
   icp_grade: string | null;
@@ -15,6 +17,7 @@ interface Finding {
   severity: string;
   message: string;
   skill_id: string;
+  skill_run_id?: string | null;
   category?: string;
   metadata?: Record<string, any>;
   deal_id?: string;
@@ -91,7 +94,26 @@ function TriSignalBadges({ sig }: { sig: TriSignal }) {
 
 export default function FindingCard({ finding, onClick, onAskPandora, onCreateRule }: FindingCardProps) {
   const [isHovered, setIsHovered] = React.useState(false);
+  const [skillRunData, setSkillRunData] = useState<any>(null);
+  const [loadingSkillRun, setLoadingSkillRun] = useState(false);
   const isClickable = !!(finding.deal_id || finding.account_id || onClick);
+
+  // Fetch skill run data if finding has skill_run_id
+  useEffect(() => {
+    if (finding.skill_run_id) {
+      setLoadingSkillRun(true);
+      api.get(`/skill-runs/${finding.skill_run_id}`)
+        .then(data => {
+          setSkillRunData(data);
+        })
+        .catch(err => {
+          console.error('[FindingCard] Failed to load skill run:', err);
+        })
+        .finally(() => {
+          setLoadingSkillRun(false);
+        });
+    }
+  }, [finding.skill_run_id]);
 
   return (
     <div
@@ -196,6 +218,15 @@ export default function FindingCard({ finding, onClick, onAskPandora, onCreateRu
                 </button>
               )}
             </div>
+          )}
+
+          {/* Methodology Attribution */}
+          {finding.skill_run_id && skillRunData && (
+            <MethodologyAttribution
+              methodologyConfigId={skillRunData.methodology_config_id}
+              contextSnapshot={skillRunData.context_snapshot}
+              runAt={skillRunData.started_at || skillRunData.created_at}
+            />
           )}
         </div>
       </div>

@@ -4,6 +4,7 @@ import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
 import { formatDateTime, formatTimeAgo } from '../lib/format';
 import Skeleton from '../components/Skeleton';
+import MethodologyAttribution from '../components/shared/MethodologyAttribution';
 
 export default function SkillRunsPage() {
   const { skillId } = useParams<{ skillId: string }>();
@@ -151,36 +152,59 @@ function RunOutput({ run }: { run: any }) {
 
   const error = run.error || run.result?.error;
 
+  // Render methodology attribution
+  const renderMethodologyAttribution = () => {
+    if (run.methodology_config_id || run.context_snapshot) {
+      return (
+        <MethodologyAttribution
+          methodologyConfigId={run.methodology_config_id}
+          contextSnapshot={run.context_snapshot}
+          runAt={run.started_at || run.created_at}
+        />
+      );
+    }
+    return null;
+  };
+
   if (error) {
     return (
-      <div style={{ fontSize: 12, color: colors.red, fontFamily: fonts.mono, whiteSpace: 'pre-wrap' }}>
-        {typeof error === 'string' ? error : JSON.stringify(error, null, 2)}
-      </div>
+      <>
+        <div style={{ fontSize: 12, color: colors.red, fontFamily: fonts.mono, whiteSpace: 'pre-wrap' }}>
+          {typeof error === 'string' ? error : JSON.stringify(error, null, 2)}
+        </div>
+        {renderMethodologyAttribution()}
+      </>
     );
   }
 
   if (isInsufficient) {
     const insufficientMessage = narrative || 'This skill did not produce output due to insufficient data.';
     return (
-      <div style={{
-        background: `${colors.yellow}11`, border: `1px solid ${colors.yellow}33`,
-        borderRadius: 8, padding: '12px 16px',
-      }}>
-        <div style={{ fontSize: 11, fontWeight: 600, color: colors.yellow, marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-          Insufficient Data
+      <>
+        <div style={{
+          background: `${colors.yellow}11`, border: `1px solid ${colors.yellow}33`,
+          borderRadius: 8, padding: '12px 16px',
+        }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: colors.yellow, marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Insufficient Data
+          </div>
+          <div style={{ fontSize: 12, color: colors.textSecondary, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+            {insufficientMessage}
+          </div>
         </div>
-        <div style={{ fontSize: 12, color: colors.textSecondary, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
-          {insufficientMessage}
-        </div>
-      </div>
+        {renderMethodologyAttribution()}
+      </>
     );
   }
 
   if (narrative) {
     return (
-      <div style={{ fontSize: 13, color: colors.text, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
-        {narrative}
-      </div>
+      <>
+        <div style={{ fontSize: 13, color: colors.text, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+          {narrative}
+        </div>
+        {renderMethodologyAttribution()}
+      </>
     );
   }
 
@@ -189,30 +213,38 @@ function RunOutput({ run }: { run: any }) {
     const truncated = raw.slice(0, 2000);
     const wasTruncated = raw.length > 2000;
     return (
-      <details>
-        <summary style={{
-          fontSize: 12, color: colors.textMuted, cursor: 'pointer',
-          userSelect: 'none', marginBottom: 8, listStyle: 'none',
-        }}>
-          <span style={{ borderBottom: `1px dashed ${colors.border}` }}>
-            Raw output — this skill may need a synthesis step
-          </span>
-        </summary>
-        <pre style={{
-          fontSize: 11, color: colors.textSecondary, fontFamily: fonts.mono,
-          background: colors.surfaceRaised, borderRadius: 6, padding: '10px 12px',
-          whiteSpace: 'pre-wrap', maxHeight: 300, overflow: 'auto', marginTop: 8,
-        }}>
-          {truncated}
-        </pre>
-        {wasTruncated && (
-          <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 6 }}>
-            Showing first 2,000 characters — run with synthesis enabled for a full report
-          </div>
-        )}
-      </details>
+      <>
+        <details>
+          <summary style={{
+            fontSize: 12, color: colors.textMuted, cursor: 'pointer',
+            userSelect: 'none', marginBottom: 8, listStyle: 'none',
+          }}>
+            <span style={{ borderBottom: `1px dashed ${colors.border}` }}>
+              Raw output — this skill may need a synthesis step
+            </span>
+          </summary>
+          <pre style={{
+            fontSize: 11, color: colors.textSecondary, fontFamily: fonts.mono,
+            background: colors.surfaceRaised, borderRadius: 6, padding: '10px 12px',
+            whiteSpace: 'pre-wrap', maxHeight: 300, overflow: 'auto', marginTop: 8,
+          }}>
+            {truncated}
+          </pre>
+          {wasTruncated && (
+            <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 6 }}>
+              Showing first 2,000 characters — run with synthesis enabled for a full report
+            </div>
+          )}
+        </details>
+        {renderMethodologyAttribution()}
+      </>
     );
   }
 
-  return <span style={{ fontSize: 12, color: colors.textMuted }}>No output available</span>;
+  return (
+    <>
+      <span style={{ fontSize: 12, color: colors.textMuted }}>No output available</span>
+      {renderMethodologyAttribution()}
+    </>
+  );
 }
