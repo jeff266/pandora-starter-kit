@@ -723,6 +723,12 @@ function SetTargetModal({ existingTarget, revenueModel, onClose, onSave, isEditi
   workspaceId?: string;
 }) {
   const { anon } = useDemoMode();
+  const { user, currentWorkspace } = useWorkspace();
+  const userRole = currentWorkspace?.role;
+  const isMember = userRole === 'member';
+  const isViewer = userRole === 'viewer';
+  const isAnalyst = userRole === 'analyst';
+
   const editing = isEditing && !!existingTarget?.id;
   const [amount, setAmount] = useState(existingTarget?.amount.toString() || '');
   const [periodType, setPeriodType] = useState<'annual' | 'quarterly' | 'monthly'>(
@@ -734,8 +740,12 @@ function SetTargetModal({ existingTarget, revenueModel, onClose, onSave, isEditi
   const [notes, setNotes] = useState(existingTarget?.notes || '');
   const [pipelineId, setPipelineId] = useState<string>(existingTarget?.pipeline_id || '');
   const [pipelineName, setPipelineName] = useState<string>(existingTarget?.pipeline_name || '');
-  const [targetType, setTargetType] = useState<TargetType>(existingTarget?.target_type || 'company');
-  const [assignedToEmail, setAssignedToEmail] = useState(existingTarget?.assigned_to_email || '');
+  const [targetType, setTargetType] = useState<TargetType>(
+    existingTarget?.target_type || (isMember ? 'individual' : 'company')
+  );
+  const [assignedToEmail, setAssignedToEmail] = useState(
+    existingTarget?.assigned_to_email || (isMember ? user?.email || '' : '')
+  );
   const [pipelines, setPipelines] = useState<{ id: string; name: string }[]>([]);
   const [rosterReps, setRosterReps] = useState<{ id: string; rep_name: string; rep_email: string; pandora_role: string | null; is_manager: boolean }[]>([]);
   const [saving, setSaving] = useState(false);
@@ -925,36 +935,41 @@ function SetTargetModal({ existingTarget, revenueModel, onClose, onSave, isEditi
           <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: colors.textMuted, marginBottom: 6 }}>
             Target Type
           </label>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
-            {(['company', 'board', 'team', 'individual'] as TargetType[]).map(t => {
-              const tc = TARGET_TYPE_COLORS[t];
-              const isSelected = targetType === t;
-              return (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => { setTargetType(t); if (t === 'company' || t === 'board') setAssignedToEmail(''); }}
-                  style={{
-                    padding: '7px 4px',
-                    fontSize: 12,
-                    fontWeight: 600,
-                    fontFamily: fonts.sans,
-                    borderRadius: 5,
-                    border: isSelected ? `2px solid ${tc.text}` : `1px solid ${colors.border}`,
-                    background: isSelected ? tc.bg : 'transparent',
-                    color: isSelected ? tc.text : colors.textMuted,
-                    cursor: 'pointer',
-                    textTransform: 'capitalize',
-                    transition: 'all 0.15s',
-                  }}
-                >
-                  {TARGET_TYPE_LABELS[t]}
-                </button>
-              );
-            })}
+          <div style={{ display: 'grid', gridTemplateColumns: `repeat(${isMember ? '1' : '4'}, 1fr)`, gap: 6 }}>
+            {(['company', 'board', 'team', 'individual'] as TargetType[])
+              .filter(t => !isMember || t === 'individual') // Members can only create Individual targets
+              .map(t => {
+                const tc = TARGET_TYPE_COLORS[t];
+                const isSelected = targetType === t;
+                return (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => { setTargetType(t); if (t === 'company' || t === 'board') setAssignedToEmail(''); }}
+                    disabled={isMember && t !== 'individual'}
+                    style={{
+                      padding: '7px 4px',
+                      fontSize: 12,
+                      fontWeight: 600,
+                      fontFamily: fonts.sans,
+                      borderRadius: 5,
+                      border: isSelected ? `2px solid ${tc.text}` : `1px solid ${colors.border}`,
+                      background: isSelected ? tc.bg : 'transparent',
+                      color: isSelected ? tc.text : colors.textMuted,
+                      cursor: 'pointer',
+                      textTransform: 'capitalize',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    {TARGET_TYPE_LABELS[t]}
+                  </button>
+                );
+              })}
           </div>
           <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 4 }}>
-            Company/Board = workspace-wide · Team = manager's pipeline · Individual = specific rep
+            {isMember
+              ? 'You can only create individual targets for yourself'
+              : 'Company/Board = workspace-wide · Team = manager's pipeline · Individual = specific rep'}
           </div>
         </div>
 
@@ -963,17 +978,21 @@ function SetTargetModal({ existingTarget, revenueModel, onClose, onSave, isEditi
           <div style={{ marginBottom: 16 }}>
             <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: colors.textMuted, marginBottom: 6 }}>
               Assigned To {targetType === 'team' ? 'Manager' : 'Rep'}
+              {isMember && <span style={{ fontSize: 10, marginLeft: 6, color: colors.textMuted }}>(read-only)</span>}
             </label>
             <input
-              list="roster-rep-options"
+              list={isMember ? undefined : "roster-rep-options"}
               value={assignedToEmail}
-              onChange={e => setAssignedToEmail(e.target.value)}
+              readOnly={isMember}
+              onChange={e => !isMember && setAssignedToEmail(e.target.value)}
               placeholder={
-                filteredRosterReps.length > 0
-                  ? `Type or select ${targetType === 'team' ? 'a manager' : 'a rep'}...`
-                  : targetType === 'team' ? 'manager@company.com' : 'rep@company.com'
+                isMember
+                  ? user?.email || 'your-email@company.com'
+                  : (filteredRosterReps.length > 0
+                      ? `Type or select ${targetType === 'team' ? 'a manager' : 'a rep'}...`
+                      : targetType === 'team' ? 'manager@company.com' : 'rep@company.com')
               }
-              style={editableInput}
+              style={isMember ? { ...readonlyInput, background: colors.surfaceRaised } : editableInput}
             />
             <datalist id="roster-rep-options">
               {filteredRosterReps.map(r => (

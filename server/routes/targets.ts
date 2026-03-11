@@ -97,6 +97,50 @@ router.post('/:workspaceId/targets', async (req: Request, res: Response): Promis
     return;
   }
 
+  // RBAC: Validate target creation permissions
+  const userId = (req as any).user?.user_id as string | undefined;
+  if (userId && req.authMethod !== 'api_key') {
+    const roleInfo = await getPandoraRole(workspaceId, userId).catch(() => null);
+    if (roleInfo) {
+      const { pandoraRole, workspaceRole, userEmail } = roleInfo;
+
+      // Members (AEs) can only create individual targets for themselves
+      if (pandoraRole === 'ae') {
+        if (target_type && target_type !== 'individual') {
+          res.status(403).json({ error: 'Members can only create individual targets' });
+          return;
+        }
+        // Verify target is assigned to the current user
+        if (assigned_to_user_id && assigned_to_user_id !== userId) {
+          res.status(403).json({ error: 'Members can only create targets for themselves' });
+          return;
+        }
+        if (assigned_to_email && assigned_to_email !== userEmail) {
+          res.status(403).json({ error: 'Members can only create targets for themselves' });
+          return;
+        }
+      }
+
+      // Managers can create board/company/team/individual, but team targets must be assigned to them
+      if (pandoraRole === 'manager' && target_type === 'team') {
+        if (assigned_to_user_id && assigned_to_user_id !== userId) {
+          res.status(403).json({ error: 'Managers can only create team targets assigned to themselves' });
+          return;
+        }
+        if (assigned_to_email && assigned_to_email !== userEmail) {
+          res.status(403).json({ error: 'Managers can only create team targets assigned to themselves' });
+          return;
+        }
+      }
+
+      // Analysts and Viewers cannot create targets
+      if (pandoraRole === 'analyst' || pandoraRole === 'viewer') {
+        res.status(403).json({ error: `${pandoraRole === 'analyst' ? 'Analysts' : 'Viewers'} cannot create targets` });
+        return;
+      }
+    }
+  }
+
   try {
     // Check for existing active target for this period and pipeline
     // If pipeline_id is null, match workspace-wide targets (pipeline_id IS NULL)
@@ -212,6 +256,46 @@ router.patch('/:workspaceId/targets/:targetId', async (req: Request, res: Respon
 
     const currentTarget = current.rows[0];
 
+    // RBAC: Validate target update permissions
+    const userId = (req as any).user?.user_id as string | undefined;
+    if (userId && req.authMethod !== 'api_key') {
+      const roleInfo = await getPandoraRole(workspaceId, userId).catch(() => null);
+      if (roleInfo) {
+        const { pandoraRole, userEmail } = roleInfo;
+
+        // Members can only edit their own individual targets
+        if (pandoraRole === 'ae') {
+          if (currentTarget.target_type !== 'individual') {
+            res.status(403).json({ error: 'Members can only edit individual targets' });
+            return;
+          }
+          if (currentTarget.assigned_to_user_id !== userId && currentTarget.assigned_to_email !== userEmail) {
+            res.status(403).json({ error: 'Members can only edit their own targets' });
+            return;
+          }
+          // Prevent changing target type or reassigning to someone else
+          if (target_type && target_type !== 'individual') {
+            res.status(403).json({ error: 'Members cannot change target type' });
+            return;
+          }
+          if (assigned_to_user_id !== undefined && assigned_to_user_id !== userId) {
+            res.status(403).json({ error: 'Members cannot reassign targets to others' });
+            return;
+          }
+          if (assigned_to_email !== undefined && assigned_to_email !== userEmail) {
+            res.status(403).json({ error: 'Members cannot reassign targets to others' });
+            return;
+          }
+        }
+
+        // Analysts and Viewers cannot edit targets
+        if (pandoraRole === 'analyst' || pandoraRole === 'viewer') {
+          res.status(403).json({ error: `${pandoraRole === 'analyst' ? 'Analysts' : 'Viewers'} cannot edit targets` });
+          return;
+        }
+      }
+    }
+
     // Deactivate old target
     await query(`UPDATE targets SET is_active = false WHERE id = $1`, [targetId]);
 
@@ -260,14 +344,50 @@ router.patch('/:workspaceId/targets/:targetId', async (req: Request, res: Respon
 router.delete('/:workspaceId/targets/:targetId', async (req: Request, res: Response): Promise<void> => {
   const { workspaceId, targetId } = req.params as Record<string, string>;
   try {
+    // Load target to check permissions
+    const current = await query(
+      `SELECT * FROM targets WHERE workspace_id = $1 AND id = $2`,
+      [workspaceId, targetId]
+    );
+
+    if (current.rows.length === 0) {
+      res.status(404).json({ error: 'Target not found' });
+      return;
+    }
+
+    const target = current.rows[0];
+
+    // RBAC: Validate target deletion permissions
+    const userId = (req as any).user?.user_id as string | undefined;
+    if (userId && req.authMethod !== 'api_key') {
+      const roleInfo = await getPandoraRole(workspaceId, userId).catch(() => null);
+      if (roleInfo) {
+        const { pandoraRole, userEmail } = roleInfo;
+
+        // Members can only delete their own individual targets
+        if (pandoraRole === 'ae') {
+          if (target.target_type !== 'individual') {
+            res.status(403).json({ error: 'Members can only delete individual targets' });
+            return;
+          }
+          if (target.assigned_to_user_id !== userId && target.assigned_to_email !== userEmail) {
+            res.status(403).json({ error: 'Members can only delete their own targets' });
+            return;
+          }
+        }
+
+        // Analysts and Viewers cannot delete targets
+        if (pandoraRole === 'analyst' || pandoraRole === 'viewer') {
+          res.status(403).json({ error: `${pandoraRole === 'analyst' ? 'Analysts' : 'Viewers'} cannot delete targets` });
+          return;
+        }
+      }
+    }
+
     const result = await query(
       `UPDATE targets SET is_active = false WHERE workspace_id = $1 AND id = $2 RETURNING id`,
       [workspaceId, targetId]
     );
-    if (result.rows.length === 0) {
-      res.status(404).json({ error: 'Target not found' });
-      return;
-    }
     clearWorkspaceMemoryCache(workspaceId);
     res.json({ ok: true, id: targetId });
   } catch (err) {
