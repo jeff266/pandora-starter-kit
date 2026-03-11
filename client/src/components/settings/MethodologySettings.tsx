@@ -799,7 +799,7 @@ export default function MethodologySettings() {
                   </div>
                 </div>
               </div>
-            )}))}
+            )})}
 
             <div style={{ marginTop: 16, textAlign: 'right' }}>
               <button
