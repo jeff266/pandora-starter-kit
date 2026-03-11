@@ -1,5 +1,5 @@
 import PDFDocument from 'pdfkit';
-import { ReportGenerationContext, SectionContent, MetricCard, DealCard, ActionItem } from '../reports/types.js';
+import { ReportGenerationContext, SectionContent, MetricCard, DealCard, ActionItem, HumanAnnotation } from '../reports/types.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -60,10 +60,21 @@ function ensureSpace(doc: any, needed: number): void {
   }
 }
 
+const TEAL = '#00BFA5';
+const CORAL = '#F87171';
+
+function pdfAnnotationMap(annotations: HumanAnnotation[]): Map<string, HumanAnnotation> {
+  const m = new Map<string, HumanAnnotation>();
+  for (const a of annotations) m.set(a.block_id, a);
+  return m;
+}
+
 export async function renderReportPDF(context: ReportGenerationContext): Promise<PDFRenderResult> {
-  const { workspace_id, template, sections_content, branding } = context;
+  const { workspace_id, template, sections_content, branding, human_annotations, annotated_at, annotated_by, version } = context;
 
   const accentColor = branding?.primary_color || C.blue;
+  const annMap = pdfAnnotationMap(human_annotations || []);
+  const isAnnotated = (human_annotations?.length ?? 0) > 0;
 
   const doc = new PDFDocument({
     size: 'LETTER',
@@ -112,6 +123,14 @@ export async function renderReportPDF(context: ReportGenerationContext): Promise
     doc.fontSize(11).fillColor(C.midGray).text(`Prepared by ${branding.prepared_by}`, lMargin, 270);
   }
 
+  if (isAnnotated) {
+    const revisedY = branding?.prepared_by ? 290 : 270;
+    doc.fontSize(11).fillColor(TEAL)
+      .text(`Revised by ${annotated_by || 'reviewer'}${annotated_at ? ` · ${new Date(annotated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}` : ''}`, lMargin, revisedY);
+    doc.fontSize(9).fillColor(C.lightGray)
+      .text(`V${version || 2} — Contains human annotations`, lMargin, revisedY + 16);
+  }
+
   doc.fontSize(10).fillColor(C.lightGray).text('Pandora GTM Intelligence', lMargin, 700, {
     width: contentW,
     align: 'center',
@@ -127,20 +146,32 @@ export async function renderReportPDF(context: ReportGenerationContext): Promise
 
     doc.y = 80;
 
-    // Metrics cards (grid layout)
+    // Metrics cards (grid layout with annotation support)
     if (section.metrics && section.metrics.length > 0) {
-      renderMetricGrid(doc, section.metrics, lMargin, contentW);
+      const metricsWithAnn = section.metrics.map((m, idx) => ({
+        metric: m,
+        annotation: annMap.get(`${section.section_id}:metric:${idx}`),
+      }));
+      renderAnnotatedMetricGrid(doc, metricsWithAnn, lMargin, contentW);
     }
 
     // Narrative
     if (section.narrative && !section.narrative.startsWith('⚠')) {
       ensureSpace(doc, 60);
-      const cleanText = stripMarkdown(section.narrative);
+      const narrativeAnn = annMap.get(`${section.section_id}:narrative`);
+      const narrativeText = narrativeAnn?.new_value || section.narrative;
+      if (narrativeAnn) {
+        doc.rect(lMargin, doc.y, 3, 14).fill(TEAL);
+        doc.fontSize(9).fillColor(TEAL).text('  ✎ Narrative edited by reviewer', lMargin + 6, doc.y - 12, { width: contentW });
+        doc.moveDown(0.3);
+      }
+      const cleanText = stripMarkdown(narrativeText);
       const lines = cleanText.split('\n').filter(l => l.trim());
       for (const line of lines.slice(0, 15)) {
         ensureSpace(doc, 16);
-        doc.fontSize(10).fillColor(C.darkSlate).text(line.trim(), lMargin, doc.y, {
-          width: contentW,
+        if (narrativeAnn) doc.rect(lMargin, doc.y, 2, 12).fill(TEAL);
+        doc.fontSize(10).fillColor(C.darkSlate).text(line.trim(), lMargin + (narrativeAnn ? 8 : 0), doc.y, {
+          width: contentW - (narrativeAnn ? 8 : 0),
           lineGap: 3,
         });
         doc.moveDown(0.3);
@@ -158,9 +189,14 @@ export async function renderReportPDF(context: ReportGenerationContext): Promise
       renderTable(doc, section.table, lMargin, contentW);
     }
 
-    // Action items
+    // Action items (with strike/note annotation support)
     if (section.action_items && section.action_items.length > 0) {
-      renderActionItems(doc, section.action_items, lMargin, contentW);
+      const actionsWithAnn = section.action_items.map((a, idx) => ({
+        action: a,
+        annotation: annMap.get(`${section.section_id}:action:${idx}`),
+        noteAnnotation: annMap.get(`${section.section_id}:action:${idx}:note`),
+      }));
+      renderAnnotatedActionItems(doc, actionsWithAnn, lMargin, contentW);
     }
 
     // Data freshness footer
@@ -194,6 +230,102 @@ export async function renderReportPDF(context: ReportGenerationContext): Promise
     });
     doc.on('error', reject);
   });
+}
+
+function renderAnnotatedMetricGrid(
+  doc: any,
+  entries: { metric: MetricCard; annotation?: HumanAnnotation }[],
+  lMargin: number,
+  contentW: number,
+): void {
+  const cols = Math.min(entries.length, 3);
+  const cardW = (contentW - (cols - 1) * 10) / cols;
+  const cardH = 60;
+
+  for (let i = 0; i < entries.length; i += cols) {
+    ensureSpace(doc, cardH + 15);
+    const rowY = doc.y;
+
+    for (let j = 0; j < cols && i + j < entries.length; j++) {
+      const { metric: m, annotation } = entries[i + j];
+      const x = lMargin + j * (cardW + 10);
+      const isOverride = annotation?.type === 'override' && annotation.new_value;
+      const { bg, fg } = severityColor(m.severity);
+      const cardBg = isOverride ? '#E0FDF4' : bg;
+
+      doc.rect(x, rowY, cardW, cardH).fill(cardBg);
+
+      const severityBar = isOverride ? TEAL : (m.severity === 'critical' ? C.red : m.severity === 'warning' ? C.amber : m.severity === 'good' ? C.green : C.border);
+      doc.rect(x, rowY, 4, cardH).fill(severityBar);
+
+      doc.fontSize(8).fillColor(C.midGray).text(m.label.toUpperCase(), x + 12, rowY + 8, { width: cardW - 20 });
+
+      if (isOverride) {
+        const origText = m.value + (m.delta ? ` ${m.delta}` : '');
+        doc.fontSize(10).fillColor(C.lightGray).text(origText, x + 12, rowY + 22, { width: (cardW - 20) / 2 });
+        doc.fontSize(14).fillColor(TEAL).text(annotation!.new_value!, x + 12 + (cardW - 20) / 2, rowY + 20, { width: (cardW - 20) / 2 });
+        doc.fontSize(7).fillColor(TEAL).text('✎ Edited', x + 12, rowY + 48, { width: cardW - 20 });
+      } else {
+        const valueText = m.delta
+          ? `${m.value}  ${m.delta_direction === 'up' ? '▲' : m.delta_direction === 'down' ? '▼' : '—'} ${m.delta}`
+          : m.value;
+        doc.fontSize(16).fillColor(fg).text(valueText, x + 12, rowY + 24, { width: cardW - 20 });
+      }
+    }
+
+    doc.y = rowY + cardH + 10;
+  }
+  doc.moveDown(0.5);
+}
+
+function renderAnnotatedActionItems(
+  doc: any,
+  entries: { action: ActionItem; annotation?: HumanAnnotation; noteAnnotation?: HumanAnnotation }[],
+  lMargin: number,
+  contentW: number,
+): void {
+  ensureSpace(doc, 30);
+  doc.fontSize(12).fillColor(C.darkSlate).text('Action Items', lMargin, doc.y);
+  doc.moveDown(0.4);
+
+  for (let i = 0; i < Math.min(entries.length, 15); i++) {
+    const { action: a, annotation, noteAnnotation } = entries[i];
+    const isStruck = annotation?.type === 'strike';
+    ensureSpace(doc, 26);
+    const y = doc.y;
+
+    const dotColor = isStruck ? C.lightGray : (a.urgency === 'today' ? C.red : a.urgency === 'this_week' ? C.amber : C.green);
+    doc.circle(lMargin + 6, y + 6, 4).fill(dotColor);
+
+    if (isStruck) {
+      doc.save();
+      doc.fontSize(9).fillColor(C.lightGray).text(a.action, lMargin + 18, y, { width: contentW - 100 });
+      const textH = 9;
+      const textY = y + textH / 2;
+      doc.moveTo(lMargin + 18, textY).lineTo(lMargin + 18 + Math.min(a.action.length * 5, contentW - 100), textY).stroke(CORAL);
+      doc.restore();
+      doc.fontSize(8).fillColor(CORAL).text('[removed by annotation]', lMargin + 18, y + 10, { width: contentW - 100 });
+    } else {
+      doc.fontSize(9).fillColor(C.darkSlate).text(a.action, lMargin + 18, y, { width: contentW - 100 });
+    }
+
+    if (a.owner) {
+      doc.fontSize(8).fillColor(C.midGray).text(a.owner, lMargin + contentW - 80, y, { width: 80, align: 'right' });
+    }
+
+    doc.y = Math.max(doc.y, y + 18);
+
+    if (noteAnnotation?.new_value) {
+      ensureSpace(doc, 20);
+      const noteY = doc.y;
+      doc.rect(lMargin + 18, noteY, 2, 14).fill(TEAL);
+      doc.fontSize(8).fillColor(TEAL).text(`✎ ${noteAnnotation.new_value}`, lMargin + 24, noteY, { width: contentW - 42 });
+      doc.y = Math.max(doc.y, noteY + 16);
+    }
+
+    doc.moveDown(0.15);
+  }
+  doc.moveDown(0.5);
 }
 
 function renderMetricGrid(doc: any, metrics: MetricCard[], lMargin: number, contentW: number): void {

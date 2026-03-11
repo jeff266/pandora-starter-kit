@@ -3,10 +3,13 @@ import {
   WidthType, AlignmentType, BorderStyle, HeadingLevel, ShadingType,
   TableLayoutType,
 } from 'docx';
-import { ReportGenerationContext, SectionContent, MetricCard, DealCard, ActionItem } from '../reports/types.js';
+import { ReportGenerationContext, SectionContent, MetricCard, DealCard, ActionItem, HumanAnnotation } from '../reports/types.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+
+const TEAL = '00BFA5';
+const CORAL = 'F87171';
 
 const C = {
   navy: '0F172A',
@@ -67,10 +70,18 @@ function stripMarkdown(text: string): string {
     .trim();
 }
 
+function annotationMap(annotations: HumanAnnotation[]): Map<string, HumanAnnotation> {
+  const m = new Map<string, HumanAnnotation>();
+  for (const a of annotations) m.set(a.block_id, a);
+  return m;
+}
+
 export async function renderDOCX(context: ReportGenerationContext): Promise<DOCXRenderResult> {
-  const { workspace_id, template, sections_content, branding } = context;
+  const { workspace_id, template, sections_content, branding, human_annotations, annotated_at, annotated_by, version } = context;
 
   const accentColor = branding?.primary_color?.replace('#', '') || C.blue;
+  const annMap = annotationMap(human_annotations || []);
+  const isAnnotated = (human_annotations?.length ?? 0) > 0;
   const docSections: any[] = [];
 
   // ── COVER PAGE ──
@@ -99,7 +110,22 @@ export async function renderDOCX(context: ReportGenerationContext): Promise<DOCX
           text: branding?.prepared_by || 'Prepared by Pandora GTM Intelligence',
           italics: true, size: 20, color: C.lightGray,
         })],
+        spacing: { after: isAnnotated ? 200 : 0 },
       }),
+      ...(isAnnotated ? [
+        new Paragraph({
+          children: [new TextRun({
+            text: `Revised by ${annotated_by || 'reviewer'}${annotated_at ? ` · ${new Date(annotated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}` : ''}`,
+            bold: true, size: 20, color: TEAL,
+          })],
+        }),
+        new Paragraph({
+          children: [new TextRun({
+            text: `V${version || 2} — Contains human annotations (overrides, strikethroughs, notes)`,
+            italics: true, size: 18, color: C.lightGray,
+          })],
+        }),
+      ] : []),
     ],
   });
 
@@ -116,13 +142,28 @@ export async function renderDOCX(context: ReportGenerationContext): Promise<DOCX
 
     // Metrics table
     if (section.metrics && section.metrics.length > 0) {
-      children.push(buildMetricsTable(section.metrics, accentColor));
+      const metricsWithAnnotations = section.metrics.map((m, idx) => {
+        const blockId = `${section.section_id}:metric:${idx}`;
+        const ann = annMap.get(blockId);
+        return { metric: m, annotation: ann };
+      });
+      children.push(buildAnnotatedMetricsTable(metricsWithAnnotations, accentColor));
       children.push(new Paragraph({ spacing: { after: 200 }, text: '' }));
     }
 
     // Narrative paragraphs
     if (section.narrative && !section.narrative.startsWith('⚠')) {
-      const cleaned = stripMarkdown(section.narrative);
+      const narrativeAnn = annMap.get(`${section.section_id}:narrative`);
+      const narrativeText = narrativeAnn?.new_value || section.narrative;
+      if (narrativeAnn) {
+        children.push(new Paragraph({
+          children: [new TextRun({ text: '✎ Narrative edited by reviewer', size: 16, color: TEAL, italics: true })],
+          spacing: { after: 100 },
+          indent: { left: 200 },
+          border: { left: { style: BorderStyle.SINGLE, size: 8, color: TEAL } },
+        }));
+      }
+      const cleaned = stripMarkdown(narrativeText);
       const paras = cleaned.split('\n\n').filter(p => p.trim());
       for (const para of paras.slice(0, 12)) {
         const lines = para.split('\n').map(l => l.trim()).filter(Boolean);
@@ -130,6 +171,7 @@ export async function renderDOCX(context: ReportGenerationContext): Promise<DOCX
           children.push(new Paragraph({
             children: [new TextRun({ text: line, size: 20, color: C.darkSlate, font: 'Calibri' })],
             spacing: { after: 120 },
+            ...(narrativeAnn ? { indent: { left: 200 }, border: { left: { style: BorderStyle.SINGLE, size: 4, color: TEAL } } } : {}),
           }));
         }
       }
@@ -157,7 +199,7 @@ export async function renderDOCX(context: ReportGenerationContext): Promise<DOCX
       children.push(new Paragraph({ spacing: { after: 200 }, text: '' }));
     }
 
-    // Action items
+    // Action items (with strike annotations)
     if (section.action_items && section.action_items.length > 0) {
       children.push(new Paragraph({
         children: [new TextRun({ text: 'Action Items', bold: true, size: 26, color: C.navy })],
@@ -166,18 +208,32 @@ export async function renderDOCX(context: ReportGenerationContext): Promise<DOCX
 
       for (let i = 0; i < Math.min(section.action_items.length, 15); i++) {
         const a = section.action_items[i];
+        const blockId = `${section.section_id}:action:${i}`;
+        const actionAnn = annMap.get(blockId);
+        const noteAnn = annMap.get(`${blockId}:note`);
+        const isStruck = actionAnn?.type === 'strike';
         const urgencyColor = a.urgency === 'today' ? C.red : a.urgency === 'this_week' ? C.amber : C.green;
         const urgencyLabel = a.urgency === 'today' ? 'TODAY' : a.urgency === 'this_week' ? 'THIS WEEK' : 'THIS MONTH';
 
         children.push(new Paragraph({
           children: [
-            new TextRun({ text: `${i + 1}. `, bold: true, size: 20, color: C.darkSlate }),
-            new TextRun({ text: `[${urgencyLabel}] `, bold: true, size: 18, color: urgencyColor }),
-            new TextRun({ text: a.action, size: 20, color: C.darkSlate }),
-            new TextRun({ text: a.owner ? `  — ${a.owner}` : '', italics: true, size: 18, color: C.midGray }),
+            new TextRun({ text: `${i + 1}. `, bold: true, size: 20, color: isStruck ? C.lightGray : C.darkSlate }),
+            new TextRun({ text: `[${urgencyLabel}] `, bold: true, size: 18, color: isStruck ? C.lightGray : urgencyColor }),
+            new TextRun({ text: a.action, size: 20, color: isStruck ? C.lightGray : C.darkSlate, strike: isStruck }),
+            new TextRun({ text: a.owner ? `  — ${a.owner}` : '', italics: true, size: 18, color: C.midGray, strike: isStruck }),
+            ...(isStruck ? [new TextRun({ text: '  [removed by annotation]', italics: true, size: 16, color: CORAL })] : []),
           ],
           spacing: { after: 100 },
         }));
+
+        if (noteAnn?.new_value) {
+          children.push(new Paragraph({
+            children: [new TextRun({ text: `  ✎ Note: ${noteAnn.new_value}`, italics: true, size: 18, color: TEAL })],
+            spacing: { after: 80 },
+            indent: { left: 400 },
+            border: { left: { style: BorderStyle.SINGLE, size: 4, color: TEAL } },
+          }));
+        }
       }
     }
 
@@ -213,6 +269,80 @@ export async function renderDOCX(context: ReportGenerationContext): Promise<DOCX
     size_bytes: buffer.length,
     download_url: `/api/workspaces/${workspace_id}/reports/${template.id}/download/docx?file=${filename}`,
   };
+}
+
+function buildAnnotatedMetricsTable(entries: { metric: MetricCard; annotation?: HumanAnnotation }[], accent: string): Table {
+  const rows: TableRow[] = [];
+
+  rows.push(new TableRow({
+    children: [
+      new TableCell({
+        children: [new Paragraph({ children: [new TextRun({ text: 'METRIC', bold: true, size: 16, color: 'FFFFFF', font: 'Calibri' })] })],
+        shading: { fill: accent, type: ShadingType.CLEAR, color: 'auto' },
+        width: { size: 40, type: WidthType.PERCENTAGE },
+      }),
+      new TableCell({
+        children: [new Paragraph({ children: [new TextRun({ text: 'VALUE', bold: true, size: 16, color: 'FFFFFF', font: 'Calibri' })] })],
+        shading: { fill: accent, type: ShadingType.CLEAR, color: 'auto' },
+        width: { size: 35, type: WidthType.PERCENTAGE },
+      }),
+      new TableCell({
+        children: [new Paragraph({ children: [new TextRun({ text: 'STATUS', bold: true, size: 16, color: 'FFFFFF', font: 'Calibri' })] })],
+        shading: { fill: accent, type: ShadingType.CLEAR, color: 'auto' },
+        width: { size: 25, type: WidthType.PERCENTAGE },
+      }),
+    ],
+    tableHeader: true,
+  }));
+
+  for (const { metric: m, annotation } of entries) {
+    const isOverride = annotation?.type === 'override' && annotation.new_value;
+    const { fill, color } = severityShading(m.severity);
+    const effectiveFill = isOverride ? 'E0FDF4' : fill;
+    const deltaText = m.delta
+      ? ` (${m.delta_direction === 'up' ? '▲' : m.delta_direction === 'down' ? '▼' : '—'} ${m.delta})`
+      : '';
+
+    const valueChildren = isOverride
+      ? [
+          new TextRun({ text: m.value + deltaText, size: 18, color: C.lightGray, strike: true }),
+          new TextRun({ text: '  →  ' + annotation!.new_value!, bold: true, size: 22, color: TEAL }),
+        ]
+      : [new TextRun({ text: m.value + deltaText, bold: true, size: 22, color })];
+
+    rows.push(new TableRow({
+      children: [
+        new TableCell({
+          children: [new Paragraph({ children: [new TextRun({ text: m.label, size: 20, color: C.darkSlate })] })],
+          shading: { fill: effectiveFill, type: ShadingType.CLEAR, color: 'auto' },
+        }),
+        new TableCell({
+          children: [new Paragraph({ children: valueChildren })],
+          shading: { fill: effectiveFill, type: ShadingType.CLEAR, color: 'auto' },
+        }),
+        new TableCell({
+          children: [new Paragraph({ children: [
+            severityTag(m.severity || 'info'),
+            ...(isOverride ? [new TextRun({ text: ' ✎', color: TEAL, bold: true, size: 16 })] : []),
+          ] })],
+          shading: { fill: effectiveFill, type: ShadingType.CLEAR, color: 'auto' },
+        }),
+      ],
+    }));
+  }
+
+  return new Table({
+    rows,
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    borders: {
+      top: { style: BorderStyle.SINGLE, size: 1, color: C.border },
+      bottom: { style: BorderStyle.SINGLE, size: 1, color: C.border },
+      left: { style: BorderStyle.SINGLE, size: 1, color: C.border },
+      right: { style: BorderStyle.SINGLE, size: 1, color: C.border },
+      insideHorizontal: { style: BorderStyle.SINGLE, size: 1, color: C.softBg },
+      insideVertical: { style: BorderStyle.NONE, size: 0, color: C.white },
+    },
+  });
 }
 
 function buildMetricsTable(metrics: MetricCard[], accent: string): Table {

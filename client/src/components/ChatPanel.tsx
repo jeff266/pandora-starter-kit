@@ -57,6 +57,8 @@ interface ChatPanelProps {
   onClose: () => void;
   scope?: ChatScope;
   initialSessionId?: string;
+  pendingMessage?: string | null;
+  onPendingMessageSent?: () => void;
 }
 
 interface ChatSessionPreview {
@@ -86,7 +88,7 @@ function getStoredWidth(): number {
   return CHAT_DEFAULT_WIDTH;
 }
 
-export default function ChatPanel({ isOpen, onClose, scope, initialSessionId }: ChatPanelProps) {
+export default function ChatPanel({ isOpen, onClose, scope, initialSessionId, pendingMessage, onPendingMessageSent }: ChatPanelProps) {
   const isMobile = useIsMobile();
   const navigate = useNavigate();
   const { anon } = useDemoMode();
@@ -319,6 +321,16 @@ export default function ChatPanel({ isOpen, onClose, scope, initialSessionId }: 
       loadSession(initialSessionId);
     }
   }, [isOpen, initialSessionId]);
+
+  useEffect(() => {
+    if (isOpen && pendingMessage && !loading) {
+      const t = setTimeout(() => {
+        sendMessage(pendingMessage);
+        onPendingMessageSent?.();
+      }, 300);
+      return () => clearTimeout(t);
+    }
+  }, [isOpen, pendingMessage]);
 
   const sendMessage = async (overrideText?: string) => {
     const text = (overrideText || input).trim();

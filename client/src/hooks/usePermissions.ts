@@ -99,10 +99,13 @@ export function usePermissions() {
    */
   const canRunSkills = hasPermission('skills.run_manual');
 
+  const canAnnotateReports = role === 'admin' || role === 'manager';
+
   return {
     role,
     hasPermission,
     isAdmin,
     canRunSkills,
+    canAnnotateReports,
   };
 }

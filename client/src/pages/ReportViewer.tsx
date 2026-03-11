@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { Download, Share2, Settings, ChevronLeft, ChevronRight, Eye } from 'lucide-react';
+import { Download, Share2, Settings, ChevronLeft, ChevronRight, Eye, Edit3, X } from 'lucide-react';
 import type { SectionContent, MetricCard, DealCard, ActionItem, SankeyChartData } from '../components/reports/types';
 import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
@@ -8,6 +8,10 @@ import { renderMarkdown } from '../lib/render-markdown';
 import SectionFeedback from '../components/reports/SectionFeedback';
 import OverallBriefingFeedback from '../components/reports/OverallBriefingFeedback';
 import SankeyChart from '../components/reports/SankeyChart';
+import ReportAnnotationEditor, { type Annotation } from '../components/reports/ReportAnnotationEditor';
+import ReportContextMenu, { type ReportContextTarget } from '../components/reports/ReportContextMenu';
+import { usePermissions } from '../hooks/usePermissions';
+import { useWorkspace } from '../context/WorkspaceContext';
 
 interface ReportGeneration {
   id: string;
@@ -29,6 +33,11 @@ interface ReportGeneration {
   triggered_by?: 'schedule' | 'manual' | 'api';
   data_as_of?: string;
   created_at: string;
+  version?: number;
+  parent_generation_id?: string;
+  human_annotations?: Annotation[];
+  annotated_by?: string;
+  annotated_at?: string;
 }
 
 interface ReportTemplate {
@@ -62,6 +71,11 @@ export default function ReportViewer() {
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
   const [anonymizeMode, setAnonymizeMode] = useState(false);
   const [feedbackSummary, setFeedbackSummary] = useState<any>(null);
+  const [annotateMode, setAnnotateMode] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; target: ReportContextTarget } | null>(null);
+  const { canAnnotateReports } = usePermissions();
+  const { currentWorkspace } = useWorkspace();
 
   useEffect(() => {
     if (isDirectBriefing) {
@@ -205,6 +219,47 @@ export default function ReportViewer() {
     }
   }
 
+  const handleContextMenu = useCallback((e: React.MouseEvent, target: ReportContextTarget) => {
+    e.preventDefault();
+    setContextMenu({ x: e.clientX, y: e.clientY, target });
+  }, []);
+
+  const handleAskPandora = useCallback((target: ReportContextTarget) => {
+    const contextMsg = `I'm reviewing a report section titled "${target.sectionTitle}". ` +
+      `I'd like to understand: ${target.label}${target.value ? ` = ${target.value}` : ''}. ` +
+      (target.evidence?.length ? `Backing data: ${JSON.stringify(target.evidence.slice(0, 3))}. ` : '') +
+      `Can you help me understand this figure and investigate further?`;
+    navigate('/', { state: { openChatWithMessage: contextMsg } });
+  }, [navigate]);
+
+  const handleSaveV2 = useCallback(async (annotations: Annotation[], mergedSections: SectionContent[]) => {
+    if (!generation) return;
+    const reportPath = reportId
+      ? `/reports/${reportId}/generations`
+      : `/reports/${generation.report_template_id || 'direct'}/generations`;
+    const data = await api.post(reportPath, {
+      parent_generation_id: generation.id,
+      human_annotations: annotations,
+      sections_content: mergedSections,
+      annotated_by: currentWorkspace?.id,
+    });
+    setSaveSuccess(true);
+    setAnnotateMode(false);
+    setTimeout(() => setSaveSuccess(false), 4000);
+    if (isDirectBriefing && generation.agent_id) {
+      loadAgentGenerations(generation.agent_id);
+    } else {
+      loadGenerations();
+    }
+    if (data.generation?.id) {
+      if (isDirectBriefing) {
+        navigate(`/workspace/${workspaceId}/briefing/${data.generation.id}`);
+      } else {
+        navigate(`/workspace/${workspaceId}/reports/${reportId}/generations/${data.generation.id}`);
+      }
+    }
+  }, [generation, reportId, workspaceId, isDirectBriefing, currentWorkspace]);
+
   async function shareReport() {
     if (!generation) return;
     try {
@@ -243,18 +298,34 @@ export default function ReportViewer() {
 
   const displayName = template?.name || generation.agent_name || 'Agent Briefing';
   const sections = generation.sections_content || generation.sections_snapshot || [];
+  const isV2 = (generation.version || 1) > 1;
+  const annotations = generation.human_annotations || [];
 
   return (
     <div style={{ display: 'flex', height: '100vh', background: colors.bg }}>
+      {/* Context Menu */}
+      {contextMenu && (
+        <ReportContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          target={contextMenu.target}
+          onAskPandora={handleAskPandora}
+          onCopy={(val) => { navigator.clipboard.writeText(val).catch(() => {}); }}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
+
       {/* Timeline Sidebar */}
       <div style={{ width: 256, background: colors.surface, borderRight: `1px solid ${colors.border}`, display: 'flex', flexDirection: 'column' }}>
         <div style={{ padding: 16, borderBottom: `1px solid ${colors.border}` }}>
           <h3 style={{ fontWeight: 600, fontSize: 14, color: colors.text, fontFamily: fonts.sans, margin: 0 }}>Timeline</h3>
         </div>
         <div style={{ flex: 1, overflowY: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {generations.map((gen) => {
+          {generations.map((gen: any) => {
             const isActive = gen.id === generation.id;
             const date = new Date(gen.created_at);
+            const genVersion = gen.version || 1;
+            const isEdited = genVersion > 1;
             return (
               <button
                 key={gen.id}
@@ -296,9 +367,17 @@ export default function ReportViewer() {
                     }}
                   />
                   <span>{date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                  {isEdited && (
+                    <span style={{
+                      fontSize: 10, fontWeight: 700, padding: '1px 5px',
+                      background: colors.accentSoft, color: colors.accent,
+                      borderRadius: 4, letterSpacing: '0.04em',
+                    }}>V{genVersion}</span>
+                  )}
                 </div>
                 <div style={{ fontSize: 12, color: colors.textMuted, marginLeft: 16, marginTop: 2 }}>
                   {date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                  {isEdited && <span style={{ marginLeft: 4 }}>✎</span>}
                 </div>
               </button>
             );
@@ -328,11 +407,53 @@ export default function ReportViewer() {
 
       {/* Main Content */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        {/* Edit Mode Banner */}
+        {annotateMode && (
+          <div style={{
+            background: colors.accent,
+            color: '#fff',
+            padding: '10px 24px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexShrink: 0,
+          }}>
+            <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: '0.08em', fontFamily: fonts.sans }}>
+              ✎  ANNOTATION MODE — Strike items, override metrics, add notes. Save as V2 when done.
+            </span>
+            <button
+              onClick={() => setAnnotateMode(false)}
+              style={{ background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff', borderRadius: 6, padding: '4px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}
+            >Exit</button>
+          </div>
+        )}
+
+        {/* Save success toast */}
+        {saveSuccess && (
+          <div style={{
+            background: '#065f46', color: '#d1fae5',
+            padding: '10px 24px', fontSize: 13, fontWeight: 500, fontFamily: fonts.sans, flexShrink: 0,
+          }}>
+            ✓ V{(generation.version || 1) + 1} saved — annotations recorded and feedback signals captured
+          </div>
+        )}
+
         {/* Header Bar */}
         <div style={{ background: colors.surface, borderBottom: `1px solid ${colors.border}`, padding: '16px 24px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div>
-              <h1 style={{ fontSize: 24, fontWeight: 700, color: colors.text, fontFamily: fonts.sans, margin: 0 }}>{displayName}</h1>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <h1 style={{ fontSize: 24, fontWeight: 700, color: colors.text, fontFamily: fonts.sans, margin: 0 }}>{displayName}</h1>
+                {isV2 && (
+                  <span style={{
+                    fontSize: 11, fontWeight: 700, padding: '3px 10px',
+                    background: colors.accentSoft, color: colors.accent,
+                    borderRadius: 20, letterSpacing: '0.04em', fontFamily: fonts.sans,
+                  }}>
+                    V{generation.version} · Edited {generation.annotated_at ? new Date(generation.annotated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''}
+                  </span>
+                )}
+              </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 4, fontSize: 14, color: colors.textMuted, fontFamily: fonts.sans }}>
                 <span>
                   Generated {new Date(generation.created_at).toLocaleDateString('en-US', {
@@ -348,9 +469,43 @@ export default function ReportViewer() {
                 <span>{generation.generation_duration_ms ?? '—'}ms</span>
                 <span>•</span>
                 <span>{generation.skills_run?.length ?? 0} skills</span>
+                {isV2 && generation.parent_generation_id && (
+                  <>
+                    <span>•</span>
+                    <button
+                      onClick={() => {
+                        if (isDirectBriefing) navigate(`/workspace/${workspaceId}/briefing/${generation.parent_generation_id}`);
+                        else navigate(`/workspace/${workspaceId}/reports/${reportId}/generations/${generation.parent_generation_id}`);
+                      }}
+                      style={{ background: 'none', border: 'none', color: colors.accent, fontSize: 13, cursor: 'pointer', padding: 0, fontFamily: fonts.sans }}
+                    >View original (V1) →</button>
+                  </>
+                )}
               </div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {canAnnotateReports && !annotateMode && (
+                <button
+                  onClick={() => setAnnotateMode(true)}
+                  style={{
+                    padding: '8px 14px',
+                    borderRadius: 8,
+                    fontSize: 14,
+                    fontWeight: 600,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    background: colors.accentSoft,
+                    color: colors.accent,
+                    border: `1px solid ${colors.accent}44`,
+                    cursor: 'pointer',
+                    fontFamily: fonts.sans,
+                  }}
+                >
+                  <Edit3 style={{ width: 15, height: 15 }} />
+                  Annotate
+                </button>
+              )}
               <button
                 onClick={() => setAnonymizeMode(!anonymizeMode)}
                 style={{
@@ -377,6 +532,28 @@ export default function ReportViewer() {
                 <Eye style={{ width: 16, height: 16 }} />
                 {anonymizeMode ? 'Anonymized' : 'Anonymize'}
               </button>
+              {isV2 && workspaceId && reportId && (
+                <>
+                  {['pdf', 'docx'].map(format => (
+                    <button
+                      key={`annotated-${format}`}
+                      onClick={() => {
+                        const url = `/api/${workspaceId}/reports/${reportId}/generations/${generation.id}/export/${format}`;
+                        window.open(url, '_blank');
+                      }}
+                      style={{
+                        padding: '8px 12px', borderRadius: 8, fontSize: 13, fontWeight: 500,
+                        display: 'flex', alignItems: 'center', gap: 6,
+                        background: colors.accentSoft, color: colors.accent,
+                        border: `1px solid ${colors.accent}44`, cursor: 'pointer', fontFamily: fonts.sans,
+                      }}
+                    >
+                      <Download style={{ width: 14, height: 14 }} />
+                      {format.toUpperCase()} (V2)
+                    </button>
+                  ))}
+                </>
+              )}
               {Object.keys(generation.formats_generated || {}).map((format) => (
                 <button
                   key={format}
@@ -453,53 +630,69 @@ export default function ReportViewer() {
         {/* Report Sections */}
         <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
           <div style={{ maxWidth: 1024, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 24 }}>
-            {/* Opening Narrative (for editorial briefings) */}
-            {generation.opening_narrative && (
-              <div style={{
-                background: colors.surface,
-                borderRadius: 8,
-                border: `1px solid ${colors.border}`,
-                padding: 24,
-              }}>
-                <p style={{
-                  fontSize: 16,
-                  lineHeight: 1.6,
-                  color: colors.text,
-                  fontFamily: fonts.sans,
-                  margin: 0,
-                }}>
-                  {renderMarkdown(generation.opening_narrative)}
-                </p>
-              </div>
-            )}
 
-            {sections?.map((section: any, idx: number) => {
-              const sectionId = section.section_id || `section-${idx}`;
-              const isCollapsed = collapsedSections.has(sectionId);
-              return (
-                <ReportSection
-                  key={sectionId}
-                  section={{ ...section, section_id: sectionId }}
-                  isCollapsed={isCollapsed}
-                  onToggle={() => toggleSection(sectionId)}
-                  anonymizeMode={anonymizeMode}
-                  workspaceId={workspaceId}
-                  agentId={generation.agent_id}
-                  generationId={generation.id}
-                  existingSignal={feedbackSummary?.sections?.[section.section_id]?.signals?.[0] || null}
-                />
-              );
-            })}
-
-            {/* Overall Briefing Feedback (only for agent-generated briefings) */}
-            {generation.agent_id && workspaceId && (
-              <OverallBriefingFeedback
-                workspaceId={workspaceId}
-                agentId={generation.agent_id}
+            {annotateMode && sections && sections.length > 0 ? (
+              <ReportAnnotationEditor
                 generationId={generation.id}
-                existingRating={feedbackSummary?.overall?.rating || null}
-                existingSignal={feedbackSummary?.overall?.signals?.[0] || null}
+                sectionsContent={sections as any}
+                existingAnnotations={annotations}
+                userId={currentWorkspace?.id || 'unknown'}
+                onSave={handleSaveV2}
+                onCancel={() => setAnnotateMode(false)}
               />
+            ) : (
+              <>
+                {/* Opening Narrative (for editorial briefings) */}
+                {generation.opening_narrative && (
+                  <div style={{
+                    background: colors.surface,
+                    borderRadius: 8,
+                    border: `1px solid ${colors.border}`,
+                    padding: 24,
+                  }}>
+                    <p style={{
+                      fontSize: 16,
+                      lineHeight: 1.6,
+                      color: colors.text,
+                      fontFamily: fonts.sans,
+                      margin: 0,
+                    }}>
+                      {renderMarkdown(generation.opening_narrative)}
+                    </p>
+                  </div>
+                )}
+
+                {sections?.map((section: any, idx: number) => {
+                  const sectionId = section.section_id || `section-${idx}`;
+                  const isCollapsed = collapsedSections.has(sectionId);
+                  return (
+                    <ReportSection
+                      key={sectionId}
+                      section={{ ...section, section_id: sectionId }}
+                      isCollapsed={isCollapsed}
+                      onToggle={() => toggleSection(sectionId)}
+                      anonymizeMode={anonymizeMode}
+                      workspaceId={workspaceId}
+                      agentId={generation.agent_id}
+                      generationId={generation.id}
+                      existingSignal={feedbackSummary?.sections?.[section.section_id]?.signals?.[0] || null}
+                      onContextMenu={handleContextMenu}
+                      humanAnnotations={annotations}
+                    />
+                  );
+                })}
+
+                {/* Overall Briefing Feedback (only for agent-generated briefings) */}
+                {generation.agent_id && workspaceId && (
+                  <OverallBriefingFeedback
+                    workspaceId={workspaceId}
+                    agentId={generation.agent_id}
+                    generationId={generation.id}
+                    existingRating={feedbackSummary?.overall?.rating || null}
+                    existingSignal={feedbackSummary?.overall?.signals?.[0] || null}
+                  />
+                )}
+              </>
             )}
           </div>
         </div>
@@ -529,9 +722,11 @@ interface ReportSectionProps {
   agentId?: string;
   generationId?: string;
   existingSignal?: string | null;
+  onContextMenu?: (e: React.MouseEvent, target: import('../components/reports/ReportContextMenu').ReportContextTarget) => void;
+  humanAnnotations?: import('../components/reports/ReportAnnotationEditor').Annotation[];
 }
 
-function ReportSection({ section, isCollapsed, onToggle, anonymizeMode, workspaceId, agentId, generationId, existingSignal }: ReportSectionProps) {
+function ReportSection({ section, isCollapsed, onToggle, anonymizeMode, workspaceId, agentId, generationId, existingSignal, onContextMenu, humanAnnotations }: ReportSectionProps) {
   return (
     <div id={section.section_id} style={{ background: colors.surface, borderRadius: 8, border: `1px solid ${colors.border}`, overflow: 'hidden' }}>
       {/* Section Header */}
@@ -565,9 +760,28 @@ function ReportSection({ section, isCollapsed, onToggle, anonymizeMode, workspac
           {/* Metrics */}
           {section.metrics && section.metrics.length > 0 && (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
-              {section.metrics.map((metric, idx) => (
-                <MetricCardComponent key={idx} metric={metric} />
-              ))}
+              {section.metrics.map((metric, idx) => {
+                const blockId = `${section.section_id}:metric:${idx}`;
+                const annotation = humanAnnotations?.find(a => a.block_id === blockId);
+                return (
+                  <div
+                    key={idx}
+                    onContextMenu={onContextMenu ? (e) => onContextMenu(e, {
+                      type: 'metric',
+                      label: metric.label,
+                      value: annotation?.new_value || metric.value,
+                      sectionTitle: section.title,
+                      blockId,
+                    }) : undefined}
+                  >
+                    <MetricCardComponent
+                      metric={metric}
+                      annotationOverride={annotation?.new_value ?? undefined}
+                      annotationOriginal={annotation?.type === 'override' ? annotation.original_value : undefined}
+                    />
+                  </div>
+                );
+              })}
             </div>
           )}
 
@@ -581,10 +795,32 @@ function ReportSection({ section, isCollapsed, onToggle, anonymizeMode, workspac
 
           {/* Narrative */}
           {section.narrative && (
-            <div style={{ maxWidth: 'none', color: colors.textSecondary, lineHeight: 1.6, fontFamily: fonts.sans }}>
-              {section.narrative.split('\n\n').map((para, idx) => (
-                <p key={idx} style={{ marginBottom: 16 }}>{renderMarkdown(para)}</p>
-              ))}
+            <div
+              style={{ maxWidth: 'none', color: colors.textSecondary, lineHeight: 1.6, fontFamily: fonts.sans }}
+              onContextMenu={onContextMenu ? (e) => onContextMenu(e, {
+                type: 'narrative',
+                label: 'Narrative',
+                value: section.narrative || '',
+                sectionTitle: section.title,
+                blockId: `${section.section_id}:narrative`,
+              }) : undefined}
+            >
+              {(() => {
+                const narrativeAnnotation = humanAnnotations?.find(a => a.block_id === `${section.section_id}:narrative`);
+                const displayText = narrativeAnnotation?.new_value || section.narrative;
+                return (
+                  <>
+                    {narrativeAnnotation && (
+                      <div style={{ fontSize: 11, color: '#00BFA5', marginBottom: 6, fontWeight: 500, borderLeft: '2px solid #00BFA5', paddingLeft: 8 }}>
+                        ✎ Narrative edited
+                      </div>
+                    )}
+                    {displayText.split('\n\n').map((para, idx) => (
+                      <p key={idx} style={{ marginBottom: 16 }}>{renderMarkdown(para)}</p>
+                    ))}
+                  </>
+                );
+              })()}
             </div>
           )}
 
@@ -593,7 +829,18 @@ function ReportSection({ section, isCollapsed, onToggle, anonymizeMode, workspac
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <h3 style={{ fontSize: 14, fontWeight: 600, color: colors.text, textTransform: 'uppercase', letterSpacing: '0.05em', fontFamily: fonts.sans, margin: 0 }}>Deals</h3>
               {section.deal_cards.map((deal, idx) => (
-                <DealCardComponent key={idx} deal={deal} anonymizeMode={anonymizeMode} />
+                <div
+                  key={idx}
+                  onContextMenu={onContextMenu ? (e) => onContextMenu(e, {
+                    type: 'deal_card',
+                    label: deal.name,
+                    value: deal.amount || '',
+                    sectionTitle: section.title,
+                    blockId: `${section.section_id}:deal:${idx}`,
+                  }) : undefined}
+                >
+                  <DealCardComponent deal={deal} anonymizeMode={anonymizeMode} />
+                </div>
               ))}
             </div>
           )}
@@ -612,8 +859,18 @@ function ReportSection({ section, isCollapsed, onToggle, anonymizeMode, workspac
                   </tr>
                 </thead>
                 <tbody style={{ borderTop: `1px solid ${colors.border}` }}>
-                  {section.table.rows.slice(0, 20).map((row, idx) => (
-                    <tr key={idx} style={{ background: idx % 2 === 0 ? colors.surface : colors.surfaceRaised, borderBottom: `1px solid ${colors.border}` }}>
+                  {section.table.rows.slice(0, 20).map((row, rowIdx) => (
+                    <tr
+                      key={rowIdx}
+                      style={{ background: rowIdx % 2 === 0 ? colors.surface : colors.surfaceRaised, borderBottom: `1px solid ${colors.border}` }}
+                      onContextMenu={onContextMenu ? (e) => onContextMenu(e, {
+                        type: 'table_row',
+                        label: section.table!.headers[0] ? String(row[section.table!.headers[0]] || '') : 'Row',
+                        value: Object.values(row).slice(0, 3).join(' · '),
+                        sectionTitle: section.title,
+                        blockId: `${section.section_id}:table:${rowIdx}`,
+                      }) : undefined}
+                    >
                       {section.table!.headers.map((header, cellIdx) => (
                         <td key={cellIdx} style={{ padding: '8px 16px', color: colors.textSecondary, fontFamily: fonts.sans }}>
                           {row[header]?.toString() || '—'}
@@ -630,9 +887,30 @@ function ReportSection({ section, isCollapsed, onToggle, anonymizeMode, workspac
           {section.action_items && section.action_items.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <h3 style={{ fontSize: 14, fontWeight: 600, color: colors.text, textTransform: 'uppercase', letterSpacing: '0.05em', fontFamily: fonts.sans, margin: 0 }}>Action Items</h3>
-              {section.action_items.map((action, idx) => (
-                <ActionItemComponent key={idx} action={action} index={idx} />
-              ))}
+              {section.action_items.map((action, idx) => {
+                const blockId = `${section.section_id}:action:${idx}`;
+                const isStruck = humanAnnotations?.some(a => a.block_id === blockId && a.type === 'strike');
+                const noteAnnotation = humanAnnotations?.find(a => a.block_id === `${blockId}:note`);
+                return (
+                  <div
+                    key={idx}
+                    onContextMenu={onContextMenu ? (e) => onContextMenu(e, {
+                      type: 'action_item',
+                      label: action.action,
+                      value: action.urgency || '',
+                      sectionTitle: section.title,
+                      blockId,
+                    }) : undefined}
+                  >
+                    <ActionItemComponent
+                      action={action}
+                      index={idx}
+                      isStruck={isStruck}
+                      noteText={noteAnnotation?.new_value ?? undefined}
+                    />
+                  </div>
+                );
+              })}
             </div>
           )}
 
@@ -661,7 +939,11 @@ function ReportSection({ section, isCollapsed, onToggle, anonymizeMode, workspac
   );
 }
 
-function MetricCardComponent({ metric }: { metric: MetricCard }) {
+function MetricCardComponent({ metric, annotationOverride, annotationOriginal }: {
+  metric: MetricCard;
+  annotationOverride?: string;
+  annotationOriginal?: string;
+}) {
   const severityColors = {
     critical: { bg: '#7f1d1d', border: '#991b1b', accent: '#dc2626' },
     warning: { bg: '#78350f', border: '#92400e', accent: '#f59e0b' },
@@ -674,21 +956,33 @@ function MetricCardComponent({ metric }: { metric: MetricCard }) {
 
   return (
     <div style={{
-      border: `1px solid ${colorScheme.border}`,
+      border: `1px solid ${annotationOverride ? '#00BFA544' : colorScheme.border}`,
       background: colorScheme.bg,
-      borderLeft: `4px solid ${colorScheme.accent}`,
+      borderLeft: `4px solid ${annotationOverride ? '#00BFA5' : colorScheme.accent}`,
       borderRadius: 8,
       padding: 16,
     }}>
       <div style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.05em', color: hasSeverity ? 'rgba(255,255,255,0.6)' : colors.textSecondary, fontWeight: 600, fontFamily: fonts.sans }}>{metric.label}</div>
       <div style={{ marginTop: 8, display: 'flex', alignItems: 'baseline', gap: 8 }}>
-        <span style={{ fontSize: 24, fontWeight: 700, color: hasSeverity ? '#ffffff' : colors.text, fontFamily: fonts.sans }}>{metric.value}</span>
-        {metric.delta && (
-          <span style={{ fontSize: 14, color: hasSeverity ? 'rgba(255,255,255,0.6)' : colors.textSecondary, fontFamily: fonts.sans }}>
-            {metric.delta_direction === 'up' ? '▲' : metric.delta_direction === 'down' ? '▼' : '—'} {metric.delta}
-          </span>
+        {annotationOverride ? (
+          <>
+            <span style={{ fontSize: 18, fontWeight: 700, color: colors.textMuted, textDecoration: 'line-through', opacity: 0.5, fontFamily: fonts.sans }}>{annotationOriginal || metric.value}</span>
+            <span style={{ fontSize: 24, fontWeight: 700, color: '#00BFA5', fontFamily: fonts.sans }}>{annotationOverride}</span>
+          </>
+        ) : (
+          <>
+            <span style={{ fontSize: 24, fontWeight: 700, color: hasSeverity ? '#ffffff' : colors.text, fontFamily: fonts.sans }}>{metric.value}</span>
+            {metric.delta && (
+              <span style={{ fontSize: 14, color: hasSeverity ? 'rgba(255,255,255,0.6)' : colors.textSecondary, fontFamily: fonts.sans }}>
+                {metric.delta_direction === 'up' ? '▲' : metric.delta_direction === 'down' ? '▼' : '—'} {metric.delta}
+              </span>
+            )}
+          </>
         )}
       </div>
+      {annotationOverride && (
+        <div style={{ fontSize: 10, color: '#00BFA5', marginTop: 4, fontWeight: 500, fontFamily: fonts.sans }}>✎ Edited</div>
+      )}
     </div>
   );
 }
@@ -729,31 +1023,58 @@ function DealCardComponent({ deal, anonymizeMode }: { deal: DealCard; anonymizeM
   );
 }
 
-function ActionItemComponent({ action, index }: { action: ActionItem; index: number }) {
-  const urgencyColors = {
+function ActionItemComponent({ action, index, isStruck, noteText }: {
+  action: ActionItem;
+  index: number;
+  isStruck?: boolean;
+  noteText?: string;
+}) {
+  const urgencyColors: Record<string, string> = {
     today: '#dc2626',
     this_week: '#f59e0b',
     this_month: '#22c55e',
   };
 
-  const urgencyLabels = {
+  const urgencyLabels: Record<string, string> = {
     today: 'TODAY',
     this_week: 'THIS WEEK',
     this_month: 'THIS MONTH',
   };
 
   return (
-    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: 12, background: colors.surfaceRaised, borderRadius: 8 }}>
+    <div style={{
+      display: 'flex', alignItems: 'flex-start', gap: 12, padding: 12,
+      background: colors.surfaceRaised, borderRadius: 8,
+      opacity: isStruck ? 0.45 : 1,
+    }}>
       <input type="checkbox" style={{ marginTop: 4 }} />
       <div style={{ flex: 1 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 12, fontWeight: 700, color: urgencyColors[action.urgency] || colors.textSecondary, fontFamily: fonts.sans }}>
             {urgencyLabels[action.urgency] || 'ACTION'}
           </span>
-          <span style={{ fontSize: 14, color: colors.text, fontFamily: fonts.sans }}>{action.action}</span>
+          <span style={{
+            fontSize: 14, color: colors.text, fontFamily: fonts.sans,
+            textDecoration: isStruck ? 'line-through' : 'none',
+            textDecorationColor: '#f87171',
+          }}>{action.action}</span>
         </div>
         {action.owner && (
           <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 4, fontFamily: fonts.sans }}>Owned by: {action.owner}</div>
+        )}
+        {isStruck && (
+          <div style={{ fontSize: 11, color: '#f87171', marginTop: 3, fontFamily: fonts.sans }}>Removed by annotation</div>
+        )}
+        {noteText && (
+          <div style={{
+            marginTop: 8, padding: '6px 10px',
+            borderLeft: '2px solid #00BFA5',
+            background: 'rgba(0,191,165,0.07)',
+            borderRadius: '0 5px 5px 0',
+            fontSize: 12, color: colors.textSecondary, fontStyle: 'italic', fontFamily: fonts.sans,
+          }}>
+            {noteText}
+          </div>
         )}
       </div>
     </div>

@@ -234,6 +234,15 @@ export interface GenerateReportRequest {
   skip_delivery?: boolean;             // Skip Slack/email delivery (for testing)
 }
 
+export interface HumanAnnotation {
+  block_id: string;
+  type: 'strike' | 'override' | 'note';
+  original_value: string;
+  new_value: string | null;
+  annotated_by: string;
+  annotated_at: string;
+}
+
 // Report Generation Context (internal)
 export interface ReportGenerationContext {
   workspace_id: string;
@@ -242,4 +251,8 @@ export interface ReportGenerationContext {
   branding: any;                        // From workspace or override
   triggered_by: GenerationTrigger;
   preview_only: boolean;
+  human_annotations?: HumanAnnotation[];
+  annotated_at?: string;
+  annotated_by?: string;
+  version?: number;
 }

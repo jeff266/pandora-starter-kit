@@ -7,6 +7,8 @@ import { ReportTemplate, ReportSection, GenerateReportRequest } from '../reports
 import { generateReport } from '../reports/generator.js';
 import { SECTION_LIBRARY, createSectionFromDefinition } from '../reports/section-library.js';
 import { createLogger } from '../utils/logger.js';
+import { renderDOCX } from '../renderers/docx-renderer.js';
+import { renderReportPDF } from '../renderers/report-pdf-renderer.js';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -404,7 +406,8 @@ router.get('/:workspaceId/generations-by-agent/:agentId', async (req: Request, r
     const limit = Math.min(parseInt(req.query.limit as string) || 20, 50);
 
     const result = await query(
-      `SELECT id, created_at, triggered_by, generation_duration_ms, total_tokens, opening_narrative
+      `SELECT id, created_at, triggered_by, generation_duration_ms, total_tokens, opening_narrative,
+              version, parent_generation_id, annotated_by, annotated_at
        FROM report_generations
        WHERE agent_id = $1 AND workspace_id = $2
        ORDER BY created_at DESC
@@ -416,6 +419,103 @@ router.get('/:workspaceId/generations-by-agent/:agentId', async (req: Request, r
   } catch (err) {
     logger.error('Failed to list agent generations', err instanceof Error ? err : undefined);
     res.status(500).json({ error: 'Failed to list generations' });
+  }
+});
+
+// Save annotated V2 generation
+router.post('/:workspaceId/reports/:reportId/generations', async (req: Request, res: Response) => {
+  try {
+    const { workspaceId, reportId } = req.params;
+    const { parent_generation_id, human_annotations, sections_content, annotated_by } = req.body as {
+      parent_generation_id: string;
+      human_annotations: any[];
+      sections_content: any[];
+      annotated_by?: string;
+    };
+
+    if (!parent_generation_id) {
+      res.status(400).json({ error: 'parent_generation_id is required' });
+      return;
+    }
+
+    // Fetch parent to copy its metadata and compute next version
+    const parentResult = await query(
+      `SELECT * FROM report_generations WHERE id = $1 AND workspace_id = $2`,
+      [parent_generation_id, workspaceId]
+    );
+    if (parentResult.rows.length === 0) {
+      res.status(404).json({ error: 'Parent generation not found' });
+      return;
+    }
+    const parent = parentResult.rows[0];
+    const nextVersion = (parent.version || 1) + 1;
+
+    // Insert V2 generation
+    const insertResult = await query(
+      `INSERT INTO report_generations
+         (workspace_id, report_template_id, agent_id, sections_content, opening_narrative,
+          editorial_decisions, run_digest, skills_run, total_tokens, triggered_by,
+          version, parent_generation_id, human_annotations, annotated_by, annotated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'manual',
+               $10, $11, $12, $13, NOW())
+       RETURNING id, created_at, version`,
+      [
+        workspaceId,
+        reportId || parent.report_template_id,
+        parent.agent_id,
+        JSON.stringify(sections_content || parent.sections_content),
+        parent.opening_narrative,
+        parent.editorial_decisions,
+        parent.run_digest,
+        parent.skills_run,
+        parent.total_tokens,
+        nextVersion,
+        parent_generation_id,
+        JSON.stringify(human_annotations || []),
+        annotated_by || null,
+      ]
+    );
+
+    const newGeneration = insertResult.rows[0];
+
+    // Write feedback signals to agent_feedback for 'override' and 'strike' annotations
+    if (parent.agent_id && Array.isArray(human_annotations)) {
+      for (const annotation of human_annotations) {
+        if (annotation.type === 'override' && annotation.new_value) {
+          await query(
+            `INSERT INTO agent_feedback
+               (workspace_id, agent_id, generation_id, feedback_type, section_id, signal, comment, processed)
+             VALUES ($1, $2, $3, 'section', $4, 'wrong_data', $5, false)`,
+            [
+              workspaceId,
+              parent.agent_id,
+              newGeneration.id,
+              annotation.block_id,
+              `Changed: "${annotation.original_value}" → "${annotation.new_value}"`,
+            ]
+          ).catch(() => {});
+        } else if (annotation.type === 'strike') {
+          await query(
+            `INSERT INTO agent_feedback
+               (workspace_id, agent_id, generation_id, feedback_type, section_id, signal, comment, processed)
+             VALUES ($1, $2, $3, 'section', $4, 'not_useful', $5, false)`,
+            [
+              workspaceId,
+              parent.agent_id,
+              newGeneration.id,
+              annotation.block_id,
+              `Struck out: "${annotation.original_value}"`,
+            ]
+          ).catch(() => {});
+        }
+      }
+    }
+
+    logger.info(`Saved V${nextVersion} report generation`, { newId: newGeneration.id, parentId: parent_generation_id });
+    res.json({ generation: newGeneration });
+  } catch (err) {
+    logger.error('Failed to save V2 generation', err instanceof Error ? err : undefined);
+    res.status(500).json({ error: 'Failed to save annotated generation' });
   }
 });
 
@@ -515,6 +615,87 @@ router.get('/:workspaceId/report-sections', async (_req: Request, res: Response)
   } catch (err) {
     logger.error('Failed to get section library', err instanceof Error ? err : undefined);
     res.status(500).json({ error: 'Failed to get section library' });
+  }
+});
+
+// On-demand annotated export — re-renders a V2 generation with annotations applied
+router.get('/:workspaceId/reports/:reportId/generations/:generationId/export/:format', async (req: Request, res: Response) => {
+  try {
+    const workspaceId = req.params.workspaceId as string;
+    const reportId = req.params.reportId as string;
+    const generationId = req.params.generationId as string;
+    const format = req.params.format as string;
+
+    if (!['pdf', 'docx'].includes(format)) {
+      res.status(400).json({ error: 'Supported formats: pdf, docx' });
+      return;
+    }
+
+    // Load generation
+    const genResult = await query(
+      `SELECT rg.*, rt.name as template_name, rt.description as template_description,
+              w.branding
+       FROM report_generations rg
+       LEFT JOIN report_templates rt ON rt.id = rg.report_template_id
+       LEFT JOIN workspaces w ON w.id = rg.workspace_id
+       WHERE rg.id = $1 AND rg.workspace_id = $2`,
+      [generationId, workspaceId]
+    );
+
+    if (genResult.rows.length === 0) {
+      res.status(404).json({ error: 'Generation not found' });
+      return;
+    }
+
+    const gen = genResult.rows[0];
+    const templateName = (gen.template_name || gen.agent_name || 'Report') as string;
+
+    const context = {
+      workspace_id: workspaceId,
+      template: {
+        id: reportId,
+        name: templateName,
+        description: (gen.template_description || '') as string,
+      } as any,
+      sections_content: gen.sections_content || [],
+      branding: gen.branding || {},
+      triggered_by: 'manual' as const,
+      preview_only: false,
+      human_annotations: gen.human_annotations || [],
+      annotated_at: gen.annotated_at as string | undefined,
+      annotated_by: gen.annotated_by as string | undefined,
+      version: (gen.version || 1) as number,
+    };
+
+    let filepath: string;
+    let mimeType: string;
+    let filename: string;
+
+    if (format === 'docx') {
+      const result = await renderDOCX(context);
+      filepath = result.filepath;
+      mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+      filename = path.basename(result.filepath);
+    } else {
+      const result = await renderReportPDF(context);
+      filepath = result.filepath;
+      mimeType = 'application/pdf';
+      filename = path.basename(result.filepath);
+    }
+
+    res.setHeader('Content-Type', mimeType);
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Cache-Control', 'no-cache');
+
+    const stream = fs.createReadStream(filepath);
+    stream.pipe(res);
+    stream.on('error', (err) => {
+      logger.error('Export stream error', err);
+      if (!res.headersSent) res.status(500).json({ error: 'Export failed' });
+    });
+  } catch (err) {
+    logger.error('Annotated export failed', err instanceof Error ? err : undefined);
+    res.status(500).json({ error: 'Export failed' });
   }
 });
 
