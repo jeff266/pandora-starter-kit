@@ -92,6 +92,7 @@ export default function MembersPage() {
   const [roles, setRoles] = useState<WorkspaceRole[]>([]);
 
   const [impersonatingId, setImpersonatingId] = useState<string | null>(null);
+  const [confirmRemove, setConfirmRemove] = useState<{ id: string; name: string } | null>(null);
 
   const isAdmin = currentWorkspace?.role === 'admin';
   const adminCount = members.filter(m => getRoleName(m.role) === 'admin').length;
@@ -192,6 +193,7 @@ export default function MembersPage() {
     try {
       await api.delete(`/members/${memberId}`);
       setMembers(prev => prev.filter(m => m.id !== memberId));
+      setConfirmRemove(null);
       showToast('Member removed', 'success');
     } catch (err: any) {
       showToast(err.message || 'Failed to remove member', 'error');
@@ -394,14 +396,28 @@ export default function MembersPage() {
                     {impersonatingId === member.id ? '...' : 'View as'}
                   </button>
                 )}
-                {canModify(member) && (
-                  <button onClick={() => handleRemove(member.id)}
+                {canModify(member) && confirmRemove?.id === member.id ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ fontSize: 11, color: colors.textSecondary }}>Remove {member.name}?</span>
+                    <button
+                      onClick={() => handleRemove(member.id)}
+                      style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 4, background: 'rgba(239,68,68,0.15)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)', cursor: 'pointer' }}>
+                      Remove
+                    </button>
+                    <button
+                      onClick={() => setConfirmRemove(null)}
+                      style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, background: 'transparent', color: colors.textMuted, border: `1px solid ${colors.border}`, cursor: 'pointer' }}>
+                      Cancel
+                    </button>
+                  </div>
+                ) : canModify(member) ? (
+                  <button onClick={() => setConfirmRemove({ id: member.id, name: member.name })}
                     style={{ fontSize: 11, color: colors.textMuted, background: 'none', border: 'none', cursor: 'pointer', padding: '2px 6px', borderRadius: 4 }}
                     onMouseEnter={e => (e.currentTarget.style.color = colors.red)}
                     onMouseLeave={e => (e.currentTarget.style.color = colors.textMuted)}>
                     &#10005;
                   </button>
-                )}
+                ) : null}
               </div>
             )}
           </div>

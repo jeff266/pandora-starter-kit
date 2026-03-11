@@ -548,11 +548,6 @@ export async function seedDemoWorkspace(): Promise<void> {
   );
   const contactsExist = contactCheck.rows[0].count > 0;
 
-  if (workspaceExists && contactsExist) {
-    console.log('[DemoSeed] Demo workspace already fully seeded — skipping.');
-    return;
-  }
-
   console.log('[DemoSeed] Seeding demo workspace...');
 
   // 1. Workspace
@@ -561,8 +556,9 @@ export async function seedDemoWorkspace(): Promise<void> {
     [WS_ID, WS_NAME, WS_SLUG]
   );
 
-  // 2. Grant all existing users access (legacy auth + RBAC)
-  const allUsers = await query<{ id: string }>(`SELECT id FROM users`);
+  // 2. Grant admin users access (legacy auth + RBAC)
+  // Exclude @pandora-test.local dummy users and @techscale.io deal reps (handled separately in 2b).
+  const allUsers = await query<{ id: string }>(`SELECT id FROM users WHERE email NOT LIKE '%@pandora-test.local' AND email NOT LIKE '%@techscale.io'`);
   for (const u of allUsers.rows) {
     await query(
       `INSERT INTO user_workspaces (user_id, workspace_id, role) VALUES ($1, $2, 'admin') ON CONFLICT DO NOTHING`,
@@ -582,6 +578,80 @@ export async function seedDemoWorkspace(): Promise<void> {
       );
     }
   }
+
+  // 2b. Seed TechScale deal-rep users + add them as workspace members
+  // These match the deal owners in DEALS/ACCOUNTS so scope filters work correctly.
+  const DEAL_REPS = [
+    { id: 'b0000000-0000-0000-0000-000000000001', name: 'Sarah Chen',  email: 'sarah.chen@techscale.io',  roleSystemType: 'manager', pandoraRole: 'manager' },
+    { id: 'b0000000-0000-0000-0000-000000000002', name: 'Marcus Webb', email: 'marcus.webb@techscale.io', roleSystemType: 'member',  pandoraRole: 'ae'      },
+    { id: 'b0000000-0000-0000-0000-000000000003', name: 'Priya Patel', email: 'priya.patel@techscale.io', roleSystemType: 'member',  pandoraRole: 'ae'      },
+    { id: 'b0000000-0000-0000-0000-000000000004', name: 'Tom Reyes',   email: 'tom.reyes@techscale.io',   roleSystemType: 'member',  pandoraRole: 'ae'      },
+  ] as const;
+
+  // Hashed 'Pandora123!' (bcrypt cost 12)
+  const DEMO_PW_HASH = '$2b$12$UCcXudns98zTtRUQIdodLuv7Egr.qxrM3rF8Zg.Z4oOiU.9YNyw9.';
+
+  for (const rep of DEAL_REPS) {
+    // Upsert user row (skip if already exists)
+    await query(
+      `INSERT INTO users (id, email, name, account_type, password_hash, created_at)
+       VALUES ($1, $2, $3, 'standard', $4, now())
+       ON CONFLICT (id) DO NOTHING`,
+      [rep.id, rep.email, rep.name, DEMO_PW_HASH]
+    );
+
+    // Also upsert by email in case user already exists with a different id
+    await query(
+      `INSERT INTO users (email, name, account_type, password_hash, created_at)
+       VALUES ($1, $2, 'standard', $3, now())
+       ON CONFLICT (email) DO NOTHING`,
+      [rep.email, rep.name, DEMO_PW_HASH]
+    );
+
+    // Resolve the actual user id (may differ if email already existed)
+    const userRow = await query<{ id: string }>(`SELECT id FROM users WHERE email = $1 LIMIT 1`, [rep.email]);
+    if (userRow.rows.length === 0) continue;
+    const userId = userRow.rows[0].id;
+
+    // Look up the role id for this workspace
+    const roleRow = await query<{ id: string }>(
+      `SELECT id FROM workspace_roles WHERE workspace_id = $1 AND system_type = $2 LIMIT 1`,
+      [WS_ID, rep.roleSystemType]
+    );
+    if (roleRow.rows.length === 0) continue;
+    const roleId = roleRow.rows[0].id;
+
+    // Legacy auth table
+    await query(
+      `INSERT INTO user_workspaces (user_id, workspace_id, role) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+      [userId, WS_ID, rep.roleSystemType]
+    );
+
+    // RBAC membership
+    await query(
+      `INSERT INTO workspace_members (workspace_id, user_id, role_id, status, pandora_role, accepted_at)
+       VALUES ($1, $2, $3, 'active', $4, now())
+       ON CONFLICT (workspace_id, user_id) DO NOTHING`,
+      [WS_ID, userId, roleId, rep.pandoraRole]
+    );
+  }
+
+  // 2c. Remove the pandora-test.local dummy users from TechScale Demo only
+  // (they remain in other workspaces; only the b0000000-range reps should appear here)
+  await query(`
+    DELETE FROM user_workspaces
+    WHERE workspace_id = $1
+      AND user_id IN (
+        SELECT id FROM users WHERE email LIKE '%@pandora-test.local'
+      )
+  `, [WS_ID]);
+  await query(`
+    DELETE FROM workspace_members
+    WHERE workspace_id = $1
+      AND user_id IN (
+        SELECT id FROM users WHERE email LIKE '%@pandora-test.local'
+      )
+  `, [WS_ID]);
 
   if (!workspaceExists) {
     // 3. Accounts
