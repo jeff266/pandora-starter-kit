@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { setApiCredentials } from '../lib/api';
+import { getImpersonationMeta } from '../components/ImpersonationBanner';
 
 interface UserInfo {
   id: string;
@@ -12,7 +13,7 @@ export interface WorkspaceInfo {
   id: string;
   name: string;
   slug: string;
-  role: 'admin' | 'member' | 'viewer';
+  role: 'admin' | 'member' | 'viewer' | 'manager' | 'analyst';
   connector_count: number;
   deal_count: number;
   last_sync: string | null;
@@ -83,6 +84,15 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
         selected = data.workspaces[0];
       } else if (lastWsId) {
         selected = data.workspaces.find((w: WorkspaceInfo) => w.id === lastWsId) || null;
+      }
+
+      // Override role if impersonating
+      const impersonationMeta = getImpersonationMeta();
+      if (impersonationMeta && selected) {
+        selected = {
+          ...selected,
+          role: impersonationMeta.targetRole as WorkspaceInfo['role'],
+        };
       }
 
       // Set API credentials BEFORE setState so components that respond to
@@ -175,7 +185,14 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const selectWorkspace = useCallback((workspace: WorkspaceInfo) => {
     localStorage.setItem('pandora_last_workspace', workspace.id);
     if (state.token) setApiCredentials(workspace.id, state.token);
-    setState(prev => ({ ...prev, currentWorkspace: workspace }));
+
+    // Override role if impersonating
+    const impersonationMeta = getImpersonationMeta();
+    const selectedWorkspace = impersonationMeta && workspace.id === impersonationMeta.workspaceId
+      ? { ...workspace, role: impersonationMeta.targetRole as WorkspaceInfo['role'] }
+      : workspace;
+
+    setState(prev => ({ ...prev, currentWorkspace: selectedWorkspace }));
   }, [state.token]);
 
   const joinWorkspace = useCallback(async (apiKey: string): Promise<WorkspaceInfo> => {
