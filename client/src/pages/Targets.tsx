@@ -969,7 +969,7 @@ function SetTargetModal({ existingTarget, revenueModel, onClose, onSave, isEditi
           <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 4 }}>
             {isMember
               ? 'You can only create individual targets for yourself'
-              : 'Company/Board = workspace-wide · Team = manager's pipeline · Individual = specific rep'}
+              : 'Company/Board = workspace-wide • Team = manager\'s pipeline • Individual = specific rep'}
           </div>
         </div>
 
