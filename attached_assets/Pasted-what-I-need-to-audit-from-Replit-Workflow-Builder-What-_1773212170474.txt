@@ -1,0 +1,54 @@
+what I need to audit from Replit:
+
+Workflow Builder — What to Pull
+CRM Writeback
+
+Where does the existing writeback code live? What fields/objects are already supported for HubSpot and Salesforce?
+Is there a central writeback service or is it scattered per-feature (e.g. stage mismatch fix, prospect score)?
+What's the current error handling / rollback model when a write fails?
+
+Findings Schema
+
+What does a finding record look like in the DB? Fields, types, status lifecycle
+How are findings linked back to their source skill run and source records (deal, contact)?
+Is there already a finding_actions or finding_resolutions table, or is resolution purely UI state?
+
+Command Center
+
+How are alerts and findings currently rendered? Is it a single query or assembled from multiple skill output tables?
+Is there an existing "action" affordance on finding cards or are they display-only today?
+
+Agent/Skill Execution
+
+When a skill run completes, what events are emitted? Is there a job queue (Bull, pg-boss, etc.) or direct execution?
+Is there a hook point where a post-run action could be triggered?
+
+
+Enablement Module — What to Pull
+Existing Methodology Storage
+
+Where are Miller Heiman, GAP, SPIN currently stored? Hardcoded in prompt strings, a config file, a DB table?
+Are they global or is there any workspace-level override already?
+
+Prompt Injection Mechanism
+
+In the CLASSIFY and SYNTHESIZE steps, how is workspace context currently assembled before the LLM call? Show me that assembly function
+Is there a workspace_config or skill_config object that gets passed into skill execution?
+
+Settings Architecture
+
+What does the Settings page routing look like? How are new settings sections added?
+Is there a workspace_settings table or is config spread across multiple tables?
+
+Skill Run Audit
+
+Does skill_runs currently stamp what config/context version was active? Or just timestamps and status?
+
+
+Quickest Path
+If you can share or paste:
+
+The CRM writeback service file
+The findings table migration
+The skill executor's context assembly function (where prompt gets built before LLM call)
+The workspace_config or equivalent table schema
