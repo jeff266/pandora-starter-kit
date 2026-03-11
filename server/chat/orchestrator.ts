@@ -337,10 +337,11 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
   // Falls through to Pandora Agent for data_query or ambiguous categories.
   // slack_dm gets the full classification + Pandora Agent path (same as in_app).
   // slack_thread uses the lighter runScopedAnalysis path below.
+  let intentClassification: Awaited<ReturnType<typeof classifyIntent>> | null = null;
   if (!answer && (surface === 'in_app' || surface === 'slack_dm')) {
     try {
       const conversationHistory = buildConversationHistory(state.messages || [] as any);
-      const intentClassification = await classifyIntent(message, conversationHistory, workspaceId);
+      intentClassification = await classifyIntent(message, conversationHistory, workspaceId);
 
       console.log('[Intent]', JSON.stringify(intentClassification));
 
