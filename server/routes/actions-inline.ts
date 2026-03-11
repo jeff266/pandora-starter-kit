@@ -490,7 +490,7 @@ router.post(
                   md5(ws_id::text || '::' || d_id::text || '::' || ttl),
                   'open', 'recommended_next_steps'
            FROM input
-           ON CONFLICT (workspace_id, dedup_hash) WHERE execution_status != 'dismissed'
+           ON CONFLICT (workspace_id, dedup_hash) WHERE execution_status != 'dismissed' AND dedup_hash IS NOT NULL
            DO UPDATE SET updated_at = now()
            RETURNING id, title, source, suggested_crm_action`,
           [
