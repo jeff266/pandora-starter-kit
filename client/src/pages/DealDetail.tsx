@@ -466,6 +466,8 @@ export default function DealDetail() {
   const [dealComposite, setDealComposite] = useState<{ label: string; color: string } | null>(null);
   const [coachingNextStep, setCoachingNextStep] = useState<string | null>(null);
   const [meddicCoverage, setMeddicCoverage] = useState<{ covered_fields: string[]; field_signal_counts?: Record<string, number> } | null>(null);
+  const [meddicCoverageData, setMeddicCoverageData] = useState<any>(null);
+  const [meddicCoverageLoading, setMeddicCoverageLoading] = useState(false);
   const { actions: inlineActions, executeAction, dismissAction } = useInlineActions(dealId);
   const [showSignals, setShowSignals] = useState<boolean | null>(null);
 
@@ -490,6 +492,25 @@ export default function DealDetail() {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [scopeEditing]);
+
+  // Fetch MEDDIC Coverage data
+  const fetchMeddicCoverage = async () => {
+    if (!dealId || !selectedWorkspaceId) return;
+
+    setMeddicCoverageLoading(true);
+    try {
+      const data = await api.get(`/deals/${dealId}/skills/meddic-coverage/latest?workspace_id=${selectedWorkspaceId}`);
+      setMeddicCoverageData(data);
+    } catch (err: any) {
+      // 404 is expected if the skill hasn't been run yet
+      if (err.status !== 404) {
+        console.error('Failed to fetch MEDDIC coverage:', err);
+      }
+      setMeddicCoverageData(null);
+    } finally {
+      setMeddicCoverageLoading(false);
+    }
+  };
 
   const fetchDossier = async (withNarrative = false) => {
     if (!dealId) return;
@@ -536,6 +557,7 @@ export default function DealDetail() {
 
   useEffect(() => {
     fetchDossier(true);
+    fetchMeddicCoverage();
     if (dealId) {
       api.get(`/deals/${dealId}/score-history`).then((res: any) => {
         setScoreHistory(res.snapshots || []);
@@ -1577,21 +1599,135 @@ export default function DealDetail() {
             { key: 'identify_pain', label: 'Identify Pain' },
             { key: 'champion', label: 'Champion' },
           ];
+
+          // Use new data format if available, otherwise fall back to old format
+          const extractions = meddicCoverageData?.classifications?.extractions || [];
+          const coverageScore = meddicCoverageData?.assessment?.coverage_score;
+          const confirmedCount = extractions.filter((e: any) => e.status === 'confirmed').length;
+
+          // Fallback to old format
           const covered = meddicCoverage?.covered_fields ?? [];
-          const coveredCount = covered.length;
+          const coveredCount = meddicCoverageData ? confirmedCount : covered.length;
+
           return (
-            <Accordion title="MEDDIC Coverage" badge={`${coveredCount}/6`}>
+            <Accordion title="MEDDIC Coverage" badge={coverageScore != null ? `${coverageScore}/100` : `${coveredCount}/6`}>
               <div style={{ paddingTop: 12 }}>
-                <div style={{ fontSize: 11, color: colors.textMuted, marginBottom: 14, lineHeight: 1.5 }}>
-                  Confirmed from call signals extracted across conversations with this account
+                {/* Header with Run Now button */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                  <div style={{ fontSize: 11, color: colors.textMuted, lineHeight: 1.5 }}>
+                    {meddicCoverageData ? 'AI-analyzed MEDDIC coverage from all calls, emails, and notes' : 'Confirmed from call signals extracted across conversations'}
+                  </div>
+                  <button
+                    onClick={async () => {
+                      if (!dealId || !selectedWorkspaceId) return;
+                      setMeddicCoverageLoading(true);
+                      try {
+                        await api.post('/skill-runs', {
+                          skill_id: 'meddic-coverage',
+                          params: { deal_id: dealId },
+                          workspace_id: selectedWorkspaceId,
+                        });
+                        // Poll for completion and refresh
+                        setTimeout(() => fetchMeddicCoverage(), 30000); // Refresh after 30s
+                      } catch (err) {
+                        console.error('Failed to trigger MEDDIC coverage:', err);
+                      }
+                    }}
+                    disabled={meddicCoverageLoading}
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 500,
+                      padding: '4px 10px',
+                      borderRadius: 4,
+                      border: `1px solid ${colors.border}`,
+                      background: colors.surfaceHover,
+                      color: colors.text,
+                      cursor: meddicCoverageLoading ? 'not-allowed' : 'pointer',
+                      opacity: meddicCoverageLoading ? 0.6 : 1,
+                    }}
+                  >
+                    {meddicCoverageLoading ? 'Running...' : 'Run Now'}
+                  </button>
                 </div>
-                {meddicCoverage === null ? (
+
+                {meddicCoverageLoading ? (
+                  <div style={{ fontSize: 12, color: colors.textMuted }}>Loading…</div>
+                ) : meddicCoverageData ? (
+                  // New format with extractions
+                  <div>
+                    {meddicCoverageData.status === 'insufficient_data' ? (
+                      <div style={{ fontSize: 12, color: colors.textMuted, lineHeight: 1.6 }}>
+                        {meddicCoverageData.reason || 'No calls or emails found for MEDDIC analysis'}
+                      </div>
+                    ) : (
+                      <>
+                        {/* Coverage summary */}
+                        {meddicCoverageData.assessment?.executive_summary && (
+                          <div style={{ fontSize: 12, color: colors.textSecondary, marginBottom: 12, lineHeight: 1.6, padding: 10, background: colors.surfaceHover, borderRadius: 6 }}>
+                            {meddicCoverageData.assessment.executive_summary}
+                          </div>
+                        )}
+
+                        {/* Field extractions */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                          {MEDDIC_FIELDS.map(({ key, label }) => {
+                            const extraction = extractions.find((e: any) =>
+                              e.field === key || e.field === `meddic_${key}` || e.field === key.replace('_', '')
+                            );
+
+                            const getStatusIcon = (status: string, confidence: string | null) => {
+                              if (status === 'confirmed' && confidence === 'high') return '✅';
+                              if (status === 'confirmed') return '✅';
+                              if (status === 'partial') return '⚠️';
+                              return '❌';
+                            };
+
+                            const getStatusText = (status: string, confidence: string | null) => {
+                              if (status === 'confirmed') return `Confirmed (${confidence || 'unknown'})`;
+                              if (status === 'partial') return `Partial (${confidence || 'low'})`;
+                              return 'Missing';
+                            };
+
+                            const status = extraction?.status || 'missing';
+                            const confidence = extraction?.confidence;
+                            const evidenceText = extraction?.evidence_text;
+
+                            return (
+                              <div key={key} style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                                <span style={{ fontSize: 14 }}>{getStatusIcon(status, confidence)}</span>
+                                <div style={{ flex: 1 }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                                    <span style={{ fontSize: 12, fontWeight: 500, color: colors.text }}>{label}</span>
+                                    <span style={{ fontSize: 11, color: colors.textMuted }}>
+                                      {getStatusText(status, confidence)}
+                                    </span>
+                                  </div>
+                                  {evidenceText && (
+                                    <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 4, lineHeight: 1.5 }}>
+                                      {evidenceText}
+                                    </div>
+                                  )}
+                                  {extraction?.contradictions && (
+                                    <div style={{ fontSize: 11, color: colors.yellow, marginTop: 4 }}>
+                                      ⚠️ Contradictions detected
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                ) : meddicCoverage === null ? (
                   <div style={{ fontSize: 12, color: colors.textMuted }}>Loading…</div>
                 ) : coveredCount === 0 ? (
                   <div style={{ fontSize: 12, color: colors.textMuted, lineHeight: 1.6 }}>
                     No MEDDIC signals extracted from conversations yet. Signals populate automatically when call recordings are processed.
                   </div>
                 ) : (
+                  // Old format fallback
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 24px' }}>
                     {MEDDIC_FIELDS.map(({ key, label }) => {
                       const isCovered = covered.includes(key);

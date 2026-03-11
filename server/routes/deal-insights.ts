@@ -425,4 +425,48 @@ router.get('/api/workspaces/:workspaceId/deals/:dealId/insights/history', requir
   }
 });
 
+// ============================================================================
+// Get Latest MEDDIC Coverage for Deal
+// ============================================================================
+
+router.get('/api/deals/:dealId/skills/meddic-coverage/latest', requireWorkspaceAccess, async (req, res) => {
+  try {
+    const dealId = req.params.dealId as string;
+    const workspaceId = req.query.workspace_id as string;
+
+    if (!workspaceId) {
+      return res.status(400).json({ error: 'workspace_id query parameter required' });
+    }
+
+    // Get most recent completed skill run for this deal
+    const result = await query<{ output: any; completed_at: Date }>(
+      `SELECT output, completed_at
+       FROM skill_runs
+       WHERE workspace_id = $1
+         AND skill_id = 'meddic-coverage'
+         AND status = 'completed'
+         AND params->>'deal_id' = $2
+       ORDER BY completed_at DESC
+       LIMIT 1`,
+      [workspaceId, dealId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'No MEDDIC coverage analysis found for this deal' });
+    }
+
+    const skillRun = result.rows[0];
+    const output = skillRun.output || {};
+
+    // Parse and return the result
+    res.json({
+      last_run_at: skillRun.completed_at,
+      ...output,
+    });
+  } catch (error) {
+    logger.error('Failed to get MEDDIC coverage', { error, dealId: req.params.dealId });
+    res.status(500).json({ error: 'Failed to get MEDDIC coverage' });
+  }
+});
+
 export default router;
