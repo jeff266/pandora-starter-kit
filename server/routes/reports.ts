@@ -537,15 +537,39 @@ router.post('/:workspaceId/reports/:reportId/generations', async (req: Request, 
           const skillId: string | null =
             section?.source_skills?.[0] ?? skillsRunFallback[0] ?? null;
 
+          // Classify the skill so dataset assemblers can explicitly handle custom corrections
+          let skillSource: 'built_in' | 'custom' | 'unknown' = 'unknown';
+          if (skillId) {
+            try {
+              const customCheck = await query(
+                `SELECT 1 FROM custom_skills WHERE skill_id = $1 LIMIT 1`,
+                [skillId]
+              );
+              if (customCheck.rows.length > 0) {
+                skillSource = 'custom';
+                logger.info('[TuningPairs] Custom skill annotation stored — pair preserved', {
+                  skill_id: skillId,
+                  block_id: annotation.block_id,
+                  generation_id: newGeneration.id,
+                });
+              } else {
+                skillSource = 'built_in';
+              }
+            } catch {
+              skillSource = 'unknown';
+            }
+          }
+
           await query(
             `INSERT INTO agent_tuning_pairs
-               (workspace_id, agent_id, generation_id, skill_id, source, block_id, input_context, preferred_output)
-             VALUES ($1, $2, $3, $4, 'report_annotation', $5, $6, $7)`,
+               (workspace_id, agent_id, generation_id, skill_id, skill_source, source, block_id, input_context, preferred_output)
+             VALUES ($1, $2, $3, $4, $5, 'report_annotation', $6, $7, $8)`,
             [
               workspaceId,
               parent.agent_id || null,
               newGeneration.id,
               skillId,
+              skillSource,
               annotation.block_id || null,
               String(annotation.original_value ?? ''),
               String(annotation.new_value),
