@@ -26,6 +26,16 @@ interface EditableDealFieldsProps {
   onFieldUpdate?: (fieldName: string, newValue: any) => void;
 }
 
+function getFieldValue(deal: any, field: EditableField): any {
+  const byName = deal?.[field.field_name];
+  if (byName !== undefined && byName !== null) return byName;
+  const byCRMKey = deal?.custom_fields?.[field.crm_property_name];
+  if (byCRMKey !== undefined && byCRMKey !== null) return byCRMKey;
+  const byFieldName = deal?.custom_fields?.[field.field_name];
+  if (byFieldName !== undefined && byFieldName !== null) return byFieldName;
+  return null;
+}
+
 function parseCRMError(raw: string): string {
   try {
     const match = raw.match(/^\S+ API \d+: (.+)$/s);
@@ -72,7 +82,7 @@ export default function EditableDealFields({ dealId, deal, onFieldUpdate }: Edit
 
   const handleStartEdit = (field: EditableField) => {
     setEditingField(field.field_name);
-    setEditValue(deal[field.field_name] ?? '');
+    setEditValue(getFieldValue(deal, field) ?? '');
     setError(null);
     setCrmWarnings((prev) => {
       const next = { ...prev };
@@ -173,7 +183,7 @@ export default function EditableDealFields({ dealId, deal, onFieldUpdate }: Edit
           <FieldRow
             key={field.id}
             field={field}
-            value={deal[field.field_name]}
+            value={getFieldValue(deal, field)}
             isEditing={editingField === field.field_name}
             editValue={editValue}
             saving={saving}

@@ -30,6 +30,14 @@ const DEALS_COLUMN_FALLBACK = [
 const router = Router();
 const logger = createLogger('EditableFieldsRoutes');
 
+// Columns that exist as dedicated top-level columns in the deals table.
+// Everything else lives in custom_fields (JSONB).
+const NATIVE_DEAL_COLUMNS = new Set([
+  'name', 'amount', 'stage', 'close_date', 'owner', 'probability',
+  'forecast_category', 'pipeline', 'next_steps', 'lead_source',
+  'narrative', 'scope_id',
+]);
+
 /**
  * GET /:workspaceId/editable-fields/suggestions
  * Returns AI-powered field suggestions
@@ -335,7 +343,7 @@ router.patch('/:workspaceId/deals/:dealId/field',
 
       // 2. Get current deal info
       const dealResult = await query(
-        'SELECT crm_id, crm_type FROM deals WHERE id = $1 AND workspace_id = $2',
+        'SELECT source_id, source FROM deals WHERE id = $1 AND workspace_id = $2',
         [dealId, workspaceId]
       );
 
@@ -345,15 +353,25 @@ router.patch('/:workspaceId/deals/:dealId/field',
       }
 
       const deal = dealResult.rows[0];
-      const crmId = deal.crm_id;
-      const crmType = deal.crm_type;
+      const crmId = deal.source_id;
+      const crmType = deal.source;
 
       // 3. Update local database
-      await query(
-        `UPDATE deals SET ${field_name} = $1, updated_at = NOW()
-         WHERE id = $2 AND workspace_id = $3`,
-        [value, dealId, workspaceId]
-      );
+      if (NATIVE_DEAL_COLUMNS.has(field_name)) {
+        await query(
+          `UPDATE deals SET ${field_name} = $1, updated_at = NOW()
+           WHERE id = $2 AND workspace_id = $3`,
+          [value, dealId, workspaceId]
+        );
+      } else {
+        await query(
+          `UPDATE deals
+           SET custom_fields = custom_fields || jsonb_build_object($1::text, to_jsonb($2::text)),
+               updated_at = NOW()
+           WHERE id = $3 AND workspace_id = $4`,
+          [config.crm_property_name, value !== null && value !== undefined ? String(value) : null, dealId, workspaceId]
+        );
+      }
 
       // 4. Write back to CRM
       try {
