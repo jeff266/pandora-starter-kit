@@ -14,6 +14,7 @@ import { buildDealCrmUrl, buildConversationUrl, useCrmInfo } from '../lib/deepli
 import { useWorkspace } from '../context/WorkspaceContext';
 import { useInlineActions } from '../hooks/useInlineActions';
 import StageRecCard from '../components/actions/StageRecCard';
+import EditableDealFields from '../components/deals/EditableDealFields';
 import type { SimilarPathsData } from '../components/reports/types';
 
 const SEVERITY_LABELS: Record<string, string> = {
@@ -1476,6 +1477,23 @@ export default function DealDetail() {
             })}
           </div>
         </div>
+      )}
+
+      {/* Editable Deal Fields */}
+      {dealId && (
+        <EditableDealFields
+          dealId={dealId}
+          deal={deal}
+          onFieldUpdate={(fieldName, newValue) => {
+            setDossier((prev: any) => ({
+              ...prev,
+              deal: {
+                ...prev?.deal,
+                [fieldName]: newValue,
+              },
+            }));
+          }}
+        />
       )}
 
       {/* ══════════════════════════════════════════════════════════════════════

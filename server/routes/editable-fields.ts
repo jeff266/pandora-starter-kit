@@ -1,0 +1,373 @@
+/**
+ * Editable Deal Fields API Routes
+ *
+ * Endpoints for configuring which CRM fields should be editable on Deal Detail page
+ */
+
+import { Router, type Request, type Response } from 'express';
+import { query } from '../db.js';
+import { createLogger } from '../utils/logger.js';
+import { requirePermission } from '../middleware/permissions.js';
+import { suggestEditableFields } from '../analysis/field-suggestions.js';
+import { updateDeal as updateHubSpotDeal } from '../connectors/hubspot/hubspot-writer.js';
+import { updateDeal as updateSalesforceDeal } from '../connectors/salesforce/salesforce-writer.js';
+
+const router = Router();
+const logger = createLogger('EditableFieldsRoutes');
+
+/**
+ * GET /:workspaceId/editable-fields/suggestions
+ * Returns AI-powered field suggestions
+ */
+router.get('/:workspaceId/editable-fields/suggestions',
+  requirePermission('config.edit'),
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { workspaceId } = req.params;
+      const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 5;
+
+      const suggestions = await suggestEditableFields(workspaceId, limit);
+
+      res.json({ suggestions });
+    } catch (err) {
+      logger.error('Failed to generate field suggestions', err as Error);
+      res.status(500).json({ error: 'Failed to generate suggestions' });
+    }
+});
+
+/**
+ * GET /:workspaceId/editable-fields
+ * Returns all editable field configurations for workspace
+ */
+router.get('/:workspaceId/editable-fields',
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { workspaceId } = req.params;
+
+      const result = await query(
+        `SELECT * FROM editable_deal_fields
+         WHERE workspace_id = $1 AND is_editable = true
+         ORDER BY display_order ASC`,
+        [workspaceId]
+      );
+
+      res.json({ fields: result.rows });
+    } catch (err) {
+      logger.error('Failed to fetch editable fields', err as Error);
+      res.status(500).json({ error: 'Failed to fetch editable fields' });
+    }
+});
+
+/**
+ * POST /:workspaceId/editable-fields
+ * Create a new editable field configuration
+ */
+router.post('/:workspaceId/editable-fields',
+  requirePermission('config.edit'),
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { workspaceId } = req.params;
+      const userId = (req as any).user?.user_id;
+      const {
+        field_name,
+        field_label,
+        field_type,
+        crm_property_name,
+        crm_property_label,
+        is_required,
+        help_text
+      } = req.body;
+
+      if (!field_name || !field_label || !field_type || !crm_property_name) {
+        res.status(400).json({ error: 'Missing required fields' });
+        return;
+      }
+
+      // Check for duplicate
+      const existing = await query(
+        'SELECT id FROM editable_deal_fields WHERE workspace_id = $1 AND field_name = $2',
+        [workspaceId, field_name]
+      );
+
+      if (existing.rows.length > 0) {
+        res.status(400).json({ error: 'Field already configured' });
+        return;
+      }
+
+      // Get next display order
+      const orderResult = await query(
+        'SELECT COALESCE(MAX(display_order), 0) + 1 as next_order FROM editable_deal_fields WHERE workspace_id = $1',
+        [workspaceId]
+      );
+      const displayOrder = orderResult.rows[0]?.next_order || 1;
+
+      // Insert new field
+      const result = await query(
+        `INSERT INTO editable_deal_fields
+          (workspace_id, field_name, field_label, field_type, crm_property_name,
+           crm_property_label, is_required, help_text, display_order, created_by_user_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         RETURNING *`,
+        [
+          workspaceId,
+          field_name,
+          field_label,
+          field_type,
+          crm_property_name,
+          crm_property_label || null,
+          is_required || false,
+          help_text || null,
+          displayOrder,
+          userId || null
+        ]
+      );
+
+      logger.info('Editable field created', {
+        workspace_id: workspaceId,
+        field_name,
+        field_id: result.rows[0].id
+      });
+
+      res.status(201).json({ field: result.rows[0] });
+    } catch (err) {
+      logger.error('Failed to create editable field', err as Error);
+      res.status(500).json({ error: 'Failed to create editable field' });
+    }
+});
+
+/**
+ * PATCH /:workspaceId/editable-fields/:fieldId
+ * Update an editable field configuration
+ */
+router.patch('/:workspaceId/editable-fields/:fieldId',
+  requirePermission('config.edit'),
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { workspaceId, fieldId } = req.params;
+      const updates = req.body;
+
+      const allowedFields = [
+        'field_label',
+        'is_editable',
+        'is_required',
+        'display_order',
+        'help_text'
+      ];
+
+      const setClause: string[] = [];
+      const values: any[] = [];
+      let paramIndex = 1;
+
+      for (const [key, value] of Object.entries(updates)) {
+        if (allowedFields.includes(key)) {
+          setClause.push(`${key} = $${paramIndex}`);
+          values.push(value);
+          paramIndex++;
+        }
+      }
+
+      if (setClause.length === 0) {
+        res.status(400).json({ error: 'No valid fields to update' });
+        return;
+      }
+
+      values.push(workspaceId, fieldId);
+
+      const result = await query(
+        `UPDATE editable_deal_fields
+         SET ${setClause.join(', ')}
+         WHERE workspace_id = $${paramIndex} AND id = $${paramIndex + 1}
+         RETURNING *`,
+        values
+      );
+
+      if (result.rows.length === 0) {
+        res.status(404).json({ error: 'Field not found' });
+        return;
+      }
+
+      logger.info('Editable field updated', { workspace_id: workspaceId, field_id: fieldId });
+      res.json({ field: result.rows[0] });
+    } catch (err) {
+      logger.error('Failed to update editable field', err as Error);
+      res.status(500).json({ error: 'Failed to update editable field' });
+    }
+});
+
+/**
+ * DELETE /:workspaceId/editable-fields/:fieldId
+ * Delete (hard delete) an editable field configuration
+ */
+router.delete('/:workspaceId/editable-fields/:fieldId',
+  requirePermission('config.edit'),
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { workspaceId, fieldId } = req.params;
+
+      const result = await query(
+        'DELETE FROM editable_deal_fields WHERE workspace_id = $1 AND id = $2 RETURNING id',
+        [workspaceId, fieldId]
+      );
+
+      if (result.rows.length === 0) {
+        res.status(404).json({ error: 'Field not found' });
+        return;
+      }
+
+      logger.info('Editable field deleted', { workspace_id: workspaceId, field_id: fieldId });
+      res.json({ success: true });
+    } catch (err) {
+      logger.error('Failed to delete editable field', err as Error);
+      res.status(500).json({ error: 'Failed to delete editable field' });
+    }
+});
+
+/**
+ * POST /:workspaceId/editable-fields/reorder
+ * Bulk update display order
+ */
+router.post('/:workspaceId/editable-fields/reorder',
+  requirePermission('config.edit'),
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { workspaceId } = req.params;
+      const { field_ids } = req.body; // Array of field IDs in desired order
+
+      if (!Array.isArray(field_ids)) {
+        res.status(400).json({ error: 'field_ids must be an array' });
+        return;
+      }
+
+      // Update display_order for each field
+      for (let i = 0; i < field_ids.length; i++) {
+        await query(
+          'UPDATE editable_deal_fields SET display_order = $1 WHERE id = $2 AND workspace_id = $3',
+          [i + 1, field_ids[i], workspaceId]
+        );
+      }
+
+      logger.info('Editable fields reordered', { workspace_id: workspaceId, count: field_ids.length });
+      res.json({ success: true });
+    } catch (err) {
+      logger.error('Failed to reorder editable fields', err as Error);
+      res.status(500).json({ error: 'Failed to reorder fields' });
+    }
+});
+
+/**
+ * PATCH /:workspaceId/deals/:dealId/field
+ * Update a single deal field and write back to CRM
+ */
+router.patch('/:workspaceId/deals/:dealId/field',
+  requirePermission('deals.edit'),
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { workspaceId, dealId } = req.params;
+      const { field_name, value } = req.body;
+
+      if (!field_name) {
+        res.status(400).json({ error: 'field_name is required' });
+        return;
+      }
+
+      // 1. Validate field is editable
+      const fieldConfig = await query(
+        `SELECT * FROM editable_deal_fields
+         WHERE workspace_id = $1 AND field_name = $2 AND is_editable = true`,
+        [workspaceId, field_name]
+      );
+
+      if (fieldConfig.rows.length === 0) {
+        res.status(403).json({ error: 'Field is not editable' });
+        return;
+      }
+
+      const config = fieldConfig.rows[0];
+
+      // 2. Get current deal info
+      const dealResult = await query(
+        'SELECT crm_id, crm_type FROM deals WHERE id = $1 AND workspace_id = $2',
+        [dealId, workspaceId]
+      );
+
+      if (dealResult.rows.length === 0) {
+        res.status(404).json({ error: 'Deal not found' });
+        return;
+      }
+
+      const deal = dealResult.rows[0];
+      const crmId = deal.crm_id;
+      const crmType = deal.crm_type;
+
+      // 3. Update local database
+      await query(
+        `UPDATE deals SET ${field_name} = $1, updated_at = NOW()
+         WHERE id = $2 AND workspace_id = $3`,
+        [value, dealId, workspaceId]
+      );
+
+      // 4. Write back to CRM
+      try {
+        if (crmType === 'hubspot') {
+          await updateHubSpotDeal(workspaceId, crmId, {
+            [config.crm_property_name]: value
+          });
+        } else if (crmType === 'salesforce') {
+          await updateSalesforceDeal(workspaceId, crmId, {
+            [config.crm_property_name]: value
+          });
+        }
+
+        // 5. Log the write
+        await query(
+          `INSERT INTO crm_write_log
+            (workspace_id, crm_type, crm_object_type, crm_record_id,
+             crm_property_name, value_written, trigger_source, status, duration_ms)
+           VALUES ($1, $2, 'deal', $3, $4, $5, 'inline_edit', 'success', 0)`,
+          [workspaceId, crmType, crmId, config.crm_property_name, JSON.stringify(value)]
+        );
+
+        logger.info('Deal field updated and written to CRM', {
+          workspace_id: workspaceId,
+          deal_id: dealId,
+          field_name,
+          crm_type: crmType
+        });
+
+        res.json({ success: true, value });
+
+      } catch (crmError) {
+        // Log CRM write failure
+        await query(
+          `INSERT INTO crm_write_log
+            (workspace_id, crm_type, crm_object_type, crm_record_id,
+             crm_property_name, value_written, trigger_source, status, error_message, duration_ms)
+           VALUES ($1, $2, 'deal', $3, $4, $5, 'inline_edit', 'failed', $6, 0)`,
+          [
+            workspaceId,
+            crmType,
+            crmId,
+            config.crm_property_name,
+            JSON.stringify(value),
+            (crmError as Error).message
+          ]
+        );
+
+        logger.error('Failed to write back to CRM', crmError as Error);
+
+        // Local DB was updated successfully, but CRM write failed
+        res.status(207).json({
+          success: true,
+          value,
+          warning: 'Updated locally but CRM write failed',
+          crm_error: (crmError as Error).message
+        });
+      }
+
+    } catch (err) {
+      logger.error('Failed to update deal field', err as Error);
+      res.status(500).json({ error: 'Failed to update field' });
+    }
+});
+
+export default router;
