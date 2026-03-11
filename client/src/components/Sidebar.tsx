@@ -6,6 +6,7 @@ import { colors, fonts } from '../styles/theme';
 import SectionErrorBoundary from './SectionErrorBoundary';
 import { useIsMobile } from '../hooks/useIsMobile';
 import PalettePicker from './PalettePicker';
+import { isImpersonating } from './ImpersonationBanner';
 
 interface NavItem {
   label: string;
@@ -104,6 +105,7 @@ export default function Sidebar({ badges, showAllClients, collapsed = false, onT
 
   const isAdmin = currentWorkspace?.role === 'admin';
   const userRole = currentWorkspace?.role as 'admin' | 'manager' | 'analyst' | 'member' | 'viewer' | undefined;
+  const impersonating = isImpersonating();
 
   // Helper to check if user has access to a nav item
   const hasAccess = (item: NavItem): boolean => {
@@ -205,10 +207,12 @@ export default function Sidebar({ badges, showAllClients, collapsed = false, onT
       <div
         style={{
           padding: collapsed ? '16px 0' : '16px 14px', borderBottom: `1px solid ${colors.border}`,
-          display: 'flex', alignItems: 'center', gap: collapsed ? 0 : 10, cursor: 'pointer', position: 'relative',
+          display: 'flex', alignItems: 'center', gap: collapsed ? 0 : 10,
+          cursor: (!collapsed && !impersonating && workspaces.length > 1) ? 'pointer' : 'default',
+          position: 'relative',
           justifyContent: collapsed ? 'center' : 'flex-start',
         }}
-        onClick={() => { if (!collapsed) setShowWsDropdown(!showWsDropdown); }}
+        onClick={() => { if (!collapsed && !impersonating && workspaces.length > 1) setShowWsDropdown(!showWsDropdown); }}
       >
         <div style={{
           width: 28, height: 28, borderRadius: 6, background: colors.accent,
@@ -230,9 +234,11 @@ export default function Sidebar({ badges, showAllClients, collapsed = false, onT
             </div>
           </div>
         )}
-        {!collapsed && <span style={{ fontSize: 10, color: colors.textMuted }}>{showWsDropdown ? '\u25B2' : '\u25BC'}</span>}
+        {!collapsed && !impersonating && workspaces.length > 1 && (
+          <span style={{ fontSize: 10, color: colors.textMuted }}>{showWsDropdown ? '\u25B2' : '\u25BC'}</span>
+        )}
 
-        {showWsDropdown && workspaces.length > 1 && (
+        {showWsDropdown && !impersonating && workspaces.length > 1 && (
           <div
             style={{
               position: 'absolute', top: '100%', left: 0, right: 0,
