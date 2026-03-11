@@ -53,7 +53,7 @@ export default function DealFieldsTab() {
   const fetchSuggestions = async () => {
     try {
       setLoadingSuggestions(true);
-      const data = await api.get(`/editable-fields/suggestions?limit=5`);
+      const data = await api.get(`/editable-fields/suggestions?limit=20`);
       setSuggestions(data.suggestions || []);
     } catch (err: any) {
       console.error('Failed to fetch field suggestions:', err);
@@ -199,7 +199,7 @@ export default function DealFieldsTab() {
           </p>
 
           <div style={{ display: 'grid', gap: 12 }}>
-            {suggestions.map((suggestion) => (
+            {suggestions.slice(0, 5).map((suggestion) => (
               <SuggestionCard
                 key={suggestion.field_name}
                 suggestion={suggestion}
@@ -274,6 +274,7 @@ export default function DealFieldsTab() {
         <FieldModal
           field={editingField}
           workspaceId={workspaceId}
+          suggestions={suggestions}
           onClose={() => {
             setShowAddModal(false);
             setEditingField(null);
@@ -565,12 +566,14 @@ function FieldRow({
 function FieldModal({
   field,
   workspaceId,
+  suggestions,
   onClose,
   onSuccess,
   onError,
 }: {
   field: EditableField | null;
   workspaceId: string;
+  suggestions: FieldSuggestion[];
   onClose: () => void;
   onSuccess: () => void;
   onError: (msg: string) => void;
@@ -657,6 +660,53 @@ function FieldModal({
         {/* Form */}
         <form onSubmit={handleSubmit} style={{ padding: 24 }}>
           <div style={{ display: 'grid', gap: 20 }}>
+            {/* Auto-fill from suggestions — new fields only */}
+            {!field && suggestions.length > 0 && (
+              <div>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: colors.text, marginBottom: 8 }}>
+                  Select from suggestions (optional)
+                </label>
+                <select
+                  defaultValue=""
+                  onChange={(e) => {
+                    const s = suggestions.find((s) => s.field_name === e.target.value);
+                    if (s) {
+                      setFieldName(s.field_name);
+                      setFieldLabel(s.field_label);
+                      setFieldType((s.field_type as FieldType) || 'text');
+                      setCrmPropertyName(s.crm_property_name);
+                      setCrmPropertyLabel('');
+                    } else {
+                      setFieldName('');
+                      setFieldLabel('');
+                      setFieldType('text');
+                      setCrmPropertyName('');
+                      setCrmPropertyLabel('');
+                    }
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    fontSize: 14,
+                    color: colors.text,
+                    background: colors.surface,
+                    border: `1px solid ${colors.border}`,
+                    borderRadius: 6,
+                    cursor: 'pointer',
+                  }}
+                >
+                  <option value="">— type or select a field to auto-fill —</option>
+                  {[...suggestions]
+                    .sort((a, b) => b.score - a.score)
+                    .map((s) => (
+                      <option key={s.field_name} value={s.field_name}>
+                        {s.field_label} — {s.field_name} · score {s.score}
+                      </option>
+                    ))}
+                </select>
+              </div>
+            )}
+
             {/* Field Name */}
             <div>
               <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: colors.text, marginBottom: 8 }}>
