@@ -484,7 +484,7 @@ router.post(
            VALUES (
              $1, $2, 'next_step', 'info',
              $3, $3, $4, $5, $6,
-             md5($1 || '::' || $2 || '::' || $3),
+             md5($1::text || '::' || $2::text || '::' || $3),
              'open', 'recommended_next_steps'
            )
            ON CONFLICT (workspace_id, dedup_hash) WHERE execution_status != 'dismissed'

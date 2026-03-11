@@ -545,7 +545,7 @@ export default function DealList() {
                         {deal.action_count && deal.action_count > 0 && <span style={{ width: 6, height: 6, borderRadius: '50%', background: deal.critical_action_count ? colors.red : colors.orange, display: 'inline-block' }} title={`${deal.action_count} pending action${deal.action_count > 1 ? 's' : ''}`} />}
                       </span>
                     )}
-                    {deal.divergence_flag && (
+                    {!!deal.divergence_flag && (
                       <span
                         onClick={(e) => {
                           e.stopPropagation();
@@ -655,7 +655,7 @@ export default function DealList() {
                       }}>
                         {deal.grade}
                       </span>
-                      {deal.divergence_flag && (
+                      {!!deal.divergence_flag && (
                         <button
                           onClick={(e) => {
                             e.stopPropagation();

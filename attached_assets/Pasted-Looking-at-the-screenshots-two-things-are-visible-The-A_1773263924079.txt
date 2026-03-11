@@ -1,0 +1,37 @@
+Looking at the screenshots, two things are visible:
+
+**The ActionCards aren't rendering.** The Recommended Next Steps section (Image 2) is still the static P1 text list — no buttons, no cards. The sync-on-load work was built but the fallback condition is winning every time. The likely culprit is the sync POST isn't returning action IDs fast enough, so the component falls back to static text and never re-renders once the IDs arrive.
+
+**The score gap badge has a spacing bug.** Image 4 shows "Score gap23" and "Score gap68" — the divergence number is concatenated directly onto the label text without a space or separator.
+
+Here's the diagnostic prompt to send:
+
+---
+
+**Two fixes needed:**
+
+**Fix 1 — ActionCards not rendering (priority)**
+
+In `DealDetail.tsx`, the sync-on-load effect runs `POST /deals/:dealId/actions/sync` and should replace the static list with ActionCard components once it returns IDs. But the static list is still showing on all deals. Debug in this order:
+
+1. Add a `console.log` at the top of the sync effect — confirm it's firing and what `GET /deals/:dealId/actions/next-steps` returns on first load
+2. Check whether the sync POST is returning action records with IDs or an empty array
+3. Check the condition that switches between ActionCard rendering and static text fallback — it may be evaluating before the async response lands and never re-evaluating
+4. The fix is likely: set a loading state while sync is in flight, and only render static fallback if sync returns 0 records (not while it's pending)
+
+Expected behavior: on first load, brief loading state → ActionCards with buttons appear. On subsequent loads, ActionCards appear immediately from cached DB records.
+
+**Fix 2 — Score gap badge spacing**
+
+In the badge component, the divergence number is being concatenated directly onto "Score gap" without a separator. Change to:
+
+```
+Score gap ↑        (just the label, no number inline)
+```
+
+Or if the number should show:
+```
+Score gap +23      (with space and + prefix)
+```
+
+The tooltip already shows the full grade comparison — the badge doesn't need the raw number. Simplest fix is to remove the number from the badge label entirely and keep it tooltip-only.
