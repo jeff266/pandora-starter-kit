@@ -8664,6 +8664,44 @@ const persistVelocityBenchmarks: ToolDefinition = {
 };
 
 // ============================================================================
+// MEDDIC Coverage Tool
+// ============================================================================
+
+const meddicCoverageExecute: ToolDefinition = {
+  name: 'meddicCoverageExecute',
+  description: 'Execute MEDDIC Coverage analysis for a deal - analyzes all calls, emails, and notes to score MEDDIC/SPICED/BANT field coverage',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {
+      deal_id: {
+        type: 'string',
+        description: 'Deal ID to analyze',
+      },
+    },
+    required: ['deal_id'],
+  },
+  execute: async (params, context) => {
+    return safeExecute('meddicCoverageExecute', async () => {
+      const { executeMeddicCoverage } = await import('./implementations/meddic-coverage/index.js');
+
+      const dealId = params.deal_id || context.params?.deal_id;
+      if (!dealId) {
+        throw new Error('deal_id parameter required');
+      }
+
+      const result = await executeMeddicCoverage(
+        context.workspaceId,
+        dealId,
+        context.runId
+      );
+
+      return result;
+    }, params);
+  },
+};
+
+// ============================================================================
 
 export const toolRegistry = new Map<string, ToolDefinition>([
   ['queryDeals', queryDeals],
@@ -8808,6 +8846,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['checkCompIntelData', checkCompIntelData],
   ['persistAccuracyScores', persistAccuracyScores],
   ['persistVelocityBenchmarks', persistVelocityBenchmarks],
+  ['meddicCoverageExecute', meddicCoverageExecute],
 ]);
 
 // ============================================================================

@@ -6,6 +6,7 @@
  */
 
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { colors, fonts } from '../../styles/theme';
 import Skeleton from '../Skeleton';
@@ -48,6 +49,7 @@ interface VersionHistoryItem {
 }
 
 export default function MethodologySettings() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [configs, setConfigs] = useState<MethodologyConfig[]>([]);
   const [frameworks, setFrameworks] = useState<SystemFramework[]>([]);
@@ -57,6 +59,7 @@ export default function MethodologySettings() {
   const [editingConfig, setEditingConfig] = useState<MethodologyConfig | null>(null);
   const [versionHistory, setVersionHistory] = useState<VersionHistoryItem[]>([]);
   const [previewData, setPreviewData] = useState<{ preview: string; token_count: number; warning: string | null } | null>(null);
+  const [highlightedVersionId, setHighlightedVersionId] = useState<string | null>(null);
 
   // Form state
   const [displayName, setDisplayName] = useState('');
@@ -77,6 +80,32 @@ export default function MethodologySettings() {
     loadConfigs();
     loadFrameworks();
   }, []);
+
+  // Handle deep-linking from methodology attribution
+  useEffect(() => {
+    const configId = searchParams.get('config');
+    const versionNum = searchParams.get('version');
+
+    if (configId) {
+      // Load version history for the specified config
+      loadVersionHistory(configId).then(() => {
+        setShowVersionHistory(true);
+
+        // Highlight the specific version if provided
+        if (versionNum && versionHistory.length > 0) {
+          const targetVersion = versionHistory.find(v => v.version === parseInt(versionNum));
+          if (targetVersion) {
+            setHighlightedVersionId(targetVersion.id);
+            // Clear highlight after 3 seconds
+            setTimeout(() => setHighlightedVersionId(null), 3000);
+          }
+        }
+      });
+
+      // Clear query params after processing
+      setSearchParams({});
+    }
+  }, [searchParams, setSearchParams]);
 
   const loadConfigs = async () => {
     setLoading(true);
@@ -716,13 +745,16 @@ export default function MethodologySettings() {
               Version History
             </h3>
 
-            {versionHistory.map(version => (
+            {versionHistory.map(version => {
+              const isHighlighted = highlightedVersionId === version.id;
+              return (
               <div key={version.id} style={{
                 padding: 12,
-                background: colors.surfaceRaised,
-                border: `1px solid ${colors.border}`,
+                background: isHighlighted ? `${colors.accent}15` : colors.surfaceRaised,
+                border: `1px solid ${isHighlighted ? colors.accent : colors.border}`,
                 borderRadius: 6,
-                marginBottom: 8
+                marginBottom: 8,
+                transition: 'background 0.3s, border-color 0.3s'
               }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
@@ -767,7 +799,7 @@ export default function MethodologySettings() {
                   </div>
                 </div>
               </div>
-            ))}
+            )}))}
 
             <div style={{ marginTop: 16, textAlign: 'right' }}>
               <button
