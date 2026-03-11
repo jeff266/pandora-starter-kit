@@ -514,16 +514,29 @@ router.post('/:workspaceId/reports/:reportId/generations', async (req: Request, 
     // Write training pairs to agent_tuning_pairs for override annotations only.
     // Strikes without a replacement value are not yet a training pair.
     if (Array.isArray(human_annotations)) {
-      // Pull the first skill_id from the parent generation's skills_run array
-      const skillsRun: string[] = Array.isArray(parent.skills_run)
+      // Fallback: skills_run on the generation when section lookup fails
+      const skillsRunFallback: string[] = Array.isArray(parent.skills_run)
         ? parent.skills_run
         : typeof parent.skills_run === 'string'
-          ? JSON.parse(parent.skills_run)
+          ? (() => { try { return JSON.parse(parent.skills_run); } catch { return []; } })()
           : [];
-      const skillId: string | null = skillsRun.length > 0 ? skillsRun[0] : null;
+
+      // Normalise sections_content to an array for per-block section lookup
+      const sectionsContent: Array<{ section_id?: string; source_skills?: string[] }> =
+        Array.isArray(parent.sections_content)
+          ? parent.sections_content
+          : typeof parent.sections_content === 'string'
+            ? (() => { try { return JSON.parse(parent.sections_content); } catch { return []; } })()
+            : [];
 
       for (const annotation of human_annotations) {
         if (annotation.type === 'override' && annotation.new_value) {
+          // block_id format: "{section_id}:{type}:{index}" — parse section_id from prefix
+          const sectionId = annotation.block_id?.split(':')[0] ?? '';
+          const section = sectionsContent.find(s => s.section_id === sectionId);
+          const skillId: string | null =
+            section?.source_skills?.[0] ?? skillsRunFallback[0] ?? null;
+
           await query(
             `INSERT INTO agent_tuning_pairs
                (workspace_id, agent_id, generation_id, skill_id, source, block_id, input_context, preferred_output)
