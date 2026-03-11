@@ -53,7 +53,7 @@ export default function DealFieldsTab() {
   const fetchSuggestions = async () => {
     try {
       setLoadingSuggestions(true);
-      const data = await api.get(`/workspaces/${workspaceId}/editable-fields/suggestions?limit=5`);
+      const data = await api.get(`/editable-fields/suggestions?limit=5`);
       setSuggestions(data.suggestions || []);
     } catch (err: any) {
       console.error('Failed to fetch field suggestions:', err);
@@ -66,7 +66,7 @@ export default function DealFieldsTab() {
   const fetchFields = async () => {
     try {
       setLoadingFields(true);
-      const data = await api.get(`/workspaces/${workspaceId}/editable-fields`);
+      const data = await api.get(`/editable-fields`);
       setFields(data.fields || []);
     } catch (err: any) {
       console.error('Failed to fetch editable fields:', err);
@@ -78,7 +78,7 @@ export default function DealFieldsTab() {
 
   const handleAddFromSuggestion = async (suggestion: FieldSuggestion) => {
     try {
-      await api.post(`/workspaces/${workspaceId}/editable-fields`, {
+      await api.post(`/editable-fields`, {
         field_name: suggestion.field_name,
         field_label: suggestion.field_label,
         field_type: suggestion.field_type,
@@ -96,7 +96,7 @@ export default function DealFieldsTab() {
 
   const handleToggleEditable = async (fieldId: string, newValue: boolean) => {
     try {
-      await api.patch(`/workspaces/${workspaceId}/editable-fields/${fieldId}`, {
+      await api.patch(`/editable-fields/${fieldId}`, {
         is_editable: newValue,
       });
       setFields(prev => prev.map(f => f.id === fieldId ? { ...f, is_editable: newValue } : f));
@@ -112,7 +112,7 @@ export default function DealFieldsTab() {
     }
 
     try {
-      await api.delete(`/workspaces/${workspaceId}/editable-fields/${fieldId}`);
+      await api.delete(`/editable-fields/${fieldId}`);
       setToast({ message: 'Field removed', type: 'success' });
       await fetchFields();
       await fetchSuggestions();
@@ -138,7 +138,7 @@ export default function DealFieldsTab() {
 
     // Send new order to backend
     try {
-      await api.post(`/workspaces/${workspaceId}/editable-fields/reorder`, {
+      await api.post(`/editable-fields/reorder`, {
         field_ids: newFields.map(f => f.id),
       });
     } catch (err: any) {
@@ -596,14 +596,14 @@ function FieldModal({
     try {
       if (field) {
         // Update existing field
-        await api.patch(`/workspaces/${workspaceId}/editable-fields/${field.id}`, {
+        await api.patch(`/editable-fields/${field.id}`, {
           field_label: fieldLabel,
           is_required: isRequired,
           help_text: helpText || null,
         });
       } else {
         // Create new field
-        await api.post(`/workspaces/${workspaceId}/editable-fields`, {
+        await api.post(`/editable-fields`, {
           field_name: fieldName,
           field_label: fieldLabel,
           field_type: fieldType,
