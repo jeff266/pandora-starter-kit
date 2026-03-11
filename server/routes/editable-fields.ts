@@ -9,8 +9,23 @@ import { query } from '../db.js';
 import { createLogger } from '../utils/logger.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { suggestEditableFields } from '../analysis/field-suggestions.js';
+import { discoverCRMProperties } from '../crm-writeback/property-discovery.js';
 import { updateDeal as updateHubSpotDeal } from '../connectors/hubspot/hubspot-writer.js';
 import { updateDeal as updateSalesforceDeal } from '../connectors/salesforce/salesforce-writer.js';
+
+// Curated list of user-editable deals columns when no CRM is connected
+const DEALS_COLUMN_FALLBACK = [
+  { field_name: 'name',              label: 'Deal Name',          crm_property_name: 'name',              field_type: 'text' },
+  { field_name: 'amount',            label: 'Amount',             crm_property_name: 'amount',            field_type: 'number' },
+  { field_name: 'stage',             label: 'Stage',              crm_property_name: 'dealstage',         field_type: 'text' },
+  { field_name: 'close_date',        label: 'Close Date',         crm_property_name: 'closedate',         field_type: 'date' },
+  { field_name: 'owner',             label: 'Owner',              crm_property_name: 'hubspot_owner_id',  field_type: 'text' },
+  { field_name: 'probability',       label: 'Probability',        crm_property_name: 'hs_deal_stage_probability', field_type: 'number' },
+  { field_name: 'forecast_category', label: 'Forecast Category',  crm_property_name: 'hs_forecast_category', field_type: 'text' },
+  { field_name: 'pipeline',          label: 'Pipeline',           crm_property_name: 'pipeline',          field_type: 'text' },
+  { field_name: 'next_steps',        label: 'Next Steps',         crm_property_name: 'hs_next_step',      field_type: 'textarea' },
+  { field_name: 'lead_source',       label: 'Lead Source',        crm_property_name: 'leadsource',        field_type: 'text' },
+];
 
 const router = Router();
 const logger = createLogger('EditableFieldsRoutes');
@@ -34,6 +49,31 @@ router.get('/:workspaceId/editable-fields/suggestions',
       res.status(500).json({ error: 'Failed to generate suggestions' });
     }
 });
+
+/**
+ * GET /:workspaceId/editable-fields/deal-properties
+ * Returns available CRM deal properties for the CRM property picker.
+ * Uses live CRM discovery when a CRM is connected; falls back to a curated
+ * list of Pandora deals-table columns otherwise.
+ */
+router.get('/:workspaceId/editable-fields/deal-properties',
+  requirePermission('config.edit'),
+  async (req: Request, res: Response): Promise<void> => {
+    const { workspaceId } = req.params;
+    try {
+      const crmProperties = await discoverCRMProperties(workspaceId, 'deal');
+      const properties = crmProperties.map((p) => ({
+        field_name: p.name,
+        label: p.label,
+        crm_property_name: p.name,
+        field_type: p.type,
+      }));
+      res.json({ properties, source: 'crm' });
+    } catch {
+      res.json({ properties: DEALS_COLUMN_FALLBACK, source: 'fallback' });
+    }
+  }
+);
 
 /**
  * GET /:workspaceId/editable-fields

@@ -16,6 +16,13 @@ interface FieldSuggestion {
   reasoning: string;
 }
 
+interface DealProperty {
+  field_name: string;
+  label: string;
+  crm_property_name: string;
+  field_type: string;
+}
+
 interface EditableField {
   id: string;
   field_name: string;
@@ -586,6 +593,19 @@ function FieldModal({
   const [isRequired, setIsRequired] = useState(field?.is_required || false);
   const [helpText, setHelpText] = useState(field?.help_text || '');
   const [saving, setSaving] = useState(false);
+  const [dealProperties, setDealProperties] = useState<DealProperty[]>([]);
+  const [propertiesSource, setPropertiesSource] = useState<'crm' | 'fallback' | null>(null);
+
+  useEffect(() => {
+    if (!field) {
+      api.get('/editable-fields/deal-properties')
+        .then((data: { properties: DealProperty[]; source: 'crm' | 'fallback' }) => {
+          setDealProperties(data.properties);
+          setPropertiesSource(data.source);
+        })
+        .catch(() => {});
+    }
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -652,9 +672,14 @@ function FieldModal({
           padding: '24px 24px 20px',
           borderBottom: `1px solid ${colors.border}`,
         }}>
-          <h2 style={{ fontSize: 20, fontWeight: 600, color: colors.text, margin: 0 }}>
-            {field ? 'Edit Field' : 'Add Custom Field'}
+          <h2 style={{ fontSize: 20, fontWeight: 600, color: colors.text, margin: '0 0 6px' }}>
+            {field ? 'Edit Field' : 'Add CRM Field'}
           </h2>
+          {!field && (
+            <p style={{ fontSize: 13, color: colors.textMuted, margin: 0, lineHeight: 1.5 }}>
+              Choose a CRM property to expose on the Deal Detail page. Edits made there will write back to your connected CRM in real time.
+            </p>
+          )}
         </div>
 
         {/* Form */}
@@ -709,9 +734,12 @@ function FieldModal({
 
             {/* Field Name */}
             <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: colors.text, marginBottom: 8 }}>
-                Field Name (Database Column) *
+              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: colors.text, marginBottom: 4 }}>
+                Pandora Field Name *
               </label>
+              <p style={{ fontSize: 11, color: colors.textMuted, marginBottom: 8, marginTop: 0 }}>
+                The column in Pandora's deals table that stores this CRM property. Auto-filled when you pick a CRM property below.
+              </p>
               <input
                 type="text"
                 value={fieldName}
@@ -790,27 +818,95 @@ function FieldModal({
 
             {/* CRM Property Name */}
             <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: colors.text, marginBottom: 8 }}>
-                CRM Property Name *
-              </label>
-              <input
-                type="text"
-                value={crmPropertyName}
-                onChange={(e) => setCrmPropertyName(e.target.value)}
-                disabled={!!field}
-                placeholder="e.g., next_step (HubSpot) or Next_Steps__c (Salesforce)"
-                style={{
-                  width: '100%',
-                  padding: '10px 12px',
-                  fontSize: 14,
-                  fontFamily: fonts.mono,
-                  color: field ? colors.textMuted : colors.text,
-                  background: field ? colors.surfaceHover : colors.surface,
-                  border: `1px solid ${colors.border}`,
-                  borderRadius: 6,
-                  cursor: field ? 'not-allowed' : 'text',
-                }}
-              />
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                <label style={{ fontSize: 13, fontWeight: 500, color: colors.text }}>
+                  CRM Property *
+                </label>
+                {propertiesSource === 'crm' && (
+                  <span style={{ fontSize: 11, color: colors.accentBright, fontWeight: 500 }}>Live from CRM</span>
+                )}
+                {propertiesSource === 'fallback' && (
+                  <span style={{ fontSize: 11, color: colors.textMuted }}>Pandora mapped fields</span>
+                )}
+              </div>
+              {!field && dealProperties.length > 0 ? (
+                <>
+                  <select
+                    value={crmPropertyName}
+                    onChange={(e) => {
+                      const chosen = dealProperties.find((p) => p.crm_property_name === e.target.value);
+                      if (chosen) {
+                        setCrmPropertyName(chosen.crm_property_name);
+                        if (!fieldName) setFieldName(chosen.field_name);
+                        if (!fieldLabel) setFieldLabel(chosen.label);
+                        if (!fieldType || fieldType === 'text') setFieldType((chosen.field_type as FieldType) || 'text');
+                      } else if (e.target.value === '__other__') {
+                        setCrmPropertyName('');
+                      } else {
+                        setCrmPropertyName(e.target.value);
+                      }
+                    }}
+                    style={{
+                      width: '100%',
+                      padding: '10px 12px',
+                      fontSize: 14,
+                      color: colors.text,
+                      background: colors.surface,
+                      border: `1px solid ${colors.border}`,
+                      borderRadius: 6,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <option value="">— select a CRM property —</option>
+                    {[...dealProperties]
+                      .sort((a, b) => a.label.localeCompare(b.label))
+                      .map((p) => (
+                        <option key={p.crm_property_name} value={p.crm_property_name}>
+                          {p.label} ({p.crm_property_name})
+                        </option>
+                      ))}
+                    <option value="__other__">Other — enter manually below</option>
+                  </select>
+                  {(crmPropertyName === '' || !dealProperties.find((p) => p.crm_property_name === crmPropertyName)) && (
+                    <input
+                      type="text"
+                      value={crmPropertyName}
+                      onChange={(e) => setCrmPropertyName(e.target.value)}
+                      placeholder="e.g., next_step (HubSpot) or Next_Steps__c (Salesforce)"
+                      style={{
+                        width: '100%',
+                        marginTop: 8,
+                        padding: '10px 12px',
+                        fontSize: 14,
+                        fontFamily: fonts.mono,
+                        color: colors.text,
+                        background: colors.surface,
+                        border: `1px solid ${colors.border}`,
+                        borderRadius: 6,
+                      }}
+                    />
+                  )}
+                </>
+              ) : (
+                <input
+                  type="text"
+                  value={crmPropertyName}
+                  onChange={(e) => setCrmPropertyName(e.target.value)}
+                  disabled={!!field}
+                  placeholder="e.g., next_step (HubSpot) or Next_Steps__c (Salesforce)"
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    fontSize: 14,
+                    fontFamily: fonts.mono,
+                    color: field ? colors.textMuted : colors.text,
+                    background: field ? colors.surfaceHover : colors.surface,
+                    border: `1px solid ${colors.border}`,
+                    borderRadius: 6,
+                    cursor: field ? 'not-allowed' : 'text',
+                  }}
+                />
+              )}
             </div>
 
             {/* CRM Property Label */}
