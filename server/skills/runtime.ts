@@ -397,6 +397,22 @@ export class SkillRuntime {
         // Non-fatal — push trigger failure never blocks skill completion
       }
 
+      // Workflow Rules: evaluate workflow rules triggered by skill completion (fire-and-forget)
+      try {
+        const { workflowTriggerManager } = await import('../workflow/trigger-manager.js');
+        // Get findings created by this skill run
+        const { query: dbQuery } = await import('../db.js');
+        const findingsResult = await dbQuery(
+          `SELECT id, workspace_id, category, severity, title, summary, metadata, deal_id
+           FROM findings
+           WHERE workspace_id = $1 AND skill_run_id = $2`,
+          [workspaceId, runId]
+        );
+        workflowTriggerManager.onSkillRunComplete(runId, workspaceId, findingsResult.rows);
+      } catch {
+        // Non-fatal — workflow trigger failure never blocks skill completion
+      }
+
       // CRM Write-back: trigger write-back for mappings with after_skill_run sync trigger
       try {
         const { query } = await import('../db.js');

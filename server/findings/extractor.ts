@@ -646,6 +646,26 @@ export async function insertFindings(findings: FindingRow[]): Promise<FindingRow
     }
   }
 
+  // Trigger workflow rules for each finding (fire-and-forget)
+  for (const finding of insertedFindings) {
+    import('../workflow/trigger-manager.js')
+      .then(({ workflowTriggerManager }) => {
+        workflowTriggerManager.onFindingCreated({
+          id: finding.id,
+          workspace_id: workspaceId,
+          category: finding.category,
+          severity: finding.severity,
+          title: finding.message || '',
+          summary: finding.message || '',
+          metadata: finding.metadata || {},
+          deal_id: finding.deal_id || undefined,
+        });
+      })
+      .catch(() => {
+        // Workflow trigger failures are non-fatal
+      });
+  }
+
   console.log(`[FindingsExtractor] Inserted ${insertedFindings.length} findings for ${skillId} in workspace ${workspaceId}`);
   return insertedFindings;
 }
