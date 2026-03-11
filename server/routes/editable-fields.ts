@@ -192,10 +192,11 @@ router.patch('/:workspaceId/editable-fields/:fieldId',
 
       const allowedFields = [
         'field_label',
+        'field_type',
         'is_editable',
         'is_required',
         'display_order',
-        'help_text'
+        'help_text',
       ];
 
       const setClause: string[] = [];
@@ -203,7 +204,11 @@ router.patch('/:workspaceId/editable-fields/:fieldId',
       let paramIndex = 1;
 
       for (const [key, value] of Object.entries(updates)) {
-        if (allowedFields.includes(key)) {
+        if (key === 'field_options') {
+          setClause.push(`field_options = $${paramIndex}`);
+          values.push(value !== null && value !== undefined ? JSON.stringify(value) : null);
+          paramIndex++;
+        } else if (allowedFields.includes(key)) {
           setClause.push(`${key} = $${paramIndex}`);
           values.push(value);
           paramIndex++;

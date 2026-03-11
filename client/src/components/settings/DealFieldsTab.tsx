@@ -35,6 +35,7 @@ interface EditableField {
   is_required: boolean;
   display_order: number;
   help_text: string | null;
+  field_options?: { value: string; label: string }[] | null;
 }
 
 type FieldType = 'text' | 'textarea' | 'number' | 'date' | 'boolean' | 'picklist';
@@ -597,16 +598,19 @@ function FieldModal({
   const [saving, setSaving] = useState(false);
   const [dealProperties, setDealProperties] = useState<DealProperty[]>([]);
   const [propertiesSource, setPropertiesSource] = useState<'crm' | 'fallback' | null>(null);
+  const [crmProperty, setCrmProperty] = useState<DealProperty | null>(null);
 
   useEffect(() => {
-    if (!field) {
-      api.get('/editable-fields/deal-properties')
-        .then((data: { properties: DealProperty[]; source: 'crm' | 'fallback' }) => {
-          setDealProperties(data.properties);
-          setPropertiesSource(data.source);
-        })
-        .catch(() => {});
-    }
+    api.get('/editable-fields/deal-properties')
+      .then((data: { properties: DealProperty[]; source: 'crm' | 'fallback' }) => {
+        setDealProperties(data.properties);
+        setPropertiesSource(data.source);
+        if (field) {
+          const match = data.properties.find((p) => p.crm_property_name === field.crm_property_name);
+          if (match) setCrmProperty(match);
+        }
+      })
+      .catch(() => {});
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -620,11 +624,15 @@ function FieldModal({
     setSaving(true);
     try {
       if (field) {
-        // Update existing field
+        // Update existing field — also re-sync type + options from CRM if available
         await api.patch(`/editable-fields/${field.id}`, {
           field_label: fieldLabel,
           is_required: isRequired,
           help_text: helpText || null,
+          ...(crmProperty ? {
+            field_type: crmProperty.field_type,
+            field_options: crmProperty.options && crmProperty.options.length > 0 ? crmProperty.options : null,
+          } : {}),
         });
       } else {
         // Create new field
@@ -894,24 +902,42 @@ function FieldModal({
                   )}
                 </>
               ) : (
-                <input
-                  type="text"
-                  value={crmPropertyName}
-                  onChange={(e) => setCrmPropertyName(e.target.value)}
-                  disabled={!!field}
-                  placeholder="e.g., next_step (HubSpot) or Next_Steps__c (Salesforce)"
-                  style={{
-                    width: '100%',
-                    padding: '10px 12px',
-                    fontSize: 14,
-                    fontFamily: fonts.mono,
-                    color: field ? colors.textMuted : colors.text,
-                    background: field ? colors.surfaceHover : colors.surface,
-                    border: `1px solid ${colors.border}`,
-                    borderRadius: 6,
-                    cursor: field ? 'not-allowed' : 'text',
-                  }}
-                />
+                <>
+                  <input
+                    type="text"
+                    value={crmPropertyName}
+                    onChange={(e) => setCrmPropertyName(e.target.value)}
+                    disabled={!!field}
+                    placeholder="e.g., next_step (HubSpot) or Next_Steps__c (Salesforce)"
+                    style={{
+                      width: '100%',
+                      padding: '10px 12px',
+                      fontSize: 14,
+                      fontFamily: fonts.mono,
+                      color: field ? colors.textMuted : colors.text,
+                      background: field ? colors.surfaceHover : colors.surface,
+                      border: `1px solid ${colors.border}`,
+                      borderRadius: 6,
+                      cursor: field ? 'not-allowed' : 'text',
+                    }}
+                  />
+                  {field && crmProperty && (crmProperty.field_type !== field.field_type || (crmProperty.options && crmProperty.options.length > 0 && !field.field_options)) && (
+                    <div style={{
+                      marginTop: 8,
+                      padding: '8px 10px',
+                      background: '#fffbeb',
+                      border: '1px solid #fcd34d',
+                      borderRadius: 4,
+                      fontSize: 12,
+                      color: '#92400e',
+                      lineHeight: 1.5,
+                    }}>
+                      CRM reports this as a <strong>{crmProperty.field_type}</strong> field
+                      {crmProperty.options && crmProperty.options.length > 0 && ` with ${crmProperty.options.length} options`}.
+                      {' '}Saving will update the field type and options.
+                    </div>
+                  )}
+                </>
               )}
             </div>
 
