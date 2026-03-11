@@ -333,6 +333,8 @@ export class JobQueue {
         return await this.handleSalesforceSyncJob(job);
       case 'investigate_skill':
         return await this.handleInvestigateSkillJob(job);
+      case 'crm_write_retry':
+        return await this.handleCrmWriteRetry(job);
       default:
         throw new Error(`Unknown job type: ${job.job_type}`);
     }
@@ -657,6 +659,193 @@ export class JobQueue {
       output_text: result.output?.narrative || 'Investigation completed',
       error: result.errors?.[0]?.error ?? null,
     };
+  }
+
+  private async handleCrmWriteRetry(job: Job): Promise<any> {
+    const { logId } = job.payload;
+
+    console.log(`[CrmWriteRetry] Processing retry for log entry ${logId}`);
+
+    await this.updateProgress(job.id, {
+      current: 0,
+      total: 100,
+      message: 'Retrying failed CRM write...',
+    });
+
+    // Fetch the failed write log entry
+    const logResult = await query<{
+      id: string;
+      workspace_id: string;
+      crm_type: string;
+      crm_object_type: string;
+      crm_record_id: string;
+      crm_property_name: string;
+      value_written: string;
+      retry_count: number;
+      workflow_rule_id: string | null;
+    }>(
+      `SELECT id, workspace_id, crm_type, crm_object_type, crm_record_id,
+              crm_property_name, value_written, retry_count, workflow_rule_id
+       FROM crm_write_log
+       WHERE id = $1`,
+      [logId]
+    );
+
+    if (logResult.rows.length === 0) {
+      throw new Error(`CRM write log entry not found: ${logId}`);
+    }
+
+    const log = logResult.rows[0];
+    const value = JSON.parse(log.value_written);
+
+    // Import CRM writers
+    const { updateDeal: updateHubSpotDeal } = await import('../connectors/hubspot/hubspot-writer.js');
+    const { updateDeal: updateSalesforceDeal } = await import('../connectors/salesforce/salesforce-writer.js');
+
+    const startTime = Date.now();
+
+    try {
+      // Retry the CRM write
+      if (log.crm_type === 'hubspot') {
+        await updateHubSpotDeal(log.workspace_id, log.crm_record_id, {
+          [log.crm_property_name]: value,
+        });
+      } else if (log.crm_type === 'salesforce') {
+        await updateSalesforceDeal(log.workspace_id, log.crm_record_id, {
+          [log.crm_property_name]: value,
+        });
+      } else {
+        throw new Error(`Unknown CRM type: ${log.crm_type}`);
+      }
+
+      const duration = Date.now() - startTime;
+
+      // Mark as successful
+      await query(
+        `UPDATE crm_write_log
+         SET status = 'success',
+             retry_count = retry_count + 1,
+             duration_ms = $1,
+             error_message = NULL,
+             next_retry_at = NULL,
+             updated_at = NOW()
+         WHERE id = $2`,
+        [duration, logId]
+      );
+
+      await this.updateProgress(job.id, {
+        current: 100,
+        total: 100,
+        message: 'CRM write succeeded',
+      });
+
+      console.log(`[CrmWriteRetry] Successfully retried write for log ${logId}`);
+
+      return {
+        success: true,
+        logId,
+        retryCount: log.retry_count + 1,
+      };
+    } catch (error: any) {
+      const errorMessage = error.message || String(error);
+      const duration = Date.now() - startTime;
+      const newRetryCount = log.retry_count + 1;
+
+      console.error(`[CrmWriteRetry] Retry failed for log ${logId} (attempt ${newRetryCount}):`, errorMessage);
+
+      if (newRetryCount >= 3) {
+        // Max retries reached - mark as permanently failed
+        await query(
+          `UPDATE crm_write_log
+           SET status = 'failed_permanent',
+               retry_count = $1,
+               error_message = $2,
+               duration_ms = $3,
+               next_retry_at = NULL,
+               updated_at = NOW()
+           WHERE id = $4`,
+          [newRetryCount, errorMessage, duration, logId]
+        );
+
+        // If this write came from a workflow rule, create a pending action for HITL
+        if (log.workflow_rule_id) {
+          await this.createFailedWriteAction(log, errorMessage);
+        }
+
+        throw new Error(`CRM write permanently failed after ${newRetryCount} retries: ${errorMessage}`);
+      } else {
+        // Schedule next retry with exponential backoff
+        const backoffMinutes = newRetryCount === 1 ? 5 : newRetryCount === 2 ? 15 : 45;
+
+        await query(
+          `UPDATE crm_write_log
+           SET status = 'failed',
+               retry_count = $1,
+               error_message = $2,
+               duration_ms = $3,
+               next_retry_at = NOW() + interval '${backoffMinutes} minutes',
+               updated_at = NOW()
+           WHERE id = $4`,
+          [newRetryCount, errorMessage, duration, logId]
+        );
+
+        throw new Error(`CRM write retry failed (attempt ${newRetryCount}/3): ${errorMessage}`);
+      }
+    }
+  }
+
+  private async createFailedWriteAction(
+    log: {
+      workspace_id: string;
+      crm_object_type: string;
+      crm_record_id: string;
+      crm_property_name: string;
+      value_written: string;
+      workflow_rule_id: string | null;
+    },
+    errorMessage: string
+  ): Promise<void> {
+    try {
+      // Find the deal ID from CRM record ID
+      const dealResult = await query<{ id: string }>(
+        `SELECT id FROM deals
+         WHERE workspace_id = $1 AND crm_id = $2
+         LIMIT 1`,
+        [log.workspace_id, log.crm_record_id]
+      );
+
+      if (dealResult.rows.length === 0) {
+        console.warn(`[CrmWriteRetry] Could not find deal for CRM record ${log.crm_record_id}`);
+        return;
+      }
+
+      const dealId = dealResult.rows[0].id;
+
+      // Create pending action
+      await query(
+        `INSERT INTO actions
+          (workspace_id, target_deal_id, workflow_rule_id, action_type, severity,
+           title, summary, execution_payload, execution_status, approval_status)
+         VALUES ($1, $2, $3, 'crm_field_write', 'critical', $4, $5, $6, 'open', 'pending')`,
+        [
+          log.workspace_id,
+          dealId,
+          log.workflow_rule_id,
+          'CRM Write Failed - Manual Action Required',
+          `Failed to write ${log.crm_property_name} after 3 retries. Error: ${errorMessage}`,
+          JSON.stringify({
+            field: log.crm_property_name,
+            to_value: JSON.parse(log.value_written),
+            error: errorMessage,
+            requires_manual_retry: true,
+          }),
+        ]
+      );
+
+      console.log(`[CrmWriteRetry] Created pending action for failed write (log ${log.workspace_id})`);
+    } catch (err) {
+      console.error(`[CrmWriteRetry] Failed to create pending action:`, err);
+    }
   }
 }
 

@@ -86,6 +86,13 @@ export class ActionExecutor {
       return { success: false, error: 'Only "deal" object supported currently' };
     }
 
+    // Check if field requires approval
+    const { requiresApproval } = await import('../crm-writeback/pandora-fields.js');
+    if (requiresApproval(field) && rule.execution_mode === 'auto') {
+      // Force to queue mode for safety-critical fields
+      return this.queueCrmFieldWrite(rule, context, field, value_expr);
+    }
+
     if (!context.deal?.id || !context.deal?.crm_id) {
       return { success: false, error: 'Deal ID or CRM ID missing from context' };
     }
@@ -161,6 +168,59 @@ export class ActionExecutor {
 
       throw error;
     }
+  }
+
+  /**
+   * Queue a CRM field write for approval (always_queue fields)
+   */
+  private async queueCrmFieldWrite(
+    rule: WorkflowRule,
+    context: RuleContext,
+    field: string,
+    value_expr: string
+  ): Promise<ActionResult> {
+    if (!context.deal?.id) {
+      return { success: false, error: 'Deal ID missing from context' };
+    }
+
+    // Resolve value expression for display purposes
+    const { RuleEvaluator } = await import('./rule-evaluator.js');
+    const evaluator = new RuleEvaluator();
+    const value = evaluator.resolveValueExpr(value_expr, context);
+
+    // Get field metadata for better action title
+    const { getFieldByKey } = await import('../crm-writeback/pandora-fields.js');
+    const fieldMeta = getFieldByKey(field);
+    const fieldLabel = fieldMeta?.label || field;
+
+    // Create pending action
+    const result = await query(
+      `INSERT INTO actions
+        (workspace_id, target_deal_id, workflow_rule_id, action_type, severity,
+         title, summary, execution_payload, execution_status, approval_status)
+       VALUES ($1, $2, $3, 'crm_field_write', 'warning', $4, $5, $6, 'open', 'pending')
+       RETURNING id`,
+      [
+        rule.workspace_id,
+        context.deal.id,
+        rule.id,
+        `Update ${fieldLabel}`,
+        `Workflow rule "${rule.name}" recommends updating ${fieldLabel} to ${JSON.stringify(value)}`,
+        JSON.stringify({
+          field,
+          from_value: (context.deal as any)[field] || null,
+          to_value: value,
+          source: 'workflow_rule',
+          rule_id: rule.id,
+        }),
+      ]
+    );
+
+    return {
+      success: true,
+      message: `Queued ${fieldLabel} update for approval`,
+      action_id: result.rows[0].id,
+    };
   }
 
   /**

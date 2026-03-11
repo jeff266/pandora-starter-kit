@@ -664,6 +664,9 @@ async function initializeAfterStart(t0: number, tDb: number): Promise<void> {
   const dbPool = (await import('./db.js')).default;
   startActionExpiryScheduler(dbPool);
 
+  const { startCrmRetryScheduler } = await import('./jobs/crm-retry-scheduler.js');
+  startCrmRetryScheduler(dbPool);
+
   const { checkScheduledReports, initializeScheduledReports } = await import('./reports/scheduler.js');
   await initializeScheduledReports();
   setInterval(checkScheduledReports, 60 * 1000);
