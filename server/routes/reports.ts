@@ -511,6 +511,37 @@ router.post('/:workspaceId/reports/:reportId/generations', async (req: Request, 
       }
     }
 
+    // Write training pairs to agent_tuning_pairs for override annotations only.
+    // Strikes without a replacement value are not yet a training pair.
+    if (Array.isArray(human_annotations)) {
+      // Pull the first skill_id from the parent generation's skills_run array
+      const skillsRun: string[] = Array.isArray(parent.skills_run)
+        ? parent.skills_run
+        : typeof parent.skills_run === 'string'
+          ? JSON.parse(parent.skills_run)
+          : [];
+      const skillId: string | null = skillsRun.length > 0 ? skillsRun[0] : null;
+
+      for (const annotation of human_annotations) {
+        if (annotation.type === 'override' && annotation.new_value) {
+          await query(
+            `INSERT INTO agent_tuning_pairs
+               (workspace_id, agent_id, generation_id, skill_id, source, block_id, input_context, preferred_output)
+             VALUES ($1, $2, $3, $4, 'report_annotation', $5, $6, $7)`,
+            [
+              workspaceId,
+              parent.agent_id || null,
+              newGeneration.id,
+              skillId,
+              annotation.block_id || null,
+              String(annotation.original_value ?? ''),
+              String(annotation.new_value),
+            ]
+          ).catch(() => {});
+        }
+      }
+    }
+
     logger.info(`Saved V${nextVersion} report generation`, { newId: newGeneration.id, parentId: parent_generation_id });
     res.json({ generation: newGeneration });
   } catch (err) {
