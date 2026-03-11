@@ -15,6 +15,8 @@ interface Finding {
   severity: string;
   message: string;
   skill_id: string;
+  category?: string;
+  metadata?: Record<string, any>;
   deal_id?: string;
   deal_name?: string;
   account_id?: string;
@@ -28,6 +30,7 @@ interface FindingCardProps {
   finding: Finding;
   onClick?: (finding: Finding) => void;
   onAskPandora?: (finding: Finding) => void;
+  onCreateRule?: (finding: Finding) => void;
 }
 
 const GRADE_COLORS: Record<string, string> = {
@@ -86,7 +89,7 @@ function TriSignalBadges({ sig }: { sig: TriSignal }) {
   );
 }
 
-export default function FindingCard({ finding, onClick, onAskPandora }: FindingCardProps) {
+export default function FindingCard({ finding, onClick, onAskPandora, onCreateRule }: FindingCardProps) {
   const [isHovered, setIsHovered] = React.useState(false);
   const isClickable = !!(finding.deal_id || finding.account_id || onClick);
 
@@ -134,33 +137,64 @@ export default function FindingCard({ finding, onClick, onAskPandora }: FindingC
             </span>
           </div>
           {finding.tri_signal && <TriSignalBadges sig={finding.tri_signal} />}
-          {onAskPandora && (
-            <div style={{ marginTop: 6 }}>
-              <button
-                onClick={(e) => { e.stopPropagation(); onAskPandora(finding); }}
-                style={{
-                  fontSize: 11,
-                  fontWeight: 600,
-                  padding: '3px 10px',
-                  borderRadius: 4,
-                  border: `1px solid ${colors.accent}44`,
-                  background: 'transparent',
-                  color: colors.accent,
-                  cursor: 'pointer',
-                  fontFamily: fonts.mono,
-                  transition: 'background 0.12s, border-color 0.12s',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = `${colors.accent}18`;
-                  e.currentTarget.style.borderColor = colors.accent;
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'transparent';
-                  e.currentTarget.style.borderColor = `${colors.accent}44`;
-                }}
-              >
-                Ask Pandora →
-              </button>
+          {(onAskPandora || onCreateRule) && (
+            <div style={{ marginTop: 6, display: 'flex', gap: 6 }}>
+              {onAskPandora && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onAskPandora(finding); }}
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    padding: '3px 10px',
+                    borderRadius: 4,
+                    border: `1px solid ${colors.accent}44`,
+                    background: 'transparent',
+                    color: colors.accent,
+                    cursor: 'pointer',
+                    fontFamily: fonts.mono,
+                    transition: 'background 0.12s, border-color 0.12s',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = `${colors.accent}18`;
+                    e.currentTarget.style.borderColor = colors.accent;
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'transparent';
+                    e.currentTarget.style.borderColor = `${colors.accent}44`;
+                  }}
+                >
+                  Ask Pandora →
+                </button>
+              )}
+              {onCreateRule && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onCreateRule(finding); }}
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    padding: '3px 10px',
+                    borderRadius: 4,
+                    border: `1px solid ${colors.textSecondary}44`,
+                    background: 'transparent',
+                    color: colors.textSecondary,
+                    cursor: 'pointer',
+                    fontFamily: fonts.mono,
+                    transition: 'background 0.12s, border-color 0.12s, color 0.12s',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = `${colors.textSecondary}18`;
+                    e.currentTarget.style.borderColor = colors.textSecondary;
+                    e.currentTarget.style.color = colors.text;
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'transparent';
+                    e.currentTarget.style.borderColor = `${colors.textSecondary}44`;
+                    e.currentTarget.style.color = colors.textSecondary;
+                  }}
+                >
+                  Create Rule →
+                </button>
+              )}
             </div>
           )}
         </div>
