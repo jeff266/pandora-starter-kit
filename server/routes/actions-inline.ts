@@ -476,17 +476,20 @@ router.post(
 
         // Compute dedup hash (match the index predicate: WHERE execution_status != 'dismissed')
         const upsertResult = await dbQuery(
-          `INSERT INTO actions (
+          `WITH input AS (
+             SELECT $1::uuid AS ws_id, $2::uuid AS d_id, $3::text AS ttl,
+                    $4::text AS src, $5::text AS cat, $6::text AS crm_action
+           )
+           INSERT INTO actions (
              workspace_id, target_deal_id, action_type, severity,
              title, summary, source, category, suggested_crm_action,
              dedup_hash, execution_status, source_skill
            )
-           VALUES (
-             $1, $2, 'next_step', 'info',
-             $3, $3, $4, $5, $6,
-             md5($1::text || '::' || $2::text || '::' || $3),
-             'open', 'recommended_next_steps'
-           )
+           SELECT ws_id, d_id, 'next_step', 'info',
+                  ttl, ttl, src, cat, crm_action,
+                  md5(ws_id::text || '::' || d_id::text || '::' || ttl),
+                  'open', 'recommended_next_steps'
+           FROM input
            ON CONFLICT (workspace_id, dedup_hash) WHERE execution_status != 'dismissed'
            DO UPDATE SET updated_at = now()
            RETURNING id, title, source, suggested_crm_action`,
