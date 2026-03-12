@@ -130,15 +130,124 @@ export class RuleEvaluator {
   }
 
   /**
-   * Resolve value expressions like 'today+3d', '{{deal.owner_email}}', 'stage_avg*2'
+   * Split a comma-separated argument string while respecting nested
+   * parentheses and single-quoted strings.
+   * e.g. "a, 'b,c', fn(x, y)" → ["a", "'b,c'", "fn(x, y)"]
+   */
+  private splitArgs(str: string): string[] {
+    const args: string[] = [];
+    let depth = 0;
+    let inQuote = false;
+    let current = '';
+
+    for (let i = 0; i < str.length; i++) {
+      const ch = str[i];
+      if (ch === "'" && !inQuote) {
+        inQuote = true;
+        current += ch;
+      } else if (ch === "'" && inQuote) {
+        inQuote = false;
+        current += ch;
+      } else if (inQuote) {
+        current += ch;
+      } else if (ch === '(') {
+        depth++;
+        current += ch;
+      } else if (ch === ')') {
+        depth--;
+        current += ch;
+      } else if (ch === ',' && depth === 0) {
+        args.push(current.trim());
+        current = '';
+      } else {
+        current += ch;
+      }
+    }
+    if (current.trim()) args.push(current.trim());
+    return args;
+  }
+
+  /**
+   * Resolve value expressions.
+   *
+   * Supported patterns (evaluated in order):
+   *   upper(expr)                      — uppercase string
+   *   lower(expr)                      — lowercase string
+   *   round(expr, n)                   — round to n decimal places
+   *   concat(expr1, expr2, ...)        — join values as strings
+   *   if(field op value, true, false)  — conditional (ops: < > <= >= == !=)
+   *   today+Nd / today-Nd              — date offset (YYYY-MM-DD)
+   *   {{deal.field}}                   — template variable (dot path into context)
+   *   field*n / field/n / etc.         — bare-field arithmetic
+   *   'literal text'                   — quoted plain string
    */
   resolveValueExpr(expr: string, context: RuleContext): any {
     if (typeof expr !== 'string') {
       return expr;
     }
 
-    // Handle date expressions: today+Nd, today-Nd
-    const dateMatch = expr.match(/^today([+-]\d+)d$/);
+    const trimmed = expr.trim();
+
+    // 1. Function calls: fnName(args...)
+    const fnMatch = trimmed.match(/^([a-z_]\w*)\((.+)\)$/);
+    if (fnMatch) {
+      const [, fnName, argsStr] = fnMatch;
+      const knownFns = ['upper', 'lower', 'round', 'concat', 'if'];
+      if (knownFns.includes(fnName)) {
+        const args = this.splitArgs(argsStr);
+
+        switch (fnName) {
+          case 'upper': {
+            const val = this.resolveValueExpr(args[0] ?? '', context);
+            return String(val ?? '').toUpperCase();
+          }
+          case 'lower': {
+            const val = this.resolveValueExpr(args[0] ?? '', context);
+            return String(val ?? '').toLowerCase();
+          }
+          case 'round': {
+            const val = Number(this.resolveValueExpr(args[0] ?? '0', context));
+            const decimals = args[1] !== undefined ? Math.max(0, parseInt(args[1])) : 0;
+            return isNaN(val) ? val : Number(val.toFixed(decimals));
+          }
+          case 'concat': {
+            return args
+              .map(a => String(this.resolveValueExpr(a, context) ?? ''))
+              .join('');
+          }
+          case 'if': {
+            if (args.length < 3) return null;
+            const [condArg, trueArg, falseArg] = args;
+            // Parse condition: leftExpr op rightExpr
+            const condMatch = condArg.match(/^(.+?)\s*(<=|>=|!=|==|<|>)\s*(.+)$/);
+            if (!condMatch) {
+              // No operator found — treat non-empty resolved value as truthy
+              const condVal = this.resolveValueExpr(condArg, context);
+              return this.resolveValueExpr(condVal ? trueArg : falseArg, context);
+            }
+            const [, leftExpr, op, rightExpr] = condMatch;
+            const leftVal  = this.resolveValueExpr(leftExpr.trim(), context);
+            const rightVal = this.resolveValueExpr(rightExpr.trim(), context);
+            const leftNum  = Number(leftVal);
+            const rightNum = Number(rightVal);
+            let result: boolean;
+            switch (op) {
+              case '<':  result = leftNum < rightNum; break;
+              case '>':  result = leftNum > rightNum; break;
+              case '<=': result = leftNum <= rightNum; break;
+              case '>=': result = leftNum >= rightNum; break;
+              case '==': result = String(leftVal) === String(rightVal); break;
+              case '!=': result = String(leftVal) !== String(rightVal); break;
+              default:   result = false;
+            }
+            return this.resolveValueExpr(result ? trueArg : falseArg, context);
+          }
+        }
+      }
+    }
+
+    // 2. Date expressions: today+Nd, today-Nd
+    const dateMatch = trimmed.match(/^today([+-]\d+)d$/);
     if (dateMatch) {
       const days = parseInt(dateMatch[1]);
       const date = new Date();
@@ -146,35 +255,50 @@ export class RuleEvaluator {
       return date.toISOString().split('T')[0]; // YYYY-MM-DD
     }
 
-    // Handle template variables: {{field.path}}
-    const templateMatch = expr.match(/\{\{(.+?)\}\}/g);
-    if (templateMatch) {
-      let result = expr;
-      for (const match of templateMatch) {
+    // 3. Template variables: {{field.path}} — with optional trailing arithmetic
+    if (trimmed.includes('{{')) {
+      let result = trimmed;
+      const matches = trimmed.match(/\{\{(.+?)\}\}/g) || [];
+      for (const match of matches) {
         const fieldPath = match.slice(2, -2).trim();
         const value = this.resolveField(fieldPath, context);
         result = result.replace(match, String(value ?? ''));
       }
+      // After substitution: if the result looks like `number op number`, evaluate it
+      const numArithMatch = result.match(/^(-?\d+(?:\.\d+)?)\s*([*\/])\s*(\d+(?:\.\d+)?)$/);
+      if (numArithMatch) {
+        const [, a, op, b] = numArithMatch;
+        const av = Number(a);
+        const bv = Number(b);
+        switch (op) {
+          case '*': return av * bv;
+          case '/': return bv !== 0 ? av / bv : av;
+        }
+      }
       return result;
     }
 
-    // Handle arithmetic expressions: stage_avg*2
-    const arithMatch = expr.match(/^(\w+)([*\/+-])(\d+(?:\.\d+)?)$/);
+    // 4. Bare-field arithmetic: amount*0.9, days_in_stage+5
+    const arithMatch = trimmed.match(/^(\w+)([*\/+-])(\d+(?:\.\d+)?)$/);
     if (arithMatch) {
       const [, field, op, num] = arithMatch;
       const fieldValue = Number(this.resolveField(field, context));
       const numValue = Number(num);
-
       switch (op) {
         case '*': return fieldValue * numValue;
-        case '/': return fieldValue / numValue;
+        case '/': return numValue !== 0 ? fieldValue / numValue : fieldValue;
         case '+': return fieldValue + numValue;
         case '-': return fieldValue - numValue;
       }
     }
 
-    // Return as-is if no pattern matches
-    return expr;
+    // 5. Quoted plain string literal: 'text'
+    if (trimmed.startsWith("'") && trimmed.endsWith("'") && trimmed.length >= 2) {
+      return trimmed.slice(1, -1);
+    }
+
+    // 6. Return as-is
+    return trimmed;
   }
 
   /**

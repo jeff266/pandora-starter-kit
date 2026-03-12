@@ -385,16 +385,31 @@ function formatRelativeTime(dateStr: string): string {
 }
 
 // Rule Builder Modal
-function validateExpr(expr: string): { valid: boolean; message: string } | null {
-  if (!expr.trim()) return null;
+const KNOWN_FNS = ['upper', 'lower', 'round', 'concat', 'if'];
 
-  const openCount = (expr.match(/\{\{/g) || []).length;
-  const closeCount = (expr.match(/\}\}/g) || []).length;
+function validateExpr(expr: string): { valid: boolean; message: string } | null {
+  const trimmed = expr.trim();
+  if (!trimmed) return null;
+
+  // Function call: fnName(...)
+  const fnMatch = trimmed.match(/^([a-z_]\w*)\((.+)\)$/);
+  if (fnMatch) {
+    const [, fnName] = fnMatch;
+    if (!KNOWN_FNS.includes(fnName)) {
+      return { valid: false, message: `Unknown function "${fnName}" — available: ${KNOWN_FNS.join(', ')}` };
+    }
+    return { valid: true, message: `${fnName}() — valid function call` };
+  }
+
+  // Template variable braces must be balanced
+  const openCount = (trimmed.match(/\{\{/g) || []).length;
+  const closeCount = (trimmed.match(/\}\}/g) || []).length;
   if (openCount !== closeCount) {
     return { valid: false, message: 'Unclosed template variable — use {{deal.field}}' };
   }
 
-  if (expr.startsWith('today') && expr !== 'today' && !/^today[+-]\d+d$/.test(expr)) {
+  // Date offset
+  if (trimmed.startsWith('today') && trimmed !== 'today' && !/^today[+-]\d+d$/.test(trimmed)) {
     return { valid: false, message: 'Invalid date offset — use today+7d or today-30d' };
   }
 
@@ -997,8 +1012,8 @@ function RuleBuilderModal({ rule, onClose, onSave }: RuleBuilderModalProps) {
                         ["'text'", 'Plain text literal', "'High Priority'"],
                         ['today+Nd', 'N days from now', 'today+7d'],
                         ['today-Nd', 'N days ago', 'today-30d'],
-                        ['{{deal.field}}', 'Dynamic deal field', '{{deal.amount}}'],
-                        ['{{deal.field}}*n', 'Arithmetic on field', '{{deal.amount}}*0.9'],
+                        ['{{deal.field}}', 'Dynamic deal field', '{{deal.stage}}'],
+                        ['amount*0.9', 'Bare-field arithmetic', 'days_in_stage+5'],
                       ] as [string, string, string][]).map(([syntax, desc, ex]) => (
                         <tr key={syntax}>
                           <td style={{ color: colors.accent, paddingRight: 12, whiteSpace: 'nowrap', verticalAlign: 'top' }}>{syntax}</td>
@@ -1008,6 +1023,28 @@ function RuleBuilderModal({ rule, onClose, onSave }: RuleBuilderModalProps) {
                       ))}
                     </tbody>
                   </table>
+
+                  <div style={{ marginTop: 10, marginBottom: 4, fontFamily: fonts.sans, color: colors.text, fontWeight: 600, fontSize: 11 }}>
+                    Functions
+                  </div>
+                  <table style={{ borderSpacing: 0, width: '100%', fontFamily: fonts.mono }}>
+                    <tbody>
+                      {([
+                        ['upper(expr)', 'Uppercase', "upper({{deal.stage}})"],
+                        ['lower(expr)', 'Lowercase', "lower({{deal.owner_email}})"],
+                        ['round(expr, n)', 'Round to n decimals', 'round({{deal.amount}}, 0)'],
+                        ['concat(a, b, ...)', 'Join values', "concat({{deal.name}}, ' — ', {{deal.stage}})"],
+                        ['if(field op val, t, f)', 'Conditional', "if({{deal.health_score}} < 50, 'At Risk', 'Healthy')"],
+                      ] as [string, string, string][]).map(([syntax, desc, ex]) => (
+                        <tr key={syntax}>
+                          <td style={{ color: colors.accent, paddingRight: 12, whiteSpace: 'nowrap', verticalAlign: 'top' }}>{syntax}</td>
+                          <td style={{ paddingRight: 12, color: colors.textMuted, verticalAlign: 'top' }}>{desc}</td>
+                          <td style={{ color: colors.textSecondary, verticalAlign: 'top', fontSize: 9.5 }}>{ex}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+
                   <div style={{ marginTop: 8, fontFamily: fonts.sans, color: colors.text, fontWeight: 600, fontSize: 11 }}>
                     Available deal fields:
                   </div>
