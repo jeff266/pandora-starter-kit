@@ -9,6 +9,8 @@ import type { ChartSpec } from './shared/ChartRenderer';
 import ChatDocBar from './ChatDocBar';
 import SaveAsAgentBanner from './chat/SaveAsAgentBanner';
 import { useSaveAsAgentTrigger } from '../hooks/useSaveAsAgentTrigger';
+import SuggestedActionsPanel from './assistant/SuggestedActionsPanel';
+import type { SuggestedAction } from './assistant/useConversationStream';
 
 interface ToolCall {
   tool: string;
@@ -93,6 +95,7 @@ export default function ChatPanel({ isOpen, onClose, scope, initialSessionId, pe
   const navigate = useNavigate();
   const { anon } = useDemoMode();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [chatSuggestedActions, setChatSuggestedActions] = useState<SuggestedAction[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [threadId, setThreadId] = useState<string | null>(null);
@@ -345,6 +348,7 @@ export default function ChatPanel({ isOpen, onClose, scope, initialSessionId, pe
       timestamp: new Date().toISOString(),
     };
     setMessages(prev => [...prev, userMsg]);
+    setChatSuggestedActions([]);
     setLoading(true);
 
     try {
@@ -375,6 +379,9 @@ export default function ChatPanel({ isOpen, onClose, scope, initialSessionId, pe
         chart_specs: result.chart_specs,
       };
       setMessages(prev => [...prev, assistantMsg]);
+      if (result.suggested_actions && result.suggested_actions.length > 0) {
+        setChatSuggestedActions(result.suggested_actions);
+      }
     } catch (err) {
       let msg = err instanceof Error ? err.message : 'Something went wrong';
       try {
@@ -708,6 +715,15 @@ export default function ChatPanel({ isOpen, onClose, scope, initialSessionId, pe
             </div>
           );
           })}
+
+          {chatSuggestedActions.length > 0 && !loading && (
+            <div style={{ padding: '0 16px 8px' }}>
+              <SuggestedActionsPanel
+                actions={chatSuggestedActions}
+                onDismissAll={() => setChatSuggestedActions([])}
+              />
+            </div>
+          )}
 
           {loading && <ThinkingBubble query={messages[messages.length - 1]?.content || ''} />}
 

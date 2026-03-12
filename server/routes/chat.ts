@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import { randomUUID } from 'crypto';
 import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import { handleConversationTurn } from '../chat/orchestrator.js';
+import { extractSuggestedActions } from '../chat/action-extractor.js';
 import { getConversationState } from '../chat/conversation-state.js';
 import {
   createChatSession,
@@ -131,6 +132,17 @@ router.post('/:workspaceId/chat', async (req: Request, res: Response): Promise<v
         });
     }
 
+    // Extract suggested actions from answer text (fire before responding)
+    let suggestedActions: any[] = [];
+    try {
+      suggestedActions = await extractSuggestedActions(result.answer, [], workspaceId);
+      if (suggestedActions.length > 0) {
+        console.log('[chat] extracted suggested_actions:', suggestedActions.length);
+      }
+    } catch (err) {
+      console.error('[chat] extractSuggestedActions failed:', err);
+    }
+
     res.json({
       answer: result.answer,
       thread_id: result.thread_id,
@@ -147,6 +159,7 @@ router.post('/:workspaceId/chat', async (req: Request, res: Response): Promise<v
       ...(result.latency_ms != null ? { latency_ms: result.latency_ms } : {}),
       ...(result.inline_actions ? { inline_actions: result.inline_actions } : {}),
       ...(result.chart_specs?.length ? { chart_specs: result.chart_specs } : {}),
+      ...(suggestedActions.length > 0 ? { suggested_actions: suggestedActions } : {}),
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
