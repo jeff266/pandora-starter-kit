@@ -498,11 +498,12 @@ export default function DealDetail() {
 
   // Fetch MEDDIC Coverage data
   const fetchMeddicCoverage = async () => {
-    if (!dealId || !selectedWorkspaceId) return;
+    const wsId = currentWorkspace?.id;
+    if (!dealId || !wsId) return;
 
     setMeddicCoverageLoading(true);
     try {
-      const data = await api.get(`/deals/${dealId}/skills/meddic-coverage/latest?workspace_id=${selectedWorkspaceId}`);
+      const data = await api.get(`/deals/${dealId}/skills/meddic-coverage/latest?workspace_id=${wsId}`);
       setMeddicCoverageData(data);
     } catch (err: any) {
       // 404 is expected if the skill hasn't been run yet
@@ -1163,7 +1164,6 @@ export default function DealDetail() {
               )}
               {deal.phase_divergence && deal.phase_confidence >= 0.6 && (
                 <>
-                  <span style={{ color: colors.textMuted, fontSize: 13 }}>→</span>
                   <div
                     style={{
                       background: colors.yellowSoft,
@@ -1704,13 +1704,14 @@ export default function DealDetail() {
                   </div>
                   <button
                     onClick={async () => {
-                      if (!dealId || !selectedWorkspaceId) return;
+                      const wsId = currentWorkspace?.id;
+                      if (!dealId || !wsId) return;
                       setMeddicCoverageLoading(true);
                       try {
                         await api.post('/skill-runs', {
                           skill_id: 'meddic-coverage',
                           params: { deal_id: dealId },
-                          workspace_id: selectedWorkspaceId,
+                          workspace_id: wsId,
                         });
                         // Poll for completion and refresh
                         setTimeout(() => fetchMeddicCoverage(), 30000); // Refresh after 30s

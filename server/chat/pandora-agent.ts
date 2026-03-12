@@ -12,6 +12,7 @@ import { captureContradictionClassificationPair } from '../llm/training-capture.
 import { randomUUID } from 'crypto';
 import { judgeAction } from '../actions/judgment.js';
 import { parseActionsFromOutput, insertExtractedActions } from '../actions/index.js';
+import { extractSuggestedActions } from './action-extractor.js';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { join, dirname } from 'path';
@@ -1936,6 +1937,26 @@ The system will transform raw_annotation into a voice-styled annotation automati
         }));
 
         sse?.({ type: 'actions_judged', items: judgedActions });
+      }
+
+      // ── Emit suggested_actions for SuggestedActionsPanel (pattern-match only, no LLM cost) ──
+      if (toolTrace.length >= 3) {
+        try {
+          const dealCtx = currentSessionContext.activeScope?.entityType === 'deal'
+            ? { deal_id: currentSessionContext.activeScope.entityId, deal_name: currentSessionContext.activeScope.entityName }
+            : undefined;
+          const suggestedActions = await extractSuggestedActions(
+            parsed.answer,
+            toolTrace as any,
+            workspaceId,
+            dealCtx,
+          );
+          if (suggestedActions.length > 0) {
+            sse?.({ type: 'suggested_actions', actions: suggestedActions });
+          }
+        } catch (err) {
+          console.error('[PandoraAgent] suggested actions extraction failed:', err);
+        }
       }
 
       const charts = extractCharts(response.content, currentSessionContext.voiceProfile);
