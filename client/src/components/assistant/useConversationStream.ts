@@ -36,6 +36,12 @@ export interface InlineAction {
   deal_name?: string;
 }
 
+export interface EntityScope {
+  entityType: 'deal';
+  entityId: string;
+  entityName: string;
+}
+
 export interface ConversationState {
   phase: 'idle' | 'recruiting' | 'findings' | 'synthesis' | 'complete' | 'clarifying';
   messages: ConversationMessage[];
@@ -57,6 +63,7 @@ export interface ConversationState {
   error: string | null;
   restored: boolean;
   clarifyingQuestion: { question: string; dimension: string; options: { label: string; value: string }[] } | null;
+  scope: EntityScope | null;
 }
 
 type Action =
@@ -66,6 +73,7 @@ type Action =
   | { type: 'DISMISS_JUDGED_ACTION'; id: string }
   | { type: 'DISMISS_INLINE_ACTION'; id: string }
   | { type: 'INIT_MESSAGES'; messages: ConversationMessage[] }
+  | { type: 'SET_SCOPE'; scope: EntityScope | null }
   | { type: 'RESET' };
 
 function makeId(): string {
@@ -93,10 +101,14 @@ const initial: ConversationState = {
   error: null,
   restored: false,
   clarifyingQuestion: null,
+  scope: null,
 };
 
 function reducer(state: ConversationState, action: Action): ConversationState {
   if (action.type === 'RESET') return { ...initial };
+  if (action.type === 'SET_SCOPE') {
+    return { ...state, scope: action.scope };
+  }
   if (action.type === 'INIT_MESSAGES') {
     if (action.messages.length === 0) return state;
     const workspaceId = getWorkspaceId();
@@ -315,6 +327,7 @@ export function useConversationStream() {
         body: JSON.stringify({
           message: text,
           thread_id: threadIdRef.current ?? undefined,
+          scope: state.scope ?? undefined,
         }),
         signal: abortRef.current.signal,
       });
@@ -382,5 +395,9 @@ export function useConversationStream() {
     dispatch({ type: 'DISMISS_INLINE_ACTION', id });
   }, []);
 
-  return { state, sendMessage, reset, dismissAction, dismissJudgedAction, dismissInlineAction, threadId, loadHistory, startNewThread };
+  const setScope = useCallback((scope: EntityScope | null) => {
+    dispatch({ type: 'SET_SCOPE', scope });
+  }, []);
+
+  return { state, sendMessage, reset, dismissAction, dismissJudgedAction, dismissInlineAction, threadId, loadHistory, startNewThread, setScope };
 }

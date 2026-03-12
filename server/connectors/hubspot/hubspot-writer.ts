@@ -206,6 +206,7 @@ export async function createTask(
   const properties: Record<string, string> = {
     hs_task_subject: task.subject,
     hs_task_status: 'NOT_STARTED',
+    hs_task_type: 'TODO',
   };
   if (task.body) properties.hs_task_body = task.body;
   if (task.dueDate) properties.hs_timestamp = new Date(task.dueDate).getTime().toString();

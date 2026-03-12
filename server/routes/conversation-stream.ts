@@ -66,7 +66,11 @@ router.get('/:workspaceId/conversation/history/:threadId', async (req: Request, 
 // ── POST stream ───────────────────────────────────────────────────────────────
 router.post('/:workspaceId/conversation/stream', async (req: Request, res: Response): Promise<void> => {
   const workspaceId = req.params.workspaceId as string;
-  const { message, thread_id } = req.body as { message: string; thread_id?: string };
+  const { message, thread_id, scope } = req.body as {
+    message: string;
+    thread_id?: string;
+    scope?: { entityType: 'deal'; entityId: string; entityName: string };
+  };
 
   if (!message?.trim()) {
     res.status(400).json({ error: 'message required' });
@@ -139,6 +143,34 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
     }
   }
 
+  // ── Deal Context Scoping ────────────────────────────────────────────────────
+  // If conversation is scoped to a deal, inject deal context into sessionContext
+  // and prepend deal info to the system prompt
+  let dealContextBlock = '';
+  if (scope && scope.entityType === 'deal' && sessionContext) {
+    sessionContext.activeScope = {
+      entityType: scope.entityType,
+      entityId: scope.entityId,
+      entityName: scope.entityName,
+    };
+
+    try {
+      const dealResult = await query(
+        `SELECT id, name, stage, amount, owner_name, close_date
+         FROM deals
+         WHERE id = $1 AND workspace_id = $2`,
+        [scope.entityId, workspaceId]
+      );
+
+      if (dealResult.rows.length > 0) {
+        const deal = dealResult.rows[0];
+        dealContextBlock = `\n\nCURRENT CONTEXT:\nYou are currently viewing the deal: "${deal.name}" (ID: ${deal.id}).\nStage: ${deal.stage || 'Unknown'}\nAmount: ${deal.amount ? `$${deal.amount.toLocaleString()}` : 'Not set'}\nOwner: ${deal.owner_name || 'Unassigned'}\nClose Date: ${deal.close_date || 'Not set'}\n\nWhen the user asks questions without specifying a deal, default to this deal.\nFor example, if they ask "What's the MEDDIC score?" without mentioning a deal name, use this deal's ID in tool calls.\n`;
+      }
+    } catch (dealErr) {
+      console.error('[conversation-stream] Failed to load deal context:', dealErr);
+    }
+  }
+
   const contextBlock = await buildWorkspaceContextBlock(workspaceId, userId).catch(() => '');
 
   // ── Workspace Terminology ──────────────────────────────────────────────────
@@ -178,10 +210,10 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
     }
   }
 
-  // Combined system context: workspace memory + optional brief instructions
+  // Combined system context: workspace memory + optional brief instructions + deal context
   const fullContextBlock = briefContextBlock
-    ? `${BRIEF_SYSTEM_PROMPT}\n\n${contextBlock}${dictionaryContextBlock}`
-    : `${contextBlock}${dictionaryContextBlock}`;
+    ? `${BRIEF_SYSTEM_PROMPT}\n\n${contextBlock}${dictionaryContextBlock}${dealContextBlock}`
+    : `${contextBlock}${dictionaryContextBlock}${dealContextBlock}`;
 
   try {
     // ── Opening brief delivery (new conversation + brief assembled) ─────────
@@ -196,6 +228,7 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
         BRIEF_SYSTEM_PROMPT,
         contextBlock,
         dictionaryContextBlock,
+        dealContextBlock,
       ].filter(Boolean).join('\n\n');
       const stream = anthropic.messages.stream({
         model: 'claude-sonnet-4-5',

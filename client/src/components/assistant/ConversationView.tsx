@@ -19,10 +19,17 @@ import ChartRenderer from '../shared/ChartRenderer';
 import SankeyChart from '../reports/SankeyChart';
 import WinningPathsChart from '../pipeline/WinningPathsChart';
 
+interface EntityScope {
+  entityType: 'deal';
+  entityId: string;
+  entityName: string;
+}
+
 interface ConversationViewProps {
   initialMessage?: string;
   onBack: () => void;
   onThreadId?: (threadId: string) => void;
+  scope?: EntityScope | null;
 }
 
 const AGENT_ROUTES: Record<string, string> = {
@@ -35,8 +42,8 @@ const AGENT_ROUTES: Record<string, string> = {
   'bowtie-review': '/command-center',
 };
 
-export default function ConversationView({ initialMessage, onBack, onThreadId }: ConversationViewProps) {
-  const { state, sendMessage, dismissAction, dismissJudgedAction, dismissInlineAction, loadHistory, startNewThread } = useConversationStream();
+export default function ConversationView({ initialMessage, onBack, onThreadId, scope }: ConversationViewProps) {
+  const { state, sendMessage, dismissAction, dismissJudgedAction, dismissInlineAction, loadHistory, startNewThread, setScope } = useConversationStream();
   const navigate = useNavigate();
   const bottomRef = useRef<HTMLDivElement>(null);
   const latestAnswerRef = useRef<HTMLDivElement>(null);
@@ -44,6 +51,13 @@ export default function ConversationView({ initialMessage, onBack, onThreadId }:
   const sentRef = useRef(false);
   const historyLoadedRef = useRef(false);
   const sentMessagesRef = useRef<Set<string>>(new Set());
+
+  // Set scope when component mounts
+  useEffect(() => {
+    if (scope) {
+      setScope(scope);
+    }
+  }, [scope, setScope]);
 
   const checkRepeatedQuestion = useCallback(async (text: string) => {
     const workspaceId = getWorkspaceId();
@@ -161,6 +175,33 @@ export default function ConversationView({ initialMessage, onBack, onThreadId }:
           borderRadius: 6,
         }}>
           Previous conversation restored
+        </div>
+      )}
+
+      {state.scope && (
+        <div style={{
+          fontSize: 12, color: colors.text, textAlign: 'center',
+          marginBottom: 12, padding: '6px 12px',
+          background: 'linear-gradient(135deg, #48af9b15 0%, #3a7fc115 100%)',
+          border: `1px solid ${colors.accent}40`,
+          borderRadius: 6,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+        }}>
+          <span style={{ fontSize: 14 }}>📋</span>
+          <span>Viewing: <strong>{state.scope.entityName}</strong></span>
+          <button
+            onClick={() => setScope(null)}
+            style={{
+              background: 'transparent', border: 'none', cursor: 'pointer',
+              fontSize: 11, color: colors.textMuted, padding: '2px 6px',
+              marginLeft: 4,
+            }}
+            onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.color = colors.text}
+            onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.color = colors.textMuted}
+            title="Clear deal context"
+          >
+            ✕
+          </button>
         </div>
       )}
 

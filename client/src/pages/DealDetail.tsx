@@ -1919,7 +1919,7 @@ export default function DealDetail() {
                       onMouseLeave={e => { e.currentTarget.style.borderColor = colors.border; e.currentTarget.style.color = colors.textMuted; }}
                     >{dismissingId === f.id ? '...' : 'Dismiss'}</button>
                     <button
-                      onClick={() => openAskPandora({ source: 'deal_finding', label: f.message, value: f.severity, section: 'Deal Findings', skillId: f.skill_id, dealId: deal?.id, dealName: deal?.name }, navigate, '.')}
+                      onClick={() => openAskPandora({ source: 'deal_finding', label: f.message, value: f.severity, section: 'Deal Findings', skillId: f.skill_id, dealId: deal?.id, dealName: deal?.name }, navigate)}
                       style={{ fontSize: 11, fontWeight: 500, padding: '4px 10px', borderRadius: 4, border: `1px solid ${colors.accent}44`, background: 'transparent', color: colors.accent, cursor: 'pointer' }}
                       onMouseEnter={e => { e.currentTarget.style.background = `${colors.accent}18`; e.currentTarget.style.borderColor = colors.accent; }}
                       onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = `${colors.accent}44`; }}

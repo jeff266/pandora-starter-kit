@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useWorkspace } from '../context/WorkspaceContext';
 import { api } from '../lib/api';
 import Greeting, { type GreetingPhase, type GreetingPayload } from '../components/assistant/Greeting';
@@ -84,12 +85,30 @@ const SECTION_ORDER = ['the_number', 'what_changed', 'reps', 'deals'];
 
 export default function AssistantView() {
   const { currentWorkspace } = useWorkspace();
+  const location = useLocation();
+  const navigate = useNavigate();
   const wsId = currentWorkspace?.id || '';
 
+  // Extract scope and initial message from location.state if provided (e.g., from DealDetail page)
+  const pandoraContext = (location.state as any)?.pandoraContext;
+  const openChatWithMessage = (location.state as any)?.openChatWithMessage;
+  const scope = pandoraContext ? {
+    entityType: 'deal' as const,
+    entityId: pandoraContext.dealId,
+    entityName: pandoraContext.dealName,
+  } : null;
+
   // ── View mode ────────────────────────────────────────────────────────────────
-  const [viewMode, setViewMode] = useState<ViewMode>('home');
-  const [initialMessage, setInitialMessage] = useState<string | undefined>(undefined);
+  const [viewMode, setViewMode] = useState<ViewMode>(openChatWithMessage ? 'conversation' : 'home');
+  const [initialMessage, setInitialMessage] = useState<string | undefined>(openChatWithMessage || undefined);
   const [threadId, setThreadId] = useState<string | null>(null);
+
+  // Clear location state after consuming it
+  useEffect(() => {
+    if (openChatWithMessage || pandoraContext) {
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+  }, []); // Only run once on mount
 
   // ── Data ─────────────────────────────────────────────────────────────────────
   const [greeting, setGreeting] = useState<GreetingPayload | null>(null);
@@ -372,10 +391,11 @@ export default function AssistantView() {
   if (viewMode === 'conversation') {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%', maxWidth: 760, margin: '0 auto', width: '100%' }}>
-        <ConversationView 
-          initialMessage={initialMessage} 
-          onBack={handleBack} 
+        <ConversationView
+          initialMessage={initialMessage}
+          onBack={handleBack}
           onThreadId={(tid) => setThreadId(tid)}
+          scope={scope}
         />
         {threadId && <DocumentPill workspaceId={wsId} threadId={threadId} />}
       </div>

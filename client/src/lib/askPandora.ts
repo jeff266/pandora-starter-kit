@@ -71,7 +71,7 @@ export function buildContextMessage(ctx: PandoraContext): string {
 export function openAskPandora(
   context: PandoraContext,
   navigate: NavigateFunction,
-  targetPath = '.'
+  targetPath = '/assistant'
 ): void {
   const message = buildContextMessage(context);
 
