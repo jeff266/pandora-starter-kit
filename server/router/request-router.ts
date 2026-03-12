@@ -96,7 +96,9 @@ Respond with ONLY valid JSON matching this exact schema:
   "skill_id": "skill-id or null",
   "needs_clarification": true|false,
   "clarification_question": "question or null"
-}`;
+}
+
+IMPORTANT: Set needs_clarification to false for broad analytical or advisory questions (e.g. "tell me about deal hygiene", "what can we do to improve our forecast", "how can we improve pipeline health"). These should be classified as scoped_analysis and answered immediately using available data — never ask for clarification on open-ended questions that can be answered comprehensively.`;
 
 export async function classifyRequest(
   workspaceId: string,

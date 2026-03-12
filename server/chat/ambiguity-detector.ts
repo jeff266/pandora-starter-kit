@@ -37,6 +37,28 @@ export async function detectQueryAmbiguity(
 
   const normalizedMsg = message.toLowerCase();
 
+  // Skip clarification for broad advisory/analytical queries — interpret comprehensively
+  const broadQueryPatterns = [
+    /\btell me about\b/i,
+    /\bwhat can we do\b/i,
+    /\bhow can we improve\b/i,
+    /\bwhat should we\b/i,
+    /\bdeal hygiene\b/i,
+    /\bpipeline health\b/i,
+    /\bdeal health\b/i,
+    /\bpipeline hygiene\b/i,
+  ];
+  if (broadQueryPatterns.some(p => p.test(message))) {
+    return null;
+  }
+
+  // Skip if query mentions two distinct domain topics joined with "and" — treat comprehensively
+  const domainTerms = ['hygiene', 'forecast', 'pipeline', 'attainment', 'risk', 'coverage', 'velocity', 'health'];
+  const mentionedDomainTerms = domainTerms.filter(t => normalizedMsg.includes(t));
+  if (normalizedMsg.includes(' and ') && mentionedDomainTerms.length >= 2) {
+    return null;
+  }
+
   // 1. Check for Pipeline Ambiguity
   const pipelineKeywords = ['pipeline', 'deal', 'revenue', 'forecast', 'attainment', 'coverage'];
   const mentionsPipeline = pipelineKeywords.some(k => normalizedMsg.includes(k));
