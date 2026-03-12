@@ -1,0 +1,83 @@
+This is a much tighter gap than expected. The infrastructure is all there — the onboarding wizard captures the data, `buildWorkspaceContextBlock()` injects it, the Frontera workspace has real configuration. Three specific wiring gaps plus four pending onboarding questions.
+
+No new tables, no new wizard, no build prompt needed for the infrastructure. Two things to do:
+
+---
+
+## Thing 1 — Fix the three injection gaps (quick Replit session)
+
+Send this:
+
+---
+
+**Fix three injection gaps in `buildWorkspaceContextBlock()` — report-then-fix**
+
+First confirm the exact paths in `context_layer.definitions` for Frontera, then fix each gap.
+
+**Gap 1 — Voice/communication settings not injected**
+
+`def.workspace_config?.voice` contains `persona`, `directness`, `detail_level`, `alert_threshold`. Add to the system prompt block:
+
+```
+COMMUNICATION STYLE:
+  Persona: teammate (peer-level, not formal)
+  Directness: direct (no hedging, get to the point)
+  Detail level: manager (summary + key evidence, not exhaustive)
+  Alert threshold: watch_and_act (surface watch and act severity, not info)
+```
+
+**Gap 2 — Stage exclusions not injected**
+
+`def.workspace_config?.tool_filters?.global?.exclude_stages` contains `["New Lead / Inquiry", "Fellow Contract Signed (Closed-Won)"]`. Add to system prompt:
+
+```
+EXCLUDED STAGES (do not include these in analysis or counts):
+  - New Lead / Inquiry
+  - Fellow Contract Signed (Closed-Won)
+```
+
+This is critical — Pandora is currently including these stages in deal counts and pipeline analysis, which inflates numbers.
+
+**Gap 3 — Stale thresholds reading wrong path**
+
+In `server/chat/workspace-memory.ts`, the stale threshold reader uses `gat.thresholds?.stale_deal_days` but Frontera's values are at `def.onboarding_Q5_stale.value.thresholds`. 
+
+Fix: update the reader to check both paths with fallback:
+```typescript
+const staleThresholds = 
+  def.onboarding_Q5_stale?.value?.thresholds ||
+  def.workspace_config?.thresholds ||
+  gat.thresholds ||
+  { stale_deal_days: 30, critical_days: 60 }; // default fallback
+```
+
+Frontera's values (40d stale, 81d critical) should now flow through to Pandora's analysis.
+
+**Exit criteria:**
+- Ask Pandora "what's considered a stale deal?" → returns "40 days" not a generic answer
+- Pipeline analysis excludes "New Lead / Inquiry" and "Fellow Contract Signed" from counts
+- Complex responses use peer/direct tone not formal hedging language
+
+---
+
+## Thing 2 — Complete Frontera's pending onboarding questions (you, not Replit)
+
+Four Tier 1 questions are still pending for Frontera. These are worth completing before the business context build — they'll flow automatically into Ask Pandora once answered:
+
+| Question | What it captures | Why it matters for Ask Pandora |
+|---|---|---|
+| Q3 — Stages | Stage definitions and advancement criteria | More accurate stage analysis |
+| Q6 — Forecast | Forecast category definitions | Better forecast reasoning |
+| Q9 — Fields | Key CRM fields to track | Smarter field recommendations |
+| Q11 — Methodology | Sales framework (GAP, MEDDIC etc) | Already in Methodology settings — may auto-populate |
+| Q15 — Competitors | Who you compete against | Competitive deal analysis |
+| Q25 — Loss reasons | Why deals close lost | Pattern matching on at-risk deals |
+| Q17 — Buying committee | Who's involved in decisions | Stakeholder coverage analysis |
+
+Go to Settings → Set Up Workspace → complete the pending onboarding questions for Frontera. Takes 10-15 minutes. Once done, Ask Pandora will immediately know competitors, loss reasons, and buying committee without any additional code.
+
+---
+
+**After both of those:** the business context layer is functionally complete for Frontera. The remaining gap (ICP pain articulation, win patterns from transcripts, Serper enrichment) is the enhancement layer — worth building eventually but not blocking current value.
+
+The injection fix is the Replit session. The onboarding completion is on you. Want me to send the injection fix prompt now?

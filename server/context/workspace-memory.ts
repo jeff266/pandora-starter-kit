@@ -217,8 +217,11 @@ export async function buildWorkspaceContextBlock(workspaceId: string, userId?: s
 
   // Pipeline thresholds from goals_and_targets and definitions
   const thresholds: string[] = [];
-  const staleThreshold = gat.thresholds?.stale_deal_days ?? gat.stale_deal_days;
-  if (staleThreshold) thresholds.push(`Stale deal: ${staleThreshold}d`);
+  const staleThresholds = def.onboarding_Q5_stale?.value?.thresholds ?? def.workspace_config?.thresholds ?? gat.thresholds ?? null;
+  // Q5 stores the key as `stale_days`; older paths use `stale_deal_days` — handle both
+  const staleThreshold = staleThresholds?.stale_deal_days ?? staleThresholds?.stale_days ?? gat.stale_deal_days;
+  const criticalDays = staleThresholds?.critical_days;
+  if (staleThreshold) thresholds.push(`Stale deal: ${staleThreshold}d${criticalDays ? `, critical: ${criticalDays}d` : ''}`);
   const coverageTarget = gat.pipeline_coverage_target;
   if (coverageTarget) thresholds.push(`Coverage target: ${coverageTarget}x`);
   const winRateLookback = def.win_rate_config?.value?.lookback_days;
@@ -282,6 +285,18 @@ export async function buildWorkspaceContextBlock(workspaceId: string, userId?: s
     lines.push(`SALES TEAM (${salesRepsDb.length} reps${eligibleNote}): ${displayNames}${more}`);
   }
 
+  // Communication style from workspace_config.voice
+  const voice = def.workspace_config?.voice;
+  if (voice && (voice.persona || voice.directness || voice.detail_level || voice.alert_threshold)) {
+    const voiceParts: string[] = [];
+    if (voice.persona) voiceParts.push(`Persona: ${voice.persona}`);
+    if (voice.directness) voiceParts.push(`Directness: ${voice.directness}`);
+    if (voice.detail_level) voiceParts.push(`Detail level: ${voice.detail_level}`);
+    if (voice.alert_threshold) voiceParts.push(`Alert threshold: ${voice.alert_threshold}`);
+    lines.push('');
+    lines.push(`COMMUNICATION STYLE: ${voiceParts.join(' | ')}`);
+  }
+
   // Sales methodology, competitors, loss reasons, buying committee (tier-2/3 onboarding)
   const methodology = def.onboarding_Q11_methodology?.value?.methodology;
   if (methodology) {
@@ -318,6 +333,13 @@ export async function buildWorkspaceContextBlock(workspaceId: string, userId?: s
     if (inactiveStages.length > 0) {
       lines.push(`PARKING LOT / EXCLUDED: ${inactiveStages.join(', ')}`);
     }
+  }
+
+  // Stage exclusions from workspace_config.tool_filters — critical for accurate counts
+  const excludedStages: string[] = def.workspace_config?.tool_filters?.global?.exclude_stages ?? [];
+  if (excludedStages.length > 0) {
+    lines.push('');
+    lines.push(`EXCLUDED STAGES (do not include these in analysis or deal counts): ${excludedStages.join(', ')}`);
   }
 
   // Win rate config
