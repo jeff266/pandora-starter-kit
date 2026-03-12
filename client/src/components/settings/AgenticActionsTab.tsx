@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { colors, fonts } from '../../styles/theme';
 import { useWorkspace } from '../../context/WorkspaceContext';
+import { api } from '../../lib/api';
 
 interface WorkspaceActionSettings {
   id: string;
@@ -49,11 +50,7 @@ export default function AgenticActionsTab() {
     try {
       setLoading(true);
       setError(null);
-      const response = await fetch(`/api/workspaces/${currentWorkspace?.id}/agentic-actions/settings`);
-      if (!response.ok) {
-        throw new Error('Failed to fetch settings');
-      }
-      const data = await response.json();
+      const data = await api.get('/agentic-actions/settings') as any;
       setSettings(data.settings);
 
       // Populate form
@@ -94,19 +91,7 @@ export default function AgenticActionsTab() {
         audit_webhook_enabled: auditWebhookEnabled,
       };
 
-      const response = await fetch(`/api/workspaces/${currentWorkspace?.id}/agentic-actions/settings`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to save settings');
-      }
-
-      const data = await response.json();
+      const data = await api.put('/agentic-actions/settings', payload) as any;
       setSettings(data.settings);
       alert('Settings saved successfully');
     } catch (err: any) {
