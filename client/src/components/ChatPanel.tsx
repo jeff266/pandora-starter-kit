@@ -571,7 +571,6 @@ export default function ChatPanel({ isOpen, onClose, scope, initialSessionId, pe
                 <ChainOfThoughtPanel
                   evidence={msg.evidence}
                   latencyMs={msg.latency_ms}
-                  visible={true}
                 />
               )}
               {msg.role === 'assistant' && msg.evidence && msg.evidence.tool_calls.length > 0 && (
@@ -953,13 +952,15 @@ function summarizeResult(toolName: string, result: any): string {
   }
 }
 
-function ChainOfThoughtPanel({ evidence, latencyMs, visible }: {
+function ChainOfThoughtPanel({ evidence, latencyMs }: {
   evidence?: Evidence;
   latencyMs?: number;
-  visible: boolean;
 }) {
+  const [open, setOpen] = useState(false);
   const toolCalls = evidence?.tool_calls || [];
   const hasTools = toolCalls.length > 0;
+
+  if (!hasTools) return null;
 
   return (
     <div style={{
@@ -973,21 +974,37 @@ function ChainOfThoughtPanel({ evidence, latencyMs, visible }: {
       marginBottom: -10,
       paddingLeft: 14,
       paddingRight: 14,
-      paddingBottom: 10,
+      paddingBottom: open ? 10 : 0,
     }}>
-      <div style={{
-        fontSize: 11,
-        color: '#6488ea',
-        marginBottom: hasTools ? 8 : 0,
-        display: 'flex',
-        alignItems: 'center',
-        gap: 6,
-        fontWeight: 600,
-        textTransform: 'uppercase',
-        letterSpacing: '0.5px',
-      }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{
+          background: 'none',
+          border: 'none',
+          cursor: 'pointer',
+          padding: 0,
+          width: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          marginBottom: open && hasTools ? 8 : 0,
+          paddingBottom: open ? 0 : 10,
+        }}
+      >
         <Icon name="filter" size={12} style={{ filter: 'brightness(0) saturate(100%) invert(47%) sepia(68%) saturate(1869%) hue-rotate(204deg) brightness(96%) contrast(94%)' }} />
-        Chain of Thought
+        <span style={{
+          fontSize: 11,
+          color: '#6488ea',
+          fontWeight: 600,
+          textTransform: 'uppercase',
+          letterSpacing: '0.5px',
+        }}>
+          Show the Math
+        </span>
+        <span style={{ fontSize: 10, color: '#64748b' }}>
+          ({toolCalls.length} step{toolCalls.length !== 1 ? 's' : ''})
+        </span>
+        <span style={{ fontSize: 10, color: '#6488ea', marginLeft: 2 }}>{open ? '▼' : '▶'}</span>
         {latencyMs != null && (
           <span style={{
             marginLeft: 'auto',
@@ -1000,8 +1017,8 @@ function ChainOfThoughtPanel({ evidence, latencyMs, visible }: {
             {(latencyMs / 1000).toFixed(1)}s
           </span>
         )}
-      </div>
-      {toolCalls.map((tc, i) => (
+      </button>
+      {open && toolCalls.map((tc, i) => (
         <div key={i} style={{
           display: 'flex',
           gap: 8,

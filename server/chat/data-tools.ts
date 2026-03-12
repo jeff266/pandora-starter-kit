@@ -1570,6 +1570,7 @@ async function computePipelineClosed(workspaceId: string, params: Record<string,
 // ─── Tool 6: query_contacts ──────────────────────────────────────────────────
 
 async function queryContacts(workspaceId: string, params: Record<string, any>): Promise<QueryContactsResult> {
+  console.log('[query_contacts] called with params:', JSON.stringify(params));
   const conditions: string[] = ['c.workspace_id = $1'];
   const values: any[] = [workspaceId];
   const descParts: string[] = [];
@@ -1608,7 +1609,7 @@ async function queryContacts(workspaceId: string, params: Record<string, any>): 
   }
 
   if (params.has_conversation === true) {
-    conditions.push(`EXISTS (SELECT 1 FROM conversations cv WHERE cv.participants::text ILIKE '%' || c.email || '%' AND cv.workspace_id = $1)`);
+    conditions.push(`(c.email IS NOT NULL AND EXISTS (SELECT 1 FROM conversations cv WHERE cv.participants::text ILIKE '%' || c.email || '%' AND cv.workspace_id = $1))`);
     descParts.push('with conversations');
   }
 
