@@ -206,6 +206,60 @@ export default function ConversationView({ initialMessage, onBack, onThreadId, s
       )}
 
       <div style={{ flex: 1, overflowY: 'auto' }}>
+        {/* Plan Text */}
+        {state.planText && (
+          <div style={{
+            padding: 12,
+            marginBottom: 16,
+            background: colors.surfaceRaised,
+            border: `1px solid ${colors.border}`,
+            borderRadius: 8,
+            fontSize: 13,
+            color: colors.textMuted,
+            fontStyle: 'italic',
+            lineHeight: 1.6,
+          }}>
+            <div style={{ fontWeight: 600, marginBottom: 6, color: colors.text }}>📋 {state.planText.split('\n')[0]}</div>
+            {state.planText.split('\n').slice(1).map((line, i) => (
+              <div key={i}>{line}</div>
+            ))}
+          </div>
+        )}
+
+        {/* Progress Panel */}
+        {state.showProgress && state.toolProgress.length >= 2 && (
+          <div style={{
+            padding: 16,
+            marginBottom: 16,
+            background: colors.surfaceRaised,
+            border: `1px solid ${colors.border}`,
+            borderRadius: 10,
+            fontSize: 13,
+          }}>
+            <div style={{ fontWeight: 600, color: colors.text, marginBottom: 12 }}>
+              ⚙️ Analyzing...
+            </div>
+            {state.toolProgress.map((progress, idx) => (
+              <div
+                key={idx}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  marginBottom: 8,
+                  color: colors.textSecondary,
+                }}
+              >
+                <span>{progress.status === 'completed' ? '✅' : '⏳'}</span>
+                <span style={{ flex: 1 }}>{progress.tool_display_name}</span>
+                <span style={{ fontSize: 11, color: colors.textMuted }}>
+                  {progress.result_summary}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
         {state.messages.map(msg => (
           <div
             key={msg.id}

@@ -98,6 +98,22 @@ function isConversationQuestion(message: string): boolean {
   return CONVERSATION_SIGNALS.some(p => p.test(message));
 }
 
+function detectComplexRequest(message: string): boolean {
+  if (message.length > 100) return true;
+
+  const COMPLEX_PATTERNS = [
+    /why\s+(is|did|has|was|are|does|do)\b/i,
+    /should\s+(i|we|the\s+team)\b/i,
+    /\b(prepare|analyze|investigate|compare|evaluate|assess)\b/i,
+    /\b(strategy|plan\s+for|what\s+should\s+(i|we))\b/i,
+    /\b(what'?s?\s+going\s+on|pull\s+the\s+thread|dig\s+into)\b/i,
+    /\b(across\s+(all|the|my)|portfolio|team-wide|this\s+week'?s?\s+priorities)\b/i,
+    /\b(prepare\s+me|brief\s+me|get\s+me\s+ready)\b/i,
+  ];
+
+  return COMPLEX_PATTERNS.some(p => p.test(message));
+}
+
 export async function handleConversationTurn(input: ConversationTurnInput): Promise<ConversationTurnResult> {
   const { workspaceId, channelId, threadId, message, surface, anchor, scope: inputScope, userId, userRole } = input;
 
@@ -539,7 +555,19 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
               agentMessage = `[Context: viewing ${scopeType} id=${entityId}] ${message}`;
             }
 
-            pandoraResult = await runPandoraAgent(workspaceId, agentMessage, history, undefined, sessionContext);
+            const isComplex = detectComplexRequest(message);
+            pandoraResult = await runPandoraAgent(
+              workspaceId,
+              agentMessage,
+              history,
+              undefined,
+              sessionContext,
+              undefined,
+              {
+                complexity: isComplex ? 'high' : 'standard',
+                enablePlanning: isComplex,
+              }
+            );
             chatResponse = pandoraResult.answer;
             toolResults = pandoraResult.evidence.tool_calls.map((tc: any) => ({
               tool: tc.tool,
@@ -681,7 +709,21 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
         }
       }
 
-      const pandoraResult = await runPandoraAgent(workspaceId, agentMessage, history, undefined, sessionContext);
+      // Detect complex requests for planning mode
+      const isComplex = detectComplexRequest(message);
+
+      const pandoraResult = await runPandoraAgent(
+        workspaceId,
+        agentMessage,
+        history,
+        undefined,
+        sessionContext,
+        undefined,
+        {
+          complexity: isComplex ? 'high' : 'standard',
+          enablePlanning: isComplex,
+        }
+      );
 
       answer = pandoraResult.answer;
       tokensUsed = pandoraResult.tokens_used;

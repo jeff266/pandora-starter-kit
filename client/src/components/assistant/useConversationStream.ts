@@ -42,6 +42,15 @@ export interface EntityScope {
   entityName: string;
 }
 
+export interface ToolProgress {
+  iteration: number;
+  tool_name: string;
+  tool_display_name: string;
+  status: 'running' | 'completed';
+  result_summary: string;
+  timestamp: string;
+}
+
 export interface ConversationState {
   phase: 'idle' | 'recruiting' | 'findings' | 'synthesis' | 'complete' | 'clarifying';
   messages: ConversationMessage[];
@@ -64,6 +73,9 @@ export interface ConversationState {
   restored: boolean;
   clarifyingQuestion: { question: string; dimension: string; options: { label: string; value: string }[] } | null;
   scope: EntityScope | null;
+  planText: string | null;
+  toolProgress: ToolProgress[];
+  showProgress: boolean;
 }
 
 type Action =
@@ -98,6 +110,9 @@ const initial: ConversationState = {
   chartSpecs: [],
   sankeyData: null,
   winningPathsData: null,
+  planText: null,
+  toolProgress: [],
+  showProgress: false,
   error: null,
   restored: false,
   clarifyingQuestion: null,
@@ -239,6 +254,27 @@ function reducer(state: ConversationState, action: Action): ConversationState {
       }
       case 'winning_paths_data': {
         return { ...state, winningPathsData: ev.data ?? null };
+      }
+      case 'plan': {
+        return { ...state, planText: ev.plan ?? null };
+      }
+      case 'tool_progress': {
+        const progressEntry: ToolProgress = {
+          iteration: ev.data.iteration,
+          tool_name: ev.data.tool_name,
+          tool_display_name: ev.data.tool_display_name,
+          status: ev.data.status,
+          result_summary: ev.data.result_summary,
+          timestamp: ev.data.timestamp,
+        };
+        return {
+          ...state,
+          toolProgress: [...state.toolProgress, progressEntry],
+          showProgress: true,
+        };
+      }
+      case 'synthesis_started': {
+        return { ...state, showProgress: false };
       }
       case 'clarifying_question': {
         return {

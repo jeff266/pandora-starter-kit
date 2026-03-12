@@ -1425,7 +1425,8 @@ export async function runPandoraAgent(
   conversationHistory: Array<{ role: 'user' | 'assistant'; content: any }>,
   onToolCall?: (toolName: string, label: string) => void,
   sessionContext?: SessionContext,
-  sse?: (event: any) => void
+  sse?: (event: any) => void,
+  options?: { complexity?: 'high' | 'standard'; enablePlanning?: boolean }
 ): Promise<PandoraResponse> {
   const startTime = Date.now();
   const toolTrace: PandoraToolCall[] = [];
@@ -1512,6 +1513,40 @@ Continue using this scope unless the user explicitly changes it.`;
       effectiveSystemPrompt = factBlock + '\n\n' + effectiveSystemPrompt;
       console.log(`[PandoraAgent] Injected live deal facts for: ${dealMentions.join(', ')}`);
     }
+  }
+
+  // ── Complexity Detection & Planning Injection ──────────────────────────────
+  const COMPLEX_PATTERNS = [
+    /why\s+(is|did|has|was|are|does|do)\b/i,
+    /should\s+(i|we|the\s+team)\b/i,
+    /\b(prepare|analyze|investigate|compare|evaluate|assess|review)\b/i,
+    /\b(strategy|plan|roadmap|priorities|focus)\b/i,
+    /\b(what'?s?\s+going\s+on|what\s+happened|pull\s+the\s+thread)\b/i,
+    /\b(across\s+(all|the|my)|portfolio|team-wide)\b/i,
+  ];
+
+  const isComplexRequest =
+    options?.enablePlanning ||
+    options?.complexity === 'high' ||
+    message.length > 100 ||
+    COMPLEX_PATTERNS.some(p => p.test(message));
+
+  if (isComplexRequest) {
+    const planningInstruction = `\n\nPLANNING INSTRUCTION:
+This is a complex analytical request. Before calling any tools, use your
+first response to briefly state your plan: what information you need,
+which tools you will call, and in what order. Format it as:
+
+"My plan:
+1. [First thing I'll check and why]
+2. [Second thing and why]
+3. [How I'll synthesize the findings]"
+
+Then immediately begin executing your plan by calling the first tool.
+Do not ask the user for clarification — proceed with your best interpretation.`;
+
+    effectiveSystemPrompt += planningInstruction;
+    console.log('[PandoraAgent] Complex request detected — planning instruction injected');
   }
 
   // ── Contradiction detection — re-query everything ─────────────────────────
@@ -1770,6 +1805,16 @@ The system will transform raw_annotation into a voice-styled annotation automati
       console.log(`[PandoraAgent] tools called:`, response.toolCalls.map((tc: any) => tc.name).join(', '));
     }
 
+    // ── Emit plan if this is iteration 0 and complex request ──────────────────
+    if (i === 0 && isComplexRequest && response.content) {
+      const planMatch = response.content.match(/My plan:\s*\n([\s\S]{20,500}?)\n\n/i);
+      if (planMatch) {
+        const planText = 'My plan:\n' + planMatch[1];
+        sse?.({ type: 'plan', plan: planText, timestamp: new Date().toISOString() });
+        console.log('[PandoraAgent] Plan emitted via SSE');
+      }
+    }
+
     if (response.stopReason === 'max_tokens' && !response.toolCalls?.length) {
       console.log(`[PandoraAgent] MAX_TOKENS GUARD at iter=${i} — discarding truncated output, injecting nudge`);
       let nudge = '[Your previous response was truncated because it exceeded the token limit. Do NOT try to write a long answer from memory. Instead, call the appropriate tools to gather data, then give a concise answer based on the results.';
@@ -1809,6 +1854,15 @@ The system will transform raw_annotation into a voice-styled annotation automati
 
         messages.push({ role: 'user', content: nudge });
         continue;
+      }
+
+      // ── Emit synthesis_started event when loop completes ──────────────────────
+      if (toolTrace.length >= 2) {
+        sse?.({
+          type: 'synthesis_started',
+          data: { iterations_completed: i + 1, timestamp: new Date().toISOString() },
+        });
+        console.log('[PandoraAgent] Synthesis started event emitted');
       }
 
       const { cleanedText: cleanedContent, specs: parsedChartSpecs } = parseChartSpecs(response.content);
@@ -2015,6 +2069,20 @@ The system will transform raw_annotation into a voice-styled annotation automati
         });
       }
 
+      // ── Emit progress event after tool completion ──────────────────────────────
+      sse?.({
+        type: 'tool_progress',
+        data: {
+          iteration: i,
+          max_iterations: MAX_TOOL_ITERATIONS,
+          tool_name: toolCall.name,
+          tool_display_name: getToolDisplayName(toolCall.name),
+          status: 'completed',
+          result_summary: isError ? 'Error' : getResultSummary(result),
+          timestamp: new Date().toISOString(),
+        },
+      });
+
       messages.push({
         role: 'tool',
         content: isError ? JSON.stringify(result) : JSON.stringify(compressToolResult(toolCall.name, result)),
@@ -2136,6 +2204,53 @@ The system will transform raw_annotation into a voice-styled annotation automati
     inline_actions: inlineActions,
     chart_specs: chartSpecs.length > 0 ? chartSpecs : undefined,
   };
+}
+
+// ─── Tool display name mapper ──────────────────────────────────────────────────
+
+const TOOL_DISPLAY_NAMES: Record<string, string> = {
+  'query_deals': 'Checking pipeline deals',
+  'query_conversations': 'Reviewing call transcripts',
+  'get_meddic_coverage': 'Analyzing MEDDIC coverage',
+  'compute_forecast_accuracy': 'Computing forecast metrics',
+  'get_pending_actions': 'Checking pending actions',
+  'get_insights_findings': 'Reviewing active findings',
+  'query_stage_history': 'Checking stage history',
+  'compute_metric': 'Computing metrics',
+  'search_transcripts': 'Searching call transcripts',
+  'get_crm_write_history': 'Reviewing CRM changes',
+  'score_icp_fit': 'Scoring ICP fit',
+  'query_accounts': 'Checking accounts',
+  'query_activities': 'Reviewing activities',
+  'query_contacts': 'Checking contacts',
+  'get_skill_evidence': 'Getting skill analysis',
+  'get_workflow_rules': 'Checking automation rules',
+  'run_meddic_coverage_skill': 'Running MEDDIC analysis',
+  'calculate': 'Performing calculation',
+  'query_schema': 'Checking data schema',
+  'get_action_threshold_settings': 'Checking action settings',
+};
+
+function getToolDisplayName(toolName: string): string {
+  return TOOL_DISPLAY_NAMES[toolName] ||
+    toolName.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function getResultSummary(result: any): string {
+  if (!result) return '';
+  // If result has a count field: "14 deals"
+  if (result.total !== undefined) return `${result.total} records`;
+  if (result.count !== undefined) return `${result.count} records`;
+  if (result.total_count !== undefined) return `${result.total_count} records`;
+  if (result.deals) return `${result.deals.length} deals`;
+  if (result.findings) return `${result.findings.length} findings`;
+  if (result.pending_actions) return `${result.pending_actions.length} actions`;
+  if (result.coverage_score !== undefined) return `Score: ${result.coverage_score}/100`;
+  if (result.rules) return `${result.rules.length} rules`;
+  if (result.excerpts) return `${result.excerpts.length} excerpts`;
+  if (result.accounts) return `${result.accounts.length} accounts`;
+  if (result.conversations) return `${result.conversations.length} calls`;
+  return '';
 }
 
 // ─── Tool result compressor ───────────────────────────────────────────────────
