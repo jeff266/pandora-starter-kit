@@ -316,7 +316,8 @@ export async function getForecastAccuracyContext(workspaceId: string): Promise<s
   const res = await query<WorkspaceMemory>(
     `SELECT * FROM workspace_memory 
      WHERE workspace_id = $1 AND memory_type = 'forecast_accuracy' 
-     ORDER BY created_at DESC LIMIT 3`
+     ORDER BY created_at DESC LIMIT 3`,
+    [workspaceId]
   );
 
   if (res.rows.length === 0) return '';
