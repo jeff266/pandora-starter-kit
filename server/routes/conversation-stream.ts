@@ -16,6 +16,7 @@ import { buildWorkspaceContextBlock } from '../context/workspace-memory.js';
 import { getOrAssembleBrief, renderBriefContext, BRIEF_SYSTEM_PROMPT } from '../context/opening-brief.js';
 import { detectQueryAmbiguity } from '../chat/ambiguity-detector.js';
 import { runPandoraAgent } from '../chat/pandora-agent.js';
+import { extractSuggestedActions } from '../chat/action-extractor.js';
 import { getOrCreateSessionContext } from '../agents/session-context.js';
 import { waterfallAnalysis } from '../analysis/waterfall-analysis.js';
 import { buildSankeyChartData } from '../analysis/sankey-builder.js';
@@ -460,6 +461,17 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
         sse(res, { type: 'synthesis_chunk', text: synthesis.text });
         sse(res, { type: 'synthesis_done', full_text: synthesis.text, response_id: tier1ResponseId });
 
+        // Emit suggested_actions from cached skill run synthesis text
+        try {
+          const cachedSuggestedActions = await extractSuggestedActions(synthesis.text, [], workspaceId);
+          if (cachedSuggestedActions.length > 0) {
+            console.log('[stream] cached path emitting suggested_actions:', cachedSuggestedActions.length);
+            sse(res, { type: 'suggested_actions', actions: cachedSuggestedActions });
+          }
+        } catch (err) {
+          console.error('[stream] cached path extractSuggestedActions failed:', err);
+        }
+
         // Emit evidence cards from findings linked to this skill run
         const t1Findings = await query(
           `SELECT f.id, f.category AS headline, f.severity, f.skill_id AS operator_name, f.message AS body, f.skill_run_id
@@ -509,6 +521,12 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
         }
         sse(res, { type: 'synthesis_chunk', text: pandoraT1.answer });
         sse(res, { type: 'synthesis_done', full_text: pandoraT1.answer, response_id: randomUUID() });
+
+        // Re-emit suggested_actions from return value (guaranteed delivery from conversation-stream.ts)
+        if (pandoraT1.suggested_actions && pandoraT1.suggested_actions.length > 0) {
+          console.log('[stream] pandora T1 re-emitting suggested_actions:', pandoraT1.suggested_actions.length);
+          sse(res, { type: 'suggested_actions', actions: pandoraT1.suggested_actions });
+        }
 
         // Emit inline actions if present
         if (pandoraT1.inline_actions && pandoraT1.inline_actions.length > 0) {
@@ -611,6 +629,12 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
         }
         sse(res, { type: 'synthesis_chunk', text: pandoraFallback.answer });
         sse(res, { type: 'synthesis_done', full_text: pandoraFallback.answer, response_id: fallbackResponseId });
+
+        // Re-emit suggested_actions from return value (guaranteed delivery from conversation-stream.ts)
+        if (pandoraFallback.suggested_actions && pandoraFallback.suggested_actions.length > 0) {
+          console.log('[stream] pandora fallback re-emitting suggested_actions:', pandoraFallback.suggested_actions.length);
+          sse(res, { type: 'suggested_actions', actions: pandoraFallback.suggested_actions });
+        }
 
         // Emit inline actions if present
         if (pandoraFallback.inline_actions && pandoraFallback.inline_actions.length > 0) {

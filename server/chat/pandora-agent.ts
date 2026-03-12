@@ -12,7 +12,7 @@ import { captureContradictionClassificationPair } from '../llm/training-capture.
 import { randomUUID } from 'crypto';
 import { judgeAction } from '../actions/judgment.js';
 import { parseActionsFromOutput, insertExtractedActions } from '../actions/index.js';
-import { extractSuggestedActions } from './action-extractor.js';
+import { extractSuggestedActions, type SuggestedAction } from './action-extractor.js';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { join, dirname } from 'path';
@@ -1125,6 +1125,7 @@ export interface PandoraResponse {
   inline_actions?: InlineAction[];
   chart_specs?: ChartSpec[];
   sessionContext?: SessionContext;
+  suggested_actions?: SuggestedAction[];
 }
 
 interface InlineAction {
@@ -1442,6 +1443,7 @@ export async function runPandoraAgent(
   const startTime = Date.now();
   const toolTrace: PandoraToolCall[] = [];
   let totalTokens = 0;
+  let pandoraSuggestedActions: SuggestedAction[] = [];
   const threadId = randomUUID(); // For consistent ID generation in this run
 
   const currentSessionContext = sessionContext || createSessionContext();
@@ -1963,6 +1965,7 @@ The system will transform raw_annotation into a voice-styled annotation automati
             dealCtx,
           );
           console.log('[action-extractor] extracted actions:', suggestedActions.length, suggestedActions.map(a => a.type));
+          pandoraSuggestedActions = suggestedActions;
           if (suggestedActions.length > 0) {
             console.log('[sse] emitting suggested_actions:', suggestedActions.length);
             sse?.({ type: 'suggested_actions', actions: suggestedActions });
@@ -2049,6 +2052,7 @@ The system will transform raw_annotation into a voice-styled annotation automati
         latency_ms: Date.now() - startTime,
         chart_specs: parsedChartSpecs.length > 0 ? parsedChartSpecs : (charts.length > 0 ? charts : undefined),
         sessionContext: currentSessionContext,
+        suggested_actions: pandoraSuggestedActions.length > 0 ? pandoraSuggestedActions : undefined,
       };
     }
 

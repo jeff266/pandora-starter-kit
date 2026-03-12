@@ -483,6 +483,12 @@ export default function ConversationView({ initialMessage, onBack, onThreadId, s
           />
         )}
 
+        {/* DEBUG: always show suggestedActions count */}
+        {state.phase === 'complete' && (
+          <div style={{ fontSize: 11, color: '#6B7280', padding: '4px 8px', background: '#111', borderRadius: 4, margin: '4px 0' }}>
+            [debug] suggestedActions: {state.suggestedActions.length} | phase: {state.phase}
+          </div>
+        )}
         {state.suggestedActions.length > 0 && (
           <SuggestedActionsPanel
             actions={state.suggestedActions}

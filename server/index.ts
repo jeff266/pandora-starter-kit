@@ -300,6 +300,12 @@ app.post('/api/admin/migrate-credentials', requireAdmin, async (_req, res) => {
 app.use("/api/workspaces", workspacesRouter);
 
 const workspaceApiRouter = express.Router();
+workspaceApiRouter.use((req, _res, next) => {
+  if (req.method === 'POST') {
+    console.log('[workspaceApiRouter] POST hit, path:', req.path);
+  }
+  next();
+});
 workspaceApiRouter.use(requireWorkspaceAccess);
 workspaceApiRouter.use(attachWorkspaceContext);
 workspaceApiRouter.use(lensMiddleware);

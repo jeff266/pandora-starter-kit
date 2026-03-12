@@ -408,11 +408,16 @@ export function useConversationStream() {
           if (line.startsWith('data: ')) {
             try {
               const event = JSON.parse(line.slice(6));
+              if (event.type === 'suggested_actions' || event.type === 'done') {
+                console.log('[stream] received event:', event.type, event.type === 'suggested_actions' ? 'count=' + (event.actions?.length ?? 0) : '');
+              }
               if (event.type === 'done' && event.thread_id) {
                 updateThreadId(event.thread_id);
               }
               dispatch({ type: 'STREAM_EVENT', event });
-            } catch {
+            } catch (parseErr) {
+              const raw = line.slice(6);
+              console.error('[stream] JSON parse error on event:', parseErr, 'raw (first 200):', raw.slice(0, 200));
             }
           }
         }
