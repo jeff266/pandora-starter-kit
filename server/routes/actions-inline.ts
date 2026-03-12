@@ -754,13 +754,18 @@ router.post('/:workspaceId/suggested-actions/sync', async (req: Request, res: Re
     const dedupHash = createHash('sha256').update(dedupInput).digest('hex').slice(0, 32);
     const summary = action.description || action.evidence || action.title;
 
+    const sourceSkill =
+      action.type === 'run_skill' ? (action.action_payload?.skill_id as string | undefined) || action.type :
+      action.type === 'run_meddic_coverage' ? 'meddic-coverage' :
+      action.type;
+
     try {
       const result = await dbQuery(
         `INSERT INTO actions (
            workspace_id, action_type, severity, title, summary,
            source, priority, suggested_crm_action, dedup_hash,
-           execution_status, target_deal_id
-         ) VALUES ($1, 'next_step', 'info', $2, $3, $4, $5, $6, $7, 'open', $8)
+           execution_status, target_deal_id, source_skill
+         ) VALUES ($1, 'next_step', 'info', $2, $3, $4, $5, $6, $7, 'open', $8, $9)
          ON CONFLICT (workspace_id, dedup_hash)
            WHERE execution_status != 'dismissed' AND dedup_hash IS NOT NULL
          DO UPDATE SET
@@ -777,6 +782,7 @@ router.post('/:workspaceId/suggested-actions/sync', async (req: Request, res: Re
           crmAction,
           dedupHash,
           action.deal_id || null,
+          sourceSkill,
         ]
       );
 
