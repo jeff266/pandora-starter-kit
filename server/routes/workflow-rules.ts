@@ -373,10 +373,56 @@ router.post('/:workspaceId/workflow-rules/pending/:actionId/approve',
       }
 
       const action = actionResult.rows[0];
+      const payload = JSON.parse(action.execution_payload || '{}');
+
+      // === RE-CHECK THRESHOLD POLICY ===
+      // Threshold may have changed since action was queued
+      if (action.action_type === 'crm_field_write') {
+        const { getActionThresholdResolver } = await import('../actions/threshold-resolver.js');
+        const thresholdResolver = getActionThresholdResolver();
+
+        const field = payload.field || (payload.action_payload && payload.action_payload.field);
+        if (field) {
+          // Get current deal to check stage
+          const deal = action.target_deal_id ? (await query('SELECT * FROM deals WHERE id = $1', [action.target_deal_id])).rows[0] : null;
+
+          const policy = await thresholdResolver.resolveWritePolicy(
+            workspaceId,
+            field,
+            deal?.stage
+          );
+
+          // If threshold changed to LOW, block execution
+          if (policy.threshold === 'low' || !policy.canWrite) {
+            await query(
+              `UPDATE actions
+               SET approval_status = 'rejected',
+                   execution_status = 'blocked',
+                   approved_by = $1,
+                   approved_at = NOW()
+               WHERE id = $2`,
+              [userId, actionId]
+            );
+
+            logger.info('Pending action blocked - threshold changed to low', {
+              workspace_id: workspaceId,
+              action_id: actionId,
+              field,
+              reason: policy.reason,
+            });
+
+            res.json({
+              success: false,
+              blocked: true,
+              reason: policy.reason || `Threshold changed - this field can no longer be written`,
+            });
+            return;
+          }
+        }
+      }
 
       // Execute the action
       const executor = new ActionExecutor();
-      const payload = JSON.parse(action.execution_payload || '{}');
 
       // Build context from action payload
       const context: any = {

@@ -66,3 +66,12 @@ export function formatWebhookPayload(
 export function signPayload(payloadJson: string, secret: string): string {
   return 'sha256=' + createHmac('sha256', secret).update(payloadJson).digest('hex');
 }
+
+/**
+ * Generic webhook payload signing
+ * Takes any object, stringifies it, and returns HMAC-SHA256 signature
+ */
+export function signWebhookPayload(payload: Record<string, any>, secret: string): string {
+  const payloadJson = JSON.stringify(payload);
+  return signPayload(payloadJson, secret);
+}

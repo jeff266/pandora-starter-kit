@@ -272,11 +272,45 @@ router.get('/:workspaceId/findings', async (req: Request, res: Response): Promis
     const whereClause = conditions.join(' AND ');
 
     const sort = (q.sort as string) || 'severity';
+    const context = (q.context as string) || null;
     filtersApplied.sort = sort;
 
     let orderClause: string;
     if (sort === 'recency') {
       orderClause = 'f.found_at DESC NULLS LAST';
+    } else if (context === 'command_center') {
+      // Role-aware prioritization for command center
+      const userRole = (req as any).userWorkspaceRole || 'rep';
+      const currentUserEmail = (req as any).user?.email || null;
+
+      // Priority scoring in SQL
+      orderClause = `
+        CASE
+          -- Base severity score
+          WHEN f.severity = 'act' THEN 100
+          WHEN f.severity = 'watch' THEN 50
+          WHEN f.severity = 'notable' THEN 20
+          WHEN f.severity = 'info' THEN 5
+          ELSE 0
+        END
+        +
+        CASE
+          -- Admin/manager category boosts
+          WHEN '${userRole}' IN ('admin', 'manager') THEN
+            CASE f.category
+              WHEN 'quota_not_configured' THEN 200
+              WHEN 'forecast_gap' THEN 150
+              WHEN 'pipeline_coverage' THEN 150
+              WHEN 'stale_deal' THEN CASE WHEN (f.metadata->>'amount')::numeric > 100000 THEN 30 ELSE 0 END
+              WHEN 'single_thread' THEN 20
+              ELSE 0
+            END
+          -- Rep sees own deals first
+          WHEN '${userRole}' = 'rep' AND f.owner_email = '${currentUserEmail}' THEN 100
+          ELSE 0
+        END DESC,
+        f.found_at DESC NULLS LAST
+      `.trim();
     } else {
       orderClause = `CASE f.severity WHEN 'act' THEN 1 WHEN 'watch' THEN 2 WHEN 'notable' THEN 3 WHEN 'info' THEN 4 ELSE 5 END ASC, f.found_at DESC NULLS LAST`;
     }
@@ -1366,6 +1400,50 @@ router.patch('/:workspaceId/findings/:findingId/resolve', async (req: Request, r
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('[findings] Resolve error:', msg);
+    res.status(500).json({ error: msg });
+  }
+});
+
+/**
+ * POST /:workspaceId/findings/bulk-resolve
+ * Bulk resolve multiple findings
+ */
+router.post('/:workspaceId/findings/bulk-resolve', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const workspaceId = req.params.workspaceId as string;
+    const { finding_ids, resolution_method } = req.body || {};
+
+    if (!Array.isArray(finding_ids) || finding_ids.length === 0) {
+      res.status(400).json({ error: 'finding_ids must be a non-empty array' });
+      return;
+    }
+
+    const validMethods = ['user_dismissed', 'action_taken', 'auto_cleared'];
+    const method = validMethods.includes(resolution_method) ? resolution_method : 'user_dismissed';
+
+    // Bulk update in a single query
+    const result = await query(
+      `UPDATE findings
+       SET resolved_at = now(), resolution_method = $3
+       WHERE id = ANY($1::uuid[]) AND workspace_id = $2 AND resolved_at IS NULL
+       RETURNING id, resolved_at, resolution_method, severity, category, message, deal_id, skill_id`,
+      [finding_ids, workspaceId, method]
+    );
+
+    const resolvedCount = result.rows.length;
+    const requestedCount = finding_ids.length;
+    const alreadyResolved = requestedCount - resolvedCount;
+
+    console.log(`[findings] Bulk resolved ${resolvedCount} findings via ${method} (${alreadyResolved} already resolved)`);
+
+    res.json({
+      resolved_count: resolvedCount,
+      already_resolved_count: alreadyResolved,
+      findings: result.rows,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[findings] Bulk resolve error:', msg);
     res.status(500).json({ error: msg });
   }
 });

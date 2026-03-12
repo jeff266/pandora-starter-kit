@@ -364,4 +364,334 @@ router.post('/:workspaceId/crm-writeback/sync-all', requirePermission('connector
   }
 });
 
+/**
+ * GET /:workspaceId/crm-writeback/log/export
+ * Export CRM write log as CSV
+ * Query params: start_date, end_date, status, initiated_by
+ */
+router.get('/:workspaceId/crm-writeback/log/export', requirePermission('connectors.view_logs'), async (req, res) => {
+  try {
+    const { workspaceId } = req.params;
+    const { start_date, end_date, status, initiated_by } = req.query;
+
+    let queryText = `
+      SELECT
+        l.id,
+        l.created_at,
+        l.crm_type,
+        l.crm_object_type,
+        l.crm_record_id,
+        l.crm_property_name,
+        l.value_written,
+        l.previous_value,
+        l.status,
+        l.error_message,
+        l.trigger_source,
+        l.duration_ms,
+        l.initiated_by,
+        l.action_threshold_at_write,
+        l.reversed_at,
+        l.reversed_by,
+        l.reversal_write_log_id,
+        l.source_citation,
+        m.pandora_field,
+        m.crm_property_label
+      FROM crm_write_log l
+      LEFT JOIN crm_property_mappings m ON m.id = l.mapping_id
+      WHERE l.workspace_id = $1
+    `;
+    const params: any[] = [workspaceId];
+
+    // Add date filters
+    if (start_date) {
+      params.push(start_date);
+      queryText += ` AND l.created_at >= $${params.length}`;
+    }
+
+    if (end_date) {
+      params.push(end_date);
+      queryText += ` AND l.created_at <= $${params.length}`;
+    }
+
+    // Add status filter
+    if (status) {
+      params.push(status);
+      queryText += ` AND l.status = $${params.length}`;
+    }
+
+    // Add initiated_by filter
+    if (initiated_by) {
+      params.push(initiated_by);
+      queryText += ` AND l.initiated_by = $${params.length}`;
+    }
+
+    queryText += ` ORDER BY l.created_at DESC LIMIT 10000`; // Max 10k rows for safety
+
+    const result = await query(queryText, params);
+
+    // Convert to CSV
+    const rows = result.rows;
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'No write log entries found for the specified filters' });
+    }
+
+    // Build CSV header
+    const headers = [
+      'Write Log ID',
+      'Timestamp',
+      'CRM Type',
+      'Object Type',
+      'CRM Record ID',
+      'CRM Property Name',
+      'CRM Property Label',
+      'Pandora Field',
+      'Value Written',
+      'Previous Value',
+      'Status',
+      'Error Message',
+      'Trigger Source',
+      'Initiated By',
+      'Threshold Level',
+      'Duration (ms)',
+      'Reversed At',
+      'Reversed By',
+      'Reversal Log ID',
+      'Source Citation',
+    ];
+
+    const csvRows = [headers.join(',')];
+
+    // Build CSV rows
+    for (const row of rows) {
+      const csvRow = [
+        row.id,
+        new Date(row.created_at).toISOString(),
+        row.crm_type || '',
+        row.crm_object_type || '',
+        row.crm_record_id || '',
+        row.crm_property_name || '',
+        row.crm_property_label || '',
+        row.pandora_field || '',
+        escapeCsvValue(row.value_written || ''),
+        escapeCsvValue(row.previous_value || ''),
+        row.status || '',
+        escapeCsvValue(row.error_message || ''),
+        row.trigger_source || '',
+        row.initiated_by || '',
+        row.action_threshold_at_write || '',
+        row.duration_ms || '',
+        row.reversed_at ? new Date(row.reversed_at).toISOString() : '',
+        row.reversed_by || '',
+        row.reversal_write_log_id || '',
+        escapeCsvValue(row.source_citation || ''),
+      ];
+      csvRows.push(csvRow.join(','));
+    }
+
+    const csv = csvRows.join('\n');
+    const filename = `crm_write_log_${workspaceId}_${new Date().toISOString().split('T')[0]}.csv`;
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(csv);
+
+    logger.info('CRM write log exported', {
+      workspace_id: workspaceId,
+      row_count: rows.length,
+    });
+  } catch (err) {
+    logger.error('Failed to export write log', err as Error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * Helper function to escape CSV values
+ */
+function escapeCsvValue(value: any): string {
+  if (value === null || value === undefined) {
+    return '';
+  }
+  const str = String(value);
+  if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
+}
+
+/**
+ * POST /:workspaceId/crm-writeback/log/:writeLogId/reverse
+ * Reverses a CRM write within the undo window
+ */
+router.post('/:workspaceId/crm-writeback/log/:writeLogId/reverse', requirePermission('connectors.trigger_sync'), async (req, res) => {
+  try {
+    const { workspaceId, writeLogId } = req.params;
+    const userId = (req as any).user?.id; // From auth middleware
+
+    if (!userId) {
+      return res.status(401).json({ error: 'User ID required' });
+    }
+
+    // Get write log entry
+    const logResult = await query(
+      `SELECT l.*, w.undo_window_hours
+       FROM crm_write_log l
+       LEFT JOIN workspace_action_settings w ON w.workspace_id = l.workspace_id
+       WHERE l.id = $1 AND l.workspace_id = $2`,
+      [writeLogId, workspaceId]
+    );
+
+    if (logResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Write log entry not found' });
+    }
+
+    const logEntry = logResult.rows[0];
+    const undoWindowHours = logEntry.undo_window_hours || 24;
+
+    // Check if already reversed
+    if (logEntry.reversed_at) {
+      return res.status(400).json({
+        error: 'This write has already been reversed',
+        reversed_at: logEntry.reversed_at,
+        reversed_by: logEntry.reversed_by,
+      });
+    }
+
+    // Check if within undo window
+    const writeTime = new Date(logEntry.created_at).getTime();
+    const now = Date.now();
+    const windowMs = undoWindowHours * 60 * 60 * 1000;
+
+    if (now - writeTime > windowMs) {
+      return res.status(400).json({
+        error: `Undo window expired. This write can only be reversed within ${undoWindowHours} hours.`,
+        hours_elapsed: Math.floor((now - writeTime) / (60 * 60 * 1000)),
+      });
+    }
+
+    // Check if previous_value exists
+    if (!logEntry.previous_value) {
+      return res.status(400).json({
+        error: 'No previous value recorded - this write cannot be reversed automatically',
+      });
+    }
+
+    const previousValue = JSON.parse(logEntry.previous_value);
+    const field = logEntry.crm_property_name;
+    const crmType = logEntry.crm_type;
+    const crmRecordId = logEntry.crm_record_id;
+
+    // Import CRM writers
+    const { updateDeal: updateHubSpotDeal } = await import('../connectors/hubspot/hubspot-writer.js');
+    const { updateDeal: updateSalesforceDeal } = await import('../connectors/salesforce/salesforce-writer.js');
+
+    const startTime = Date.now();
+
+    try {
+      // Write previous value back to CRM
+      if (crmType === 'hubspot') {
+        await updateHubSpotDeal(workspaceId, crmRecordId, {
+          [field]: previousValue,
+        });
+      } else if (crmType === 'salesforce') {
+        await updateSalesforceDeal(workspaceId, crmRecordId, {
+          [field]: previousValue,
+        });
+      } else {
+        return res.status(400).json({ error: `Unsupported CRM type: ${crmType}` });
+      }
+
+      const durationMs = Date.now() - startTime;
+
+      // Create reversal write log entry
+      const reversalLogResult = await query(
+        `INSERT INTO crm_write_log
+          (workspace_id, crm_type, crm_object_type, crm_record_id, crm_property_name,
+           value_written, trigger_source, status, duration_ms, reversal_write_log_id,
+           previous_value, action_threshold_at_write, initiated_by, source_citation)
+         VALUES ($1, $2, $3, $4, $5, $6, 'user_manual', 'success', $7, $8, $9, $10, $11, $12)
+         RETURNING id`,
+        [
+          workspaceId,
+          crmType,
+          logEntry.crm_object_type,
+          crmRecordId,
+          field,
+          JSON.stringify(previousValue),
+          durationMs,
+          writeLogId, // Points to original write being reversed
+          logEntry.value_written, // The new value becomes the previous value
+          logEntry.action_threshold_at_write,
+          'user_manual',
+          `Reversal of write ${writeLogId} by user`,
+        ]
+      );
+
+      const reversalLogId = reversalLogResult.rows[0].id;
+
+      // Mark original write as reversed
+      await query(
+        `UPDATE crm_write_log
+         SET reversed_at = NOW(), reversed_by = $1, reversal_write_log_id = $2
+         WHERE id = $3`,
+        [userId, reversalLogId, writeLogId]
+      );
+
+      // Update local deal field (if deal)
+      if (logEntry.crm_object_type === 'deal') {
+        await query(
+          `UPDATE deals
+           SET ${field} = $1, updated_at = NOW()
+           WHERE crm_id = $2 AND workspace_id = $3`,
+          [previousValue, crmRecordId, workspaceId]
+        );
+      }
+
+      logger.info('CRM write reversed successfully', {
+        workspace_id: workspaceId,
+        write_log_id: writeLogId,
+        reversal_log_id: reversalLogId,
+        field,
+      });
+
+      res.json({
+        success: true,
+        message: `Reversed ${field} back to previous value`,
+        reversal_log_id: reversalLogId,
+      });
+    } catch (error: any) {
+      logger.error('Failed to reverse CRM write', {
+        workspace_id: workspaceId,
+        write_log_id: writeLogId,
+        error: error.message,
+      });
+
+      // Log the failed reversal attempt
+      await query(
+        `INSERT INTO crm_write_log
+          (workspace_id, crm_type, crm_object_type, crm_record_id, crm_property_name,
+           value_written, trigger_source, status, error_message, duration_ms, reversal_write_log_id, initiated_by)
+         VALUES ($1, $2, $3, $4, $5, $6, 'user_manual', 'failed', $7, $8, $9, $10)`,
+        [
+          workspaceId,
+          crmType,
+          logEntry.crm_object_type,
+          crmRecordId,
+          field,
+          JSON.stringify(previousValue),
+          error.message,
+          Date.now() - startTime,
+          writeLogId,
+          'user_manual',
+        ]
+      );
+
+      res.status(500).json({ error: `Failed to reverse write: ${error.message}` });
+    }
+  } catch (err) {
+    logger.error('Failed to process reversal request', err as Error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 export default router;

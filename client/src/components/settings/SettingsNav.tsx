@@ -32,6 +32,7 @@ const adminTabs: NavItem[] = [
   { key: 'deal-fields', label: 'Deal Fields', icon: 'edit' },
   { key: 'methodology', label: 'Methodology', icon: 'target' },
   { key: 'automations', label: 'Automations', icon: '⚡' },
+  { key: 'agentic-actions', label: 'Agentic Actions', icon: '🤖' },
   { key: 'webhooks', label: 'Webhooks', icon: 'transfer' },
   { key: 'billing', label: 'Billing', icon: 'chart-growth' },
   { key: 'dimensions', label: 'Dimensions', icon: 'filter' },

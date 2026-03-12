@@ -11,6 +11,7 @@ import SectionErrorBoundary from '../components/SectionErrorBoundary';
 import MonteCarloPanel from '../components/MonteCarloPanel';
 import StageAdvancementPanel from '../components/command-center/StageAdvancementPanel';
 import PendingActions from '../components/command-center/PendingActions';
+import RecentHighThresholdWrites from '../components/command-center/RecentHighThresholdWrites';
 import { useDemoMode } from '../contexts/DemoModeContext';
 import { useLens } from '../contexts/LensContext';
 import { useIsMobile } from '../hooks/useIsMobile';
@@ -834,6 +835,10 @@ export default function CommandCenter() {
 
       <SectionErrorBoundary fallbackMessage="Failed to load pending actions." sectionName="Pending Actions">
         <PendingActions />
+      </SectionErrorBoundary>
+
+      <SectionErrorBoundary fallbackMessage="Failed to load recent auto-writes." sectionName="Recent Auto-Writes">
+        <RecentHighThresholdWrites />
       </SectionErrorBoundary>
 
       {/* Top row: Critical Findings + Skill Activity side by side */}

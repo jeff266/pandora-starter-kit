@@ -8,6 +8,7 @@ import { createLogger } from '../utils/logger.js';
 import { RuleContext } from './rule-evaluator.js';
 import { updateDeal as updateHubSpotDeal } from '../connectors/hubspot/hubspot-writer.js';
 import { updateDeal as updateSalesforceDeal } from '../connectors/salesforce/salesforce-writer.js';
+import { getActionThresholdResolver } from '../actions/threshold-resolver.js';
 
 const logger = createLogger('ActionExecutor');
 
@@ -86,13 +87,6 @@ export class ActionExecutor {
       return { success: false, error: 'Only "deal" object supported currently' };
     }
 
-    // Check if field requires approval
-    const { requiresApproval } = await import('../crm-writeback/pandora-fields.js');
-    if (requiresApproval(field) && rule.execution_mode === 'auto') {
-      // Force to queue mode for safety-critical fields
-      return this.queueCrmFieldWrite(rule, context, field, value_expr);
-    }
-
     if (!context.deal?.id || !context.deal?.crm_id) {
       return { success: false, error: 'Deal ID or CRM ID missing from context' };
     }
@@ -105,8 +99,68 @@ export class ActionExecutor {
     // Get deal CRM type
     const crmType = context.deal.crm_type || 'hubspot';
 
+    // === THRESHOLD ENFORCEMENT ===
+    // Resolve write policy using ActionThresholdResolver
+    const thresholdResolver = getActionThresholdResolver();
+    const policy = await thresholdResolver.resolveWritePolicy(
+      rule.workspace_id,
+      field,
+      context.deal.stage
+    );
+
+    // Block if canWrite is false
+    if (!policy.canWrite) {
+      logger.info('Write blocked by threshold policy', {
+        workspace_id: rule.workspace_id,
+        field,
+        reason: policy.reason,
+      });
+      return {
+        success: false,
+        error: policy.reason || `Cannot write to ${field}`,
+      };
+    }
+
+    // Handle MEDIUM threshold: queue for approval (HITL)
+    if (policy.threshold === 'medium' && rule.execution_mode === 'auto') {
+      return this.queueCrmFieldWrite(rule, context, field, value_expr);
+    }
+
+    // Handle LOW threshold: should have been blocked above, but defensive check
+    if (policy.threshold === 'low') {
+      return {
+        success: false,
+        error: `Field ${field} has "low" threshold - Pandora can only recommend, not write`,
+      };
+    }
+
+    // === HIGH THRESHOLD: WRITE IMMEDIATELY ===
+    // Get previous value for reversal capability
+    const previousValueResult = await query(
+      `SELECT ${field} FROM deals WHERE id = $1 AND workspace_id = $2`,
+      [context.deal.id, rule.workspace_id]
+    );
+    const previousValue = previousValueResult.rows[0]?.[field] || null;
+
+    // === INVERSE DIVERGENCE CHECK ===
+    // If current value already matches recommended value, skip the write
+    if (previousValue === value) {
+      logger.info('Inverse divergence: CRM value already matches recommendation', {
+        workspace_id: rule.workspace_id,
+        field,
+        value,
+        deal_id: context.deal.id,
+      });
+      return {
+        success: true,
+        message: `${field} already matches recommended value (${value}) - no write needed`,
+      };
+    }
+
     // Build source citation
     const sourceCitation = this.buildSourceCitation(rule, context);
+
+    const startTime = Date.now();
 
     try {
       // Write to CRM
@@ -120,22 +174,32 @@ export class ActionExecutor {
         });
       }
 
-      // Log to crm_write_log
-      await query(
+      const durationMs = Date.now() - startTime;
+
+      // Log to crm_write_log with new threshold columns
+      const logResult = await query(
         `INSERT INTO crm_write_log
           (workspace_id, crm_type, crm_object_type, crm_record_id, crm_property_name,
-           value_written, trigger_source, status, duration_ms, workflow_rule_id, source_citation)
-         VALUES ($1, $2, 'deal', $3, $4, $5, 'workflow_rule', 'success', 0, $6, $7)`,
+           value_written, trigger_source, status, duration_ms, workflow_rule_id, source_citation,
+           previous_value, action_threshold_at_write, initiated_by)
+         VALUES ($1, $2, 'deal', $3, $4, $5, 'workflow_rule', 'success', $6, $7, $8, $9, $10, $11)
+         RETURNING id`,
         [
           rule.workspace_id,
           crmType,
           context.deal.crm_id,
           field,
           JSON.stringify(value),
+          durationMs,
           rule.id,
           sourceCitation,
+          JSON.stringify(previousValue),
+          policy.threshold, // 'high'
+          'workflow_rule',  // initiated_by
         ]
       );
+
+      const writeLogId = logResult.rows[0].id;
 
       // Update local deal field
       await query(
@@ -144,17 +208,53 @@ export class ActionExecutor {
         [value, context.deal.id, rule.workspace_id]
       );
 
+      // Fire post-write actions for HIGH threshold
+      if (policy.threshold === 'high') {
+        // Send notification (fire and forget)
+        this.sendHighThresholdNotification(
+          rule.workspace_id,
+          context.deal,
+          field,
+          previousValue,
+          value,
+          rule.name
+        ).catch(err => {
+          logger.error('Failed to send high-threshold notification', { error: err.message });
+        });
+
+        // Fire audit webhook (fire and forget)
+        this.fireAuditWebhook(
+          rule.workspace_id,
+          writeLogId,
+          {
+            deal_id: context.deal.id,
+            deal_name: context.deal.name,
+            field,
+            previous_value: previousValue,
+            new_value: value,
+            threshold: 'high',
+            initiated_by: 'workflow_rule',
+            rule_name: rule.name,
+          }
+        ).catch(err => {
+          logger.error('Failed to fire audit webhook', { error: err.message });
+        });
+      }
+
       return {
         success: true,
         message: `Updated ${field} to ${value} on deal ${context.deal.name || context.deal.id}`,
       };
     } catch (error: any) {
+      const durationMs = Date.now() - startTime;
+
       // Log failure
       await query(
         `INSERT INTO crm_write_log
           (workspace_id, crm_type, crm_object_type, crm_record_id, crm_property_name,
-           value_written, trigger_source, status, error_message, duration_ms, workflow_rule_id)
-         VALUES ($1, $2, 'deal', $3, $4, $5, 'workflow_rule', 'failed', $6, 0, $7)`,
+           value_written, trigger_source, status, error_message, duration_ms, workflow_rule_id,
+           previous_value, action_threshold_at_write, initiated_by)
+         VALUES ($1, $2, 'deal', $3, $4, $5, 'workflow_rule', 'failed', $6, $7, $8, $9, $10, $11)`,
         [
           rule.workspace_id,
           crmType,
@@ -162,7 +262,11 @@ export class ActionExecutor {
           field,
           JSON.stringify(value),
           error.message,
+          durationMs,
           rule.id,
+          JSON.stringify(previousValue),
+          policy.threshold,
+          'workflow_rule',
         ]
       );
 
@@ -192,6 +296,22 @@ export class ActionExecutor {
     const { getFieldByKey } = await import('../crm-writeback/pandora-fields.js');
     const fieldMeta = getFieldByKey(field);
     const fieldLabel = fieldMeta?.label || field;
+
+    // === INVERSE DIVERGENCE CHECK ===
+    // If current value already matches recommended value, skip queuing
+    const currentValue = (context.deal as any)[field] || null;
+    if (currentValue === value) {
+      logger.info('Inverse divergence: CRM value already matches recommendation (queue)', {
+        workspace_id: rule.workspace_id,
+        field,
+        value,
+        deal_id: context.deal.id,
+      });
+      return {
+        success: true,
+        message: `${fieldLabel} already matches recommended value (${value}) - no action needed`,
+      };
+    }
 
     // Create pending action
     const result = await query(
@@ -224,14 +344,36 @@ export class ActionExecutor {
   }
 
   /**
+   * Generate task title from finding category
+   */
+  private getTaskTitleFromCategory(category: string, finding?: any): string {
+    const taskTitleFromCategory: Record<string, string> = {
+      'stale_deal': 'Re-engage deal — no activity in {days} days',
+      'single_thread': 'Add second contact to reduce single-thread risk',
+      'close_date_risk': 'Review close date — timeline may have shifted',
+      'missing_amount': 'Update deal amount in CRM',
+      'no_economic_buyer': 'Confirm economic buyer before advancing stage',
+      'stage_velocity': 'Review deal velocity — stuck in stage',
+      'meddic_coverage': 'Address MEDDIC coverage gaps',
+    };
+
+    if (taskTitleFromCategory[category]) {
+      return taskTitleFromCategory[category];
+    }
+
+    // Fallback to finding message
+    if (finding?.message) {
+      return `Review and address: ${finding.message}`;
+    }
+
+    return 'Review and address finding';
+  }
+
+  /**
    * Execute CRM task creation
    */
   private async executeCrmTaskCreate(rule: WorkflowRule, context: RuleContext): Promise<ActionResult> {
     const { title_template, due_expr, assign_to } = rule.action_payload;
-
-    if (!title_template) {
-      return { success: false, error: 'Missing title_template' };
-    }
 
     if (!context.deal?.id || !context.deal?.crm_id) {
       return { success: false, error: 'Deal ID or CRM ID missing from context' };
@@ -240,7 +382,17 @@ export class ActionExecutor {
     // Resolve template and expressions
     const { RuleEvaluator } = await import('./rule-evaluator.js');
     const evaluator = new RuleEvaluator();
-    const title = evaluator.resolveValueExpr(title_template, context);
+
+    // If title_template is missing or empty, generate from finding category
+    let title: string;
+    if (!title_template && context.finding?.category) {
+      title = this.getTaskTitleFromCategory(context.finding.category, context.finding);
+    } else if (title_template) {
+      title = evaluator.resolveValueExpr(title_template, context);
+    } else {
+      return { success: false, error: 'Missing title_template and no finding category available' };
+    }
+
     const dueDate = due_expr ? evaluator.resolveValueExpr(due_expr, context) : null;
 
     // Determine assignee
@@ -436,5 +588,121 @@ export class ActionExecutor {
     // TODO: Implement Salesforce task creation
     // POST to /services/data/vXX.0/sobjects/Task
     logger.warn('Salesforce task creation not yet implemented');
+  }
+
+  /**
+   * Send notification for high-threshold write
+   * Notifies to configured channel, deal owner, and manager
+   */
+  private async sendHighThresholdNotification(
+    workspaceId: string,
+    deal: any,
+    field: string,
+    previousValue: any,
+    newValue: any,
+    ruleName: string
+  ): Promise<void> {
+    // Get workspace action settings
+    const thresholdResolver = getActionThresholdResolver();
+    const settings = await thresholdResolver.getSettings(workspaceId);
+
+    if (!settings || !settings.notify_on_auto_write) {
+      return; // Notifications disabled
+    }
+
+    // Get field metadata for label
+    const { getFieldByKey } = await import('../crm-writeback/pandora-fields.js');
+    const fieldMeta = getFieldByKey(field);
+    const fieldLabel = fieldMeta?.label || field;
+
+    // Build notification message
+    const message = [
+      `:robot_face: *High-Threshold CRM Write*`,
+      `*Deal:* ${deal.name || deal.id}`,
+      `*Field:* ${fieldLabel}`,
+      `*Previous:* ${JSON.stringify(previousValue)}`,
+      `*New:* ${JSON.stringify(newValue)}`,
+      `*Rule:* ${ruleName}`,
+      ``,
+      `You have ${settings.undo_window_hours} hours to undo this change.`,
+    ].join('\n');
+
+    // Import Slack client
+    const { SlackAppClient } = await import('../notifications/slack-app-client.js');
+    const slackClient = new SlackAppClient();
+
+    // Send to configured channel
+    if (settings.notify_channel) {
+      try {
+        await slackClient.sendMessage(workspaceId, settings.notify_channel, message);
+        logger.info('Sent high-threshold notification to channel', {
+          workspace_id: workspaceId,
+          channel: settings.notify_channel,
+        });
+      } catch (error: any) {
+        logger.error('Failed to send channel notification', { error: error.message });
+      }
+    }
+
+    // TODO: Send DM to deal owner if notify_rep is true
+    // TODO: Send DM to manager if notify_manager is true
+  }
+
+  /**
+   * Fire audit webhook with HMAC signature
+   */
+  private async fireAuditWebhook(
+    workspaceId: string,
+    writeLogId: string,
+    payload: Record<string, any>
+  ): Promise<void> {
+    // Get workspace action settings
+    const thresholdResolver = getActionThresholdResolver();
+    const settings = await thresholdResolver.getSettings(workspaceId);
+
+    if (!settings || !settings.audit_webhook_enabled || !settings.audit_webhook_url) {
+      return; // Webhook not configured
+    }
+
+    // Build webhook payload
+    const webhookPayload = {
+      event: 'crm_write',
+      write_log_id: writeLogId,
+      workspace_id: workspaceId,
+      timestamp: new Date().toISOString(),
+      data: payload,
+    };
+
+    // Sign payload with HMAC-SHA256
+    const { signWebhookPayload } = await import('../utils/webhook-formatter.js');
+    const signature = settings.audit_webhook_secret
+      ? signWebhookPayload(webhookPayload, settings.audit_webhook_secret)
+      : null;
+
+    // Send webhook
+    try {
+      const response = await fetch(settings.audit_webhook_url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(signature ? { 'X-Pandora-Signature': signature } : {}),
+        },
+        body: JSON.stringify(webhookPayload),
+      });
+
+      if (!response.ok) {
+        logger.error('Audit webhook failed', {
+          status: response.status,
+          url: settings.audit_webhook_url,
+        });
+      } else {
+        logger.info('Audit webhook sent successfully', {
+          workspace_id: workspaceId,
+          write_log_id: writeLogId,
+        });
+      }
+    } catch (error: any) {
+      logger.error('Failed to fire audit webhook', { error: error.message });
+    }
   }
 }

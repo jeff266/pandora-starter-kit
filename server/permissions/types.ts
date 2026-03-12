@@ -45,6 +45,9 @@ export interface PermissionSet {
   // Flags
   'flags.toggle': boolean;
 
+  // Settings
+  'settings.manage': boolean;
+
   // Data
   'data.deals_view': boolean;
   'data.accounts_view': boolean;
@@ -102,6 +105,8 @@ export function createPermissionSet(defaultValue = false): PermissionSet {
     'billing.manage': defaultValue,
 
     'flags.toggle': defaultValue,
+
+    'settings.manage': defaultValue,
 
     'data.deals_view': defaultValue,
     'data.accounts_view': defaultValue,

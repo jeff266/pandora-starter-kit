@@ -376,12 +376,24 @@ export default function PendingActions() {
                     style={{ marginTop: 2, cursor: 'pointer' }}
                   />
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 13, fontWeight: 500, color: colors.text, marginBottom: 4 }}>
+                    <div style={{ fontSize: 13, fontWeight: 500, color: colors.text, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
                       {action.title}
+                      <span style={{
+                        fontSize: 9,
+                        fontWeight: 700,
+                        padding: '2px 6px',
+                        borderRadius: 3,
+                        background: '#f97316' + '20',
+                        color: '#f97316',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.05em',
+                      }}>
+                        HITL
+                      </span>
                     </div>
                     <div style={{ fontSize: 11, color: colors.textSecondary, marginBottom: 4 }}>
                       {action.deal_name && `${action.deal_name} · `}
-                      Rule: {action.rule_name || 'Manual'} · {formatActionType(action.action_type)}
+                      Rule: {action.rule_name || 'Manual'} · {formatActionType(action.action_type)} · Medium Threshold
                     </div>
                     <div style={{ fontSize: 11, color: colors.textMuted, marginBottom: 8 }}>
                       {action.summary}

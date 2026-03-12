@@ -30,8 +30,8 @@ export default function InsightsPage() {
   const [hasMore, setHasMore] = useState(true);
   const [offset, setOffset] = useState(0);
   const [filters, setFilters] = useState({
-    severity: 'all',
-    status: 'all',
+    severity: 'act,watch', // Default to Act + Watch
+    status: 'active',       // Default to Active only
     skill: '',
   });
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
