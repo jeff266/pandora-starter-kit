@@ -16,11 +16,16 @@ ALTER TABLE stage_configs ADD CONSTRAINT stage_configs_workspace_pipeline_stage_
 --   contractsent          → 'negotiation'     = "Contract Sent"      (order 7)
 -- (decisionmakerboughtin → Proposal Reviewed already inserted in earlier fix)
 
+-- Only insert if workspace exists (migration is environment-specific)
 INSERT INTO stage_configs (workspace_id, pipeline_name, stage_name, display_order, stage_id)
-VALUES
-  ('4160191d-73bc-414b-97dd-5a1853190378', 'Core Sales Pipeline', 'Demo Scheduled',  2, 'appointmentscheduled'),
-  ('4160191d-73bc-414b-97dd-5a1853190378', 'Core Sales Pipeline', 'Demo Conducted',  3, 'presentationscheduled'),
-  ('4160191d-73bc-414b-97dd-5a1853190378', 'Core Sales Pipeline', 'Contract Sent',   7, 'contractsent')
+SELECT '4160191d-73bc-414b-97dd-5a1853190378'::uuid, 'Core Sales Pipeline', 'Demo Scheduled',  2, 'appointmentscheduled'
+FROM workspaces WHERE id = '4160191d-73bc-414b-97dd-5a1853190378'::uuid
+UNION ALL
+SELECT '4160191d-73bc-414b-97dd-5a1853190378'::uuid, 'Core Sales Pipeline', 'Demo Conducted',  3, 'presentationscheduled'
+FROM workspaces WHERE id = '4160191d-73bc-414b-97dd-5a1853190378'::uuid
+UNION ALL
+SELECT '4160191d-73bc-414b-97dd-5a1853190378'::uuid, 'Core Sales Pipeline', 'Contract Sent',   7, 'contractsent'
+FROM workspaces WHERE id = '4160191d-73bc-414b-97dd-5a1853190378'::uuid
 ON CONFLICT (workspace_id, pipeline_name, stage_name) DO UPDATE
   SET stage_id = EXCLUDED.stage_id,
       display_order = EXCLUDED.display_order,
