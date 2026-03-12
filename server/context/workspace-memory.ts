@@ -67,7 +67,7 @@ export async function buildWorkspaceContextBlock(workspaceId: string, userId?: s
       [workspaceId, ...targetsExtraParams]
     ).catch(() => null),
     query(
-      `SELECT stage_name, is_active, display_order
+      `SELECT stage_name, is_active, display_order, stage_normalized
        FROM stage_configs WHERE workspace_id = $1
        ORDER BY display_order ASC NULLS LAST, stage_name ASC`,
       [workspaceId]
@@ -260,8 +260,9 @@ export async function buildWorkspaceContextBlock(workspaceId: string, userId?: s
   }
 
   // Team
-  // Priority: context_layer.definitions.team_roster > context_layer.team_structure > sales_reps table
-  const reps: any[] = def.team_roster?.value?.reps ?? ts.reps ?? [];
+  // Priority: context_layer.definitions.team_roster > teams_reps (onboarding key) > context_layer.team_structure > sales_reps table
+  const teamsRepsArr: any[] = Array.isArray(def.teams_reps?.value) && def.teams_reps.value.length > 0 ? def.teams_reps.value : [];
+  const reps: any[] = def.team_roster?.value?.reps ?? (teamsRepsArr.length > 0 ? teamsRepsArr : null) ?? ts.reps ?? [];
   const managers: string[] = def.team_roster?.value?.managers ?? ts.managers ?? [];
   const excluded: string[] = def.team_roster?.value?.excluded_owners ?? ts.excluded_owners ?? [];
   const salesRepsDb: any[] = salesRepsRow?.rows ?? [];
@@ -332,6 +333,22 @@ export async function buildWorkspaceContextBlock(workspaceId: string, userId?: s
     }
     if (inactiveStages.length > 0) {
       lines.push(`PARKING LOT / EXCLUDED: ${inactiveStages.join(', ')}`);
+    }
+
+    // Stage classifications from stage_normalized column
+    const wonStages = stages.filter((s: any) => s.stage_normalized === 'won').map((s: any) => s.stage_name);
+    const lostStages = stages.filter((s: any) => s.stage_normalized === 'lost').map((s: any) => s.stage_name);
+    const parkingStages = stages.filter((s: any) => s.stage_normalized === 'parking_lot').map((s: any) => s.stage_name);
+    const excludedNorm = stages.filter((s: any) => s.stage_normalized === 'excluded').map((s: any) => s.stage_name);
+    const classLines: string[] = [];
+    if (wonStages.length > 0) classLines.push(`Won: ${wonStages.join(', ')}`);
+    if (lostStages.length > 0) classLines.push(`Lost: ${lostStages.join(', ')}`);
+    if (parkingStages.length > 0) classLines.push(`Parking lot: ${parkingStages.join(', ')}`);
+    if (excludedNorm.length > 0) classLines.push(`Pre-opportunity (excluded from conversion): ${excludedNorm.join(', ')}`);
+    if (classLines.length > 0) {
+      lines.push('');
+      lines.push(`STAGE CLASSIFICATIONS:`);
+      classLines.forEach(l => lines.push(`  ${l}`));
     }
   }
 

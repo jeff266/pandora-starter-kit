@@ -1,0 +1,77 @@
+Now I have the full picture. Here's what the data shows:
+
+stage_configs table — 20 stages across 5 pipelines (Core Sales, Fellowship, Pilot Program, Partnership, Customer Expansion), all active. But no stage_normalized column exists — which explains why the onboarding showed "Won: 0, Lost: 0". The classification data exists in context_layer.definitions under stage_classification but it was never written back to stage_configs.
+
+context_layer.definitions — 23 keys present. The important ones:
+
+stage_classification ✅ — classification data is there
+teams_reps ✅ — exists but had 0 reps
+teams_excluded_owners ✅ — the 2 excluded owners
+revenue_motions ✅ — Core Sales + Fellowship
+onboarding_Q5_stale ✅ — stale thresholds
+workspace_config ✅ — voice, exclusions etc.
+onboarding_Q11_methodology ❌ — still pending
+onboarding_Q15/Q25/Q17 ❌ — still pending
+Two specific problems to fix:
+
+Send this to Replit:
+
+Two targeted fixes — report then fix:
+
+Fix 1 — Stage classification not flowing to stage_configs
+
+context_layer.definitions.stage_classification contains won/lost/parking lot classifications from onboarding. The stage_configs table has no stage_normalized column so this data never landed.
+
+Check what stage_classification actually contains:
+
+sql
+SELECT definitions->'stage_classification' 
+FROM context_layer 
+WHERE workspace_id = (
+  SELECT id FROM workspaces WHERE name ILIKE '%frontera%'
+);
+Then add the column and populate it:
+
+sql
+ALTER TABLE stage_configs 
+  ADD COLUMN IF NOT EXISTS stage_normalized TEXT 
+  CHECK (stage_normalized IN ('open','won','lost','parking_lot','excluded'));
+Write a one-time script that reads stage_classification from context_layer.definitions and updates stage_configs.stage_normalized for each matching stage name. After running, verify:
+
+"Closed Won" → won
+"Closed Lost" / "Closed Lost Partnership" / "Pilot never activated | Lost" → lost
+Open stages → open
+Fix 2 — teams_reps has 0 reps
+
+Check what's actually in teams_reps:
+
+sql
+SELECT definitions->'teams_reps'
+FROM context_layer
+WHERE workspace_id = (
+  SELECT id FROM workspaces WHERE name ILIKE '%frontera%'
+);
+If it's empty or malformed, check user_workspaces for active reps:
+
+sql
+SELECT u.email, u.name, uw.role
+FROM user_workspaces uw
+JOIN users u ON uw.user_id = u.id
+WHERE uw.workspace_id = (
+  SELECT id FROM workspaces WHERE name ILIKE '%frontera%'
+)
+AND uw.role = 'rep';
+If reps exist in user_workspaces but aren't in teams_reps, the onboarding team question didn't save correctly. Fix by writing the rep list from user_workspaces into context_layer.definitions.teams_reps for Frontera.
+
+Exit criteria:
+
+stage_configs has stage_normalized populated for all Frontera stages
+buildWorkspaceContextBlock() correctly reads stage classifications
+Ask Pandora "what stages count as won?" returns correct stage names
+teams_reps contains Nate Phillips and Sara Bollman
+
+
+
+
+
+
