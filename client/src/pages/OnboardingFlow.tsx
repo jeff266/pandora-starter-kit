@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useWorkspace } from '../context/WorkspaceContext';
 import { HypothesisCard } from '../components/onboarding/HypothesisCard';
 import { ArtifactPreview } from '../components/onboarding/ArtifactPreview';
@@ -85,6 +85,7 @@ function authHeaders(): Record<string, string> {
 export default function OnboardingFlow() {
   const { currentWorkspace } = useWorkspace();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   const [flowState, setFlowState] = useState<FlowState>('welcome');
   const [thread, setThread] = useState<ThreadItem[]>([]);
@@ -117,6 +118,19 @@ export default function OnboardingFlow() {
       const data = await res.json();
       if (data.not_started) return;
       if (data.state?.tier0_complete) {
+        if (searchParams.get('force') === 'true') {
+          if (!window.confirm('Re-run the CRM scan and restart setup from the beginning?')) {
+            navigate('/');
+            return;
+          }
+          setThread([]);
+          setCurrentQuestion(null);
+          setCurrentHypothesis(null);
+          setProgress(null);
+          setQuestionStates({});
+          await handleStart(true);
+          return;
+        }
         navigate('/');
         return;
       }

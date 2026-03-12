@@ -285,7 +285,7 @@ export default function WorkspacesTab() {
                       ) : null}
                       {isCurrent && (
                         <button
-                          onClick={() => { navigate('/onboarding'); }}
+                          onClick={() => { navigate('/onboarding?force=true'); }}
                           style={{
                             padding: '6px 12px',
                             fontSize: 12,
