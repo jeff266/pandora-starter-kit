@@ -709,6 +709,7 @@ function buildEvidenceFromSignals(signals: any): Evidence[] {
 // ---------------------------------------------------------------------------
 router.post('/:workspaceId/suggested-actions/sync', async (req: Request, res: Response) => {
   const { workspaceId } = req.params as { workspaceId: string };
+  console.log('[SuggestedActions] sync called for workspace:', workspaceId, 'actions:', (req.body as any)?.actions?.length ?? 0);
   const { actions } = req.body as {
     actions: Array<{
       id: string;

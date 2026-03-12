@@ -1694,14 +1694,72 @@ export default function DealDetail() {
           const covered = meddicCoverage?.covered_fields ?? [];
           const coveredCount = meddicCoverageData ? confirmedCount : covered.length;
 
+          // Gap fields for bulk task creation
+          const gapFields = meddicCoverageData
+            ? MEDDIC_FIELDS.filter(({ key }) => {
+                const ex = extractions.find((e: any) =>
+                  e.field === key || e.field === `meddic_${key}` || e.field === key.replace('_', '')
+                );
+                return !ex || ex.status === 'missing' || ex.status === 'partial';
+              })
+            : MEDDIC_FIELDS.filter(({ key }) => !covered.includes(key));
+
+          const MEDDIC_TASK_TITLES_BULK: Record<string, string> = {
+            economic_buyer: 'Confirm economic buyer and schedule introductory call',
+            champion: 'Identify internal champion and confirm authority to advocate',
+            metrics: 'Quantify ROI and establish success metrics with prospect',
+            decision_criteria: 'Capture vendor evaluation criteria and decision factors',
+            decision_process: 'Map evaluation steps from POC to signed contract',
+            identify_pain: 'Document core business problem and get agreement on pain',
+          };
+
           return (
             <Accordion title="MEDDIC Coverage" badge={coverageScore != null ? `${coverageScore}/100` : `${coveredCount}/6`}>
               <div style={{ paddingTop: 12 }}>
-                {/* Header with Run Now button */}
+                {/* Header with Run Now + Create Gap Tasks buttons */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
                   <div style={{ fontSize: 11, color: colors.textMuted, lineHeight: 1.5 }}>
                     {meddicCoverageData ? 'AI-analyzed MEDDIC coverage from all calls, emails, and notes' : 'Confirmed from call signals extracted across conversations'}
                   </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    {gapFields.length > 0 && dealId && (
+                      <button
+                        onClick={async () => {
+                          if (!dealId) return;
+                          try {
+                            const steps = gapFields.map(({ key, label }) => ({
+                              title: MEDDIC_TASK_TITLES_BULK[key] || `MEDDIC: Address ${label}`,
+                              priority: 'P1' as const,
+                              source: 'meddic' as const,
+                              category: key,
+                              suggested_crm_action: 'task_create' as const,
+                            }));
+                            const syncRes = await api.post(`/deals/${dealId}/actions/sync`, { steps }) as any;
+                            if (syncRes?.actions?.length > 0) {
+                              setActionCards(prev => {
+                                const newCards = (syncRes.actions as any[])
+                                  .filter((a: any) => !prev.find(c => c.id === a.id))
+                                  .map((a: any) => ({ id: a.id, title: a.title, priority: 'P1' as const, source: 'meddic', suggested_crm_action: 'task_create' as const }));
+                                return [...prev, ...newCards];
+                              });
+                            }
+                          } catch {}
+                        }}
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 600,
+                          padding: '4px 10px',
+                          borderRadius: 4,
+                          border: `1px solid ${colors.accent}`,
+                          background: `${colors.accent}12`,
+                          color: colors.accent,
+                          cursor: 'pointer',
+                          fontFamily: fonts.sans,
+                        }}
+                      >
+                        Create {gapFields.length} Gap Task{gapFields.length !== 1 ? 's' : ''} ▶
+                      </button>
+                    )}
                   <button
                     onClick={async () => {
                       const wsId = currentWorkspace?.id;
@@ -1734,6 +1792,7 @@ export default function DealDetail() {
                   >
                     {meddicCoverageLoading ? 'Running...' : 'Run Now'}
                   </button>
+                  </div>
                 </div>
 
                 {meddicCoverageLoading ? (

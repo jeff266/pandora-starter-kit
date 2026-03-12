@@ -15,6 +15,7 @@ export default function SuggestedActionsPanel({ actions, onDismissAll }: Suggest
   const [syncError, setSyncError] = useState(false);
 
   useEffect(() => {
+    console.log('[SuggestedActionsPanel] mounted, actions.length:', actions.length);
     if (actions.length === 0) {
       setSyncing(false);
       return;
@@ -25,12 +26,14 @@ export default function SuggestedActionsPanel({ actions, onDismissAll }: Suggest
 
     api.post('/suggested-actions/sync', { actions })
       .then((res: { cards: ActionCardItem[] }) => {
+        console.log('[SuggestedActionsPanel] sync OK, cards:', res.cards?.length ?? 0);
         if (!cancelled) {
           setCards(res.cards ?? []);
           setSyncing(false);
         }
       })
-      .catch(() => {
+      .catch((err: unknown) => {
+        console.error('[SuggestedActionsPanel] sync FAILED:', err);
         if (!cancelled) {
           setSyncing(false);
           setSyncError(true);

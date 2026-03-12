@@ -212,12 +212,14 @@ app.use('/api/auth/', authLimiter);
 
 const heavyOpLimiter = rateLimit({
   windowMs: 60_000,
-  max: 5,
+  max: 20,
   standardHeaders: true,
   legacyHeaders: false,
   validate: { ip: false, trustProxy: false, xForwardedForHeader: false },
   keyGenerator: (req: any): string => {
-    return req.params?.workspaceId || 'global';
+    return req.params?.workspaceId
+      ?? req.path.match(/\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i)?.[1]
+      ?? 'global';
   },
   message: { error: 'Too many requests for this operation, please try again later' },
 });
