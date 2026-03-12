@@ -1,16 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
-
-const teal = '#2DD4BF';
-const coral = '#F97316';
-const bg = '#0D1117';
-const surface = '#161B22';
-const border = '#21262D';
-const textPrimary = '#E6EDF3';
-const textMuted = '#7D8590';
-const textDim = '#484F58';
-const accent = '#2DD4BF';
+import { colors, fonts } from '../styles/theme';
 
 const categories = ['Pipeline', 'Forecasting', 'Reporting', 'Intelligence', 'Custom'];
 
@@ -34,13 +25,13 @@ interface SavedQuery {
 
 const inputStyle: React.CSSProperties = {
   width: '100%',
-  background: surface,
-  border: `1px solid ${border}`,
+  background: colors.surface,
+  border: `1px solid ${colors.border}`,
   borderRadius: 8,
   padding: '9px 12px',
-  color: textPrimary,
+  color: colors.text,
   fontSize: 13,
-  fontFamily: 'inherit',
+  fontFamily: fonts.sans,
   outline: 'none',
   boxSizing: 'border-box',
 };
@@ -49,8 +40,8 @@ function Field({ label, hint, children, style }: { label: string; hint?: string;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, ...style }}>
       <div>
-        <div style={{ fontSize: 12, fontWeight: 600, color: textPrimary }}>{label}</div>
-        {hint && <div style={{ fontSize: 11, color: textMuted, marginTop: 1 }}>{hint}</div>}
+        <div style={{ fontSize: 12, fontWeight: 600, color: colors.text }}>{label}</div>
+        {hint && <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 1 }}>{hint}</div>}
       </div>
       {children}
     </div>
@@ -59,12 +50,12 @@ function Field({ label, hint, children, style }: { label: string; hint?: string;
 
 function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
   return (
-    <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontSize: 13, color: textPrimary }}>
+    <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontSize: 13, color: colors.text }}>
       <div
         onClick={() => onChange(!checked)}
         style={{
           width: 34, height: 18, borderRadius: 9,
-          background: checked ? teal : border,
+          background: checked ? colors.accent : colors.border,
           position: 'relative', transition: 'background 0.2s', flexShrink: 0,
         }}
       >
@@ -83,7 +74,7 @@ function Switch({ on }: { on: boolean }) {
   return (
     <div style={{
       width: 34, height: 18, borderRadius: 9,
-      background: on ? teal : border,
+      background: on ? colors.accent : colors.border,
       position: 'relative', flexShrink: 0,
     }}>
       <div style={{
@@ -98,9 +89,9 @@ function CostBar({ classifyEnabled, synthesizeEnabled }: { classifyEnabled: bool
   const tokensPerRun = (classifyEnabled ? 800 : 0) + (synthesizeEnabled ? 1200 : 0) + 200;
   const costPerRun = ((classifyEnabled ? 0.0002 : 0) + (synthesizeEnabled ? 0.006 : 0)).toFixed(4);
   return (
-    <div style={{ background: `${teal}08`, border: `1px solid ${teal}22`, borderRadius: 8, padding: '10px 14px', fontSize: 11, color: textMuted, display: 'flex', gap: 20 }}>
-      <span>Est. <strong style={{ color: textPrimary }}>{tokensPerRun.toLocaleString()}</strong> tokens/run</span>
-      <span>Est. <strong style={{ color: textPrimary }}>${costPerRun}</strong>/run</span>
+    <div style={{ background: colors.accentSoft, border: `1px solid ${colors.borderFocus}`, borderRadius: 8, padding: '10px 14px', fontSize: 11, color: colors.textMuted, display: 'flex', gap: 20 }}>
+      <span>Est. <strong style={{ color: colors.text }}>{tokensPerRun.toLocaleString()}</strong> tokens/run</span>
+      <span>Est. <strong style={{ color: colors.text }}>${costPerRun}</strong>/run</span>
       <span>{classifyEnabled || synthesizeEnabled ? 'AI analysis enabled' : 'Data-only (no AI cost)'}</span>
     </div>
   );
@@ -239,30 +230,30 @@ export default function SkillBuilder({ editMode }: Props) {
   }, [skillName, question, category, sqlMode, selectedQueryId, selectedQueryName, sql, classifyEnabled, classifyBad, classifyGood, synthesizeEnabled, synthesizeTone, customPrompt, outputSlack, outputReport, schedule, editMode, skillId, navigate]);
 
   return (
-    <div style={{ fontFamily: "'IBM Plex Sans', system-ui, sans-serif", background: bg, minHeight: '100vh', color: textPrimary, padding: '32px 24px', boxSizing: 'border-box' }}>
+    <div style={{ fontFamily: fonts.sans, background: colors.bg, minHeight: '100vh', color: colors.text, padding: '32px 24px', boxSizing: 'border-box' }}>
       <div style={{ maxWidth: 760, margin: '0 auto' }}>
 
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 }}>
           <div style={{
             width: 28, height: 28, borderRadius: 6,
-            background: `linear-gradient(135deg, ${teal}33, ${teal}11)`,
-            border: `1px solid ${teal}44`,
+            background: colors.accentSoft,
+            border: `1px solid ${colors.borderFocus}`,
             display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14,
           }}>⚡</div>
-          <span style={{ fontSize: 12, color: textMuted, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+          <span style={{ fontSize: 12, color: colors.textMuted, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
             Skill Builder
           </span>
         </div>
-        <h1 style={{ fontSize: 22, fontWeight: 600, margin: '0 0 4px', color: textPrimary }}>
+        <h1 style={{ fontSize: 22, fontWeight: 600, margin: '0 0 4px', color: colors.text }}>
           {skillName || (editMode ? 'Edit Skill' : 'New Skill')}
         </h1>
-        <p style={{ fontSize: 13, color: textMuted, margin: '0 0 32px' }}>
+        <p style={{ fontSize: 13, color: colors.textMuted, margin: '0 0 32px' }}>
           Custom skills appear in the Skills library and are available to all Agents.
         </p>
 
         {/* Step nav */}
-        <div style={{ display: 'flex', gap: 0, marginBottom: 32, borderBottom: `1px solid ${border}` }}>
+        <div style={{ display: 'flex', gap: 0, marginBottom: 32, borderBottom: `1px solid ${colors.border}` }}>
           {steps.map((s, i) => {
             const num = i + 1;
             const active = activeStep === num;
@@ -276,8 +267,8 @@ export default function SkillBuilder({ editMode }: Props) {
                   cursor: done ? 'pointer' : 'default',
                   padding: '10px 20px', fontSize: 13,
                   fontWeight: active ? 600 : 400,
-                  color: active ? teal : done ? textPrimary : textDim,
-                  borderBottom: active ? `2px solid ${teal}` : '2px solid transparent',
+                  color: active ? colors.accent : done ? colors.text : colors.textDim,
+                  borderBottom: active ? `2px solid ${colors.accent}` : '2px solid transparent',
                   marginBottom: -1,
                   display: 'flex', alignItems: 'center', gap: 8,
                   transition: 'color 0.15s',
@@ -286,8 +277,8 @@ export default function SkillBuilder({ editMode }: Props) {
                 <span style={{
                   width: 18, height: 18, borderRadius: '50%', fontSize: 10,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  background: active ? teal : done ? `${teal}22` : border,
-                  color: active ? bg : done ? teal : textDim,
+                  background: active ? colors.accent : done ? colors.accentSoft : colors.border,
+                  color: active ? '#fff' : done ? colors.accent : colors.textDim,
                   fontWeight: 700, flexShrink: 0,
                 }}>
                   {done ? '✓' : num}
@@ -329,9 +320,9 @@ export default function SkillBuilder({ editMode }: Props) {
                     style={{
                       padding: '6px 14px', borderRadius: 6, fontSize: 12, fontWeight: 500,
                       cursor: 'pointer', transition: 'all 0.15s',
-                      background: category === c ? `${teal}22` : surface,
-                      border: `1px solid ${category === c ? teal : border}`,
-                      color: category === c ? teal : textMuted,
+                      background: category === c ? colors.accentSoft : colors.surface,
+                      border: `1px solid ${category === c ? colors.accent : colors.border}`,
+                      color: category === c ? colors.accent : colors.textMuted,
                     }}
                   >{c}</button>
                 ))}
@@ -395,10 +386,10 @@ export default function SkillBuilder({ editMode }: Props) {
                     onClick={() => setSqlMode(i === 1)}
                     style={{
                       padding: '7px 16px', borderRadius: '6px 6px 0 0',
-                      background: isActive ? surface : 'transparent',
-                      border: `1px solid ${isActive ? border : 'transparent'}`,
-                      borderBottom: isActive ? `1px solid ${surface}` : `1px solid ${border}`,
-                      color: isActive ? textPrimary : textMuted,
+                      background: isActive ? colors.surface : 'transparent',
+                      border: `1px solid ${isActive ? colors.border : 'transparent'}`,
+                      borderBottom: isActive ? `1px solid ${colors.surface}` : `1px solid ${colors.border}`,
+                      color: isActive ? colors.text : colors.textMuted,
                       fontSize: 13, fontWeight: isActive ? 600 : 400, cursor: 'pointer',
                     }}
                   >{tab}</button>
@@ -406,16 +397,16 @@ export default function SkillBuilder({ editMode }: Props) {
               })}
             </div>
 
-            <div style={{ background: surface, border: `1px solid ${border}`, borderRadius: '0 8px 8px 8px', padding: 20 }}>
+            <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: '0 8px 8px 8px', padding: 20 }}>
               {!sqlMode ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <p style={{ fontSize: 12, color: textMuted, margin: '0 0 8px' }}>
+                  <p style={{ fontSize: 12, color: colors.textMuted, margin: '0 0 8px' }}>
                     Select a saved query as the data source for this skill.
                   </p>
                   {loadingQueries ? (
-                    <div style={{ color: textMuted, fontSize: 13, padding: '12px 0' }}>Loading queries…</div>
+                    <div style={{ color: colors.textMuted, fontSize: 13, padding: '12px 0' }}>Loading queries…</div>
                   ) : savedQueries.length === 0 ? (
-                    <div style={{ color: textMuted, fontSize: 13, padding: '12px 0' }}>
+                    <div style={{ color: colors.textMuted, fontSize: 13, padding: '12px 0' }}>
                       No saved queries found. Use the SQL Explorer to save a query first, or switch to "Write SQL".
                     </div>
                   ) : (
@@ -424,27 +415,27 @@ export default function SkillBuilder({ editMode }: Props) {
                         key={q.id}
                         onClick={() => { setSelectedQueryId(q.id); setSelectedQueryName(q.name); }}
                         style={{
-                          background: selectedQueryId === q.id ? `${teal}0D` : 'transparent',
-                          border: `1px solid ${selectedQueryId === q.id ? teal : border}`,
+                          background: selectedQueryId === q.id ? colors.accentSoft : 'transparent',
+                          border: `1px solid ${selectedQueryId === q.id ? colors.accent : colors.border}`,
                           borderRadius: 8, padding: '12px 16px', cursor: 'pointer',
                           textAlign: 'left', transition: 'all 0.15s',
                         }}
                       >
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ fontSize: 13, fontWeight: 500, color: selectedQueryId === q.id ? teal : textPrimary }}>
+                          <span style={{ fontSize: 13, fontWeight: 500, color: selectedQueryId === q.id ? colors.accent : colors.text }}>
                             {q.name}
                           </span>
                           {selectedQueryId === q.id && (
-                            <span style={{ fontSize: 10, background: `${teal}22`, color: teal, padding: '2px 8px', borderRadius: 4 }}>
+                            <span style={{ fontSize: 10, background: colors.accentSoft, color: colors.accent, padding: '2px 8px', borderRadius: 4 }}>
                               Selected
                             </span>
                           )}
                         </div>
                         {q.description && (
-                          <div style={{ fontSize: 11, color: textMuted, marginTop: 4 }}>{q.description}</div>
+                          <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 4 }}>{q.description}</div>
                         )}
                         {q.sql_text && (
-                          <div style={{ fontSize: 10, color: textDim, marginTop: 4, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          <div style={{ fontSize: 10, color: colors.textDim, marginTop: 4, fontFamily: fonts.mono, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {q.sql_text.slice(0, 80)}…
                           </div>
                         )}
@@ -454,7 +445,7 @@ export default function SkillBuilder({ editMode }: Props) {
                 </div>
               ) : (
                 <div>
-                  <p style={{ fontSize: 12, color: textMuted, margin: '0 0 10px' }}>
+                  <p style={{ fontSize: 12, color: colors.textMuted, margin: '0 0 10px' }}>
                     Write a SQL query against your workspace data. Your data is automatically scoped to your workspace.
                   </p>
                   <textarea
@@ -462,7 +453,7 @@ export default function SkillBuilder({ editMode }: Props) {
                     onChange={e => setSql(e.target.value)}
                     placeholder={'SELECT d.id, d.name, d.owner_email, d.amount, d.close_date\nFROM deals d\nWHERE stage NOT IN (\'closed_won\',\'closed_lost\')\n  AND close_date < NOW()'}
                     rows={8}
-                    style={{ ...inputStyle, fontFamily: 'monospace', fontSize: 12, lineHeight: 1.7, resize: 'vertical' }}
+                    style={{ ...inputStyle, fontFamily: fonts.mono, fontSize: 12, lineHeight: 1.7, resize: 'vertical' }}
                   />
                 </div>
               )}
@@ -470,8 +461,8 @@ export default function SkillBuilder({ editMode }: Props) {
 
             {/* Data preview */}
             {(selectedQueryId || sql.length > 10) && (
-              <div style={{ background: `${teal}08`, border: `1px solid ${teal}22`, borderRadius: 8, padding: '14px 16px' }}>
-                <div style={{ fontSize: 11, color: teal, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 8 }}>
+              <div style={{ background: colors.accentSoft, border: `1px solid ${colors.borderFocus}`, borderRadius: 8, padding: '14px 16px' }}>
+                <div style={{ fontSize: 11, color: colors.accent, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 8 }}>
                   Data preview
                 </div>
                 {previewColumns.length > 0 ? (
@@ -479,16 +470,16 @@ export default function SkillBuilder({ editMode }: Props) {
                     {previewColumns.map(col => (
                       <div
                         key={col}
-                        style={{ fontSize: 11, fontFamily: 'monospace', background: surface, border: `1px solid ${border}`, padding: '3px 8px', borderRadius: 4, color: textMuted }}
+                        style={{ fontSize: 11, fontFamily: fonts.mono, background: colors.surface, border: `1px solid ${colors.border}`, padding: '3px 8px', borderRadius: 4, color: colors.textMuted }}
                       >
                         {col}
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <div style={{ fontSize: 11, color: textMuted }}>Columns will be inferred at runtime</div>
+                  <div style={{ fontSize: 11, color: colors.textMuted }}>Columns will be inferred at runtime</div>
                 )}
-                <div style={{ fontSize: 11, color: textDim, marginTop: 10 }}>
+                <div style={{ fontSize: 11, color: colors.textDim, marginTop: 10 }}>
                   ✓ Workspace isolation enforced · Row limit: 500 · Token budget: ~1,200
                 </div>
               </div>
@@ -500,23 +491,23 @@ export default function SkillBuilder({ editMode }: Props) {
         {activeStep === 3 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
             {/* Classify panel */}
-            <div style={{ border: `1px solid ${classifyEnabled ? `${teal}44` : border}`, borderRadius: 10, overflow: 'hidden', transition: 'border-color 0.2s' }}>
+            <div style={{ border: `1px solid ${classifyEnabled ? colors.borderFocus : colors.border}`, borderRadius: 10, overflow: 'hidden', transition: 'border-color 0.2s' }}>
               <div
-                style={{ padding: '14px 18px', background: classifyEnabled ? `${teal}08` : surface, display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}
+                style={{ padding: '14px 18px', background: classifyEnabled ? colors.accentSoft : colors.surface, display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}
                 onClick={() => setClassifyEnabled(!classifyEnabled)}
               >
                 <div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: classifyEnabled ? teal : textPrimary }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: classifyEnabled ? colors.accent : colors.text }}>
                     Classify with AI
                   </div>
-                  <div style={{ fontSize: 12, color: textMuted, marginTop: 2 }}>
+                  <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>
                     DeepSeek labels each row before Claude synthesizes — keeps costs low
                   </div>
                 </div>
                 <Switch on={classifyEnabled} />
               </div>
               {classifyEnabled && (
-                <div style={{ padding: '16px 18px', borderTop: `1px solid ${border}`, display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <div style={{ padding: '16px 18px', borderTop: `1px solid ${colors.border}`, display: 'flex', flexDirection: 'column', gap: 14 }}>
                   <Field label="What does bad look like?" hint="Plain English — e.g. 'No activity in 21+ days and deal is in Proposal stage'">
                     <input
                       value={classifyBad}
@@ -538,25 +529,25 @@ export default function SkillBuilder({ editMode }: Props) {
             </div>
 
             {/* Synthesize panel */}
-            <div style={{ border: `1px solid ${synthesizeEnabled ? `${coral}44` : border}`, borderRadius: 10, overflow: 'hidden', transition: 'border-color 0.2s' }}>
+            <div style={{ border: `1px solid ${synthesizeEnabled ? colors.coralSoft : colors.border}`, borderRadius: 10, overflow: 'hidden', transition: 'border-color 0.2s' }}>
               <div
-                style={{ padding: '14px 18px', background: synthesizeEnabled ? `${coral}08` : surface, display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}
+                style={{ padding: '14px 18px', background: synthesizeEnabled ? colors.coralSoft : colors.surface, display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}
                 onClick={() => setSynthesizeEnabled(!synthesizeEnabled)}
               >
                 <div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: synthesizeEnabled ? coral : textPrimary }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: synthesizeEnabled ? colors.coral : colors.text }}>
                     Synthesize with Claude
                   </div>
-                  <div style={{ fontSize: 12, color: textMuted, marginTop: 2 }}>
+                  <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>
                     Generates a narrative report with findings and recommended actions
                   </div>
                 </div>
-                <div style={{ width: 34, height: 18, borderRadius: 9, background: synthesizeEnabled ? coral : border, position: 'relative', flexShrink: 0 }}>
+                <div style={{ width: 34, height: 18, borderRadius: 9, background: synthesizeEnabled ? colors.coral : colors.border, position: 'relative', flexShrink: 0 }}>
                   <div style={{ position: 'absolute', top: 2, left: synthesizeEnabled ? 16 : 2, width: 14, height: 14, borderRadius: '50%', background: '#fff', transition: 'left 0.2s' }} />
                 </div>
               </div>
               {synthesizeEnabled && (
-                <div style={{ padding: '16px 18px', borderTop: `1px solid ${border}`, display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <div style={{ padding: '16px 18px', borderTop: `1px solid ${colors.border}`, display: 'flex', flexDirection: 'column', gap: 14 }}>
                   <Field label="Tone">
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                       {tones.map(t => (
@@ -566,9 +557,9 @@ export default function SkillBuilder({ editMode }: Props) {
                           style={{
                             padding: '6px 12px', borderRadius: 6, fontSize: 12,
                             cursor: 'pointer', transition: 'all 0.15s',
-                            background: synthesizeTone === t ? `${coral}22` : surface,
-                            border: `1px solid ${synthesizeTone === t ? coral : border}`,
-                            color: synthesizeTone === t ? coral : textMuted,
+                            background: synthesizeTone === t ? colors.coralSoft : colors.surface,
+                            border: `1px solid ${synthesizeTone === t ? colors.coral : colors.border}`,
+                            color: synthesizeTone === t ? colors.coral : colors.textMuted,
                           }}
                         >{t}</button>
                       ))}
@@ -596,7 +587,7 @@ export default function SkillBuilder({ editMode }: Props) {
         {/* Step 4: Review */}
         {activeStep === 4 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-            <div style={{ background: surface, border: `1px solid ${border}`, borderRadius: 10, overflow: 'hidden' }}>
+            <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10, overflow: 'hidden' }}>
               {[
                 ['Skill name', skillName],
                 ['Description', question],
@@ -612,21 +603,21 @@ export default function SkillBuilder({ editMode }: Props) {
                   key={k}
                   style={{
                     display: 'flex', gap: 16, padding: '11px 16px',
-                    borderBottom: i < arr.length - 1 ? `1px solid ${border}` : 'none',
+                    borderBottom: i < arr.length - 1 ? `1px solid ${colors.border}` : 'none',
                   }}
                 >
-                  <div style={{ fontSize: 12, color: textMuted, width: 140, flexShrink: 0 }}>{k}</div>
-                  <div style={{ fontSize: 12, color: textPrimary, flex: 1 }}>{v}</div>
+                  <div style={{ fontSize: 12, color: colors.textMuted, width: 140, flexShrink: 0 }}>{k}</div>
+                  <div style={{ fontSize: 12, color: colors.text, flex: 1 }}>{v}</div>
                 </div>
               ))}
             </div>
 
-            <div style={{ background: `${teal}08`, border: `1px solid ${teal}22`, borderRadius: 8, padding: '14px 16px', fontSize: 12, color: textMuted, lineHeight: 1.6 }}>
-              This skill will appear in the Skills library with a <strong style={{ color: teal }}>Custom</strong> badge. All Agents can be configured to call it. You can edit or delete it at any time.
+            <div style={{ background: colors.accentSoft, border: `1px solid ${colors.borderFocus}`, borderRadius: 8, padding: '14px 16px', fontSize: 12, color: colors.textMuted, lineHeight: 1.6 }}>
+              This skill will appear in the Skills library with a <strong style={{ color: colors.accent }}>Custom</strong> badge. All Agents can be configured to call it. You can edit or delete it at any time.
             </div>
 
             {submitError && (
-              <div style={{ background: '#f9191911', border: '1px solid #f91919', borderRadius: 8, padding: '10px 14px', fontSize: 12, color: '#f87171' }}>
+              <div style={{ background: colors.redSoft, border: `1px solid ${colors.red}`, borderRadius: 8, padding: '10px 14px', fontSize: 12, color: colors.red }}>
                 {submitError}
               </div>
             )}
@@ -636,8 +627,9 @@ export default function SkillBuilder({ editMode }: Props) {
               disabled={submitting}
               style={{
                 padding: '11px 24px', borderRadius: 8, fontSize: 14, fontWeight: 600,
-                background: submitting ? `${teal}66` : teal,
-                color: bg, border: 'none', cursor: submitting ? 'not-allowed' : 'pointer',
+                background: submitting ? colors.accentSoft : colors.accent,
+                color: submitting ? colors.textMuted : '#fff',
+                border: 'none', cursor: submitting ? 'not-allowed' : 'pointer',
                 alignSelf: 'flex-start', transition: 'background 0.15s',
               }}
             >
@@ -650,7 +642,7 @@ export default function SkillBuilder({ editMode }: Props) {
         <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 40 }}>
           <button
             onClick={() => activeStep > 1 ? setActiveStep(s => s - 1) : navigate('/skills')}
-            style={{ padding: '8px 18px', borderRadius: 8, fontSize: 13, background: 'transparent', color: textMuted, border: `1px solid ${border}`, cursor: 'pointer' }}
+            style={{ padding: '8px 18px', borderRadius: 8, fontSize: 13, background: 'transparent', color: colors.textMuted, border: `1px solid ${colors.border}`, cursor: 'pointer' }}
           >
             {activeStep === 1 ? '← Back to Skills' : '← Back'}
           </button>
@@ -660,8 +652,8 @@ export default function SkillBuilder({ editMode }: Props) {
               disabled={!canAdvance[activeStep]}
               style={{
                 padding: '8px 20px', borderRadius: 8, fontSize: 13, fontWeight: 600,
-                background: canAdvance[activeStep] ? teal : `${teal}33`,
-                color: canAdvance[activeStep] ? bg : textDim,
+                background: canAdvance[activeStep] ? colors.accent : colors.accentSoft,
+                color: canAdvance[activeStep] ? '#fff' : colors.textDim,
                 border: 'none', cursor: canAdvance[activeStep] ? 'pointer' : 'not-allowed',
                 transition: 'all 0.15s',
               }}
