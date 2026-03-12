@@ -6,6 +6,7 @@
  */
 
 import { Router, type Request, type Response } from 'express';
+import { createHash } from 'crypto';
 import { query as dbQuery } from '../db.js';
 import dbPool from '../db.js';
 import { executeAction } from '../actions/executor.js';
@@ -699,5 +700,100 @@ function buildEvidenceFromSignals(signals: any): Evidence[] {
 
   return evidence.slice(0, 3); // Max 3 evidence items
 }
+
+// ---------------------------------------------------------------------------
+// POST /:workspaceId/suggested-actions/sync
+// Persist ephemeral suggested actions (from Ask Pandora extractor) to DB so
+// ActionCard can call /actions/:id/execute-inline and /actions/:id/dismiss.
+// Returns ActionCardItem[] with real DB ids.
+// ---------------------------------------------------------------------------
+router.post('/:workspaceId/suggested-actions/sync', async (req: Request, res: Response) => {
+  const { workspaceId } = req.params as { workspaceId: string };
+  const { actions } = req.body as {
+    actions: Array<{
+      id: string;
+      type: string;
+      title: string;
+      description?: string;
+      evidence?: string;
+      priority: 'P1' | 'P2' | 'P3';
+      deal_id?: string;
+      execution_mode?: string;
+    }>;
+  };
+
+  if (!Array.isArray(actions) || actions.length === 0) {
+    return res.json({ cards: [] });
+  }
+
+  const cards: Array<{
+    id: string;
+    title: string;
+    priority: 'P0' | 'P1' | 'P2';
+    source: string;
+    suggested_crm_action: 'task_create' | 'note_create' | 'field_write' | null;
+  }> = [];
+
+  for (const action of actions.slice(0, 6)) {
+    const cardPriority: 'P0' | 'P1' | 'P2' =
+      action.priority === 'P1' ? 'P0' :
+      action.priority === 'P2' ? 'P1' : 'P2';
+
+    const crmAction: 'task_create' | 'field_write' =
+      action.type === 'update_forecast_category' || action.type === 'update_close_date'
+        ? 'field_write'
+        : 'task_create';
+
+    const source =
+      action.type === 'run_meddic_coverage' ? 'meddic' :
+      action.type === 'run_skill' ? 'dossier' :
+      'dossier';
+
+    const dedupInput = `${workspaceId}:suggested:${action.type}:${action.title}`;
+    const dedupHash = createHash('sha256').update(dedupInput).digest('hex').slice(0, 32);
+    const summary = action.description || action.evidence || action.title;
+
+    try {
+      const result = await dbQuery(
+        `INSERT INTO actions (
+           workspace_id, action_type, severity, title, summary,
+           source, priority, suggested_crm_action, dedup_hash,
+           execution_status, target_deal_id
+         ) VALUES ($1, 'next_step', 'info', $2, $3, $4, $5, $6, $7, 'open', $8)
+         ON CONFLICT (workspace_id, dedup_hash)
+           WHERE execution_status != 'dismissed' AND dedup_hash IS NOT NULL
+         DO UPDATE SET
+           title = EXCLUDED.title,
+           summary = EXCLUDED.summary,
+           updated_at = now()
+         RETURNING id`,
+        [
+          workspaceId,
+          action.title,
+          summary,
+          source,
+          cardPriority,
+          crmAction,
+          dedupHash,
+          action.deal_id || null,
+        ]
+      );
+
+      if (result.rows[0]) {
+        cards.push({
+          id: result.rows[0].id,
+          title: action.title,
+          priority: cardPriority,
+          source,
+          suggested_crm_action: crmAction,
+        });
+      }
+    } catch (err) {
+      console.error('[SuggestedActions] Failed to persist action:', (err as Error).message);
+    }
+  }
+
+  return res.json({ cards });
+});
 
 export default router;

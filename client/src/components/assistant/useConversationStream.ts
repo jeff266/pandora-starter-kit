@@ -51,6 +51,17 @@ export interface ToolProgress {
   timestamp: string;
 }
 
+export interface SuggestedAction {
+  id: string;
+  type: string;
+  title: string;
+  description?: string;
+  evidence?: string;
+  priority: 'P1' | 'P2' | 'P3';
+  deal_id?: string;
+  execution_mode?: string;
+}
+
 export interface ConversationState {
   phase: 'idle' | 'recruiting' | 'findings' | 'synthesis' | 'complete' | 'clarifying';
   messages: ConversationMessage[];
@@ -64,6 +75,7 @@ export interface ConversationState {
   actions: RecommendedAction[];
   judgedActions: any[];
   inlineActions: InlineAction[];
+  suggestedActions: SuggestedAction[];
   strategicAnalysis: any | null;
   deliverableOptions: DeliverableOption[];
   chartSpecs: ChartSpec[];
@@ -84,6 +96,7 @@ type Action =
   | { type: 'DISMISS_ACTION'; id: string }
   | { type: 'DISMISS_JUDGED_ACTION'; id: string }
   | { type: 'DISMISS_INLINE_ACTION'; id: string }
+  | { type: 'DISMISS_SUGGESTED_ACTIONS' }
   | { type: 'INIT_MESSAGES'; messages: ConversationMessage[] }
   | { type: 'SET_SCOPE'; scope: EntityScope | null }
   | { type: 'RESET' };
@@ -105,6 +118,7 @@ const initial: ConversationState = {
   actions: [],
   judgedActions: [],
   inlineActions: [],
+  suggestedActions: [],
   strategicAnalysis: null,
   deliverableOptions: [],
   chartSpecs: [],
@@ -139,6 +153,9 @@ function reducer(state: ConversationState, action: Action): ConversationState {
   if (action.type === 'DISMISS_INLINE_ACTION') {
     return { ...state, inlineActions: state.inlineActions.filter(a => a.id !== action.id) };
   }
+  if (action.type === 'DISMISS_SUGGESTED_ACTIONS') {
+    return { ...state, suggestedActions: [] };
+  }
   if (action.type === 'USER_MESSAGE') {
     return {
       ...state,
@@ -151,6 +168,7 @@ function reducer(state: ConversationState, action: Action): ConversationState {
       crossSignalFindings: [],
       actions: [],
       inlineActions: [],
+      suggestedActions: [],
       strategicAnalysis: null,
       deliverableOptions: [],
       chartSpecs: [],
@@ -239,6 +257,9 @@ function reducer(state: ConversationState, action: Action): ConversationState {
       }
       case 'inline_actions': {
         return { ...state, inlineActions: ev.items ?? [] };
+      }
+      case 'suggested_actions': {
+        return { ...state, suggestedActions: ev.actions ?? [] };
       }
       case 'strategic_reasoning': {
         return { ...state, strategicAnalysis: ev.data };
@@ -431,9 +452,13 @@ export function useConversationStream() {
     dispatch({ type: 'DISMISS_INLINE_ACTION', id });
   }, []);
 
+  const dismissSuggestedActions = useCallback(() => {
+    dispatch({ type: 'DISMISS_SUGGESTED_ACTIONS' });
+  }, []);
+
   const setScope = useCallback((scope: EntityScope | null) => {
     dispatch({ type: 'SET_SCOPE', scope });
   }, []);
 
-  return { state, sendMessage, reset, dismissAction, dismissJudgedAction, dismissInlineAction, threadId, loadHistory, startNewThread, setScope };
+  return { state, sendMessage, reset, dismissAction, dismissJudgedAction, dismissInlineAction, dismissSuggestedActions, threadId, loadHistory, startNewThread, setScope };
 }

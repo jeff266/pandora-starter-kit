@@ -18,6 +18,7 @@ import AgentConversationFeed from './AgentConversationFeed';
 import ChartRenderer from '../shared/ChartRenderer';
 import SankeyChart from '../reports/SankeyChart';
 import WinningPathsChart from '../pipeline/WinningPathsChart';
+import SuggestedActionsPanel from './SuggestedActionsPanel';
 
 interface EntityScope {
   entityType: 'deal';
@@ -43,7 +44,7 @@ const AGENT_ROUTES: Record<string, string> = {
 };
 
 export default function ConversationView({ initialMessage, onBack, onThreadId, scope }: ConversationViewProps) {
-  const { state, sendMessage, dismissAction, dismissJudgedAction, dismissInlineAction, loadHistory, startNewThread, setScope } = useConversationStream();
+  const { state, sendMessage, dismissAction, dismissJudgedAction, dismissInlineAction, dismissSuggestedActions, loadHistory, startNewThread, setScope } = useConversationStream();
   const navigate = useNavigate();
   const bottomRef = useRef<HTMLDivElement>(null);
   const latestAnswerRef = useRef<HTMLDivElement>(null);
@@ -479,6 +480,13 @@ export default function ConversationView({ initialMessage, onBack, onThreadId, s
               await api.post(`/workspaces/${workspaceId}/actions/${actionId}/dismiss`);
               dismissInlineAction(actionId);
             }}
+          />
+        )}
+
+        {state.suggestedActions.length > 0 && (
+          <SuggestedActionsPanel
+            actions={state.suggestedActions}
+            onDismissAll={dismissSuggestedActions}
           />
         )}
 
