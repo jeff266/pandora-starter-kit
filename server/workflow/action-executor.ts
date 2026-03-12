@@ -8,6 +8,8 @@ import { createLogger } from '../utils/logger.js';
 import { RuleContext } from './rule-evaluator.js';
 import { updateDeal as updateHubSpotDeal } from '../connectors/hubspot/hubspot-writer.js';
 import { updateDeal as updateSalesforceDeal } from '../connectors/salesforce/salesforce-writer.js';
+import { HubSpotClient } from '../connectors/hubspot/client.js';
+import { getCredentials } from '../connectors/adapters/credentials.js';
 import { getActionThresholdResolver } from '../actions/threshold-resolver.js';
 
 const logger = createLogger('ActionExecutor');
@@ -575,10 +577,36 @@ export class ActionExecutor {
    * Create HubSpot task
    */
   private async createHubSpotTask(workspaceId: string, taskData: any, dealId: string): Promise<void> {
-    // TODO: Implement HubSpot task creation
-    // POST to /crm/v3/objects/tasks with task data
-    // Then associate task to deal: POST /crm/v3/objects/tasks/{taskId}/associations/deals/{dealId}/TODO
-    logger.warn('HubSpot task creation not yet implemented');
+    const connection = await getCredentials(workspaceId, 'hubspot');
+    if (!connection) {
+      throw new Error(`No HubSpot connector configured for workspace ${workspaceId}`);
+    }
+    if (connection.status === 'auth_expired') {
+      throw new Error('HubSpot authorization has expired. Please reconnect.');
+    }
+
+    const credentials = connection.credentials;
+    const client = new HubSpotClient(
+      credentials.access_token || credentials.accessToken,
+      workspaceId
+    );
+
+    const subject = taskData.subject || taskData.title || 'Pandora Action';
+    const body = taskData.hs_task_body || taskData.body || '';
+    const dueDateMs = taskData.hs_timestamp ?? undefined;
+
+    const result = await client.createDealTask(dealId, subject, body, dueDateMs);
+
+    if (!result.success) {
+      throw new Error(`HubSpot task creation failed: ${result.error}`);
+    }
+
+    logger.info('HubSpot task created', {
+      workspace_id: workspaceId,
+      deal_id: dealId,
+      task_id: result.taskId,
+      subject,
+    });
   }
 
   /**

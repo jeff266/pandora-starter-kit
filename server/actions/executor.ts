@@ -371,6 +371,17 @@ async function executeOperation(
       return { sent_to: slackUserId, channel: dmResult.channel, ts: dmResult.ts };
     }
 
+    case 'crm_task': {
+      const { externalId, title, body, dueDateMs } = op.payload;
+
+      if (crmSource === 'hubspot') {
+        return client.createDealTask(externalId, title, body ?? '', dueDateMs);
+      } else if (crmSource === 'salesforce') {
+        throw new Error('Salesforce task creation not yet supported');
+      }
+      throw new Error(`Unsupported CRM source: ${crmSource}`);
+    }
+
     default:
       throw new Error(`Unknown operation type: ${op.type}`);
   }
