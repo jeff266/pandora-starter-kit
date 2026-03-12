@@ -22,6 +22,8 @@ import { formatCurrency } from '../utils/format-currency.js';
 import { scoreIcpFit, scoreMultithreading, scoreConversationSentiment } from './scoring-tools.js';
 import { computeRepConversions, computeSourceConversion, detectProcessBlockers, detectBuyerSignals, checkStakeholderStatus, enrichMarketSignals } from './analysis-tools.js';
 import { queryDealOutcomes } from './query-deal-outcomes.js';
+import { executeActionApproval } from '../workflow/action-approver.js';
+import { reverseWrite } from '../crm-writeback/write-reverser.js';
 
 // ─── Calculator Tool ─────────────────────────────────────────────────────────
 
@@ -4259,15 +4261,25 @@ async function approvePendingAction(workspaceId: string, params: Record<string, 
     };
   }
 
-  // Step 3: Execute approval
-  // NOTE: This is a simplified version. The full implementation would call shared
-  // action approval logic from the route handler
-  await query(
-    `UPDATE actions
-     SET approval_status = 'approved', approved_at = NOW()
-     WHERE id = $1 AND workspace_id = $2`,
-    [action_id, workspaceId]
-  );
+  // Step 3: Execute approval via shared function
+  // This calls ActionExecutor, writes to CRM, logs to crm_write_log, and updates action status
+  const approvalResult = await executeActionApproval(workspaceId, action_id, 'ask_pandora_tool');
+
+  if (!approvalResult.success) {
+    throw new Error(approvalResult.error || 'Failed to execute approval');
+  }
+
+  if (approvalResult.blocked) {
+    return {
+      success: false,
+      action_id,
+      executed: false,
+      blocked: true,
+      block_reason: approvalResult.block_reason,
+      message: `Action blocked: ${approvalResult.block_reason}`,
+      query_description: `Approval blocked for action ${action_id}`,
+    };
+  }
 
   return {
     success: true,
@@ -4462,17 +4474,18 @@ async function reverseCrmWrite(workspaceId: string, params: Record<string, any>)
     };
   }
 
-  // Execute reversal (simplified - full implementation would call CRM API)
-  await query(
-    `UPDATE crm_write_log
-     SET reversed_at = NOW()
-     WHERE id = $1 AND workspace_id = $2`,
-    [write_log_id, workspaceId]
-  );
+  // Execute reversal via shared function
+  // This writes previous value back to CRM, creates reversal log entry, and updates original as reversed
+  const reversalResult = await reverseWrite(workspaceId, write_log_id, 'ask_pandora_tool');
+
+  if (!reversalResult.success) {
+    throw new Error(reversalResult.error || 'Failed to execute reversal');
+  }
 
   return {
     success: true,
     write_log_id,
+    reversal_log_id: reversalResult.reversal_log_id,
     field: logEntry.crm_property_name,
     reverted_to: previousValue,
     message: `Successfully reversed write to ${logEntry.crm_property_name}`,
