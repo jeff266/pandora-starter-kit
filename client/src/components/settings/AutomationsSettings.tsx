@@ -384,14 +384,200 @@ function formatRelativeTime(dateStr: string): string {
   return `${diffDays}d ago`;
 }
 
-// Rule Builder Modal (placeholder for now - will implement in next phase)
+// Rule Builder Modal
 interface RuleBuilderModalProps {
   rule: WorkflowRule | null;
   onClose: () => void;
   onSave: () => void;
 }
 
+interface Skill {
+  id: string;
+  name: string;
+  description?: string;
+  category?: string;
+}
+
+interface PandoraField {
+  key: string;
+  label: string;
+  description: string;
+  writable?: boolean;
+  value_type: string;
+}
+
 function RuleBuilderModal({ rule, onClose, onSave }: RuleBuilderModalProps) {
+  const { currentWorkspace } = useWorkspace();
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Form state
+  const [name, setName] = useState(rule?.name || '');
+  const [description, setDescription] = useState(rule?.description || '');
+  const [triggerType, setTriggerType] = useState<string>(rule?.trigger_type || 'skill_run');
+  const [triggerSkillId, setTriggerSkillId] = useState(rule?.trigger_skill_id || '');
+  const [triggerFindingCategory, setTriggerFindingCategory] = useState(rule?.trigger_finding_category || '');
+  const [triggerSeverity, setTriggerSeverity] = useState(rule?.trigger_severity || '');
+  const [conditionField, setConditionField] = useState(rule?.condition_json?.field || '');
+  const [conditionOperator, setConditionOperator] = useState(rule?.condition_json?.operator || '');
+  const [conditionValue, setConditionValue] = useState(rule?.condition_json?.value || '');
+  const [actionType, setActionType] = useState<string>(rule?.action_type || 'crm_field_write');
+  const [actionField, setActionField] = useState(rule?.action_payload?.field || '');
+  const [actionValueExpr, setActionValueExpr] = useState(rule?.action_payload?.value_expr || '');
+  const [actionTaskTitle, setActionTaskTitle] = useState(rule?.action_payload?.title_template || '');
+  const [actionTaskDescription, setActionTaskDescription] = useState(rule?.action_payload?.description_template || '');
+  const [actionTargetStage, setActionTargetStage] = useState(rule?.action_payload?.target_stage || '');
+  const [executionMode, setExecutionMode] = useState<'auto' | 'queue' | 'manual'>(rule?.execution_mode || 'queue');
+  const [isActive, setIsActive] = useState(rule?.is_active ?? true);
+
+  // Data fetching
+  const [skills, setSkills] = useState<Skill[]>([]);
+  const [fields, setFields] = useState<PandoraField[]>([]);
+  const [loadingData, setLoadingData] = useState(true);
+
+  useEffect(() => {
+    if (currentWorkspace?.id) {
+      fetchData();
+    }
+  }, [currentWorkspace]);
+
+  const fetchData = async () => {
+    if (!currentWorkspace?.id) return;
+
+    setLoadingData(true);
+    try {
+      const [skillsRes, fieldsRes] = await Promise.all([
+        api.get(`/skills`),
+        api.get(`/crm-writeback/fields`),
+      ]);
+
+      setSkills(skillsRes.skills || []);
+      setFields((fieldsRes.fields || []).filter((f: PandoraField) => f.writable));
+    } catch (err) {
+      console.error('[RuleBuilderModal] Failed to fetch data:', err);
+    } finally {
+      setLoadingData(false);
+    }
+  };
+
+  const handleSave = async () => {
+    setError(null);
+
+    // Validate required fields
+    if (!name.trim()) {
+      setError('Rule name is required');
+      return;
+    }
+
+    if (triggerType === 'skill_run' && !triggerSkillId) {
+      setError('Please select a skill for the trigger');
+      return;
+    }
+
+    if (triggerType === 'finding_created' && !triggerFindingCategory) {
+      setError('Please enter a finding category for the trigger');
+      return;
+    }
+
+    if (actionType === 'crm_field_write' && !actionField) {
+      setError('Please select a field to write');
+      return;
+    }
+
+    if (actionType === 'crm_field_write' && !actionValueExpr) {
+      setError('Please enter a value expression');
+      return;
+    }
+
+    if (actionType === 'crm_task_create' && !actionTaskTitle) {
+      setError('Please enter a task title template');
+      return;
+    }
+
+    if (actionType === 'stage_change' && !actionTargetStage) {
+      setError('Please enter a target stage');
+      return;
+    }
+
+    // Build condition_json
+    const condition_json = (conditionField && conditionOperator && conditionValue)
+      ? { field: conditionField, operator: conditionOperator, value: conditionValue }
+      : {};
+
+    // Build action_payload
+    let action_payload: Record<string, any> = {};
+    if (actionType === 'crm_field_write') {
+      action_payload = { field: actionField, value_expr: actionValueExpr };
+    } else if (actionType === 'crm_task_create') {
+      action_payload = {
+        title_template: actionTaskTitle,
+        description_template: actionTaskDescription,
+      };
+    } else if (actionType === 'stage_change') {
+      action_payload = { target_stage: actionTargetStage };
+    }
+
+    const payload = {
+      name,
+      description: description || undefined,
+      trigger_type: triggerType,
+      trigger_skill_id: triggerType === 'skill_run' ? triggerSkillId : undefined,
+      trigger_finding_category: triggerType === 'finding_created' ? triggerFindingCategory : undefined,
+      trigger_severity: triggerType === 'finding_created' && triggerSeverity ? triggerSeverity : undefined,
+      condition_json,
+      action_type: actionType,
+      action_payload,
+      execution_mode: executionMode,
+      is_active: isActive,
+    };
+
+    setSaving(true);
+    try {
+      if (rule) {
+        await api.patch(`/workflow-rules/${rule.id}`, payload);
+      } else {
+        await api.post(`/workflow-rules`, payload);
+      }
+      onSave();
+    } catch (err: any) {
+      console.error('[RuleBuilderModal] Failed to save rule:', err);
+      setError(err.response?.data?.error || 'Failed to save rule');
+      setSaving(false);
+    }
+  };
+
+  if (loadingData) {
+    return (
+      <div style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        background: 'rgba(0, 0, 0, 0.5)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 1000,
+      }}>
+        <div style={{
+          background: colors.surface,
+          borderRadius: 12,
+          padding: 40,
+          textAlign: 'center',
+          color: colors.textMuted,
+        }}>
+          Loading...
+        </div>
+      </div>
+    );
+  }
+
+  // Force queue mode for stage changes and amount updates
+  const finalExecutionMode = (actionType === 'stage_change' || (actionType === 'crm_field_write' && actionField === 'amount'))
+    ? 'queue'
+    : executionMode;
+
   return (
     <div style={{
       position: 'fixed',
@@ -409,22 +595,487 @@ function RuleBuilderModal({ rule, onClose, onSave }: RuleBuilderModalProps) {
         background: colors.surface,
         borderRadius: 12,
         padding: 24,
-        maxWidth: 600,
+        maxWidth: 700,
         width: '90%',
-        maxHeight: '80vh',
+        maxHeight: '85vh',
         overflowY: 'auto',
+        fontFamily: fonts.sans,
       }}>
-        <div style={{ marginBottom: 16, fontSize: 18, fontWeight: 600, color: colors.text }}>
-          {rule ? 'Edit Rule' : 'New Automation Rule'}
+        <div style={{ marginBottom: 20 }}>
+          <h2 style={{ fontSize: 18, fontWeight: 600, color: colors.text, margin: 0 }}>
+            {rule ? 'Edit Rule' : 'New Automation Rule'}
+          </h2>
         </div>
 
-        <div style={{ padding: 40, textAlign: 'center', color: colors.textMuted }}>
-          Rule builder coming soon...
+        {error && (
+          <div style={{
+            padding: 12,
+            marginBottom: 16,
+            background: colors.dangerSoft,
+            border: `1px solid ${colors.danger}`,
+            borderRadius: 6,
+            color: colors.danger,
+            fontSize: 13,
+          }}>
+            {error}
+          </div>
+        )}
+
+        {/* Basic Info */}
+        <div style={{ marginBottom: 20 }}>
+          <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: colors.text, marginBottom: 6 }}>
+            Rule Name *
+          </label>
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g., Auto-update deal score when MEDDIC runs"
+            style={{
+              width: '100%',
+              padding: '8px 12px',
+              fontSize: 13,
+              fontFamily: fonts.sans,
+              color: colors.text,
+              background: colors.surfaceRaised,
+              border: `1px solid ${colors.border}`,
+              borderRadius: 6,
+              outline: 'none',
+            }}
+          />
         </div>
 
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 24 }}>
+        <div style={{ marginBottom: 20 }}>
+          <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: colors.text, marginBottom: 6 }}>
+            Description
+          </label>
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Optional: What does this rule do?"
+            rows={2}
+            style={{
+              width: '100%',
+              padding: '8px 12px',
+              fontSize: 13,
+              fontFamily: fonts.sans,
+              color: colors.text,
+              background: colors.surfaceRaised,
+              border: `1px solid ${colors.border}`,
+              borderRadius: 6,
+              outline: 'none',
+              resize: 'vertical',
+            }}
+          />
+        </div>
+
+        {/* Trigger */}
+        <div style={{ marginBottom: 20 }}>
+          <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: colors.text, marginBottom: 6 }}>
+            Trigger Type *
+          </label>
+          <select
+            value={triggerType}
+            onChange={(e) => setTriggerType(e.target.value)}
+            style={{
+              width: '100%',
+              padding: '8px 12px',
+              fontSize: 13,
+              fontFamily: fonts.sans,
+              color: colors.text,
+              background: colors.surfaceRaised,
+              border: `1px solid ${colors.border}`,
+              borderRadius: 6,
+              outline: 'none',
+              cursor: 'pointer',
+            }}
+          >
+            <option value="skill_run">Skill Run</option>
+            <option value="finding_created">Finding Created</option>
+            <option value="manual">Manual</option>
+          </select>
+        </div>
+
+        {triggerType === 'skill_run' && (
+          <div style={{ marginBottom: 20 }}>
+            <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: colors.text, marginBottom: 6 }}>
+              Skill *
+            </label>
+            <select
+              value={triggerSkillId}
+              onChange={(e) => setTriggerSkillId(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '8px 12px',
+                fontSize: 13,
+                fontFamily: fonts.sans,
+                color: colors.text,
+                background: colors.surfaceRaised,
+                border: `1px solid ${colors.border}`,
+                borderRadius: 6,
+                outline: 'none',
+                cursor: 'pointer',
+              }}
+            >
+              <option value="">Select a skill...</option>
+              {skills.map(skill => (
+                <option key={skill.id} value={skill.id}>{skill.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {triggerType === 'finding_created' && (
+          <>
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: colors.text, marginBottom: 6 }}>
+                Finding Category *
+              </label>
+              <input
+                type="text"
+                value={triggerFindingCategory}
+                onChange={(e) => setTriggerFindingCategory(e.target.value)}
+                placeholder="e.g., stale_deal, at_risk"
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  fontSize: 13,
+                  fontFamily: fonts.sans,
+                  color: colors.text,
+                  background: colors.surfaceRaised,
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: 6,
+                  outline: 'none',
+                }}
+              />
+            </div>
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: colors.text, marginBottom: 6 }}>
+                Severity
+              </label>
+              <select
+                value={triggerSeverity}
+                onChange={(e) => setTriggerSeverity(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  fontSize: 13,
+                  fontFamily: fonts.sans,
+                  color: colors.text,
+                  background: colors.surfaceRaised,
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: 6,
+                  outline: 'none',
+                  cursor: 'pointer',
+                }}
+              >
+                <option value="">Any severity</option>
+                <option value="act">Act</option>
+                <option value="watch">Watch</option>
+                <option value="info">Info</option>
+              </select>
+            </div>
+          </>
+        )}
+
+        {/* Condition (Optional) */}
+        <div style={{ marginBottom: 20 }}>
+          <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: colors.text, marginBottom: 6 }}>
+            Condition (Optional)
+          </label>
+          <div style={{ fontSize: 12, color: colors.textMuted, marginBottom: 8 }}>
+            Only execute if this condition is met
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 120px 1fr', gap: 8 }}>
+            <select
+              value={conditionField}
+              onChange={(e) => setConditionField(e.target.value)}
+              style={{
+                padding: '8px 12px',
+                fontSize: 13,
+                fontFamily: fonts.sans,
+                color: colors.text,
+                background: colors.surfaceRaised,
+                border: `1px solid ${colors.border}`,
+                borderRadius: 6,
+                outline: 'none',
+                cursor: 'pointer',
+              }}
+            >
+              <option value="">Select field...</option>
+              {fields.map(field => (
+                <option key={field.key} value={field.key}>{field.label}</option>
+              ))}
+            </select>
+            <select
+              value={conditionOperator}
+              onChange={(e) => setConditionOperator(e.target.value)}
+              disabled={!conditionField}
+              style={{
+                padding: '8px 12px',
+                fontSize: 13,
+                fontFamily: fonts.sans,
+                color: colors.text,
+                background: colors.surfaceRaised,
+                border: `1px solid ${colors.border}`,
+                borderRadius: 6,
+                outline: 'none',
+                cursor: conditionField ? 'pointer' : 'not-allowed',
+                opacity: conditionField ? 1 : 0.5,
+              }}
+            >
+              <option value="">Operator</option>
+              <option value="equals">=</option>
+              <option value="not_equals">≠</option>
+              <option value="greater_than">&gt;</option>
+              <option value="less_than">&lt;</option>
+              <option value="contains">contains</option>
+            </select>
+            <input
+              type="text"
+              value={conditionValue}
+              onChange={(e) => setConditionValue(e.target.value)}
+              disabled={!conditionField || !conditionOperator}
+              placeholder="Value"
+              style={{
+                padding: '8px 12px',
+                fontSize: 13,
+                fontFamily: fonts.sans,
+                color: colors.text,
+                background: colors.surfaceRaised,
+                border: `1px solid ${colors.border}`,
+                borderRadius: 6,
+                outline: 'none',
+                opacity: conditionField && conditionOperator ? 1 : 0.5,
+              }}
+            />
+          </div>
+        </div>
+
+        {/* Action */}
+        <div style={{ marginBottom: 20 }}>
+          <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: colors.text, marginBottom: 6 }}>
+            Action Type *
+          </label>
+          <select
+            value={actionType}
+            onChange={(e) => setActionType(e.target.value)}
+            style={{
+              width: '100%',
+              padding: '8px 12px',
+              fontSize: 13,
+              fontFamily: fonts.sans,
+              color: colors.text,
+              background: colors.surfaceRaised,
+              border: `1px solid ${colors.border}`,
+              borderRadius: 6,
+              outline: 'none',
+              cursor: 'pointer',
+            }}
+          >
+            <option value="crm_field_write">CRM Field Write</option>
+            <option value="crm_task_create">Create Task</option>
+            <option value="stage_change">Change Stage</option>
+            <option value="slack_notify">Send Slack Notification</option>
+            <option value="finding_escalate">Escalate Finding</option>
+          </select>
+        </div>
+
+        {actionType === 'crm_field_write' && (
+          <>
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: colors.text, marginBottom: 6 }}>
+                Field to Write *
+              </label>
+              <select
+                value={actionField}
+                onChange={(e) => setActionField(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  fontSize: 13,
+                  fontFamily: fonts.sans,
+                  color: colors.text,
+                  background: colors.surfaceRaised,
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: 6,
+                  outline: 'none',
+                  cursor: 'pointer',
+                }}
+              >
+                <option value="">Select field...</option>
+                {fields.map(field => (
+                  <option key={field.key} value={field.key}>{field.label}</option>
+                ))}
+              </select>
+            </div>
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: colors.text, marginBottom: 6 }}>
+                Value Expression *
+              </label>
+              <input
+                type="text"
+                value={actionValueExpr}
+                onChange={(e) => setActionValueExpr(e.target.value)}
+                placeholder="e.g., {{deal_score}}, today+7d, 'High Priority'"
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  fontSize: 13,
+                  fontFamily: fonts.sans,
+                  color: colors.text,
+                  background: colors.surfaceRaised,
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: 6,
+                  outline: 'none',
+                }}
+              />
+              <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 4 }}>
+                Use {'{{field_name}}'} for dynamic values, 'text' for literals, today+Nd for dates
+              </div>
+            </div>
+          </>
+        )}
+
+        {actionType === 'crm_task_create' && (
+          <>
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: colors.text, marginBottom: 6 }}>
+                Task Title Template *
+              </label>
+              <input
+                type="text"
+                value={actionTaskTitle}
+                onChange={(e) => setActionTaskTitle(e.target.value)}
+                placeholder="e.g., Follow up on {{deal_name}}"
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  fontSize: 13,
+                  fontFamily: fonts.sans,
+                  color: colors.text,
+                  background: colors.surfaceRaised,
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: 6,
+                  outline: 'none',
+                }}
+              />
+            </div>
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: colors.text, marginBottom: 6 }}>
+                Task Description Template
+              </label>
+              <textarea
+                value={actionTaskDescription}
+                onChange={(e) => setActionTaskDescription(e.target.value)}
+                placeholder="e.g., Deal score: {{deal_score}}. Next steps: {{next_steps}}"
+                rows={3}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  fontSize: 13,
+                  fontFamily: fonts.sans,
+                  color: colors.text,
+                  background: colors.surfaceRaised,
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: 6,
+                  outline: 'none',
+                  resize: 'vertical',
+                }}
+              />
+            </div>
+          </>
+        )}
+
+        {actionType === 'stage_change' && (
+          <div style={{ marginBottom: 20 }}>
+            <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: colors.text, marginBottom: 6 }}>
+              Target Stage *
+            </label>
+            <input
+              type="text"
+              value={actionTargetStage}
+              onChange={(e) => setActionTargetStage(e.target.value)}
+              placeholder="e.g., Proposal, Closed Won"
+              style={{
+                width: '100%',
+                padding: '8px 12px',
+                fontSize: 13,
+                fontFamily: fonts.sans,
+                color: colors.text,
+                background: colors.surfaceRaised,
+                border: `1px solid ${colors.border}`,
+                borderRadius: 6,
+                outline: 'none',
+              }}
+            />
+          </div>
+        )}
+
+        {/* Execution Mode */}
+        <div style={{ marginBottom: 20 }}>
+          <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: colors.text, marginBottom: 6 }}>
+            Execution Mode
+          </label>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: colors.text, cursor: 'pointer' }}>
+              <input
+                type="radio"
+                value="auto"
+                checked={finalExecutionMode === 'auto'}
+                onChange={(e) => setExecutionMode(e.target.value as 'auto')}
+                disabled={actionType === 'stage_change' || (actionType === 'crm_field_write' && actionField === 'amount')}
+                style={{ cursor: 'pointer' }}
+              />
+              <span>Auto - Execute immediately</span>
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: colors.text, cursor: 'pointer' }}>
+              <input
+                type="radio"
+                value="queue"
+                checked={finalExecutionMode === 'queue'}
+                onChange={(e) => setExecutionMode(e.target.value as 'queue')}
+                style={{ cursor: 'pointer' }}
+              />
+              <span>Queue - Require approval before executing</span>
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: colors.text, cursor: 'pointer' }}>
+              <input
+                type="radio"
+                value="manual"
+                checked={finalExecutionMode === 'manual'}
+                onChange={(e) => setExecutionMode(e.target.value as 'manual')}
+                disabled={actionType === 'stage_change' || (actionType === 'crm_field_write' && actionField === 'amount')}
+                style={{ cursor: 'pointer' }}
+              />
+              <span>Manual - Never auto-execute</span>
+            </label>
+          </div>
+          {(actionType === 'stage_change' || (actionType === 'crm_field_write' && actionField === 'amount')) && (
+            <div style={{ fontSize: 11, color: colors.warning, marginTop: 6 }}>
+              Stage changes and amount updates always require approval
+            </div>
+          )}
+        </div>
+
+        {/* Active Toggle */}
+        <div style={{ marginBottom: 24 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: colors.text, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={isActive}
+              onChange={(e) => setIsActive(e.target.checked)}
+              style={{ cursor: 'pointer' }}
+            />
+            <span>Active (rule will execute when triggered)</span>
+          </label>
+        </div>
+
+        {/* Footer */}
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', paddingTop: 16, borderTop: `1px solid ${colors.border}` }}>
           <button
             onClick={onClose}
+            disabled={saving}
             style={{
               padding: '8px 16px',
               fontSize: 13,
@@ -434,10 +1085,28 @@ function RuleBuilderModal({ rule, onClose, onSave }: RuleBuilderModalProps) {
               background: 'transparent',
               border: `1px solid ${colors.border}`,
               borderRadius: 6,
-              cursor: 'pointer',
+              cursor: saving ? 'not-allowed' : 'pointer',
+              opacity: saving ? 0.5 : 1,
             }}
           >
             Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            style={{
+              padding: '8px 16px',
+              fontSize: 13,
+              fontWeight: 600,
+              fontFamily: fonts.sans,
+              color: '#fff',
+              background: saving ? colors.textMuted : colors.accent,
+              border: 'none',
+              borderRadius: 6,
+              cursor: saving ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {saving ? 'Saving...' : (rule ? 'Update Rule' : 'Create Rule')}
           </button>
         </div>
       </div>

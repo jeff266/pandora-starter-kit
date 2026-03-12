@@ -20,6 +20,19 @@ interface WorkspaceActionSettings {
   audit_webhook_enabled: boolean;
 }
 
+interface Stage {
+  raw_stage: string;
+  normalized_stage: string;
+  pipeline: string;
+}
+
+interface PandoraField {
+  key: string;
+  label: string;
+  category: string;
+  always_queue?: boolean;
+}
+
 export default function AgenticActionsTab() {
   const { currentWorkspace } = useWorkspace();
   const [settings, setSettings] = useState<WorkspaceActionSettings | null>(null);
@@ -27,10 +40,15 @@ export default function AgenticActionsTab() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Data for pickers
+  const [availableStages, setAvailableStages] = useState<Stage[]>([]);
+  const [availableFields, setAvailableFields] = useState<PandoraField[]>([]);
+  const [loadingPickerData, setLoadingPickerData] = useState(true);
+
   // Form state
   const [actionThreshold, setActionThreshold] = useState<'high' | 'medium' | 'low'>('medium');
-  const [protectedStages, setProtectedStages] = useState<string>('');
-  const [protectedFields, setProtectedFields] = useState<string>('');
+  const [protectedStages, setProtectedStages] = useState<string[]>([]);
+  const [protectedFields, setProtectedFields] = useState<string[]>([]);
   const [notifyOnAutoWrite, setNotifyOnAutoWrite] = useState(true);
   const [notifyChannel, setNotifyChannel] = useState('');
   const [notifyRep, setNotifyRep] = useState(true);
@@ -42,9 +60,30 @@ export default function AgenticActionsTab() {
 
   useEffect(() => {
     if (currentWorkspace?.id) {
+      fetchPickerData();
       fetchSettings();
     }
   }, [currentWorkspace?.id]);
+
+  const fetchPickerData = async () => {
+    try {
+      setLoadingPickerData(true);
+
+      // Fetch available stages
+      const stagesData = await api.get('/workspace-config/stages') as any;
+      const stages: Stage[] = stagesData.stages || [];
+      setAvailableStages(stages);
+
+      // Fetch available fields
+      const fieldsData = await api.get('/crm-writeback/fields') as any;
+      const fields: PandoraField[] = fieldsData.fields || [];
+      setAvailableFields(fields);
+    } catch (err) {
+      console.error('Failed to fetch picker data:', err);
+    } finally {
+      setLoadingPickerData(false);
+    }
+  };
 
   const fetchSettings = async () => {
     try {
@@ -55,8 +94,8 @@ export default function AgenticActionsTab() {
 
       // Populate form
       setActionThreshold(data.settings.action_threshold);
-      setProtectedStages(data.settings.protected_stages.join(', '));
-      setProtectedFields(data.settings.protected_fields.join(', '));
+      setProtectedStages(data.settings.protected_stages || []);
+      setProtectedFields(data.settings.protected_fields || []);
       setNotifyOnAutoWrite(data.settings.notify_on_auto_write);
       setNotifyChannel(data.settings.notify_channel || '');
       setNotifyRep(data.settings.notify_rep);
@@ -79,8 +118,8 @@ export default function AgenticActionsTab() {
 
       const payload = {
         action_threshold: actionThreshold,
-        protected_stages: protectedStages.split(',').map(s => s.trim()).filter(Boolean),
-        protected_fields: protectedFields.split(',').map(s => s.trim()).filter(Boolean),
+        protected_stages: protectedStages,
+        protected_fields: protectedFields,
         notify_on_auto_write: notifyOnAutoWrite,
         notify_channel: notifyChannel || null,
         notify_rep: notifyRep,
@@ -168,24 +207,73 @@ export default function AgenticActionsTab() {
           Protected Stages
         </h3>
         <p style={{ fontSize: 13, color: colors.textSecondary, marginBottom: 12 }}>
-          Comma-separated list of deal stages that Pandora will never write to (e.g., "Closed Won, Closed Lost")
+          Select deal stages that Pandora will never write to
         </p>
-        <input
-          type="text"
-          value={protectedStages}
-          onChange={(e) => setProtectedStages(e.target.value)}
-          placeholder="Closed Won, Closed Lost"
-          style={{
-            width: '100%',
-            padding: '10px 12px',
-            fontSize: 14,
-            fontFamily: fonts.mono,
-            color: colors.text,
+        {loadingPickerData ? (
+          <div style={{ fontSize: 13, color: colors.textMuted, padding: '12px 0' }}>Loading stages...</div>
+        ) : (
+          <div style={{
             background: colors.surface,
             border: `1px solid ${colors.border}`,
             borderRadius: 6,
-          }}
-        />
+            padding: 12,
+            maxHeight: 240,
+            overflowY: 'auto'
+          }}>
+            {availableStages.length === 0 ? (
+              <div style={{ fontSize: 13, color: colors.textMuted, padding: 8 }}>No stages available</div>
+            ) : (
+              // Group by pipeline
+              Object.entries(
+                availableStages.reduce((acc, stage) => {
+                  const pipeline = stage.pipeline || 'Unknown Pipeline';
+                  if (!acc[pipeline]) acc[pipeline] = [];
+                  acc[pipeline].push(stage);
+                  return acc;
+                }, {} as Record<string, Stage[]>)
+              ).map(([pipeline, stages]) => (
+                <div key={pipeline} style={{ marginBottom: 12 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
+                    {pipeline}
+                  </div>
+                  {stages.map((stage) => {
+                    const isChecked = protectedStages.includes(stage.raw_stage);
+                    return (
+                      <label
+                        key={`${pipeline}-${stage.raw_stage}`}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          padding: '6px 8px',
+                          cursor: 'pointer',
+                          borderRadius: 4,
+                          transition: 'background 0.15s',
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = `${colors.accent}10`; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setProtectedStages([...protectedStages, stage.raw_stage]);
+                            } else {
+                              setProtectedStages(protectedStages.filter(s => s !== stage.raw_stage));
+                            }
+                          }}
+                          style={{ cursor: 'pointer' }}
+                        />
+                        <span style={{ fontSize: 13, color: colors.text }}>{stage.raw_stage}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              ))
+            )}
+          </div>
+        )}
       </div>
 
       {/* Protected Fields */}
@@ -194,24 +282,82 @@ export default function AgenticActionsTab() {
           Protected Fields
         </h3>
         <p style={{ fontSize: 13, color: colors.textSecondary, marginBottom: 12 }}>
-          Comma-separated list of field keys that Pandora will never write to (e.g., "amount, close_date")
+          Select fields that Pandora will never write to. Some fields are always protected and cannot be disabled.
         </p>
-        <input
-          type="text"
-          value={protectedFields}
-          onChange={(e) => setProtectedFields(e.target.value)}
-          placeholder="amount, close_date"
-          style={{
-            width: '100%',
-            padding: '10px 12px',
-            fontSize: 14,
-            fontFamily: fonts.mono,
-            color: colors.text,
+        {loadingPickerData ? (
+          <div style={{ fontSize: 13, color: colors.textMuted, padding: '12px 0' }}>Loading fields...</div>
+        ) : (
+          <div style={{
             background: colors.surface,
             border: `1px solid ${colors.border}`,
             borderRadius: 6,
-          }}
-        />
+            padding: 12,
+            maxHeight: 320,
+            overflowY: 'auto'
+          }}>
+            {availableFields.length === 0 ? (
+              <div style={{ fontSize: 13, color: colors.textMuted, padding: 8 }}>No fields available</div>
+            ) : (
+              // Group by category
+              Object.entries(
+                availableFields.reduce((acc, field) => {
+                  const category = field.category || 'Other';
+                  if (!acc[category]) acc[category] = [];
+                  acc[category].push(field);
+                  return acc;
+                }, {} as Record<string, PandoraField[]>)
+              ).map(([category, fields]) => (
+                <div key={category} style={{ marginBottom: 16 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
+                    {category}
+                  </div>
+                  {fields.map((field) => {
+                    const isLocked = field.always_queue === true;
+                    const isChecked = isLocked || protectedFields.includes(field.key);
+                    return (
+                      <label
+                        key={field.key}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          padding: '6px 8px',
+                          cursor: isLocked ? 'not-allowed' : 'pointer',
+                          borderRadius: 4,
+                          transition: 'background 0.15s',
+                          opacity: isLocked ? 0.7 : 1,
+                        }}
+                        onMouseEnter={(e) => { if (!isLocked) e.currentTarget.style.background = `${colors.accent}10`; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                        title={isLocked ? 'Always protected — cannot be disabled' : ''}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          disabled={isLocked}
+                          onChange={(e) => {
+                            if (!isLocked) {
+                              if (e.target.checked) {
+                                setProtectedFields([...protectedFields, field.key]);
+                              } else {
+                                setProtectedFields(protectedFields.filter(k => k !== field.key));
+                              }
+                            }
+                          }}
+                          style={{ cursor: isLocked ? 'not-allowed' : 'pointer' }}
+                        />
+                        <span style={{ fontSize: 13, color: colors.text, flex: 1 }}>{field.label}</span>
+                        {isLocked && (
+                          <span style={{ fontSize: 11, color: colors.yellow, marginLeft: 4 }} title="Always protected">🔒</span>
+                        )}
+                      </label>
+                    );
+                  })}
+                </div>
+              ))
+            )}
+          </div>
+        )}
       </div>
 
       {/* Notification Settings */}
