@@ -280,7 +280,7 @@ export default function ChatPanel({ isOpen, onClose, scope, initialSessionId, pe
   const loadSession = async (id: string) => {
     try {
       const data = await api.get(`/chat/sessions/${id}`);
-      setMessages(data.messages.map((msg: any) => ({
+      const mapped = data.messages.map((msg: any) => ({
         role: msg.role,
         content: stripChartBlocks(msg.content),
         timestamp: msg.created_at,
@@ -290,9 +290,19 @@ export default function ChatPanel({ isOpen, onClose, scope, initialSessionId, pe
         tool_call_count: msg.metadata?.tool_call_count,
         latency_ms: msg.metadata?.latency_ms,
         chart_specs: msg.metadata?.chart_specs,
-      })));
+      }));
+      setMessages(mapped);
       setSessionId(id);
       setIsHistoryView(false);
+
+      // Re-hydrate action cards from the last assistant message's saved suggested_actions
+      const lastAssistant = [...data.messages].reverse().find((m: any) => m.role === 'assistant');
+      const savedActions = lastAssistant?.metadata?.suggested_actions;
+      if (savedActions && savedActions.length > 0) {
+        setChatSuggestedActions(savedActions);
+      } else {
+        setChatSuggestedActions([]);
+      }
     } catch (err) {
       console.error('Failed to load session:', err);
       setError('Failed to load conversation');

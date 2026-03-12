@@ -76,63 +76,7 @@ router.post('/:workspaceId/chat', async (req: Request, res: Response): Promise<v
       return;
     }
 
-    // Persist to session (fire-and-forget to not slow response)
-    let finalSessionId = session_id;
-    if (!finalSessionId) {
-      // Auto-create session from first message
-      getOrCreateSession(workspaceId, userId, null, message.trim())
-        .then((newSessionId) => {
-          finalSessionId = newSessionId;
-          // Save user message
-          return appendChatMessage(
-            finalSessionId,
-            workspaceId,
-            userId,
-            'user',
-            message.trim()
-          );
-        })
-        .then(() => {
-          // Save assistant response
-          return appendChatMessage(
-            finalSessionId!,
-            workspaceId,
-            userId,
-            'assistant',
-            result.answer,
-            {
-              router_decision: result.router_decision,
-              data_strategy: result.data_strategy,
-              tokens_used: result.tokens_used,
-              tool_call_count: result.tool_call_count,
-              latency_ms: result.latency_ms,
-              ...(result.chart_specs?.length ? { chart_specs: result.chart_specs } : {}),
-            }
-          );
-        })
-        .catch((err) => {
-          console.error('[chat] Failed to persist session:', err);
-        });
-    } else {
-      // Append to existing session
-      Promise.resolve()
-        .then(() => appendChatMessage(finalSessionId!, workspaceId, userId, 'user', message.trim()))
-        .then(() =>
-          appendChatMessage(finalSessionId!, workspaceId, userId, 'assistant', result.answer, {
-            router_decision: result.router_decision,
-            data_strategy: result.data_strategy,
-            tokens_used: result.tokens_used,
-            tool_call_count: result.tool_call_count,
-            latency_ms: result.latency_ms,
-            ...(result.chart_specs?.length ? { chart_specs: result.chart_specs } : {}),
-          })
-        )
-        .catch((err) => {
-          console.error('[chat] Failed to append to session:', err);
-        });
-    }
-
-    // Extract suggested actions from answer text (fire before responding)
+    // Extract suggested actions first so they can be included in saved metadata
     let suggestedActions: any[] = [];
     try {
       suggestedActions = await extractSuggestedActions(result.answer, [], workspaceId);
@@ -141,6 +85,44 @@ router.post('/:workspaceId/chat', async (req: Request, res: Response): Promise<v
       }
     } catch (err) {
       console.error('[chat] extractSuggestedActions failed:', err);
+    }
+
+    const assistantMetadata: Record<string, any> = {
+      router_decision: result.router_decision,
+      data_strategy: result.data_strategy,
+      tokens_used: result.tokens_used,
+      tool_call_count: result.tool_call_count,
+      latency_ms: result.latency_ms,
+      ...(result.evidence ? { evidence: result.evidence } : {}),
+      ...(result.chart_specs?.length ? { chart_specs: result.chart_specs } : {}),
+      ...(suggestedActions.length > 0 ? { suggested_actions: suggestedActions } : {}),
+    };
+
+    // Persist to session (fire-and-forget to not slow response)
+    let finalSessionId = session_id;
+    if (!finalSessionId) {
+      // Auto-create session from first message
+      getOrCreateSession(workspaceId, userId, null, message.trim())
+        .then((newSessionId) => {
+          finalSessionId = newSessionId;
+          return appendChatMessage(finalSessionId, workspaceId, userId, 'user', message.trim());
+        })
+        .then(() =>
+          appendChatMessage(finalSessionId!, workspaceId, userId, 'assistant', result.answer, assistantMetadata)
+        )
+        .catch((err) => {
+          console.error('[chat] Failed to persist session:', err);
+        });
+    } else {
+      // Append to existing session
+      Promise.resolve()
+        .then(() => appendChatMessage(finalSessionId!, workspaceId, userId, 'user', message.trim()))
+        .then(() =>
+          appendChatMessage(finalSessionId!, workspaceId, userId, 'assistant', result.answer, assistantMetadata)
+        )
+        .catch((err) => {
+          console.error('[chat] Failed to append to session:', err);
+        });
     }
 
     res.json({
