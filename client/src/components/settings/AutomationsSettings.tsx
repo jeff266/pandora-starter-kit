@@ -385,6 +385,22 @@ function formatRelativeTime(dateStr: string): string {
 }
 
 // Rule Builder Modal
+function validateExpr(expr: string): { valid: boolean; message: string } | null {
+  if (!expr.trim()) return null;
+
+  const openCount = (expr.match(/\{\{/g) || []).length;
+  const closeCount = (expr.match(/\}\}/g) || []).length;
+  if (openCount !== closeCount) {
+    return { valid: false, message: 'Unclosed template variable — use {{deal.field}}' };
+  }
+
+  if (expr.startsWith('today') && expr !== 'today' && !/^today[+-]\d+d$/.test(expr)) {
+    return { valid: false, message: 'Invalid date offset — use today+7d or today-30d' };
+  }
+
+  return { valid: true, message: 'Valid expression' };
+}
+
 interface RuleBuilderModalProps {
   rule: WorkflowRule | null;
   onClose: () => void;
@@ -429,6 +445,8 @@ function RuleBuilderModal({ rule, onClose, onSave }: RuleBuilderModalProps) {
   const [actionTargetStage, setActionTargetStage] = useState(rule?.action_payload?.target_stage || '');
   const [executionMode, setExecutionMode] = useState<'auto' | 'queue' | 'manual'>(rule?.execution_mode || 'queue');
   const [isActive, setIsActive] = useState(rule?.is_active ?? true);
+  const [showExprHelp, setShowExprHelp] = useState(false);
+  const [exprValidation, setExprValidation] = useState<{ valid: boolean; message: string } | null>(null);
 
   // Data fetching
   const [skills, setSkills] = useState<Skill[]>([]);
@@ -446,12 +464,29 @@ function RuleBuilderModal({ rule, onClose, onSave }: RuleBuilderModalProps) {
 
     setLoadingData(true);
     try {
-      const [skillsRes, fieldsRes] = await Promise.all([
-        api.get(`/skills`),
-        api.get(`/crm-writeback/fields`),
-      ]);
+      const [skillsRes, customRes, fieldsRes] = await Promise.all([
+        api.get('/skills'),
+        api.get('/skills/custom'),
+        api.get('/crm-writeback/fields'),
+      ]) as any[];
 
-      setSkills(skillsRes.skills || []);
+      // Registry skills: API returns a plain array (not { skills: [] })
+      const registrySkills: Skill[] = (Array.isArray(skillsRes) ? skillsRes : []).map((s: any) => ({
+        id: s.id,
+        name: s.name,
+        description: s.description,
+        category: s.category || 'other',
+      }));
+
+      // Custom skills: API returns { skills: [] } with skill_id as trigger key
+      const customSkills: Skill[] = (customRes.skills || []).map((s: any) => ({
+        id: s.skill_id,
+        name: `${s.name} [Custom]`,
+        description: s.description,
+        category: 'custom',
+      }));
+
+      setSkills([...registrySkills, ...customSkills]);
       setFields((fieldsRes.fields || []).filter((f: PandoraField) => f.writable));
     } catch (err) {
       console.error('[RuleBuilderModal] Failed to fetch data:', err);
@@ -718,9 +753,20 @@ function RuleBuilderModal({ rule, onClose, onSave }: RuleBuilderModalProps) {
               }}
             >
               <option value="">Select a skill...</option>
-              {skills.map(skill => (
-                <option key={skill.id} value={skill.id}>{skill.name}</option>
+              {Array.from(new Set(skills.filter(s => s.category !== 'custom').map(s => s.category))).sort().map(cat => (
+                <optgroup key={cat} label={cat ? (cat.charAt(0).toUpperCase() + cat.slice(1)) : 'Other'}>
+                  {skills.filter(s => s.category === cat).map(skill => (
+                    <option key={skill.id} value={skill.id}>{skill.name}</option>
+                  ))}
+                </optgroup>
               ))}
+              {skills.some(s => s.category === 'custom') && (
+                <optgroup label="Custom Skills">
+                  {skills.filter(s => s.category === 'custom').map(skill => (
+                    <option key={skill.id} value={skill.id}>{skill.name}</option>
+                  ))}
+                </optgroup>
+              )}
             </select>
           </div>
         )}
@@ -910,14 +956,76 @@ function RuleBuilderModal({ rule, onClose, onSave }: RuleBuilderModalProps) {
               </select>
             </div>
             <div style={{ marginBottom: 20 }}>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: colors.text, marginBottom: 6 }}>
-                Value Expression *
-              </label>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                <label style={{ fontSize: 13, fontWeight: 600, color: colors.text }}>
+                  Value Expression *
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setShowExprHelp(h => !h)}
+                  style={{
+                    fontSize: 11,
+                    color: showExprHelp ? colors.accent : colors.textMuted,
+                    background: 'transparent',
+                    border: `1px solid ${showExprHelp ? colors.accent : colors.border}`,
+                    borderRadius: 4,
+                    cursor: 'pointer',
+                    padding: '2px 8px',
+                    fontFamily: fonts.sans,
+                  }}
+                >
+                  {showExprHelp ? '✕ close' : 'ⓘ syntax guide'}
+                </button>
+              </div>
+
+              {showExprHelp && (
+                <div style={{
+                  marginBottom: 8,
+                  padding: '10px 12px',
+                  background: colors.surfaceRaised,
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: 6,
+                  fontSize: 11,
+                  lineHeight: 1.8,
+                }}>
+                  <div style={{ fontWeight: 600, marginBottom: 6, fontFamily: fonts.sans, color: colors.text, fontSize: 12 }}>
+                    Syntax Reference
+                  </div>
+                  <table style={{ borderSpacing: 0, width: '100%', fontFamily: fonts.mono }}>
+                    <tbody>
+                      {([
+                        ["'text'", 'Plain text literal', "'High Priority'"],
+                        ['today+Nd', 'N days from now', 'today+7d'],
+                        ['today-Nd', 'N days ago', 'today-30d'],
+                        ['{{deal.field}}', 'Dynamic deal field', '{{deal.amount}}'],
+                        ['{{deal.field}}*n', 'Arithmetic on field', '{{deal.amount}}*0.9'],
+                      ] as [string, string, string][]).map(([syntax, desc, ex]) => (
+                        <tr key={syntax}>
+                          <td style={{ color: colors.accent, paddingRight: 12, whiteSpace: 'nowrap', verticalAlign: 'top' }}>{syntax}</td>
+                          <td style={{ paddingRight: 12, color: colors.textMuted, verticalAlign: 'top' }}>{desc}</td>
+                          <td style={{ color: colors.textSecondary, verticalAlign: 'top' }}>{ex}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <div style={{ marginTop: 8, fontFamily: fonts.sans, color: colors.text, fontWeight: 600, fontSize: 11 }}>
+                    Available deal fields:
+                  </div>
+                  <div style={{ marginTop: 4, color: colors.textMuted, fontFamily: fonts.mono, fontSize: 10, lineHeight: 1.7 }}>
+                    deal.amount · deal.name · deal.stage · deal.close_date · deal.owner_email<br />
+                    deal.health_score · deal.days_in_stage · deal.crm_id · deal.source_id
+                  </div>
+                </div>
+              )}
+
               <input
                 type="text"
                 value={actionValueExpr}
-                onChange={(e) => setActionValueExpr(e.target.value)}
-                placeholder="e.g., {{deal_score}}, today+7d, 'High Priority'"
+                onChange={(e) => {
+                  setActionValueExpr(e.target.value);
+                  setExprValidation(validateExpr(e.target.value));
+                }}
+                placeholder="e.g., {{deal.amount}}*0.9, today+7d, 'High Priority'"
                 style={{
                   width: '100%',
                   padding: '8px 12px',
@@ -925,14 +1033,16 @@ function RuleBuilderModal({ rule, onClose, onSave }: RuleBuilderModalProps) {
                   fontFamily: fonts.sans,
                   color: colors.text,
                   background: colors.surfaceRaised,
-                  border: `1px solid ${colors.border}`,
+                  border: `1px solid ${exprValidation ? (exprValidation.valid ? colors.success : colors.danger) : colors.border}`,
                   borderRadius: 6,
                   outline: 'none',
                 }}
               />
-              <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 4 }}>
-                Use {'{{field_name}}'} for dynamic values, 'text' for literals, today+Nd for dates
-              </div>
+              {exprValidation && (
+                <div style={{ fontSize: 11, marginTop: 4, color: exprValidation.valid ? colors.success : colors.danger }}>
+                  {exprValidation.valid ? '✓ ' : '✗ '}{exprValidation.message}
+                </div>
+              )}
             </div>
           </>
         )}
