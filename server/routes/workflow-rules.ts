@@ -9,6 +9,7 @@ import { createLogger } from '../utils/logger.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { RuleEvaluator } from '../workflow/rule-evaluator.js';
 import { ActionExecutor, type WorkflowRule } from '../workflow/action-executor.js';
+import { executeActionApproval } from '../workflow/action-approver.js';
 
 const router = Router();
 const logger = createLogger('WorkflowRulesRoutes');
@@ -358,110 +359,27 @@ router.post('/:workspaceId/workflow-rules/pending/:actionId/approve',
       const { workspaceId, actionId } = req.params;
       const userId = (req as any).user?.user_id;
 
-      // Get action details
-      const actionResult = await query(
-        `SELECT a.*, wr.* as rule_data
-         FROM actions a
-         LEFT JOIN workflow_rules wr ON a.workflow_rule_id = wr.id
-         WHERE a.workspace_id = $1 AND a.id = $2 AND a.approval_status = 'pending'`,
-        [workspaceId, actionId]
-      );
-
-      if (actionResult.rows.length === 0) {
-        res.status(404).json({ error: 'Pending action not found' });
+      if (!userId) {
+        res.status(401).json({ error: 'User ID required' });
         return;
       }
 
-      const action = actionResult.rows[0];
-      const payload = JSON.parse(action.execution_payload || '{}');
-
-      // === RE-CHECK THRESHOLD POLICY ===
-      // Threshold may have changed since action was queued
-      if (action.action_type === 'crm_field_write') {
-        const { getActionThresholdResolver } = await import('../actions/threshold-resolver.js');
-        const thresholdResolver = getActionThresholdResolver();
-
-        const field = payload.field || (payload.action_payload && payload.action_payload.field);
-        if (field) {
-          // Get current deal to check stage
-          const deal = action.target_deal_id ? (await query('SELECT * FROM deals WHERE id = $1', [action.target_deal_id])).rows[0] : null;
-
-          const policy = await thresholdResolver.resolveWritePolicy(
-            workspaceId,
-            field,
-            deal?.stage
-          );
-
-          // If threshold changed to LOW, block execution
-          if (policy.threshold === 'low' || !policy.canWrite) {
-            await query(
-              `UPDATE actions
-               SET approval_status = 'rejected',
-                   execution_status = 'blocked',
-                   approved_by = $1,
-                   approved_at = NOW()
-               WHERE id = $2`,
-              [userId, actionId]
-            );
-
-            logger.info('Pending action blocked - threshold changed to low', {
-              workspace_id: workspaceId,
-              action_id: actionId,
-              field,
-              reason: policy.reason,
-            });
-
-            res.json({
-              success: false,
-              blocked: true,
-              reason: policy.reason || `Threshold changed - this field can no longer be written`,
-            });
-            return;
-          }
-        }
-      }
-
-      // Execute the action
-      const executor = new ActionExecutor();
-
-      // Build context from action payload
-      const context: any = {
-        deal: action.target_deal_id ? (await query('SELECT * FROM deals WHERE id = $1', [action.target_deal_id])).rows[0] : null,
-        trigger: payload.context?.trigger,
-      };
-
-      const rule: WorkflowRule = {
-        id: action.workflow_rule_id,
-        workspace_id: workspaceId,
-        name: payload.rule_name || action.rule_name,
-        action_type: action.action_type,
-        action_payload: payload.action_payload || {},
-        execution_mode: 'auto', // Override to auto for approved actions
-      };
-
-      const result = await executor.execute(rule, context);
+      const result = await executeActionApproval(workspaceId, actionId, userId);
 
       if (result.success) {
-        // Mark as approved and executed
-        await query(
-          `UPDATE actions
-           SET approval_status = 'approved',
-               execution_status = 'completed',
-               approved_by = $1,
-               approved_at = NOW()
-           WHERE id = $2`,
-          [userId, actionId]
-        );
-
-        logger.info('Pending action approved and executed', {
-          workspace_id: workspaceId,
-          action_id: actionId,
-          approved_by: userId,
-        });
-
-        res.json({ success: true, result });
+        if (result.blocked) {
+          res.json({
+            success: false,
+            blocked: true,
+            reason: result.block_reason,
+          });
+        } else {
+          res.json({ success: true, executed: result.executed });
+        }
       } else {
-        res.status(500).json({ error: result.error || 'Action execution failed' });
+        res.status(result.error === 'Pending action not found or already processed' ? 404 : 500).json({
+          error: result.error || 'Failed to approve action',
+        });
       }
     } catch (err) {
       logger.error('Failed to approve action', err as Error);

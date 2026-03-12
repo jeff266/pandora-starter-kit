@@ -774,6 +774,154 @@ const PANDORA_TOOLS: ToolDef[] = [
       required: ['expression'],
     },
   },
+  {
+    name: 'get_pending_actions',
+    description:
+      'Get pending workflow actions awaiting approval for this workspace. Returns actions queued by automation rules that require human approval before execution (e.g., stage changes, field updates, CRM writes). Use when user asks about: pending actions, items to approve, HITL queue, what needs review, what\'s waiting for approval.',
+    parameters: {
+      type: 'object',
+      properties: {
+        action_type: { type: 'string', description: 'Filter by action type: stage_change, crm_field_write, slack_notify' },
+        deal_id: { type: 'string', description: 'Filter actions for specific deal' },
+        limit: { type: 'number', description: 'Max records to return (default 50)' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'get_workflow_rules',
+    description:
+      'Get active automation rules configured for this workspace. Returns rules that trigger actions based on AI findings, stage changes, or scheduled events. Use when user asks about: automation rules, what rules are set up, what Pandora monitors automatically, active automations.',
+    parameters: {
+      type: 'object',
+      properties: {
+        is_active: { type: 'boolean', description: 'Filter by active/inactive status (default: true)' },
+        trigger_type: { type: 'string', description: 'Filter by trigger: finding, schedule, stage_change' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'get_meddic_coverage',
+    description:
+      'Get MEDDIC/SPICED/BANT qualification framework coverage for a specific deal. Returns scores and field breakdown for Metrics, Economic Buyer, Decision Criteria, Decision Process, Identify Pain, and Champion. Use when user asks about: MEDDIC score, qualification coverage, what fields are confirmed, champion status, economic buyer status, methodology coverage on a deal.',
+    parameters: {
+      type: 'object',
+      properties: {
+        deal_id: { type: 'string', description: 'Deal ID to get MEDDIC coverage for (required)' },
+      },
+      required: ['deal_id'],
+    },
+  },
+  {
+    name: 'get_crm_write_history',
+    description:
+      'Get history of CRM field updates made by Pandora automation. Returns log of all writes to CRM fields including what was written, previous values, success/failure status, and who initiated. Use when user asks about: CRM write history, what Pandora changed, what was updated, recent writes, what did Pandora do.',
+    parameters: {
+      type: 'object',
+      properties: {
+        deal_id: { type: 'string', description: 'Filter writes for specific deal (uses crm_record_id)' },
+        field: { type: 'string', description: 'Filter to specific field (crm_property_name)' },
+        limit: { type: 'number', description: 'Max records (default 50)' },
+        status: { type: 'string', enum: ['success', 'failed'], description: 'Filter by write status' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'get_insights_findings',
+    description:
+      'Get AI-generated insights and findings from skill analysis. Returns findings like at-risk deals, missing stakeholders, stalled conversations, pricing concerns. Use when user asks about: active findings, pipeline problems, what\'s flagged, insights, AI alerts, deal risks.',
+    parameters: {
+      type: 'object',
+      properties: {
+        severity: { type: 'string', enum: ['act', 'watch', 'notable'], description: 'Filter by severity level (can be comma-separated)' },
+        category: { type: 'string', description: 'Filter by finding category (e.g., stale_deal, single_thread)' },
+        deal_id: { type: 'string', description: 'Filter findings for specific deal' },
+        owner_email: { type: 'string', description: 'Filter findings for specific rep' },
+        status: { type: 'string', enum: ['active', 'resolved'], description: 'Filter by resolution status (default: active)' },
+        limit: { type: 'number', description: 'Max records (default 50)' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'get_action_threshold_settings',
+    description:
+      'Get workspace configuration for agentic action thresholds and protections. Returns threshold level (high/medium/low), protected stages, protected fields, notification settings, and undo window. Use when user asks about: action settings, threshold level, what Pandora can do automatically, CRM write permissions, automation settings.',
+    parameters: {
+      type: 'object',
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: 'approve_pending_action',
+    description:
+      'WRITE OPERATION: Approve and execute a pending workflow action. CRITICAL: Call this tool WITHOUT confirm=true first to preview what will happen. You must show the preview to the user and get explicit confirmation before calling again with confirm=true to execute. Use when user explicitly approves a specific pending action.',
+    parameters: {
+      type: 'object',
+      properties: {
+        action_id: { type: 'string', description: 'ID of the pending action to approve (required)' },
+        confirm: { type: 'boolean', description: 'Set to true to execute approval after previewing (must preview first)' },
+      },
+      required: ['action_id'],
+    },
+  },
+  {
+    name: 'dismiss_finding',
+    description:
+      'WRITE OPERATION: Dismiss/resolve an AI-generated finding. CRITICAL: Call WITHOUT confirm=true first to preview. Must get user confirmation before setting confirm=true to execute. Use when user explicitly dismisses a specific insight or finding.',
+    parameters: {
+      type: 'object',
+      properties: {
+        finding_id: { type: 'string', description: 'ID of finding to dismiss (required)' },
+        resolution_method: { type: 'string', enum: ['user_dismissed', 'action_taken', 'no_longer_relevant'], description: 'How it was resolved (default: user_dismissed)' },
+        confirm: { type: 'boolean', description: 'Set to true to execute dismissal (must preview first)' },
+      },
+      required: ['finding_id'],
+    },
+  },
+  {
+    name: 'snooze_finding',
+    description:
+      'WRITE OPERATION: Snooze an AI finding for N days. CRITICAL: Call WITHOUT confirm=true first to preview. Must get user confirmation before executing. Use when user wants to temporarily hide a finding.',
+    parameters: {
+      type: 'object',
+      properties: {
+        finding_id: { type: 'string', description: 'ID of finding to snooze (required)' },
+        days: { type: 'number', description: 'Number of days to snooze (default: 7)' },
+        confirm: { type: 'boolean', description: 'Set to true to execute snooze (must preview first)' },
+      },
+      required: ['finding_id'],
+    },
+  },
+  {
+    name: 'reverse_crm_write',
+    description:
+      'WRITE OPERATION: Reverse (undo) a CRM field write within the undo window. CRITICAL: Call WITHOUT confirm=true first to preview what will be reverted. Must get user confirmation before executing. Use when user wants to undo a recent CRM field change. Shows current value, previous value, and undo window status.',
+    parameters: {
+      type: 'object',
+      properties: {
+        write_log_id: { type: 'string', description: 'ID of write log entry to reverse (required)' },
+        confirm: { type: 'boolean', description: 'Set to true to execute reversal (must preview first)' },
+      },
+      required: ['write_log_id'],
+    },
+  },
+  {
+    name: 'run_meddic_coverage_skill',
+    description:
+      'EXECUTION OPERATION: Trigger MEDDIC qualification coverage analysis for a deal. Call WITHOUT confirm=true first to preview. This runs an AI skill that analyzes conversations and activities to score MEDDIC framework elements. Takes 30-60 seconds to complete. Use when user requests fresh MEDDIC analysis.',
+    parameters: {
+      type: 'object',
+      properties: {
+        deal_id: { type: 'string', description: 'Deal ID to analyze (required)' },
+        confirm: { type: 'boolean', description: 'Set to true to execute skill run (must preview first)' },
+      },
+      required: ['deal_id'],
+    },
+  },
 ];
 
 // ─── System prompt ────────────────────────────────────────────────────────────

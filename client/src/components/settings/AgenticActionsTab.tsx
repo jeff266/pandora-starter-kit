@@ -49,7 +49,7 @@ export default function AgenticActionsTab() {
     try {
       setLoading(true);
       setError(null);
-      const response = await fetch(`/api/${currentWorkspace?.id}/agentic-actions/settings`);
+      const response = await fetch(`/api/workspaces/${currentWorkspace?.id}/agentic-actions/settings`);
       if (!response.ok) {
         throw new Error('Failed to fetch settings');
       }
@@ -94,7 +94,7 @@ export default function AgenticActionsTab() {
         audit_webhook_enabled: auditWebhookEnabled,
       };
 
-      const response = await fetch(`/api/${currentWorkspace?.id}/agentic-actions/settings`, {
+      const response = await fetch(`/api/workspaces/${currentWorkspace?.id}/agentic-actions/settings`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',

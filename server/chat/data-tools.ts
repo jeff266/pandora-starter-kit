@@ -5,6 +5,7 @@
  * No LLM calls — pure database access with workspace scoping enforced everywhere.
  */
 
+import { randomUUID } from 'crypto';
 import { query } from '../db.js';
 import { resolvePipelineName, resolveDefaultPipeline, classifyQuestionIntent } from './pipeline-resolver.js';
 import type { PipelineResolution } from './pipeline-resolver.js';
@@ -21,6 +22,8 @@ import { formatCurrency } from '../utils/format-currency.js';
 import { scoreIcpFit, scoreMultithreading, scoreConversationSentiment } from './scoring-tools.js';
 import { computeRepConversions, computeSourceConversion, detectProcessBlockers, detectBuyerSignals, checkStakeholderStatus, enrichMarketSignals } from './analysis-tools.js';
 import { queryDealOutcomes } from './query-deal-outcomes.js';
+import { executeActionApproval } from '../workflow/action-approver.js';
+import { reverseWrite } from '../crm-writeback/write-reverser.js';
 
 // ─── Calculator Tool ─────────────────────────────────────────────────────────
 
@@ -388,6 +391,28 @@ export async function executeDataTool(
         result = await queryDealOutcomes(workspaceId, params); break;
       case 'calculate':
         result = calculateMath(params as { expression: string; description?: string }); break;
+      case 'get_pending_actions':
+        result = await getPendingActions(workspaceId, params); break;
+      case 'get_workflow_rules':
+        result = await getWorkflowRules(workspaceId, params); break;
+      case 'get_meddic_coverage':
+        result = await getMeddicCoverage(workspaceId, params); break;
+      case 'get_crm_write_history':
+        result = await getCrmWriteHistory(workspaceId, params); break;
+      case 'get_insights_findings':
+        result = await getInsightsFindings(workspaceId, params); break;
+      case 'get_action_threshold_settings':
+        result = await getActionThresholdSettings(workspaceId, params); break;
+      case 'approve_pending_action':
+        result = await approvePendingAction(workspaceId, params); break;
+      case 'dismiss_finding':
+        result = await dismissFinding(workspaceId, params); break;
+      case 'snooze_finding':
+        result = await snoozeFinding(workspaceId, params); break;
+      case 'reverse_crm_write':
+        result = await reverseCrmWrite(workspaceId, params); break;
+      case 'run_meddic_coverage_skill':
+        result = await runMeddicCoverageSkill(workspaceId, params); break;
       default:
         throw new Error(`Unknown tool: ${toolName}`);
     }
@@ -3920,4 +3945,608 @@ Respond ONLY with JSON:
     console.error('[infer_contact_role] error:', err?.message);
     return { contact_id: contactId, inferred_role: 'unknown', confidence: 0, title_signal: 'Inference failed', participation_signal: err?.message, calls_analyzed: 0, error: true };
   }
+}
+
+// ─── Tool: get_pending_actions ────────────────────────────────────────────────
+
+async function getPendingActions(workspaceId: string, params: Record<string, any>) {
+  const conditions: string[] = ['a.workspace_id = $1', 'a.approval_status = \'pending\'', 'a.execution_status = \'open\''];
+  const values: any[] = [workspaceId];
+  let paramIdx = 2;
+
+  if (params.action_type) {
+    values.push(params.action_type);
+    conditions.push(`a.action_type = $${paramIdx}`);
+    paramIdx++;
+  }
+
+  if (params.deal_id) {
+    values.push(params.deal_id);
+    conditions.push(`a.target_deal_id = $${paramIdx}`);
+    paramIdx++;
+  }
+
+  const limit = params.limit || 50;
+
+  const result = await query(
+    `SELECT a.id, a.workspace_id, a.workflow_rule_id, a.target_deal_id, a.action_type,
+            a.execution_payload, a.approval_status, a.execution_status, a.created_at,
+            wr.name as rule_name, d.name as deal_name
+     FROM actions a
+     LEFT JOIN workflow_rules wr ON a.workflow_rule_id = wr.id
+     LEFT JOIN deals d ON a.target_deal_id = d.id
+     WHERE ${conditions.join(' AND ')}
+     ORDER BY a.created_at DESC
+     LIMIT $${paramIdx}`,
+    [...values, limit]
+  );
+
+  return {
+    pending_actions: result.rows,
+    count: result.rows.length,
+    query_description: `Found ${result.rows.length} pending actions awaiting approval`,
+  };
+}
+
+// ─── Tool: get_workflow_rules ────────────────────────────────────────────────
+
+async function getWorkflowRules(workspaceId: string, params: Record<string, any>) {
+  const conditions: string[] = ['workspace_id = $1'];
+  const values: any[] = [workspaceId];
+  let paramIdx = 2;
+
+  const isActive = params.is_active !== undefined ? params.is_active : true;
+  if (isActive !== null) {
+    values.push(isActive);
+    conditions.push(`is_active = $${paramIdx}`);
+    paramIdx++;
+  }
+
+  if (params.trigger_type) {
+    values.push(params.trigger_type);
+    conditions.push(`trigger_type = $${paramIdx}`);
+    paramIdx++;
+  }
+
+  const result = await query(
+    `SELECT id, name, description, trigger_type, trigger_skill_id, trigger_finding_category,
+            trigger_severity, condition_json, action_type, action_payload, execution_mode,
+            scope, is_active, last_triggered_at, trigger_count, created_at, updated_at
+     FROM workflow_rules
+     WHERE ${conditions.join(' AND ')}
+     ORDER BY created_at DESC`,
+    values
+  );
+
+  return {
+    rules: result.rows,
+    count: result.rows.length,
+    query_description: `Found ${result.rows.length} workflow rules`,
+  };
+}
+
+// ─── Tool: get_meddic_coverage ────────────────────────────────────────────────
+
+async function getMeddicCoverage(workspaceId: string, params: Record<string, any>) {
+  const { deal_id } = params;
+
+  if (!deal_id) {
+    throw new Error('deal_id is required');
+  }
+
+  const result = await query(
+    `SELECT output, completed_at
+     FROM skill_runs
+     WHERE workspace_id = $1
+       AND skill_id = 'meddic-coverage'
+       AND status = 'completed'
+       AND params->>'deal_id' = $2
+     ORDER BY completed_at DESC
+     LIMIT 1`,
+    [workspaceId, deal_id]
+  );
+
+  if (result.rows.length === 0) {
+    return {
+      error: 'No MEDDIC coverage analysis found for this deal',
+      deal_id,
+      query_description: 'No completed MEDDIC analysis found. Run the skill first using run_meddic_coverage_skill.',
+    };
+  }
+
+  const skillRun = result.rows[0];
+  const output = skillRun.output || {};
+
+  return {
+    deal_id,
+    coverage: output.coverage || {},
+    scores: output.scores || {},
+    last_analyzed: skillRun.completed_at,
+    metrics: output.metrics || null,
+    implicated_metrics: output.implicated_metrics || null,
+    query_description: `Retrieved MEDDIC coverage analysis from ${skillRun.completed_at}`,
+  };
+}
+
+// ─── Tool: get_crm_write_history ───────────────────────────────────────────────
+
+async function getCrmWriteHistory(workspaceId: string, params: Record<string, any>) {
+  const conditions: string[] = ['l.workspace_id = $1'];
+  const values: any[] = [workspaceId];
+  let paramIdx = 2;
+
+  if (params.deal_id) {
+    values.push(params.deal_id);
+    conditions.push(`l.crm_record_id = $${paramIdx}`);
+    paramIdx++;
+  }
+
+  if (params.field) {
+    values.push(params.field);
+    conditions.push(`m.pandora_field = $${paramIdx} OR l.crm_property_name = $${paramIdx}`);
+    paramIdx++;
+  }
+
+  if (params.status) {
+    values.push(params.status);
+    conditions.push(`l.status = $${paramIdx}`);
+    paramIdx++;
+  }
+
+  const limit = params.limit || 50;
+
+  const result = await query(
+    `SELECT l.id, l.workspace_id, l.mapping_id, l.crm_type, l.crm_object_type,
+            l.crm_record_id, l.crm_property_name, l.value_written, l.previous_value,
+            l.status, l.error_message, l.created_at, l.trigger_source, l.duration_ms,
+            l.initiated_by, l.reversed_at, l.reversed_by, l.action_threshold_at_write,
+            m.pandora_field, m.crm_property_name as mapped_crm_field
+     FROM crm_write_log l
+     LEFT JOIN crm_property_mappings m ON m.id = l.mapping_id
+     WHERE ${conditions.join(' AND ')}
+     ORDER BY l.created_at DESC
+     LIMIT $${paramIdx}`,
+    [...values, limit]
+  );
+
+  return {
+    log_entries: result.rows,
+    count: result.rows.length,
+    query_description: `Found ${result.rows.length} CRM write log entries`,
+  };
+}
+
+// ─── Tool: get_insights_findings ────────────────────────────────────────────────
+
+async function getInsightsFindings(workspaceId: string, params: Record<string, any>) {
+  const conditions: string[] = ['f.workspace_id = $1'];
+  const values: any[] = [workspaceId];
+  let paramIdx = 2;
+
+  const status = params.status || 'active';
+  if (status === 'active') {
+    conditions.push('f.resolved_at IS NULL');
+  } else if (status === 'resolved') {
+    conditions.push('f.resolved_at IS NOT NULL');
+  }
+
+  if (params.severity) {
+    const severities = params.severity.includes(',') ? params.severity.split(',') : [params.severity];
+    values.push(severities);
+    conditions.push(`f.severity = ANY($${paramIdx})`);
+    paramIdx++;
+  }
+
+  if (params.category) {
+    values.push(params.category);
+    conditions.push(`f.category = $${paramIdx}`);
+    paramIdx++;
+  }
+
+  if (params.deal_id) {
+    values.push(params.deal_id);
+    conditions.push(`f.deal_id = $${paramIdx}`);
+    paramIdx++;
+  }
+
+  if (params.owner_email) {
+    values.push(params.owner_email);
+    conditions.push(`f.owner_email = $${paramIdx}`);
+    paramIdx++;
+  }
+
+  const limit = params.limit || 50;
+
+  const result = await query(
+    `SELECT f.id, f.skill_id, f.category, f.severity, f.message, f.entity_type,
+            f.deal_id, f.account_id, f.entity_name, f.metric_value, f.found_at,
+            f.resolved_at, f.resolution_method, f.owner_email, f.snoozed_until
+     FROM findings f
+     WHERE ${conditions.join(' AND ')}
+     ORDER BY CASE f.severity WHEN 'act' THEN 1 WHEN 'watch' THEN 2 WHEN 'notable' THEN 3 ELSE 4 END,
+              f.found_at DESC
+     LIMIT $${paramIdx}`,
+    [...values, limit]
+  );
+
+  return {
+    findings: result.rows,
+    count: result.rows.length,
+    status,
+    query_description: `Found ${result.rows.length} ${status} findings`,
+  };
+}
+
+// ─── Tool: get_action_threshold_settings ────────────────────────────────────────
+
+async function getActionThresholdSettings(workspaceId: string, params: Record<string, any>) {
+  const result = await query(
+    `SELECT id, workspace_id, action_threshold, protected_stages, protected_fields,
+            field_overrides, notify_on_auto_write, notify_channel, notify_rep,
+            notify_manager, undo_window_hours, created_at, updated_at
+     FROM workspace_action_settings
+     WHERE workspace_id = $1`,
+    [workspaceId]
+  );
+
+  if (result.rows.length === 0) {
+    return {
+      error: 'No action settings found for this workspace',
+      workspace_id: workspaceId,
+      query_description: 'Action settings not configured',
+    };
+  }
+
+  const settings = result.rows[0];
+
+  return {
+    settings: {
+      action_threshold: settings.action_threshold,
+      protected_stages: settings.protected_stages || [],
+      protected_fields: settings.protected_fields || [],
+      field_overrides: settings.field_overrides || {},
+      notify_on_auto_write: settings.notify_on_auto_write,
+      notify_channel: settings.notify_channel,
+      notify_rep: settings.notify_rep,
+      notify_manager: settings.notify_manager,
+      undo_window_hours: settings.undo_window_hours,
+    },
+    query_description: `Current action threshold: ${settings.action_threshold}, Undo window: ${settings.undo_window_hours} hours`,
+  };
+}
+
+// ─── Tool: approve_pending_action (WRITE TOOL) ──────────────────────────────────
+
+async function approvePendingAction(workspaceId: string, params: Record<string, any>) {
+  const { action_id, confirm } = params;
+
+  if (!action_id) {
+    throw new Error('action_id is required');
+  }
+
+  // Step 1: Get action details for preview
+  const actionResult = await query(
+    `SELECT a.*, wr.name as rule_name, d.name as deal_name, d.stage, d.owner as deal_owner
+     FROM actions a
+     LEFT JOIN workflow_rules wr ON a.workflow_rule_id = wr.id
+     LEFT JOIN deals d ON a.target_deal_id = d.id
+     WHERE a.workspace_id = $1 AND a.id = $2 AND a.approval_status = 'pending'`,
+    [workspaceId, action_id]
+  );
+
+  if (actionResult.rows.length === 0) {
+    throw new Error('Pending action not found or already processed');
+  }
+
+  const action = actionResult.rows[0];
+  const payload = typeof action.execution_payload === 'string' ? JSON.parse(action.execution_payload) : action.execution_payload;
+
+  // Step 2: Preview mode (confirm not set or false)
+  if (!confirm) {
+    return {
+      requires_confirmation: true,
+      action_preview: {
+        action_id: action.id,
+        action_type: action.action_type,
+        rule_name: action.rule_name,
+        deal_name: action.deal_name,
+        deal_stage: action.stage,
+        deal_owner: action.deal_owner,
+        target_deal_id: action.target_deal_id,
+        execution_payload: payload,
+        created_at: action.created_at,
+      },
+      message: 'This action will execute immediately upon approval. Set confirm=true to proceed.',
+      query_description: `Preview approval for ${action.action_type} on ${action.deal_name}`,
+    };
+  }
+
+  // Step 3: Execute approval via shared function
+  // This calls ActionExecutor, writes to CRM, logs to crm_write_log, and updates action status
+  const approvalResult = await executeActionApproval(workspaceId, action_id, 'ask_pandora_tool');
+
+  if (!approvalResult.success) {
+    throw new Error(approvalResult.error || 'Failed to execute approval');
+  }
+
+  if (approvalResult.blocked) {
+    return {
+      success: false,
+      action_id,
+      executed: false,
+      blocked: true,
+      block_reason: approvalResult.block_reason,
+      message: `Action blocked: ${approvalResult.block_reason}`,
+      query_description: `Approval blocked for action ${action_id}`,
+    };
+  }
+
+  return {
+    success: true,
+    action_id,
+    executed: true,
+    message: `Action approved and executed: ${action.action_type} on ${action.deal_name}`,
+    query_description: `Approved action ${action_id}`,
+  };
+}
+
+// ─── Tool: dismiss_finding (WRITE TOOL) ──────────────────────────────────────────
+
+async function dismissFinding(workspaceId: string, params: Record<string, any>) {
+  const { finding_id, resolution_method, confirm } = params;
+
+  if (!finding_id) {
+    throw new Error('finding_id is required');
+  }
+
+  // Get finding details
+  const findingResult = await query(
+    `SELECT f.*, d.name as deal_name
+     FROM findings f
+     LEFT JOIN deals d ON d.id = f.deal_id
+     WHERE f.workspace_id = $1 AND f.id = $2 AND f.resolved_at IS NULL`,
+    [workspaceId, finding_id]
+  );
+
+  if (findingResult.rows.length === 0) {
+    throw new Error('Active finding not found or already resolved');
+  }
+
+  const finding = findingResult.rows[0];
+
+  // Preview mode
+  if (!confirm) {
+    return {
+      requires_confirmation: true,
+      finding_preview: {
+        finding_id: finding.id,
+        message: finding.message,
+        severity: finding.severity,
+        category: finding.category,
+        deal_name: finding.deal_name,
+        skill_id: finding.skill_id,
+        found_at: finding.found_at,
+      },
+      message: 'This will mark the finding as resolved and remove it from active insights. Set confirm=true to proceed.',
+      query_description: `Preview dismissal of ${finding.severity} finding: ${finding.message}`,
+    };
+  }
+
+  // Execute dismissal
+  const method = resolution_method || 'user_dismissed';
+  await query(
+    `UPDATE findings
+     SET resolved_at = NOW(),
+         resolution_method = $1
+     WHERE id = $2 AND workspace_id = $3`,
+    [method, finding_id, workspaceId]
+  );
+
+  return {
+    success: true,
+    finding_id,
+    resolution_method: method,
+    message: `Finding dismissed: ${finding.message}`,
+    query_description: `Dismissed finding ${finding_id}`,
+  };
+}
+
+// ─── Tool: snooze_finding (WRITE TOOL) ────────────────────────────────────────────
+
+async function snoozeFinding(workspaceId: string, params: Record<string, any>) {
+  const { finding_id, days, confirm } = params;
+
+  if (!finding_id) {
+    throw new Error('finding_id is required');
+  }
+
+  const snoozeDays = days || 7;
+
+  const findingResult = await query(
+    `SELECT f.*, d.name as deal_name
+     FROM findings f
+     LEFT JOIN deals d ON d.id = f.deal_id
+     WHERE f.workspace_id = $1 AND f.id = $2 AND f.resolved_at IS NULL`,
+    [workspaceId, finding_id]
+  );
+
+  if (findingResult.rows.length === 0) {
+    throw new Error('Active finding not found');
+  }
+
+  const finding = findingResult.rows[0];
+  const snoozeUntil = new Date();
+  snoozeUntil.setDate(snoozeUntil.getDate() + snoozeDays);
+
+  if (!confirm) {
+    return {
+      requires_confirmation: true,
+      finding_preview: {
+        finding_id: finding.id,
+        message: finding.message,
+        severity: finding.severity,
+        snooze_days: snoozeDays,
+        snooze_until: snoozeUntil.toISOString(),
+      },
+      message: `This will hide the finding until ${snoozeUntil.toISOString().split('T')[0]}. Set confirm=true to proceed.`,
+      query_description: `Preview snooze finding for ${snoozeDays} days`,
+    };
+  }
+
+  await query(
+    `UPDATE findings
+     SET snoozed_until = NOW() + ($1 || ' days')::interval
+     WHERE id = $2 AND workspace_id = $3`,
+    [snoozeDays, finding_id, workspaceId]
+  );
+
+  return {
+    success: true,
+    finding_id,
+    snoozed_until: snoozeUntil.toISOString(),
+    message: `Finding snoozed for ${snoozeDays} days`,
+    query_description: `Snoozed finding ${finding_id}`,
+  };
+}
+
+// ─── Tool: reverse_crm_write (WRITE TOOL) ──────────────────────────────────────────
+
+async function reverseCrmWrite(workspaceId: string, params: Record<string, any>) {
+  const { write_log_id, confirm } = params;
+
+  if (!write_log_id) {
+    throw new Error('write_log_id is required');
+  }
+
+  // Get write log details with undo window check
+  const logResult = await query(
+    `SELECT l.*, w.undo_window_hours
+     FROM crm_write_log l
+     LEFT JOIN workspace_action_settings w ON w.workspace_id = l.workspace_id
+     WHERE l.id = $1 AND l.workspace_id = $2`,
+    [write_log_id, workspaceId]
+  );
+
+  if (logResult.rows.length === 0) {
+    throw new Error('Write log entry not found');
+  }
+
+  const logEntry = logResult.rows[0];
+  const undoWindowHours = logEntry.undo_window_hours || 24;
+
+  // Check if already reversed
+  if (logEntry.reversed_at) {
+    throw new Error(`This write has already been reversed on ${logEntry.reversed_at}`);
+  }
+
+  // Check undo window
+  const writeTime = new Date(logEntry.created_at).getTime();
+  const now = Date.now();
+  const windowMs = undoWindowHours * 60 * 60 * 1000;
+  const hoursElapsed = Math.floor((now - writeTime) / (60 * 60 * 1000));
+
+  if (now - writeTime > windowMs) {
+    throw new Error(`Undo window expired. This write can only be reversed within ${undoWindowHours} hours (${hoursElapsed} hours have passed).`);
+  }
+
+  if (!logEntry.previous_value) {
+    throw new Error('No previous value recorded - cannot reverse automatically');
+  }
+
+  const currentValue = typeof logEntry.value_written === 'string' ? JSON.parse(logEntry.value_written) : logEntry.value_written;
+  const previousValue = typeof logEntry.previous_value === 'string' ? JSON.parse(logEntry.previous_value) : logEntry.previous_value;
+
+  if (!confirm) {
+    return {
+      requires_confirmation: true,
+      write_preview: {
+        write_log_id: logEntry.id,
+        field: logEntry.crm_property_name,
+        current_value: currentValue,
+        will_revert_to: previousValue,
+        crm_record_id: logEntry.crm_record_id,
+        hours_since_write: hoursElapsed,
+        undo_window_hours: undoWindowHours,
+        hours_remaining: undoWindowHours - hoursElapsed,
+      },
+      message: `This will write the previous value back to the CRM field "${logEntry.crm_property_name}". You have ${undoWindowHours - hoursElapsed} hours remaining to reverse this write. Set confirm=true to execute.`,
+      query_description: `Preview reversal of ${logEntry.crm_property_name} write`,
+    };
+  }
+
+  // Execute reversal via shared function
+  // This writes previous value back to CRM, creates reversal log entry, and updates original as reversed
+  const reversalResult = await reverseWrite(workspaceId, write_log_id, 'ask_pandora_tool');
+
+  if (!reversalResult.success) {
+    throw new Error(reversalResult.error || 'Failed to execute reversal');
+  }
+
+  return {
+    success: true,
+    write_log_id,
+    reversal_log_id: reversalResult.reversal_log_id,
+    field: logEntry.crm_property_name,
+    reverted_to: previousValue,
+    message: `Successfully reversed write to ${logEntry.crm_property_name}`,
+    query_description: `Reversed CRM write ${write_log_id}`,
+  };
+}
+
+// ─── Tool: run_meddic_coverage_skill (EXECUTION TOOL) ────────────────────────────
+
+async function runMeddicCoverageSkill(workspaceId: string, params: Record<string, any>) {
+  const { deal_id, confirm } = params;
+
+  if (!deal_id) {
+    throw new Error('deal_id is required');
+  }
+
+  // Get deal details for preview
+  const dealResult = await query(
+    `SELECT id, name, stage, amount, owner_name
+     FROM deals
+     WHERE workspace_id = $1 AND id = $2`,
+    [workspaceId, deal_id]
+  );
+
+  if (dealResult.rows.length === 0) {
+    throw new Error('Deal not found');
+  }
+
+  const deal = dealResult.rows[0];
+
+  if (!confirm) {
+    return {
+      requires_confirmation: true,
+      execution_preview: {
+        skill_id: 'meddic-coverage',
+        deal_id: deal.id,
+        deal_name: deal.name,
+        deal_stage: deal.stage,
+        deal_amount: deal.amount,
+        deal_owner: deal.owner_name,
+      },
+      message: 'This will trigger MEDDIC coverage analysis for this deal. It analyzes conversations and activities to score qualification framework elements. Analysis takes 30-60 seconds. Set confirm=true to execute.',
+      query_description: `Preview MEDDIC analysis for ${deal.name}`,
+    };
+  }
+
+  // Execute skill run - create a skill_runs entry
+  const runId = randomUUID();
+  await query(
+    `INSERT INTO skill_runs (id, workspace_id, skill_id, params, status, started_at)
+     VALUES ($1, $2, 'meddic-coverage', $3, 'pending', NOW())`,
+    [runId, workspaceId, JSON.stringify({ deal_id })]
+  );
+
+  return {
+    success: true,
+    run_id: runId,
+    status: 'pending',
+    deal_id,
+    deal_name: deal.name,
+    message: `MEDDIC coverage analysis started for ${deal.name}. Use get_meddic_coverage to retrieve results once complete (typically 30-60 seconds).`,
+    query_description: `Triggered MEDDIC analysis for ${deal.name}`,
+  };
 }
