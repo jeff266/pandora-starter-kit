@@ -403,14 +403,26 @@ export default function ChatPanel({ isOpen, onClose, scope, initialSessionId, pe
   };
 
   const submitExport = (msgContent: string) => {
-    const desc = exportDesc.trim();
-    const snippet = msgContent.slice(0, 200).replace(/\n/g, ' ');
-    const prompt = desc
-      ? `Export the previous analysis as a document: ${desc}`
-      : `Export the previous analysis as a downloadable document. Context: ${snippet}`;
+    const title = exportDesc.trim();
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const safeTitle = title
+      ? title.replace(/[^a-z0-9\s-]/gi, '').trim().replace(/\s+/g, '_').slice(0, 50)
+      : `pandora_export_${dateStr}`;
+    const filename = `${safeTitle}.md`;
+    const content = title ? `# ${title}\n\n${msgContent}` : msgContent;
+
+    const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
     setExportingIdx(null);
     setExportDesc('');
-    sendMessage(prompt);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -576,7 +588,7 @@ export default function ChatPanel({ isOpen, onClose, scope, initialSessionId, pe
                   {exportingIdx === idx ? (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                       <div style={{ fontSize: 12, color: '#94a3b8' }}>
-                        Briefly describe the doc you want (or leave blank for a general export):
+                        Document title (optional — leave blank to use date):
                       </div>
                       <div style={{ display: 'flex', gap: 6 }}>
                         <input
@@ -611,7 +623,7 @@ export default function ChatPanel({ isOpen, onClose, scope, initialSessionId, pe
                             whiteSpace: 'nowrap',
                           }}
                         >
-                          Generate
+                          ↓ Download
                         </button>
                         <button
                           onClick={() => { setExportingIdx(null); setExportDesc(''); }}
