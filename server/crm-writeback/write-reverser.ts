@@ -1,5 +1,7 @@
 import { query } from '../db.js';
-import { logger } from '../logger.js';
+import { createLogger } from '../utils/logger.js';
+
+const logger = createLogger('WriteReverser');
 
 export interface WriteReversalResult {
   success: boolean;

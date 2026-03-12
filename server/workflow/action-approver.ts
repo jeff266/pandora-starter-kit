@@ -1,6 +1,8 @@
 import { query } from '../db.js';
-import { logger } from '../logger.js';
+import { createLogger } from '../utils/logger.js';
 import { ActionExecutor } from './action-executor.js';
+
+const logger = createLogger('ActionApprover');
 
 export interface ActionApprovalResult {
   success: boolean;
@@ -28,8 +30,8 @@ export async function executeActionApproval(
     const actionResult = await query(
       `SELECT a.*,
               wr.name as rule_name,
-              wr.action_type,
-              wr.action_payload,
+              wr.action_type as rule_action_type,
+              wr.action_payload as rule_action_payload,
               wr.execution_mode,
               d.name as deal_name,
               d.id as deal_id,
@@ -54,7 +56,10 @@ export async function executeActionApproval(
     }
 
     const action = actionResult.rows[0];
-    const payload = JSON.parse(action.execution_payload || '{}');
+    const rawPayload = action.execution_payload;
+    const payload = typeof rawPayload === 'string'
+      ? JSON.parse(rawPayload || '{}')
+      : (rawPayload || {});
 
     // Re-check threshold policy (may have changed since action was queued)
     const currentThreshold = action.current_threshold || 'medium';
@@ -114,7 +119,14 @@ export async function executeActionApproval(
     const executor = new ActionExecutor();
     const context: any = {
       deal: action.target_deal_id
-        ? (await query('SELECT * FROM deals WHERE id = $1', [action.target_deal_id])).rows[0]
+        ? (await query(
+            `SELECT *,
+                    source_id AS crm_id,
+                    source AS crm_type,
+                    owner AS hubspot_owner_id
+             FROM deals WHERE id = $1`,
+            [action.target_deal_id]
+          )).rows[0]
         : null,
       trigger: payload.context?.trigger,
       user_id: userId,
@@ -124,8 +136,8 @@ export async function executeActionApproval(
       id: action.workflow_rule_id,
       workspace_id: workspaceId,
       name: action.rule_name,
-      action_type: action.action_type,
-      action_payload: payload.action_payload || action.action_payload || {},
+      action_type: action.rule_action_type || action.action_type,
+      action_payload: payload.action_payload || action.rule_action_payload || {},
       execution_mode: action.execution_mode || 'auto',
     };
 
