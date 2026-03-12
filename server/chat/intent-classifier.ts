@@ -253,7 +253,7 @@ export const INTENT_CLASSIFIER_SYSTEM_PROMPT = `You are classifying sales operat
 Categories:
 - data_query: Requires pulling data from CRM or conversation tools to answer. Examples: "how many deals in pipeline?", "which deals are stalled?", "what's our win rate?"
 - advisory_stateless: Answerable from general RevOps knowledge, no data needed. Examples: "what's MEDDIC?", "what's a good sales process?", "how does bowtie attribution work?"
-- advisory_with_data_option: Could be answered generically, but would be MUCH better if we first mined the user's actual CRM data or call transcripts. Examples: "what closed-lost reason values should I use?", "how should I structure my pipeline stages?", "why do our customers churn?"
+- advisory_with_data_option: Could be answered generically, but would be MUCH better if we first mined the user's actual CRM data or call transcripts. ONLY for structural/configuration questions like: "what closed-lost reason values should I use?", "how should I structure my pipeline stages?", "why do our customers churn?". DO NOT use this for operational RevOps questions about pipeline health, deal hygiene, forecast improvement, deal risk, or rep performance — those are data_query because the data IS the answer, not an option.
 - document_request: User wants a formatted deliverable — a framework, report, briefing, or strategic document. Keywords: "create a framework", "build a report", "put together a briefing", "draft a plan for", "generate a capacity plan". This category always requires data mining first, then document synthesis. Different from data_query (which returns a chat answer) because the user explicitly wants a downloadable document.
 - retrospective: User is asking a retrospective revenue question about a past quarter or period — why did we miss/beat quota, how did Q1 go, what drove results, were we lucky or process-driven. These require correlating pipeline, activity, conversion, and rep performance data across a period. Examples: "why did we miss last quarter?", "how did we do in Q1?", "was our Q3 result replicable?", "what went wrong this quarter?"
 
@@ -412,13 +412,13 @@ export async function classifyIntent(
   }
 
   // Fast path — advisory with data option patterns
+  // Always pull data rather than asking — redirect to data_query
   for (const pattern of ADVISORY_WITH_DATA_PATTERNS) {
     if (pattern.test(message)) {
       return {
-        category: 'advisory_with_data_option',
+        category: 'data_query',
         confidence: 0.80,
-        reasoning: 'Advisory-with-data pattern match',
-        gating_question: generateGatingQuestion(message),
+        reasoning: 'Advisory-with-data pattern — auto-routing to data pull',
         fast_path: true,
         tokens_used: 0,
       };
@@ -429,8 +429,9 @@ export async function classifyIntent(
   const tokenEstimate = estimateTokens(message, conversationHistory);
   const result = await classifyWithLLM(message, workspaceId, tokenEstimate);
 
+  // advisory_with_data_option: always pull data rather than asking which the user prefers
   if (result.category === 'advisory_with_data_option') {
-    result.gating_question = generateGatingQuestion(message);
+    result.category = 'data_query';
   }
 
   return result;
