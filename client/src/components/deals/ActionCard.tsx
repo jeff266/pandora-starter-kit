@@ -8,6 +8,8 @@ export interface ActionCardItem {
   priority: 'P0' | 'P1' | 'P2';
   source: string;
   suggested_crm_action: 'task_create' | 'note_create' | 'field_write' | null;
+  action_type?: string;
+  skill_id?: string;
 }
 
 interface ActionCardProps {
@@ -29,29 +31,108 @@ const SOURCE_LABELS: Record<string, string> = {
   coaching: 'Stage Benchmark',
 };
 
-type InFlight = 'task' | 'note' | 'dismiss' | null;
+type InFlight = 'primary' | 'note' | 'dismiss' | null;
+
+function getPrimaryConfig(item: ActionCardItem): { label: string; mode: string } {
+  switch (item.action_type) {
+    case 'run_skill':
+      return { label: 'Run skill ▶', mode: 'skill_run' };
+    case 'run_meddic_coverage':
+      return { label: 'Run MEDDIC ▶', mode: 'skill_run' };
+    case 'update_forecast_category':
+    case 'update_close_date':
+      return { label: 'Review change ▶', mode: 'field_write' };
+    default:
+      return { label: 'Create CRM Task ▶', mode: 'task_create' };
+  }
+}
+
+function isSkillType(actionType?: string) {
+  return actionType === 'run_skill' || actionType === 'run_meddic_coverage';
+}
+
+function isFieldWriteType(actionType?: string) {
+  return actionType === 'update_forecast_category' || actionType === 'update_close_date';
+}
 
 export function ActionCard({ item, crmSource, onRemove }: ActionCardProps) {
   const [inFlight, setInFlight] = useState<InFlight>(null);
   const [error, setError] = useState<string | null>(null);
+  const [reviewing, setReviewing] = useState(false);
 
-  const crmLabel = crmSource === 'salesforce' ? 'Salesforce' : 'HubSpot';
   const pm = PRIORITY_META[item.priority] || PRIORITY_META.P2;
   const sourceLabel = SOURCE_LABELS[item.source] || item.source;
+  const primaryConfig = getPrimaryConfig(item);
 
-  async function handleAction(mode: 'task' | 'note' | 'dismiss') {
+  async function handlePrimary() {
     if (inFlight) return;
-    setInFlight(mode);
+
+    if (isFieldWriteType(item.action_type)) {
+      setReviewing(r => !r);
+      return;
+    }
+
+    setInFlight('primary');
     setError(null);
     try {
-      if (mode === 'dismiss') {
-        await api.post(`/actions/${item.id}/dismiss`);
+      if (isSkillType(item.action_type)) {
+        await api.post(`/actions/${item.id}/execute-inline`, {
+          mode: 'skill_run',
+          skill_id: item.skill_id,
+          user_id: 'rep',
+        });
       } else {
         await api.post(`/actions/${item.id}/execute-inline`, {
-          mode: mode === 'task' ? 'task_create' : 'note_create',
+          mode: 'task_create',
           user_id: 'rep',
         });
       }
+      onRemove(item.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Action failed');
+      setInFlight(null);
+    }
+  }
+
+  async function handleConfirmFieldWrite() {
+    if (inFlight) return;
+    setInFlight('primary');
+    setError(null);
+    try {
+      await api.post(`/actions/${item.id}/execute-inline`, {
+        mode: 'field_write',
+        user_id: 'rep',
+      });
+      onRemove(item.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Action failed');
+      setInFlight(null);
+      setReviewing(false);
+    }
+  }
+
+  async function handleNote() {
+    if (inFlight) return;
+    setInFlight('note');
+    setError(null);
+    try {
+      await api.post(`/actions/${item.id}/execute-inline`, {
+        mode: 'note_create',
+        user_id: 'rep',
+      });
+      onRemove(item.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Action failed');
+      setInFlight(null);
+    }
+  }
+
+  async function handleDismiss() {
+    if (inFlight) return;
+    setInFlight('dismiss');
+    setError(null);
+    try {
+      await api.post(`/actions/${item.id}/dismiss`);
       onRemove(item.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Action failed');
@@ -86,6 +167,8 @@ export function ActionCard({ item, crmSource, onRemove }: ActionCardProps) {
     );
   }
 
+  const showNoteButton = !isSkillType(item.action_type) && !isFieldWriteType(item.action_type);
+
   return (
     <div style={{
       background: colors.surface,
@@ -112,51 +195,87 @@ export function ActionCard({ item, crmSource, onRemove }: ActionCardProps) {
         Source: {sourceLabel}
       </div>
 
-      {error && (
-        <div style={{ fontSize: 11, color: colors.red || '#ef4444' }}>{error}</div>
+      {reviewing && isFieldWriteType(item.action_type) && (
+        <div style={{
+          background: `${colors.accent}08`,
+          border: `1px solid ${colors.accent}30`,
+          borderRadius: 6,
+          padding: '8px 10px',
+          fontSize: 12,
+          color: colors.text,
+          fontFamily: fonts.sans,
+        }}>
+          <div style={{ fontWeight: 600, marginBottom: 4, color: colors.accent }}>Confirm field update</div>
+          <div style={{ color: colors.textMuted, marginBottom: 8 }}>{item.title}</div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button
+              disabled={!!inFlight}
+              onClick={handleConfirmFieldWrite}
+              style={{ ...btnBase, background: colors.accent, color: '#fff' }}
+            >
+              {inFlight === 'primary' && <Spinner />}
+              Approve
+            </button>
+            <button
+              disabled={!!inFlight}
+              onClick={() => setReviewing(false)}
+              style={{ ...btnBase, background: 'transparent', color: colors.textMuted, border: `1px solid ${colors.border}` }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
       )}
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-        <button
-          disabled={!!inFlight}
-          onClick={() => handleAction('task')}
-          style={{
-            ...btnBase,
-            background: colors.accent,
-            color: '#fff',
-          }}
-        >
-          {inFlight === 'task' && <Spinner />}
-          Create CRM Task ▶
-        </button>
+      {error && (
+        <div style={{ fontSize: 11, color: '#ef4444' }}>{error}</div>
+      )}
 
-        <button
-          disabled={!!inFlight}
-          onClick={() => handleAction('note')}
-          style={{
-            ...btnBase,
-            background: colors.accentSoft || `${colors.accent}15`,
-            color: colors.accent,
-          }}
-        >
-          {inFlight === 'note' && <Spinner />}
-          Log as Note
-        </button>
+      {!reviewing && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <button
+            disabled={!!inFlight}
+            onClick={handlePrimary}
+            style={{
+              ...btnBase,
+              background: colors.accent,
+              color: '#fff',
+            }}
+          >
+            {inFlight === 'primary' && !isFieldWriteType(item.action_type) && <Spinner />}
+            {primaryConfig.label}
+          </button>
 
-        <button
-          disabled={!!inFlight}
-          onClick={() => handleAction('dismiss')}
-          style={{
-            ...btnBase,
-            background: 'transparent',
-            color: colors.textMuted,
-            border: `1px solid ${colors.border}`,
-          }}
-        >
-          {inFlight === 'dismiss' && <Spinner />}
-          Dismiss
-        </button>
-      </div>
+          {showNoteButton && (
+            <button
+              disabled={!!inFlight}
+              onClick={handleNote}
+              style={{
+                ...btnBase,
+                background: colors.accentSoft || `${colors.accent}15`,
+                color: colors.accent,
+              }}
+            >
+              {inFlight === 'note' && <Spinner />}
+              Log as Note
+            </button>
+          )}
+
+          <button
+            disabled={!!inFlight}
+            onClick={handleDismiss}
+            style={{
+              ...btnBase,
+              background: 'transparent',
+              color: colors.textMuted,
+              border: `1px solid ${colors.border}`,
+            }}
+          >
+            {inFlight === 'dismiss' && <Spinner />}
+            Dismiss
+          </button>
+        </div>
+      )}
     </div>
   );
 }

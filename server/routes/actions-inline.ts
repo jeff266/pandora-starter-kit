@@ -793,6 +793,10 @@ router.post('/:workspaceId/suggested-actions/sync', async (req: Request, res: Re
           priority: cardPriority,
           source,
           suggested_crm_action: crmAction,
+          action_type: action.type,
+          skill_id: (action.type === 'run_skill' || action.type === 'run_meddic_coverage')
+            ? (action.action_payload?.skill_id as string | undefined) || undefined
+            : undefined,
         });
       }
     } catch (err) {
