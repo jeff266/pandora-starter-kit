@@ -32,10 +32,10 @@ interface ToolCallRecord {
 
 const SKILL_PATTERNS: Array<{ pattern: RegExp; skill_id: string; title: string; description: string }> = [
   {
-    pattern: /pipeline.?hygiene|stage.?velocity.?missing|missing.*stage.?data/i,
+    pattern: /pipeline.?hygiene|deal.?hygiene|stage.?velocity.?missing|missing.*stage.?data/i,
     skill_id: 'pipeline-hygiene',
     title: 'Run Pipeline Hygiene Check',
-    description: 'Stage velocity data missing from this analysis',
+    description: 'Audit stage completeness and velocity across the pipeline',
   },
   {
     pattern: /deal.?risk.?sweep|run.*deal.?risk/i,
@@ -44,7 +44,7 @@ const SKILL_PATTERNS: Array<{ pattern: RegExp; skill_id: string; title: string; 
     description: 'Identify at-risk deals across your pipeline',
   },
   {
-    pattern: /forecast.*rollup|run.*forecast/i,
+    pattern: /forecast.*rollup|run.*forecast.*rollup/i,
     skill_id: 'forecast-rollup',
     title: 'Run Forecast Rollup',
     description: 'Aggregate forecast across all reps and pipelines',
@@ -54,6 +54,36 @@ const SKILL_PATTERNS: Array<{ pattern: RegExp; skill_id: string; title: string; 
     skill_id: 'data-quality-audit',
     title: 'Run Data Quality Audit',
     description: 'Audit missing or inconsistent CRM fields',
+  },
+  {
+    pattern: /deal.?scor|rfm.?scor|scoring.?model|deal.*rfm|run.*deal.*scoring/i,
+    skill_id: 'deal-scoring-model',
+    title: 'Run Deal Scoring',
+    description: 'Score all open deals by fit, engagement, and pipeline health',
+  },
+  {
+    pattern: /pipeline.?coverage|coverage.?gap|coverage.?ratio/i,
+    skill_id: 'pipeline-coverage',
+    title: 'Run Pipeline Coverage Analysis',
+    description: 'Measure pipeline coverage vs. quota across all reps',
+  },
+  {
+    pattern: /rep.?scorecard|rep.*performance.*review|coaching.*digest/i,
+    skill_id: 'rep-scorecard',
+    title: 'Run Rep Scorecard',
+    description: 'Benchmark rep performance against team averages',
+  },
+  {
+    pattern: /stage.?mismatch|stage.*divergen|divergen.*stage/i,
+    skill_id: 'stage-mismatch-detector',
+    title: 'Run Stage Mismatch Detector',
+    description: 'Find deals where CRM stage conflicts with conversation signals',
+  },
+  {
+    pattern: /meddic.?coverage|run.*meddic/i,
+    skill_id: 'meddic-coverage',
+    title: 'Run MEDDIC Coverage',
+    description: 'Score qualification completeness across open deals',
   },
 ];
 
@@ -88,10 +118,10 @@ export async function extractSuggestedActions(
 
   // ── 2. CRM task creation (P1, queue) ────────────────────────────────────
   const numberedItems = extractNumberedItems(synthesisText);
-  const hasActionItems = numberedItems.length > 0 || /\b(follow up|audit|review|check in|reach out|next step)\b/i.test(synthesisText);
+  const hasActionItems = numberedItems.length > 0 || /\b(follow up|audit|review|check in|reach out|next step|immediately|priorit)\b/i.test(synthesisText);
 
   if (hasActionItems) {
-    const taskTitle = numberedItems[0] || 'Deal follow-up';
+    const taskTitle = numberedItems[0] || 'Pipeline review task';
     if (dealsFromTools.length > 0) {
       const deals = dealsFromTools.slice(0, 4);
       actions.push({
@@ -124,6 +154,20 @@ export async function extractSuggestedActions(
           steps: [{ title: taskTitle, priority: 'P1', source: 'dossier' as const }],
         },
         evidence: 'Action item identified in analysis',
+      });
+    } else if (numberedItems.length > 0) {
+      actions.push({
+        id: randomUUID(),
+        type: 'create_crm_tasks',
+        title: taskTitle.length > 60 ? taskTitle.slice(0, 57) + '…' : taskTitle,
+        description: `Workspace-level action from this analysis`,
+        priority: 'P1',
+        execution_mode: 'queue',
+        action_payload: {
+          task_title: taskTitle,
+          steps: numberedItems.map(item => ({ title: item, priority: 'P1' as const, source: 'dossier' as const })),
+        },
+        evidence: 'Action items extracted from analysis',
       });
     }
   }
@@ -163,7 +207,7 @@ export async function extractSuggestedActions(
     }
   }
 
-  // ── 5. Skill run suggestions (P3, auto) ───────────────────────────────
+  // ── 5. Skill run suggestions (P2, auto) ───────────────────────────────
   for (const sp of SKILL_PATTERNS) {
     if (sp.pattern.test(synthesisText)) {
       const alreadyCovered =
@@ -174,7 +218,7 @@ export async function extractSuggestedActions(
           type: 'run_skill',
           title: sp.title,
           description: sp.description,
-          priority: 'P3',
+          priority: 'P2',
           execution_mode: 'auto',
           action_payload: { skill_id: sp.skill_id },
           evidence: 'Skill referenced in analysis',
@@ -193,23 +237,42 @@ export async function extractSuggestedActions(
 
 function extractDealNamesFromToolCalls(toolCalls: ToolCallRecord[]): string[] {
   const names = new Set<string>();
-  for (const tc of toolCalls) {
-    if (!tc.result || typeof tc.result !== 'object') continue;
-    const res = tc.result as Record<string, unknown>;
-    const rows: unknown[] = (
-      (Array.isArray(res.deals) && res.deals) ||
-      (Array.isArray(res.items) && res.items) ||
-      (Array.isArray(res.data) && res.data) ||
-      []
-    );
-    for (const row of rows.slice(0, 8)) {
-      if (row && typeof row === 'object') {
-        const r = row as Record<string, unknown>;
-        if (typeof r.name === 'string' && r.name.trim()) names.add(r.name.trim());
-        if (typeof r.deal_name === 'string' && r.deal_name.trim()) names.add(r.deal_name.trim());
+
+  function extractFromValue(val: unknown, depth = 0): void {
+    if (depth > 3 || !val || typeof val !== 'object') return;
+    const obj = val as Record<string, unknown>;
+
+    const candidateArrayKeys = [
+      'deals', 'items', 'data', 'results', 'rows',
+      'pipeline_deals', 'deals_at_risk', 'open_deals',
+      'at_risk_deals', 'flagged_deals', 'risk_deals',
+    ];
+
+    for (const key of candidateArrayKeys) {
+      if (Array.isArray(obj[key])) {
+        for (const row of (obj[key] as unknown[]).slice(0, 12)) {
+          if (row && typeof row === 'object') {
+            const r = row as Record<string, unknown>;
+            if (typeof r.name === 'string' && r.name.trim()) names.add(r.name.trim());
+            if (typeof r.deal_name === 'string' && r.deal_name.trim()) names.add(r.deal_name.trim());
+            if (typeof r.title === 'string' && r.title.trim() && r.amount) names.add(r.title.trim());
+          }
+        }
+      }
+    }
+
+    for (const childKey of Object.keys(obj)) {
+      if (typeof obj[childKey] === 'object' && !Array.isArray(obj[childKey])) {
+        extractFromValue(obj[childKey], depth + 1);
       }
     }
   }
+
+  for (const tc of toolCalls) {
+    if (!tc.result) continue;
+    extractFromValue(tc.result);
+  }
+
   return Array.from(names);
 }
 

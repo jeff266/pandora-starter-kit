@@ -1955,13 +1955,16 @@ The system will transform raw_annotation into a voice-styled annotation automati
           const dealCtx = currentSessionContext.activeScope?.entityType === 'deal'
             ? { deal_id: currentSessionContext.activeScope.entityId, deal_name: currentSessionContext.activeScope.entityName }
             : undefined;
+          console.log('[action-extractor] calling extractSuggestedActions, toolTrace.length:', toolTrace.length);
           const suggestedActions = await extractSuggestedActions(
             parsed.answer,
             toolTrace as any,
             workspaceId,
             dealCtx,
           );
+          console.log('[action-extractor] extracted actions:', suggestedActions.length, suggestedActions.map(a => a.type));
           if (suggestedActions.length > 0) {
+            console.log('[sse] emitting suggested_actions:', suggestedActions.length);
             sse?.({ type: 'suggested_actions', actions: suggestedActions });
           }
         } catch (err) {
