@@ -66,6 +66,7 @@ interface OpeningBriefData {
     periodStart?: string | null;
     periodEnd?: string | null;
     coverageRatio?: number | null;
+    hasTarget?: boolean;
   };
   pipeline: {
     totalValue?: number;
@@ -187,7 +188,6 @@ function deriveSituationLine(brief: OpeningBriefData): string {
   const parts: string[] = [];
   const temporal = brief.temporal as any;
 
-  // Line 1: week + quarter + urgency
   const week = temporal?.weekOfQuarter;
   const quarter = temporal?.fiscalQuarter;
   const urgency = temporal?.urgencyLabel;
@@ -198,19 +198,21 @@ function deriveSituationLine(brief: OpeningBriefData): string {
     parts.push(urgency.endsWith('.') ? urgency : `${urgency}.`);
   }
 
-  // Line 2: attainment (only if plausible 0–200%) or pipeline coverage if attainment is inflated
+  const hasTarget = brief.targets?.hasTarget !== false;
   const pct = brief.targets?.pctAttained;
   const headline = brief.targets?.headline;
-  if (pct != null && pct >= 0 && pct <= 200) {
+  const coverage = brief.pipeline?.coverageRatio;
+
+  if (hasTarget && pct != null && pct >= 0 && pct <= 200) {
     parts.push(`Attainment is at ${pct}% against a ${fmtCurrency(headline?.amount)} target.`);
-  } else if (pct != null && pct > 200) {
-    const coverage = brief.pipeline?.coverageRatio;
+  } else if (hasTarget && pct != null && pct > 200) {
     if (coverage != null) {
       parts.push(`Pipeline coverage is ${coverage.toFixed(1)}× against a ${fmtCurrency(headline?.amount)} target.`);
     }
+  } else if (!hasTarget && coverage != null) {
+    parts.push(`Pipeline coverage is ${coverage.toFixed(1)}×.`);
   }
 
-  // Line 3: critical or warning signal count — stake-first, no noisy "and X warnings"
   const critical = brief.findings?.critical ?? 0;
   const warning = brief.findings?.warning ?? 0;
   if (critical > 0) {
@@ -297,8 +299,9 @@ export default function ConciergeView() {
   };
 
   const subTabs = getSubTabs(pandoraRole);
+  const hasTarget = brief?.targets?.hasTarget !== false;
   const pct = brief?.targets?.pctAttained;
-  const verdictColor = healthColor(pct);
+  const verdictColor = hasTarget ? healthColor(pct) : S.blue;
   const wsName = brief?.workspace?.name || currentWorkspace?.name || 'Pandora';
 
   return (
@@ -486,7 +489,7 @@ export default function ConciergeView() {
             })()}
 
             {/* VERDICT BLOCK */}
-            {pct !== undefined && pct !== null && (
+            {hasTarget && pct !== undefined && pct !== null ? (
               <div
                 onClick={() => openMathModal('coverage')}
                 style={{
@@ -520,7 +523,6 @@ export default function ConciergeView() {
                   </span>
                 </div>
 
-                {/* Progress bar */}
                 <div style={{ height: 3, background: S.border2, borderRadius: 2, marginBottom: 8, overflow: 'hidden' }}>
                   <div style={{ height: '100%', width: `${Math.min(pct, 100)}%`, background: verdictColor, borderRadius: 2, transition: 'width 0.5s ease' }} />
                 </div>
@@ -529,7 +531,7 @@ export default function ConciergeView() {
                   {brief.targets?.closedWonValue !== undefined && (
                     <span style={{ fontSize: 11, color: S.textMuted }}>{fmtCurrency(brief.targets.closedWonValue)} closed won</span>
                   )}
-                  {brief.targets?.gap !== undefined && (
+                  {brief.targets?.gap !== undefined && brief.targets.gap !== null && (
                     <span style={{ fontSize: 11, color: S.textMuted }}>{typeof brief.targets.gap === 'number' ? fmtCurrency(brief.targets.gap) : brief.targets.gap} gap</span>
                   )}
                   {brief.pipeline?.coverageRatio != null && (
@@ -542,7 +544,47 @@ export default function ConciergeView() {
                   )}
                 </div>
               </div>
-            )}
+            ) : !hasTarget && brief?.pipeline?.coverageRatio != null ? (
+              <div
+                onClick={() => openMathModal('coverage')}
+                style={{
+                  border: `0.5px solid ${S.blue}44`,
+                  borderRadius: 10,
+                  padding: '14px 16px',
+                  cursor: 'pointer',
+                  marginBottom: 20,
+                  background: `${S.blue}06`,
+                  transition: 'border-color 0.15s',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = `${S.blue}88`; }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = `${S.blue}44`; }}
+              >
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 4 }}>
+                  <span style={{ fontSize: 32, fontWeight: 500, color: S.blue }}>
+                    {brief.pipeline.coverageRatio.toFixed(1)}×
+                  </span>
+                  <span style={{ fontSize: 13, color: S.textSub }}>Pipeline coverage</span>
+                  <span
+                    onClick={e => { e.stopPropagation(); openMathModal('pipeline'); }}
+                    style={{ fontSize: 10, color: S.textDim, marginLeft: 'auto', cursor: 'pointer' }}
+                  >
+                    ∑ Show math
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                  {brief.pipeline?.totalValue !== undefined && (
+                    <span style={{ fontSize: 11, color: S.textMuted }}>{fmtCurrency(brief.pipeline.totalValue)} open pipeline</span>
+                  )}
+                  {brief.pipeline?.weightedValue !== undefined && (
+                    <span style={{ fontSize: 11, color: S.textMuted }}>{fmtCurrency(brief.pipeline.weightedValue)} weighted</span>
+                  )}
+                  {brief.targets?.closedWonValue !== undefined && brief.targets.closedWonValue > 0 && (
+                    <span style={{ fontSize: 11, color: S.textMuted }}>{fmtCurrency(brief.targets.closedWonValue)} closed won</span>
+                  )}
+                </div>
+              </div>
+            ) : null}
 
             {/* ACTIVITY LOG — tactical sub-tab for non-ae roles */}
             {(pandoraRole !== 'ae') && activeSubTab === 'tactical' && brief.findings?.skillRuns && brief.findings.skillRuns.length > 0 && (

@@ -10,7 +10,6 @@ import {
   type OpeningBriefData,
   type TemporalContext,
 } from '../context/opening-brief.js';
-import { configLoader } from '../config/workspace-config-loader.js';
 import { requireWorkspaceAccess } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/permissions.js';
 
@@ -244,68 +243,112 @@ router.get(
     }
 
     const refresh = req.query.refresh === 'true';
+    const pipelineFilter = (req.query.pipeline as string | undefined) || null;
 
     try {
-      // Fetch brief data (cached or fresh based on refresh param)
       const brief: OpeningBriefData = refresh
         ? await assembleOpeningBrief(workspaceId, userId)
         : await getOrAssembleBrief(workspaceId, userId);
 
-      // Re-compute pctAttained scoped to the target's pipeline so the
-      // numerator (closed won) and denominator (quota) measure the same thing.
       try {
-        const [quotaPeriod, targetRow, scopeRow] = await (async () => {
-          const qp = await configLoader.getQuotaPeriod(workspaceId).catch(() => null);
-          const tr = await query<{ amount: string; pipeline_id: string | null; pipeline_name: string | null }>(
-            `SELECT amount, pipeline_id, pipeline_name FROM targets
-             WHERE workspace_id = $1 AND is_active = true
-               AND (period_start IS NULL OR period_start <= NOW())
-               AND (period_end IS NULL OR period_end >= NOW())
-             ORDER BY period_start DESC NULLS LAST LIMIT 1`,
-            [workspaceId]
-          ).then(r => r.rows[0]).catch(() => null);
-          const pipelineRef = tr?.pipeline_id || tr?.pipeline_name || null;
-          const sr = pipelineRef
-            ? await query<{ scope_id: string }>(
-                `SELECT scope_id FROM analysis_scopes
-                 WHERE workspace_id = $1 AND (name = $2 OR scope_id = $2) LIMIT 1`,
-                [workspaceId, pipelineRef]
-              ).then(r => r.rows[0]).catch(() => null)
-            : null;
-          return [qp, tr, sr];
-        })();
+        const targetRow = await query<{
+          amount: string;
+          pipeline_id: string | null;
+          pipeline_name: string | null;
+          period_start: string | null;
+          period_end: string | null;
+        }>(
+          `SELECT amount, pipeline_id, pipeline_name, period_start, period_end
+           FROM targets
+           WHERE workspace_id = $1 AND is_active = true
+             AND period_start <= CURRENT_DATE
+             AND period_end >= CURRENT_DATE
+           ORDER BY amount ASC
+           LIMIT 1`,
+          [workspaceId]
+        ).then(r => r.rows[0]).catch(() => null);
 
-        const periodStart = quotaPeriod?.start ?? new Date(Date.now() - 90 * 86400000);
-        const pipelineScopeId = scopeRow?.scope_id ?? null;
+        let hasTarget = !!targetRow;
+        const targetPipeline = targetRow?.pipeline_id || targetRow?.pipeline_name || null;
 
-        const cwParams: unknown[] = [workspaceId, periodStart];
-        let cwScope = '';
-        if (pipelineScopeId) {
-          cwScope = ` AND scope_id = $3::text`;
-          cwParams.push(pipelineScopeId);
+        if (pipelineFilter && targetPipeline && targetPipeline !== pipelineFilter
+            && targetPipeline !== 'All pipelines') {
+          hasTarget = false;
         }
 
-        const cwResult = await query<{ closed_won_value: string }>(
-          `SELECT COALESCE(SUM(amount), 0)::numeric as closed_won_value
+        const periodStart = targetRow?.period_start ? new Date(targetRow.period_start) : null;
+        const periodEnd = targetRow?.period_end ? new Date(targetRow.period_end) : null;
+
+        const pipelineRef = targetPipeline;
+        let pipelineScopeId: string | null = null;
+        if (pipelineRef) {
+          const sr = await query<{ scope_id: string }>(
+            `SELECT scope_id FROM analysis_scopes
+             WHERE workspace_id = $1 AND (name = $2 OR scope_id = $2) LIMIT 1`,
+            [workspaceId, pipelineRef]
+          ).catch(() => ({ rows: [] as any[] }));
+          pipelineScopeId = sr.rows[0]?.scope_id ?? null;
+        }
+
+        let cwSQL = `SELECT COALESCE(SUM(amount), 0)::numeric as closed_won_value
            FROM deals
            WHERE workspace_id = $1
-             AND stage_normalized = 'closed_won'
-             AND updated_at >= $2
-             ${cwScope}`,
-          cwParams
-        );
+             AND stage_normalized = 'closed_won'`;
+        const cwParams: unknown[] = [workspaceId];
+        let pi = 2;
+
+        if (periodStart) {
+          cwSQL += ` AND close_date >= $${pi}`;
+          cwParams.push(periodStart);
+          pi++;
+        }
+        if (periodEnd) {
+          cwSQL += ` AND close_date <= $${pi}`;
+          cwParams.push(periodEnd);
+          pi++;
+        }
+
+        if (pipelineFilter) {
+          cwSQL += ` AND pipeline = $${pi}`;
+          cwParams.push(pipelineFilter);
+          pi++;
+        } else if (pipelineScopeId) {
+          cwSQL += ` AND scope_id = $${pi}::text`;
+          cwParams.push(pipelineScopeId);
+          pi++;
+        }
+
+        const cwResult = await query<{ closed_won_value: string }>(cwSQL, cwParams);
         const scopedClosedWon = Number(cwResult.rows[0]?.closed_won_value ?? 0);
         const targetAmount = brief.targets.headline?.amount ?? Number(targetRow?.amount ?? 0);
-        if (targetAmount > 0) {
+
+        (brief.targets as any).hasTarget = hasTarget;
+
+        if (hasTarget && targetAmount > 0) {
           brief.targets.pctAttained = Math.round((scopedClosedWon / targetAmount) * 100);
           brief.targets.closedWonValue = scopedClosedWon;
           brief.targets.gap = Math.max(0, targetAmount - scopedClosedWon);
+        } else if (!hasTarget) {
+          brief.targets.pctAttained = null;
+          brief.targets.closedWonValue = scopedClosedWon;
+          brief.targets.gap = null;
+        }
+
+        if (pipelineFilter && brief.findings?.topFindings) {
+          const dealIdsRes = await query<{ id: string }>(
+            `SELECT id FROM deals WHERE workspace_id = $1 AND pipeline = $2`,
+            [workspaceId, pipelineFilter]
+          ).catch(() => ({ rows: [] as any[] }));
+          const dealIdSet = new Set(dealIdsRes.rows.map((r: any) => r.id));
+          const filtered = brief.findings.topFindings.filter((f: any) => {
+            if (!f.dealId) return true;
+            return dealIdSet.has(f.dealId);
+          });
+          brief.findings.topFindings = filtered;
         }
       } catch {
-        // Non-fatal: keep original values if scoped query fails
       }
 
-      // Fetch temporal context (always fresh, it's cheap to compute)
       const temporal: TemporalContext = await computeTemporalContext(workspaceId);
 
       res.json({
@@ -320,6 +363,71 @@ router.get(
         error: 'brief_assembly_failed',
         message: err.message || 'Failed to assemble opening brief',
       });
+    }
+  }
+);
+
+router.get(
+  '/:workspaceId/briefing/pipelines',
+  requireWorkspaceAccess,
+  async (req: Request, res: Response): Promise<void> => {
+    const workspaceId = req.params.workspaceId as string;
+
+    try {
+      const pipelinesRes = await query<{ pipeline: string }>(
+        `SELECT DISTINCT pipeline FROM deals
+         WHERE workspace_id = $1 AND pipeline IS NOT NULL
+         ORDER BY pipeline`,
+        [workspaceId]
+      );
+
+      const targetsRes = await query<{
+        pipeline_name: string | null;
+        pipeline_id: string | null;
+        amount: string;
+      }>(
+        `SELECT pipeline_name, pipeline_id, amount FROM targets
+         WHERE workspace_id = $1 AND is_active = true
+           AND period_start <= CURRENT_DATE
+           AND period_end >= CURRENT_DATE`,
+        [workspaceId]
+      );
+
+      const targetMap = new Map<string, number>();
+      for (const t of targetsRes.rows) {
+        const key = t.pipeline_name || t.pipeline_id || 'All pipelines';
+        targetMap.set(key, Number(t.amount));
+      }
+
+      const hasAnyTarget = targetsRes.rows.length > 0;
+      const pipelines: Array<{
+        name: string;
+        value: string | null;
+        hasTarget: boolean;
+        targetAmount?: number;
+      }> = [
+        {
+          name: 'All Data',
+          value: null,
+          hasTarget: hasAnyTarget,
+          ...(hasAnyTarget ? { targetAmount: targetMap.values().next().value } : {}),
+        },
+      ];
+
+      for (const row of pipelinesRes.rows) {
+        const tAmount = targetMap.get(row.pipeline);
+        pipelines.push({
+          name: row.pipeline,
+          value: row.pipeline,
+          hasTarget: tAmount !== undefined,
+          ...(tAmount !== undefined ? { targetAmount: tAmount } : {}),
+        });
+      }
+
+      res.json({ pipelines });
+    } catch (err: any) {
+      console.error('[briefing] pipelines error:', err);
+      res.status(500).json({ error: err.message || 'Failed to fetch pipelines' });
     }
   }
 );
