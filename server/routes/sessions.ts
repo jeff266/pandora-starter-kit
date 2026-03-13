@@ -131,8 +131,9 @@ router.post('/:workspaceId/sessions/:threadId/document/distribute', async (req: 
 
 router.post('/:workspaceId/sessions/seed-wbr', async (req, res) => {
   const { workspaceId } = req.params;
-  const { sessionId, contributions } = req.body as {
+  const { sessionId, threadId, contributions } = req.body as {
     sessionId: string;
+    threadId?: string;
     contributions: Array<{
       id: string;
       type: 'finding' | 'chart' | 'table' | 'recommendation';
@@ -162,7 +163,20 @@ router.post('/:workspaceId/sessions/seed-wbr', async (req, res) => {
       addContribution(doc, contribution);
     }
 
-    res.json({ document: doc, contributionCount: contributions.length });
+    if (threadId) {
+      try {
+        const state = await getConversationState(workspaceId, 'command_center', threadId);
+        if (state) {
+          const sessionContext = await getOrCreateSessionContext(state.context, workspaceId);
+          sessionContext.accumulatedDocument = doc;
+          await updateContext(workspaceId, 'command_center', threadId, { sessionContext });
+        }
+      } catch (persistErr) {
+        console.warn('[Sessions] WBR seed: could not persist to thread, doc returned in response:', persistErr);
+      }
+    }
+
+    res.json({ document: doc, contributionCount: contributions.length, sessionId });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error';
     console.error('[Sessions] WBR seed error:', message);

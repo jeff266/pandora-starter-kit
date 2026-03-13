@@ -124,6 +124,26 @@ export default function ChatPanel({ isOpen, onClose, scope, initialSessionId, pe
   const [extractedAgentData, setExtractedAgentData] = useState<any>(null);
   const [extractionLoading, setExtractionLoading] = useState(false);
   const [navPendingOpen, setNavPendingOpen] = useState(false);
+  const contextInjectedRef = useRef(false);
+
+  useEffect(() => {
+    if (conciergeContext && isOpen && !contextInjectedRef.current && messages.length === 0) {
+      contextInjectedRef.current = true;
+      const preamble = formatConciergeContextPreamble(conciergeContext as ConciergeContext);
+      const systemMsg: ChatMessage = {
+        role: 'assistant',
+        content: `**Briefing context loaded**\n\n${preamble}`,
+        timestamp: new Date().toISOString(),
+      };
+      setMessages([systemMsg]);
+    }
+  }, [conciergeContext, isOpen, messages.length]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      contextInjectedRef.current = false;
+    }
+  }, [isOpen]);
 
   const hasTableContent = messages.some(m => m.role === 'assistant' && m.content.split('\n').some(l => isTableRow(l)));
 
@@ -364,15 +384,11 @@ export default function ChatPanel({ isOpen, onClose, scope, initialSessionId, pe
     setLoading(true);
 
     try {
-      let messageText = text;
-      if (conciergeContext && !threadId) {
-        const preamble = formatConciergeContextPreamble(conciergeContext as ConciergeContext);
-        messageText = `[Briefing context]\n${preamble}\n\n${text}`;
-      }
-      const body: any = { message: messageText };
+      const body: any = { message: text };
       if (threadId) body.thread_id = threadId;
       if (sessionId) body.session_id = sessionId;
       if (scope && !threadId) body.scope = scope;
+      if (conciergeContext && !threadId) body.conciergeContext = conciergeContext;
 
       const result: any = await api.post('/chat', body);
 
@@ -560,25 +576,6 @@ export default function ChatPanel({ isOpen, onClose, scope, initialSessionId, pe
                   </div>
                 </div>
               )}
-
-          {conciergeContext && messages.length > 0 && (
-            <div style={{
-              margin: '0 0 12px',
-              padding: '10px 14px',
-              background: 'rgba(29,158,117,0.06)',
-              border: '0.5px solid rgba(29,158,117,0.20)',
-              borderRadius: 8,
-              fontSize: 11,
-              color: '#9CA3AF',
-              lineHeight: 1.6,
-              whiteSpace: 'pre-line',
-            }}>
-              <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#1D9E75', marginBottom: 4 }}>
-                Briefing context
-              </div>
-              {formatConciergeContextPreamble(conciergeContext as ConciergeContext)}
-            </div>
-          )}
 
           {messages.map((msg, idx) => {
             const isLastAssistant = msg.role === 'assistant' && idx === messages.length - 1;

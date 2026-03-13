@@ -38,12 +38,22 @@ interface AskBarProps {
   suggestedQuestion?: string;
   onChipClick?: (chipId: ChipId) => void;
   conciergeContext?: Record<string, unknown> | null;
+  prefillValue?: string;
+  onPrefillConsumed?: () => void;
 }
 
-export default function AskBar({ pandoraRole, suggestedQuestion, onChipClick, conciergeContext }: AskBarProps) {
+export default function AskBar({ pandoraRole, suggestedQuestion, onChipClick, conciergeContext, prefillValue, onPrefillConsumed }: AskBarProps) {
   const navigate = useNavigate();
   const [input, setInput] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
+
+  React.useEffect(() => {
+    if (prefillValue) {
+      setInput(prefillValue);
+      onPrefillConsumed?.();
+      inputRef.current?.focus();
+    }
+  }, [prefillValue, onPrefillConsumed]);
 
   const placeholder = suggestedQuestion
     || PLACEHOLDERS[pandoraRole || 'default']

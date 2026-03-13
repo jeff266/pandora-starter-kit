@@ -344,12 +344,14 @@ export default function ConciergeView() {
     });
   }, [navigate]);
 
+  const [askBarPrefill, setAskBarPrefill] = useState('');
+
   const handleChipClick = useCallback((chipId: ChipId) => {
     const ctx = buildConciergeContext();
     switch (chipId) {
       case 'live_queries': {
         const q = brief?.suggestedQuestion || 'What should I focus on today?';
-        navigateToChat(q, ctx);
+        setAskBarPrefill(q);
         break;
       }
       case 'show_math': {
@@ -401,7 +403,7 @@ export default function ConciergeView() {
       });
       if (contributions.length > 0) {
         try {
-          await api.post(`/sessions/${currentWorkspace.id}/sessions/seed-wbr`, {
+          await api.post('/sessions/seed-wbr', {
             sessionId: `wbr-${Date.now()}`,
             contributions,
           });
@@ -915,6 +917,8 @@ export default function ConciergeView() {
         suggestedQuestion={brief?.suggestedQuestion}
         onChipClick={handleChipClick}
         conciergeContext={buildConciergeContext() as Record<string, unknown> | null}
+        prefillValue={askBarPrefill}
+        onPrefillConsumed={() => setAskBarPrefill('')}
       />
 
       {/* MATH MODAL */}
