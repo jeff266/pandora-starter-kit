@@ -71,3 +71,7 @@ HUBSPOT_CALLBACK_URL = "https://2249ba4a-228b-47b6-989b-1bd765452af0-00-zmr8y6ng
 deploymentTarget = "autoscale"
 run = ["npx", "tsx", "server/index.ts"]
 build = ["bash", "-c", "npx vite build --config client/vite.config.ts"]
+
+[postMerge]
+path = "scripts/post-merge.sh"
+timeoutMs = 120000
