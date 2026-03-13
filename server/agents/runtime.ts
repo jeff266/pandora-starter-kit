@@ -137,19 +137,34 @@ export class AgentRuntime {
              SET execution_mode = 'loop',
                  loop_iterations = $1,
                  loop_trace = $2,
-                 termination_reason = $3
+                 termination_reason = $3,
+                 synthesized_output = $5
              WHERE id = $4`,
             [
               loopResult.iterations.length,
               JSON.stringify(loopResult.iterations),
               loopResult.termination_reason,
               runId,
+              loopResult.final_synthesis || null,
             ]
           );
 
           // Return early with loop synthesis as final output
           const duration = Date.now() - startTime;
-          await this.logAgentRun(runId, agentId, workspaceId, 'completed', loopResult.final_synthesis);
+          await this.logAgentRun(runId, agentId, workspaceId, 'completed', {
+            synthesizedOutput: loopResult.final_synthesis,
+            duration,
+            skillResults: loopResult.iterations.map((it) => ({
+              skillId: it.skill_executed || 'planning',
+              status: 'completed',
+              duration: 0,
+            })),
+            tokenUsage: {
+              skills: loopResult.total_loop_tokens,
+              synthesis: 0,
+              total: loopResult.total_loop_tokens,
+            },
+          });
 
           return {
             runId,

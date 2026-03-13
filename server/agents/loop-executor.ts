@@ -179,6 +179,12 @@ Voice: direct, peer-level, no hedging. Show your math.`,
     termination: goalSatisfied ? 'goal_satisfied' : 'max_iterations',
   }, 'Loop executor complete');
 
+  logger.info({
+    finalTextLength: finalText?.length,
+    finalTextPreview: finalText?.slice(0, 100),
+    termination: goalSatisfied ? 'goal_satisfied' : 'max_iterations',
+  }, 'Loop executor returning result');
+
   return {
     iterations,
     termination_reason: totalLoopTokens > TOKEN_BUDGET
