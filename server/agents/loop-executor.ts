@@ -141,7 +141,7 @@ export async function executeLoop(input: LoopExecutorInput): Promise<LoopRunResu
 
   let synthesisResponse: any;
   try {
-    synthesisResponse = await callLLM(workspaceId, 'synthesize', {
+    synthesisResponse = await callLLM(workspaceId, 'reason', {
       systemPrompt: `You are ${agent.role || agent.name}. ${agent.goal || agent.description || ''}
 
 Synthesize a comprehensive, evidence-based answer. Every claim must be traceable to the evidence provided.

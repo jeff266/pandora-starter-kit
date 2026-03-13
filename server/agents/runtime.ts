@@ -138,7 +138,7 @@ export class AgentRuntime {
                  loop_iterations = $1,
                  loop_trace = $2,
                  termination_reason = $3
-             WHERE run_id = $4`,
+             WHERE id = $4`,
             [
               loopResult.iterations.length,
               JSON.stringify(loopResult.iterations),
