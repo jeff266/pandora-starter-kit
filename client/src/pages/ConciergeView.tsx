@@ -428,7 +428,7 @@ export default function ConciergeView() {
                   {brief.targets?.gap !== undefined && (
                     <span style={{ fontSize: 11, color: S.textMuted }}>{typeof brief.targets.gap === 'number' ? fmtCurrency(brief.targets.gap) : brief.targets.gap} gap</span>
                   )}
-                  {brief.pipeline?.coverageRatio !== undefined && (
+                  {brief.pipeline?.coverageRatio != null && (
                     <span
                       onClick={e => { e.stopPropagation(); openMathModal('coverage'); }}
                       style={{ fontSize: 11, color: S.textMuted, cursor: 'pointer', textDecoration: 'underline dotted' }}
