@@ -94,6 +94,7 @@ const pageTitles: Record<string, string> = {
   '/enrichment': 'Enrichment Connectors',
   '/filters': 'Named Filters',
   '/dictionary': 'Data Dictionary',
+  '/data': 'Data Dictionary',
   '/sql-workspace': 'SQL Workspace',
   '/members': 'Members',
   '/marketplace': 'Marketplace',
@@ -375,6 +376,7 @@ export default function App() {
             <Route path="/connectors/health" element={<ConnectorHealth />} />
             <Route path="/filters" element={<FiltersPage />} />
             <Route path="/dictionary" element={<DataDictionary />} />
+            <Route path="/data" element={<DataDictionary />} />
             <Route path="/sql-workspace" element={<SQLWorkspace />} />
             <Route path="/forecast" element={<ForecastPage />} />
             <Route path="/pipeline" element={<PipelinePage />} />
