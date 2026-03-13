@@ -347,29 +347,6 @@ export default function ConciergeView() {
 
   const [askBarPrefill, setAskBarPrefill] = useState('');
 
-  const handleChipClick = useCallback((chipId: ChipId) => {
-    const ctx = buildConciergeContext();
-    switch (chipId) {
-      case 'live_queries': {
-        const q = brief?.suggestedQuestion || 'What should I focus on today?';
-        setAskBarPrefill(q);
-        break;
-      }
-      case 'show_math': {
-        const _hasTarget = brief?.targets?.hasTarget !== false;
-        openMathModal(_hasTarget ? 'attainment' : 'pipeline');
-        break;
-      }
-      case 'action_cards':
-        navigate('/actions');
-        break;
-      case 'doc_accumulator': {
-        navigateToChat('Start a WBR document from my current briefing.', ctx);
-        break;
-      }
-    }
-  }, [brief, buildConciergeContext, navigate, navigateToChat, openMathModal]);
-
   const handleStartWBR = useCallback(() => {
     const ctx = buildConciergeContext();
     const contributions: Array<{ id: string; type: 'finding' | 'recommendation'; title: string; body: string; severity?: 'critical' | 'warning' | 'info' }> = [];
@@ -409,6 +386,28 @@ export default function ConciergeView() {
       contributions.length > 0 ? contributions : undefined,
     );
   }, [brief, buildConciergeContext, navigateToChat]);
+
+  const handleChipClick = useCallback((chipId: ChipId) => {
+    switch (chipId) {
+      case 'live_queries': {
+        const q = brief?.suggestedQuestion || 'What should I focus on today?';
+        setAskBarPrefill(q);
+        break;
+      }
+      case 'show_math': {
+        const _hasTarget = brief?.targets?.hasTarget !== false;
+        openMathModal(_hasTarget ? 'attainment' : 'pipeline');
+        break;
+      }
+      case 'action_cards':
+        navigate('/actions');
+        break;
+      case 'doc_accumulator': {
+        handleStartWBR();
+        break;
+      }
+    }
+  }, [brief, navigate, openMathModal, handleStartWBR]);
 
   const handleQuarterTab = (tab: QuarterTab) => {
     const currentPhaseOrder = tabPhaseOrder(phaseToTab(brief?.temporal?.quarterPhase));
