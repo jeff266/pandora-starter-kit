@@ -409,7 +409,8 @@ router.get(
             brief.findings.warning = warning;
           }
         }
-      } catch {
+      } catch (scopeErr) {
+        console.error('[briefing] concierge target/metric scoping error:', scopeErr);
       }
 
       const temporal: TemporalContext = await computeTemporalContext(workspaceId);
