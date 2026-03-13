@@ -54,7 +54,7 @@ export async function buildWorkspaceContextBlock(workspaceId: string, userId?: s
     }
   }
 
-  const [contextRow, targetsRow, stagesRow, goalsRow, scopesRow, salesRepsRow] = await Promise.all([
+  const [contextRow, targetsRow, stagesRow, goalsRow, scopesRow, salesRepsRow, calendarRow] = await Promise.all([
     query(
       `SELECT business_model, team_structure, goals_and_targets, definitions, operational_maturity
        FROM context_layer WHERE workspace_id = $1 LIMIT 1`,
@@ -86,6 +86,19 @@ export async function buildWorkspaceContextBlock(workspaceId: string, userId?: s
       `SELECT rep_name, rep_email, team, quota_eligible
        FROM sales_reps WHERE workspace_id = $1 AND is_rep = true AND pandora_role IS NOT NULL
        ORDER BY rep_name ASC`,
+      [workspaceId]
+    ).catch(() => null),
+    query(
+      `SELECT ce.title, ce.start_time, ce.end_time, ce.attendees, ce.meet_link, ce.resolved_deal_ids,
+              array_agg(d.name) FILTER (WHERE d.name IS NOT NULL) as deal_names
+       FROM calendar_events ce
+       LEFT JOIN deals d ON d.id = ANY(ce.resolved_deal_ids) AND d.workspace_id = ce.workspace_id
+       WHERE ce.workspace_id = $1
+         AND ce.start_time::date = CURRENT_DATE
+         AND ce.status != 'cancelled'
+       GROUP BY ce.id, ce.title, ce.start_time, ce.end_time, ce.attendees, ce.meet_link, ce.resolved_deal_ids
+       ORDER BY ce.start_time ASC
+       LIMIT 10`,
       [workspaceId]
     ).catch(() => null),
   ]);
@@ -412,6 +425,30 @@ export async function buildWorkspaceContextBlock(workspaceId: string, userId?: s
     lines.push(`(Deals with scope_id='default' are legacy Core Sales records — include them in Core Sales totals.)`);
   } catch {
     // Non-fatal — skip quarter block if computation fails
+  }
+
+  // Today's Calendar Meetings
+  const meetings = calendarRow?.rows ?? [];
+  if (meetings.length > 0) {
+    lines.push('');
+    lines.push('TODAY\'S MEETINGS:');
+    for (const meeting of meetings) {
+      const time = new Date(meeting.start_time).toLocaleTimeString('en-US', {
+        hour: 'numeric',
+        minute: '2-digit',
+        timeZone: 'America/Los_Angeles'
+      });
+      const attendees = (meeting.attendees || [])
+        .filter((a: any) => !a.self)
+        .map((a: any) => a.displayName || a.email)
+        .slice(0, 3)  // Max 3 attendees to keep context compact
+        .join(', ');
+      const dealNote = (meeting.deal_names?.length > 0)
+        ? ` [${meeting.deal_names.join(', ')}]`
+        : '';
+      const meetNote = meeting.meet_link ? ' 📹' : '';
+      lines.push(`  ${time}: ${meeting.title || 'Untitled'}${attendees ? ` — ${attendees}` : ''}${dealNote}${meetNote}`);
+    }
   }
 
   lines.push('=== END WORKSPACE CONTEXT ===');

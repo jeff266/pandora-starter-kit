@@ -413,6 +413,10 @@ export async function executeDataTool(
         result = await reverseCrmWrite(workspaceId, params); break;
       case 'run_meddic_coverage_skill':
         result = await runMeddicCoverageSkill(workspaceId, params); break;
+      case 'get_todays_meetings':
+        result = await getTodaysMeetings(workspaceId, params); break;
+      case 'get_upcoming_meetings':
+        result = await getUpcomingMeetings(workspaceId, params); break;
       default:
         throw new Error(`Unknown tool: ${toolName}`);
     }
@@ -4549,5 +4553,69 @@ async function runMeddicCoverageSkill(workspaceId: string, params: Record<string
     deal_name: deal.name,
     message: `MEDDIC coverage analysis started for ${deal.name}. Use get_meddic_coverage to retrieve results once complete (typically 30-60 seconds).`,
     query_description: `Triggered MEDDIC analysis for ${deal.name}`,
+  };
+}
+
+// ============================================================================
+// Calendar Tools
+// ============================================================================
+
+async function getTodaysMeetings(workspaceId: string, params: Record<string, any>): Promise<any> {
+  const result = await query(
+    `SELECT ce.id, ce.title, ce.start_time, ce.end_time, ce.attendees,
+            ce.meet_link, ce.location, ce.resolved_deal_ids,
+            array_agg(d.name) FILTER (WHERE d.name IS NOT NULL) as deal_names,
+            array_agg(d.stage) FILTER (WHERE d.stage IS NOT NULL) as deal_stages
+     FROM calendar_events ce
+     LEFT JOIN deals d ON d.id = ANY(ce.resolved_deal_ids) AND d.workspace_id = ce.workspace_id
+     WHERE ce.workspace_id = $1
+       AND ce.start_time::date = CURRENT_DATE
+       AND ce.status != 'cancelled'
+     GROUP BY ce.id, ce.title, ce.start_time, ce.end_time, ce.attendees,
+              ce.meet_link, ce.location, ce.resolved_deal_ids
+     ORDER BY ce.start_time ASC`,
+    [workspaceId]
+  );
+
+  return {
+    meetings: result.rows,
+    count: result.rows.length,
+    date: new Date().toISOString().split('T')[0],
+    query_description: "Retrieved today's calendar meetings",
+  };
+}
+
+async function getUpcomingMeetings(workspaceId: string, params: Record<string, any>): Promise<any> {
+  const days = params.days || 7;
+  const dealFilter = params.deal_id
+    ? 'AND $3::uuid = ANY(ce.resolved_deal_ids)'
+    : '';
+  const queryParams = params.deal_id
+    ? [workspaceId, days, params.deal_id]
+    : [workspaceId, days];
+
+  const result = await query(
+    `SELECT ce.id, ce.title, ce.start_time, ce.end_time, ce.attendees,
+            ce.meet_link, ce.location, ce.resolved_deal_ids,
+            array_agg(d.name) FILTER (WHERE d.name IS NOT NULL) as deal_names
+     FROM calendar_events ce
+     LEFT JOIN deals d ON d.id = ANY(ce.resolved_deal_ids) AND d.workspace_id = ce.workspace_id
+     WHERE ce.workspace_id = $1
+       AND ce.start_time >= NOW()
+       AND ce.start_time <= NOW() + ($2 || ' days')::interval
+       AND ce.status != 'cancelled'
+       ${dealFilter}
+     GROUP BY ce.id, ce.title, ce.start_time, ce.end_time, ce.attendees,
+              ce.meet_link, ce.location, ce.resolved_deal_ids
+     ORDER BY ce.start_time ASC
+     LIMIT 50`,
+    queryParams
+  );
+
+  return {
+    meetings: result.rows,
+    count: result.rows.length,
+    days_ahead: days,
+    query_description: `Retrieved upcoming meetings for next ${days} days${params.deal_id ? ' linked to specified deal' : ''}`,
   };
 }

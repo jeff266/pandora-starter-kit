@@ -10,6 +10,7 @@ import {
 } from '../connectors/adapters/credentials.js';
 import { upsertTasks, upsertDocuments } from '../connectors/adapters/db-upsert.js';
 import { requirePermission } from '../middleware/permissions.js';
+import { syncGoogleCalendar } from '../connectors/google-calendar/adapter.js';
 
 const router = Router();
 
@@ -308,6 +309,67 @@ router.get('/:workspaceId/connectors/google-drive/health', async (req: Request<W
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     console.error('[Google Drive Route] Health check error:', message);
+    res.status(500).json({ error: message });
+  }
+});
+
+// ============================================================================
+// Google Calendar Routes
+// ============================================================================
+
+router.post('/:workspaceId/connectors/google-calendar/sync', async (req: Request<WorkspaceParams>, res: Response) => {
+  try {
+    const { workspaceId } = req.params;
+
+    const conn = await getCredentials(workspaceId, 'google-calendar');
+    if (!conn) {
+      res.status(404).json({ error: 'Google Calendar connection not found. Connect first.' });
+      return;
+    }
+
+    if (conn.status === 'disconnected') {
+      res.status(400).json({ error: 'Google Calendar connection is disconnected.' });
+      return;
+    }
+
+    await updateSyncStatus(workspaceId, 'google-calendar', 'syncing');
+
+    const result = await syncGoogleCalendar(workspaceId);
+
+    await updateSyncStatus(workspaceId, 'google-calendar', 'synced');
+
+    res.json({
+      success: true,
+      synced: result.synced,
+      resolved: result.resolved,
+      errors: result.errors,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[Google Calendar Route] Sync error:', message);
+    await updateSyncStatus(req.params.workspaceId, 'google-calendar', 'error', message).catch(() => {});
+    res.status(500).json({ error: message });
+  }
+});
+
+router.get('/:workspaceId/connectors/google-calendar/health', async (req: Request<WorkspaceParams>, res: Response) => {
+  try {
+    const { workspaceId } = req.params;
+
+    const conn = await getCredentials(workspaceId, 'google-calendar');
+    if (!conn) {
+      res.json({ connected: false, status: 'not_connected' });
+      return;
+    }
+
+    res.json({
+      connected: true,
+      status: conn.status,
+      lastSyncAt: conn.last_sync_at,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[Google Calendar Route] Health check error:', message);
     res.status(500).json({ error: message });
   }
 });

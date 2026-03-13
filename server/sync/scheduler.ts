@@ -8,6 +8,7 @@ import { syncConsultantFireflies } from '../connectors/consultant-fireflies-sync
 import { hardDeleteExpiredAgents } from '../jobs/cleanup-agents.js';
 import { cleanupExpiredRefreshTokens } from '../auth/cleanup.js';
 import { recalculateAllWorkspacesQuality } from '../jobs/recalculate-training-quality.js';
+import { syncGoogleCalendar } from '../connectors/google-calendar/adapter.js';
 
 const INTERNAL_CONNECTORS = ['enrichment_config', 'csv_import'];
 
@@ -58,6 +59,15 @@ export class SyncScheduler {
       });
     }, { timezone: 'UTC' });
     this.tasks.push(crmHeartbeat);
+
+    // Google Calendar sync — runs every 15 minutes
+    // Syncs events from 7 days back to 14 days forward, resolves attendees to deals
+    const calendarSyncTask = cron.schedule('*/15 * * * *', () => {
+      this.runCalendarSync().catch((err) => {
+        console.error('[Scheduler] Unhandled error in calendar sync:', err);
+      });
+    }, { timezone: 'UTC' });
+    this.tasks.push(calendarSyncTask);
 
     // Consultant connector sync (every 6 hours)
     const consultantTask = cron.schedule('0 */6 * * *', () => {
@@ -295,6 +305,33 @@ export class SyncScheduler {
         } catch {
           // ignore update error
         }
+      }
+    }
+  }
+
+  async runCalendarSync(): Promise<void> {
+    // Get all workspaces with google-calendar connected
+    const workspacesResult = await query<{ workspace_id: string }>(
+      `SELECT workspace_id FROM connections
+       WHERE connector_name = 'google-calendar' AND status != 'disconnected'`
+    );
+
+    if (workspacesResult.rows.length === 0) {
+      return;
+    }
+
+    console.log(`[Scheduler] Calendar sync: processing ${workspacesResult.rows.length} workspace(s)`);
+
+    for (const row of workspacesResult.rows) {
+      try {
+        const result = await syncGoogleCalendar(row.workspace_id);
+        console.log(
+          `[Scheduler] Calendar sync (${row.workspace_id}): ${result.synced} synced, ` +
+          `${result.resolved} resolved to deals, ${result.errors.length} error(s)`
+        );
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[Scheduler] Calendar sync failed for ${row.workspace_id}: ${msg}`);
       }
     }
   }
