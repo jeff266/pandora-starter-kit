@@ -23,7 +23,6 @@ router.use(requireWorkspaceAccess);
  */
 router.get(
   '/:workspaceId/briefing/math/:mathKey',
-  requirePermission('briefing.view'),
   async (req: Request, res: Response): Promise<void> => {
     const workspaceId = req.params.workspaceId as string;
     const mathKey = req.params.mathKey as string;

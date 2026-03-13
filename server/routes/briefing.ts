@@ -233,7 +233,6 @@ router.get('/:workspaceId/briefing/operators', async (req: Request, res: Respons
 router.get(
   '/:workspaceId/briefing/concierge',
   requireWorkspaceAccess,
-  requirePermission('briefing.view'),
   async (req: Request, res: Response): Promise<void> => {
     const workspaceId = req.params.workspaceId as string;
     const userId = (req as any).user?.user_id as string;
