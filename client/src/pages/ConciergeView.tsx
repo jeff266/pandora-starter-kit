@@ -59,23 +59,23 @@ interface OpeningBriefData {
   user: { name: string; email: string; pandoraRole: string; workspaceRole: string };
   workspace: { name: string; salesMotion: string };
   targets: {
-    headline?: string;
-    pctAttained?: number;
-    gap?: number | string;
+    headline?: { amount: number; label: string; type: string } | null;
+    pctAttained?: number | null;
+    gap?: number | string | null;
     closedWonValue?: number;
-    periodStart?: string;
-    periodEnd?: string;
-    coverageRatio?: number;
+    periodStart?: string | null;
+    periodEnd?: string | null;
+    coverageRatio?: number | null;
   };
   pipeline: {
     totalValue?: number;
     dealCount?: number;
     weightedValue?: number;
-    coverageRatio?: number;
-    pipelineLabel?: string;
-    closingThisWeek?: number;
-    closingThisMonth?: number;
-    newThisWeek?: number;
+    coverageRatio?: number | null;
+    pipelineLabel?: string | null;
+    closingThisWeek?: { count: number; value: number; dealNames?: string[] } | number | null;
+    closingThisMonth?: { count: number; value: number } | number | null;
+    newThisWeek?: { count: number; value: number } | number | null;
   };
   findings: {
     critical?: number;
@@ -405,8 +405,12 @@ export default function ConciergeView() {
                   <span style={{ fontSize: 32, fontWeight: 500, color: verdictColor }}>
                     {fmtPct(pct)}
                   </span>
-                  {brief.targets?.headline && (
-                    <span style={{ fontSize: 13, color: S.textSub }}>{brief.targets.headline}</span>
+                  {brief.targets?.headline != null && (
+                    <span style={{ fontSize: 13, color: S.textSub }}>
+                      {typeof brief.targets.headline === 'object'
+                        ? `${brief.targets.headline.label} · ${fmtCurrency(brief.targets.headline.amount)}`
+                        : brief.targets.headline}
+                    </span>
                   )}
                   <span
                     onClick={e => { e.stopPropagation(); openMathModal('attainment'); }}
