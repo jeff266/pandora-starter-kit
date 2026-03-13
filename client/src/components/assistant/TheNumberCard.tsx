@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import ChartRenderer from '../shared/ChartRenderer';
+import { api } from '../../lib/api';
 
 function fmt(n: number): string {
   if (!n && n !== 0) return '—';
@@ -83,15 +84,13 @@ export default function TheNumberCard({ theNumber: n, briefType, deltaMode, reps
     </MathPanel>
   );
 
-  const AttainmentMath = () => (
-    <MathPanel>
-      {n.won_this_period != null && <MathRow label="Closed won (this period)" value={fmt(n.won_this_period)} />}
-      {target != null && <MathRow label="Period target" value={fmt(target)} />}
-      <MathRow label="Attainment" value={`${n.attainment_pct?.toFixed(0) ?? '—'}%`} />
-      {n.days_remaining != null && <MathRow label="Days remaining" value={String(n.days_remaining)} />}
-      {n.weeks_remaining != null && <MathRow label="Weeks remaining" value={String(n.weeks_remaining)} />}
-    </MathPanel>
-  );
+  const attainmentSummary = {
+    wonThisPeriod: n.won_this_period,
+    target,
+    attainmentPct: n.attainment_pct,
+    daysRemaining: n.days_remaining,
+    weeksRemaining: n.weeks_remaining,
+  };
 
   const GapMath = () => (
     <MathPanel>
@@ -118,7 +117,7 @@ export default function TheNumberCard({ theNumber: n, briefType, deltaMode, reps
           {n.days_remaining} <span style={{ fontSize: 16, fontWeight: 500, color: '#9CA3AF' }}>days left</span>
         </div>
         <ClickableRow label="Attainment" value={`${n.attainment_pct?.toFixed(0) ?? '—'}%`} valueColor={n.attainment_pct < 65 ? '#F87171' : '#34D399'} onClick={() => toggle('attainment')} expanded={expanded === 'attainment'} />
-        {expanded === 'attainment' && <AttainmentMath />}
+        {expanded === 'attainment' && <AttainmentMathPanel summary={attainmentSummary} />}
         <ClickableRow label="Gap to quota" value={fmt(n.gap)} onClick={() => toggle('gap')} expanded={expanded === 'gap'} />
         {expanded === 'gap' && <GapMath />}
         <ClickableRow label="Pipeline" value={fmt(n.pipeline_total)} sub={`${n.deal_count} deals`} onClick={() => toggle('pipeline')} expanded={expanded === 'pipeline'} />
@@ -142,7 +141,7 @@ export default function TheNumberCard({ theNumber: n, briefType, deltaMode, reps
         {n.attainment_pct != null && (
           <>
             <ClickableRow label="Attainment" value={`${n.attainment_pct.toFixed(0)}%`} onClick={() => toggle('attainment')} expanded={expanded === 'attainment'} />
-            {expanded === 'attainment' && <AttainmentMath />}
+            {expanded === 'attainment' && <AttainmentMathPanel summary={attainmentSummary} />}
           </>
         )}
         {n.attainment_delta != null && (
@@ -195,7 +194,7 @@ export default function TheNumberCard({ theNumber: n, briefType, deltaMode, reps
       {n.attainment_pct != null && (
         <>
           <ClickableRow label="Attainment" value={`${n.attainment_pct.toFixed(0)}%`} onClick={() => toggle('attainment')} expanded={expanded === 'attainment'} />
-          {expanded === 'attainment' && <AttainmentMath />}
+          {expanded === 'attainment' && <AttainmentMathPanel summary={attainmentSummary} />}
         </>
       )}
       {n.gap > 0 && (
@@ -215,6 +214,94 @@ export default function TheNumberCard({ theNumber: n, briefType, deltaMode, reps
         </div>
       )}
     </div>
+  );
+}
+
+interface AttainmentSummary {
+  wonThisPeriod: number | null;
+  target: number | null;
+  attainmentPct: number | null;
+  daysRemaining: number | null;
+  weeksRemaining: number | null;
+}
+
+interface AttainmentDeal {
+  name: string;
+  amount: number;
+  close_date: string;
+}
+
+interface AttainmentMathResponse {
+  mathKey: string;
+  title: string;
+  hasTarget: boolean;
+  numerator: { value: number; label: string };
+  denominator: { value: number; label: string };
+  result: { value: number; label: string; unit: string };
+  breakdown: AttainmentDeal[];
+  total_count: number;
+  note: string;
+}
+
+function AttainmentMathPanel({ summary }: { summary: AttainmentSummary }) {
+  const [deals, setDeals] = useState<AttainmentDeal[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const [totalCount, setTotalCount] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(false);
+    (api.get('/briefing/math/attainment') as Promise<AttainmentMathResponse>)
+      .then((data) => {
+        if (cancelled) return;
+        setDeals(data.breakdown ?? []);
+        setTotalCount(data.total_count ?? 0);
+      })
+      .catch(() => { if (!cancelled) setError(true); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const additionalCount = deals ? totalCount - deals.length : 0;
+
+  return (
+    <MathPanel>
+      {summary.wonThisPeriod != null && <MathRow label="Closed won (this period)" value={fmt(summary.wonThisPeriod)} />}
+      {summary.target != null && <MathRow label="Period target" value={fmt(summary.target)} />}
+      <MathRow label="Attainment" value={`${summary.attainmentPct?.toFixed(0) ?? '—'}%`} />
+      {summary.daysRemaining != null && <MathRow label="Days remaining" value={String(summary.daysRemaining)} />}
+      {summary.weeksRemaining != null && <MathRow label="Weeks remaining" value={String(summary.weeksRemaining)} />}
+      {loading && (
+        <div style={{ marginTop: 6, color: '#6B7280', fontSize: 11 }}>Loading deals…</div>
+      )}
+      {error && (
+        <div style={{ marginTop: 6, color: '#F87171', fontSize: 11 }}>Failed to load deal breakdown</div>
+      )}
+      {deals && deals.length === 0 && !loading && (
+        <div style={{ marginTop: 6, color: '#6B7280', fontSize: 11 }}>No contributing deals in this period</div>
+      )}
+      {deals && deals.length > 0 && (
+        <div style={{ marginTop: 6, borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 6 }}>
+          <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 4 }}>Contributing deals</div>
+          {deals.map((d, i) => (
+            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '2px 0' }}>
+              <span style={{ color: '#9CA3AF', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '55%' }}>{d.name}</span>
+              <span style={{ color: '#D1D5DB', fontSize: 11, fontVariantNumeric: 'tabular-nums', display: 'flex', gap: 8 }}>
+                <span style={{ color: '#6B7280' }}>{d.close_date ? new Date(d.close_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''}</span>
+                {fmt(d.amount)}
+              </span>
+            </div>
+          ))}
+          {additionalCount > 0 && (
+            <div style={{ fontSize: 11, color: '#6B7280', marginTop: 4, fontStyle: 'italic' }}>
+              + {additionalCount} additional deal{additionalCount !== 1 ? 's' : ''} not listed
+            </div>
+          )}
+        </div>
+      )}
+    </MathPanel>
   );
 }
 

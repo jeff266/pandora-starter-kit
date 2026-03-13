@@ -276,6 +276,15 @@ async function handleAttainmentMath(
   );
   const closedWon = Number(aggResult.rows[0]?.closed_won ?? 0);
 
+  const countResult = await query<{ total_count: string }>(
+    `SELECT COUNT(*)::text as total_count
+     FROM deals
+     WHERE workspace_id = $1
+       AND stage_normalized = 'closed_won'${scopeWhere}`,
+    scopeParams
+  );
+  const totalCount = Number(countResult.rows[0]?.total_count ?? 0);
+
   const closedResult = await query<{
     name: string;
     amount: string;
@@ -309,6 +318,7 @@ async function handleAttainmentMath(
     denominator: { value: quota, label: 'Quota' },
     result: { value: pct, label: `${pct}% attainment`, unit: '%' },
     breakdown: closedDeals,
+    total_count: totalCount,
     note: `Closed won deals in ${periodLabel}.${scopeNote}`,
   });
 }
