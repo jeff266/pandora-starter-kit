@@ -335,11 +335,12 @@ export default function ConciergeView() {
     };
   }, [brief]);
 
-  const navigateToChat = useCallback((message: string, ctx: ConciergeContext | null) => {
+  const navigateToChat = useCallback((message: string, ctx: ConciergeContext | null, wbrContributions?: any[]) => {
     navigate(window.location.pathname, {
       state: {
         openChatWithMessage: message,
         conciergeContext: ctx,
+        wbrContributions: wbrContributions || undefined,
       },
     });
   }, [navigate]);
@@ -369,10 +370,10 @@ export default function ConciergeView() {
     }
   }, [brief, buildConciergeContext, navigate, navigateToChat, openMathModal]);
 
-  const handleStartWBR = useCallback(async () => {
+  const handleStartWBR = useCallback(() => {
     const ctx = buildConciergeContext();
-    if (brief && currentWorkspace?.id) {
-      const contributions: Array<{ id: string; type: 'finding' | 'recommendation'; title: string; body: string; severity?: 'critical' | 'warning' | 'info' }> = [];
+    const contributions: Array<{ id: string; type: 'finding' | 'recommendation'; title: string; body: string; severity?: 'critical' | 'warning' | 'info' }> = [];
+    if (brief) {
       const _hasTarget = brief.targets?.hasTarget !== false;
       const _pct = brief.targets?.pctAttained;
       if (_hasTarget && _pct != null) {
@@ -401,22 +402,13 @@ export default function ConciergeView() {
           severity: f.severity === 'critical' ? 'critical' : f.severity === 'warning' ? 'warning' : 'info',
         });
       });
-      if (contributions.length > 0) {
-        try {
-          await api.post('/sessions/seed-wbr', {
-            sessionId: `wbr-${Date.now()}`,
-            contributions,
-          });
-        } catch (e) {
-          console.warn('[ConciergeView] WBR seed failed, proceeding with chat:', e);
-        }
-      }
     }
     navigateToChat(
-      'Assemble a WBR from this briefing. Use the attainment, pipeline, and findings as initial contributions.',
+      '📄 Assemble a WBR from this briefing. Use the attainment, pipeline, and findings as initial contributions.',
       ctx,
+      contributions.length > 0 ? contributions : undefined,
     );
-  }, [brief, currentWorkspace?.id, buildConciergeContext, navigateToChat]);
+  }, [brief, buildConciergeContext, navigateToChat]);
 
   const handleQuarterTab = (tab: QuarterTab) => {
     const currentPhaseOrder = tabPhaseOrder(phaseToTab(brief?.temporal?.quarterPhase));

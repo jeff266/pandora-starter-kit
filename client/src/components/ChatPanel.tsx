@@ -63,6 +63,10 @@ interface ChatPanelProps {
   pendingMessage?: string | null;
   onPendingMessageSent?: () => void;
   conciergeContext?: Record<string, unknown> | null;
+  forceNewThread?: boolean;
+  onForceNewThreadConsumed?: () => void;
+  wbrContributions?: any[] | null;
+  onWbrContributionsConsumed?: () => void;
 }
 
 interface ChatSessionPreview {
@@ -92,7 +96,7 @@ function getStoredWidth(): number {
   return CHAT_DEFAULT_WIDTH;
 }
 
-export default function ChatPanel({ isOpen, onClose, scope, initialSessionId, pendingMessage, onPendingMessageSent, conciergeContext }: ChatPanelProps) {
+export default function ChatPanel({ isOpen, onClose, scope, initialSessionId, pendingMessage, onPendingMessageSent, conciergeContext, forceNewThread, onForceNewThreadConsumed, wbrContributions, onWbrContributionsConsumed }: ChatPanelProps) {
   const isMobile = useIsMobile();
   const navigate = useNavigate();
   const { anon } = useDemoMode();
@@ -127,7 +131,20 @@ export default function ChatPanel({ isOpen, onClose, scope, initialSessionId, pe
   const contextInjectedRef = useRef(false);
 
   useEffect(() => {
-    if (conciergeContext && isOpen && !contextInjectedRef.current && messages.length === 0) {
+    if (forceNewThread && isOpen) {
+      setMessages([]);
+      setThreadId(null);
+      setSessionId(null);
+      setError(null);
+      setInput('');
+      setIsHistoryView(false);
+      contextInjectedRef.current = false;
+      onForceNewThreadConsumed?.();
+    }
+  }, [forceNewThread, isOpen, onForceNewThreadConsumed]);
+
+  useEffect(() => {
+    if (conciergeContext && isOpen && !contextInjectedRef.current && messages.length === 0 && !threadId) {
       contextInjectedRef.current = true;
       const preamble = formatConciergeContextPreamble(conciergeContext as ConciergeContext);
       const systemMsg: ChatMessage = {
@@ -137,7 +154,7 @@ export default function ChatPanel({ isOpen, onClose, scope, initialSessionId, pe
       };
       setMessages([systemMsg]);
     }
-  }, [conciergeContext, isOpen, messages.length]);
+  }, [conciergeContext, isOpen, messages.length, threadId]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -388,12 +405,25 @@ export default function ChatPanel({ isOpen, onClose, scope, initialSessionId, pe
       if (threadId) body.thread_id = threadId;
       if (sessionId) body.session_id = sessionId;
       if (scope && !threadId) body.scope = scope;
-      if (conciergeContext && !threadId) body.conciergeContext = conciergeContext;
+      if (conciergeContext) body.conciergeContext = conciergeContext;
 
       const result: any = await api.post('/chat', body);
 
       if (result.thread_id && !threadId) {
         setThreadId(result.thread_id);
+
+        if (wbrContributions && wbrContributions.length > 0) {
+          try {
+            await api.post('/sessions/seed-wbr', {
+              sessionId: `wbr-${Date.now()}`,
+              threadId: result.thread_id,
+              contributions: wbrContributions,
+            });
+          } catch (e) {
+            console.warn('[ChatPanel] WBR seed failed:', e);
+          }
+          onWbrContributionsConsumed?.();
+        }
       }
 
       if (result.session_id && !sessionId) {

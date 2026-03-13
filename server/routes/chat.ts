@@ -37,7 +37,7 @@ async function getUserRole(workspaceId: string, userId: string): Promise<string>
 router.post('/:workspaceId/chat', async (req: Request, res: Response): Promise<void> => {
   try {
     const workspaceId = req.params.workspaceId as string;
-    const { message, thread_id, scope, session_id } = req.body;
+    const { message, thread_id, scope, session_id, conciergeContext } = req.body;
 
     if (!message || typeof message !== 'string' || message.trim().length === 0) {
       res.status(400).json({ error: 'message is required' });
@@ -50,7 +50,6 @@ router.post('/:workspaceId/chat', async (req: Request, res: Response): Promise<v
       return;
     }
 
-    // Fetch user's workspace role for RBAC data scoping (T10)
     const userRole = await getUserRole(workspaceId, userId);
 
     const threadTs = thread_id || `web_${randomUUID()}`;
@@ -64,6 +63,7 @@ router.post('/:workspaceId/chat', async (req: Request, res: Response): Promise<v
       userId,
       userRole: userRole as any,
       scope: scope || undefined,
+      conciergeContext: conciergeContext || undefined,
     });
 
     if (result.rate_limited) {

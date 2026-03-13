@@ -54,6 +54,16 @@ export interface ConversationTurnInput {
     report_type?: string;
     result?: any;
   };
+  conciergeContext?: {
+    quarter?: string;
+    attainmentPct?: number;
+    pipelineScope?: {
+      totalValue?: number | null;
+      dealCount?: number | null;
+      coverageRatio?: number | null;
+    };
+    topFindings?: Array<{ severity: string; message: string }>;
+  };
 }
 
 export interface ConversationTurnResult {
@@ -115,7 +125,7 @@ function detectComplexRequest(message: string): boolean {
 }
 
 export async function handleConversationTurn(input: ConversationTurnInput): Promise<ConversationTurnResult> {
-  const { workspaceId, channelId, threadId, message, surface, anchor, scope: inputScope, userId, userRole } = input;
+  const { workspaceId, channelId, threadId, message, surface, anchor, scope: inputScope, userId, userRole, conciergeContext } = input;
 
   let state = await getConversationState(workspaceId, channelId, threadId);
   const isFollowUp = !!state && (state.messages || []).length > 0;
@@ -139,6 +149,29 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
       tokens_used: 0,
       turn_limit_reached: true,
     };
+  }
+
+  if (conciergeContext && !isFollowUp) {
+    const parts: string[] = ['[Concierge Briefing Context]'];
+    if (conciergeContext.quarter) parts.push(`Quarter: ${conciergeContext.quarter}`);
+    if (conciergeContext.attainmentPct != null) parts.push(`Attainment: ${Math.round(conciergeContext.attainmentPct)}%`);
+    if (conciergeContext.pipelineScope) {
+      const ps = conciergeContext.pipelineScope;
+      if (ps.totalValue != null) parts.push(`Pipeline: ${formatCurrency(ps.totalValue)}`);
+      if (ps.dealCount != null) parts.push(`Deal count: ${ps.dealCount}`);
+      if (ps.coverageRatio != null) parts.push(`Coverage: ${ps.coverageRatio.toFixed(1)}×`);
+    }
+    if (conciergeContext.topFindings?.length) {
+      parts.push('Key findings:');
+      for (const f of conciergeContext.topFindings.slice(0, 5)) {
+        parts.push(`  [${f.severity}] ${f.message}`);
+      }
+    }
+    await appendMessage(workspaceId, channelId, threadId, {
+      role: 'system',
+      content: parts.join('\n'),
+      timestamp: new Date().toISOString(),
+    });
   }
 
   await appendMessage(workspaceId, channelId, threadId, {
