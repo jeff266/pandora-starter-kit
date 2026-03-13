@@ -3,8 +3,15 @@ import { generateGreeting } from '../briefing/greeting-engine.js';
 import { getOperatorStatuses } from '../briefing/operator-status.js';
 import { query } from '../db.js';
 import { getPandoraRole, type PandolaRole } from '../context/pandora-role.js';
-import { computeTemporalContext } from '../context/opening-brief.js';
+import {
+  computeTemporalContext,
+  assembleOpeningBrief,
+  getOrAssembleBrief,
+  type OpeningBriefData,
+  type TemporalContext,
+} from '../context/opening-brief.js';
 import { requireWorkspaceAccess } from '../middleware/auth.js';
+import { requirePermission } from '../middleware/permissions.js';
 
 const router = Router();
 
@@ -216,5 +223,51 @@ router.get('/:workspaceId/briefing/operators', async (req: Request, res: Respons
     res.status(500).json({ error: msg });
   }
 });
+
+/**
+ * GET /:workspaceId/briefing/concierge
+ *
+ * Returns the full opening brief with temporal context for the Concierge UI.
+ * Supports ?refresh=true to bypass the 5-minute cache.
+ */
+router.get(
+  '/:workspaceId/briefing/concierge',
+  requireWorkspaceAccess,
+  requirePermission('briefing.view'),
+  async (req: Request, res: Response): Promise<void> => {
+    const workspaceId = req.params.workspaceId as string;
+    const userId = (req as any).user?.user_id as string;
+
+    if (!userId) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+
+    const refresh = req.query.refresh === 'true';
+
+    try {
+      // Fetch brief data (cached or fresh based on refresh param)
+      const brief: OpeningBriefData = refresh
+        ? await assembleOpeningBrief(workspaceId, userId)
+        : await getOrAssembleBrief(workspaceId, userId);
+
+      // Fetch temporal context (always fresh, it's cheap to compute)
+      const temporal: TemporalContext = await computeTemporalContext(workspaceId);
+
+      res.json({
+        brief,
+        temporal,
+        generatedAt: new Date().toISOString(),
+        workspaceId,
+      });
+    } catch (err: any) {
+      console.error('[briefing] Error assembling concierge brief:', err);
+      res.status(500).json({
+        error: 'brief_assembly_failed',
+        message: err.message || 'Failed to assemble opening brief',
+      });
+    }
+  }
+);
 
 export default router;

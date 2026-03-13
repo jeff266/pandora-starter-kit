@@ -55,6 +55,9 @@ export interface PermissionSet {
   'data.reps_view_team': boolean;
   'data.reps_view_all': boolean;
   'data.export': boolean;
+
+  // Briefing
+  'briefing.view': boolean;
 }
 
 /**
@@ -114,5 +117,7 @@ export function createPermissionSet(defaultValue = false): PermissionSet {
     'data.reps_view_team': defaultValue,
     'data.reps_view_all': defaultValue,
     'data.export': defaultValue,
+
+    'briefing.view': defaultValue,
   };
 }
