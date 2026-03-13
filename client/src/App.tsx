@@ -4,6 +4,7 @@ import { openAskPandora } from './lib/askPandora';
 import { useWorkspace } from './context/WorkspaceContext';
 import { useDemoMode } from './contexts/DemoModeContext';
 import { setApiCredentials, api } from './lib/api';
+import { PandoraRoleProvider } from './context/PandoraRoleContext';
 import Sidebar from './components/Sidebar';
 import TopBar from './components/TopBar';
 import NotificationBell from './components/notifications/NotificationBell';
@@ -18,6 +19,7 @@ import JoinWorkspace from './pages/JoinWorkspace';
 import MembersPage from './pages/MembersPage';
 import CommandCenter from './pages/CommandCenter';
 import AssistantView from './pages/AssistantView';
+import ConciergeView from './pages/ConciergeView';
 import DealDetail from './pages/DealDetail';
 import AccountDetail from './pages/AccountDetail';
 import DealList from './pages/DealList';
@@ -70,6 +72,7 @@ import ImpersonationBanner from './components/ImpersonationBanner';
 
 const pageTitles: Record<string, string> = {
   '/': 'Command Center',
+  '/concierge': 'Concierge',
   '/portfolio': 'All Clients',
   '/deals': 'Open Deals',
   '/accounts': 'Accounts',
@@ -335,8 +338,9 @@ export default function App() {
 
   return (
     <div style={{ display: 'flex', height: '100vh', background: colors.bg }}>
+      <PandoraRoleProvider>
       <Sidebar badges={badges} showAllClients={hasMultipleWorkspaces} collapsed={sidebarCollapsed} onToggleCollapse={toggleSidebar} mobileOpen={mobileMenuOpen} onMobileClose={() => setMobileMenuOpen(false)} mode={activeView} onModeChange={handleViewChange} />
-      <main style={{ marginLeft: isMobile ? 0 : (sidebarCollapsed ? 56 : 220), flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', transition: 'margin-left 0.2s ease' }}>
+      <main style={{ marginLeft: isMobile ? 0 : (sidebarCollapsed ? 48 : 200), flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', transition: 'margin-left 0.15s ease' }}>
         <ImpersonationBanner />
         <DemoModeBanner />
         <TopBar title={title} lastRefreshed={lastRefreshed} onRefresh={fetchBadges} onMenuToggle={isMobile ? () => setMobileMenuOpen(true) : undefined} governancePending={governancePending} actions={currentWorkspace?.id ? <NotificationBell workspaceId={currentWorkspace.id} /> : undefined} />
@@ -397,6 +401,7 @@ export default function App() {
             <Route path="/workspace/:workspaceId/reports/:reportId" element={<ReportViewer />} />
             <Route path="/workspace/:workspaceId/reports/:reportId/generations/:generationId" element={<ReportViewer />} />
             <Route path="/workspace/:workspaceId/briefing/:generationId" element={<ReportViewer />} />
+            <Route path="/concierge" element={<ConciergeView />} />
           </Routes>
         </div>
       </main>
@@ -457,6 +462,7 @@ export default function App() {
           50% { opacity: 0.8; }
         }
       `}</style>
+      </PandoraRoleProvider>
     </div>
   );
 }

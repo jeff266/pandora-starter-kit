@@ -1,0 +1,648 @@
+1. Ask Pandora Endpoint:                
+  - Non-streaming: POST                   
+  /api/workspaces/:workspaceId/chat       
+  (chat.ts)                               
+  - Streaming: POST /api/workspaces/:works
+  paceId/conversation/stream              
+  (conversation-stream.ts)                
+                                          
+  For the Math Modal chat, the simpler    
+  non-streaming endpoint is better.       
+                                          
+  2. OpeningBriefData Actual Structure:   
+  {                                       
+    temporal: TemporalContext;            
+    user: {                               
+      name: string;          // ✅        
+  brief.user.name (not userContext)       
+      email: string;                      
+      pandoraRole: string;                
+      workspaceRole: string;              
+    };                                    
+    workspace: { name, salesMotion };     
+    targets: { headline, pctAttained, gap,
+   closedWonValue, periodStart, periodEnd 
+  };                                      
+    pipeline: { totalValue, dealCount,    
+  weightedValue, coverageRatio,           
+  pipelineLabel, closingThisWeek,         
+  closingThisMonth, newThisWeek };        
+    findings: {                           
+      critical: number;                   
+      warning: number;                    
+      topFindings: [        // ✅         
+  brief.findings.topFindings (not         
+  atRiskDeals)                            
+        { severity, message, skillName,   
+  dealName?, age }                        
+      ];                                  
+      lastSkillRunAt: string | null;      
+    };                                    
+    movement: { dealsAdvanced,            
+  dealsClosed, closedWonValue,            
+  closedLostValue, newFindings };         
+    conversations: { recentCallCount,     
+  unlinkedCalls } | null;                 
+    movementAnchorLabel: string;          
+  }                                       
+                                          
+  No atRiskDeals field exists. Brief cards
+   should use brief.findings.topFindings. 
+                                          
+  ---                                     
+  UPDATED PROMPT 2 FOR REPLIT — READY TO  
+  PASTE                                   
+                                          
+  ## CRITICAL CONTEXT — READ FIRST        
+                                          
+  **API Endpoints (exact paths, do not    
+  construct):**                           
+  - Brief: GET /api/workspaces/:workspaceI
+  d/briefing/concierge                    
+  - Math: GET /api/workspaces/:workspaceId
+  /briefing/math/:mathKey                 
+  - Math keys available: coverage,        
+  attainment, pipeline, deal-{dealId}     
+  - Ask Pandora: POST                     
+  /api/workspaces/:workspaceId/chat       
+    - Body: { message: string, thread_id?:
+   string, scope?: { entityType, entityId,
+   entityName } }                         
+                                          
+  **Role System (two independent          
+  systems):**                             
+  - workspace_members.role_id →           
+  workspace_roles.permissions (access     
+  control)                                
+    - Values: admin, member, manager,     
+  analyst, viewer                         
+    - briefing.view permission is granted 
+  by workspace role, NOT pandora_role     
+  - workspace_members.pandora_role (data  
+  visibility filtering)                   
+    - Values: 'cro' | 'manager' | 'ae' |  
+  'revops' | 'admin' | null               
+    - Use these exact strings in all role 
+  checks — not 'rep'                      
+                                          
+  **Frontend Role Checks:**               
+  - Use pandora_role for UI customization 
+  (which nav items to show, which sub-tabs
+   to display)                            
+  - Permission enforcement happens        
+  server-side via workspace role          
+  - A user can have pandora_role='cro' but
+   still get 403 if their workspace role  
+  is 'viewer'                             
+                                          
+  **Navigation Visibility Mapping:**      
+  - pandora_role = 'ae' → show: Concierge,
+   Actions, Settings only                 
+  - pandora_role = 'manager' → show:      
+  Concierge, Pipeline, Actions, Settings  
+  - pandora_role = 'cro' → show: all      
+  except Skills, Data                     
+  - pandora_role = 'revops' → show: all   
+  - pandora_role = 'admin' → show: all    
+  (treat same as revops)                  
+  - pandora_role = null → show: all (safe 
+  fallback)                               
+                                          
+  **Sub-tab Visibility:**                 
+  - pandora_role IN ('cro', 'revops',     
+  'admin', null) → Strategic | Tactical   
+  sub-tabs                                
+  - pandora_role = 'manager' → Strategic |
+   Tactical sub-tabs                      
+  - pandora_role = 'ae' → Deals | Pipeline
+   sub-tabs                               
+                                          
+  ---                                     
+                                          
+  Read REPLIT_CONTEXT.md and the current  
+  client/src/App.tsx (or equivalent       
+  routing                                 
+  file) before writing any code. Check how
+   the existing navigation is structured  
+  and which auth context provides the     
+  current user's role.                    
+                                          
+  ---                                     
+                                          
+  TASK 1: Slim Icon Sidebar —             
+  client/src/components/Sidebar.tsx       
+                                          
+  Replace or refactor the existing sidebar
+   navigation with an icon-based sidebar. 
+                                          
+  Collapsed: 48px wide (default)          
+  Expanded: 200px wide (on hover OR on    
+  click-to-pin)                           
+  Transition: width 150ms ease, no jank   
+                                          
+  Design tokens — match existing app      
+  exactly:                                
+    bg: #0a0d14                           
+    border-right: 0.5px solid #1a1f2b     
+    icon-rest: #5a6578                    
+    icon-active: #1D9E75                  
+    icon-hover: #94a3b8                   
+    active-indicator: 2px left border,    
+  color #1D9E75 (no background fill)      
+    label-font: IBM Plex Sans, 12px,      
+  #94a3b8                                 
+    label-active: #e8ecf4                 
+    font for all text: IBM Plex Sans      
+                                          
+  Navigation items and role visibility:   
+                                          
+    Route             Label         Icon  
+    Visible to                            
+    /concierge        Concierge     ◈     
+    all roles                             
+    /pipeline         Pipeline      ◯     
+    admin, manager, cro, revops           
+    /actions          Actions       ⚡    
+    all roles                             
+    /agents           Agents        ◎     
+    admin, cro, revops only               
+    /skills           Skills        ⊞     
+    admin, revops only                    
+    /data             Data          ⬡     
+    admin, revops only                    
+    /settings         Settings      ⚙     
+     admin, manager, cro, revops          
+                                          
+    pandora_role mapping from             
+  workspace_members:                      
+      'ae' → show: Concierge, Actions,    
+  Settings only                           
+      'manager' → show: Concierge,        
+  Pipeline, Actions, Settings             
+      'cro' → show: all except Skills,    
+  Data                                    
+      'revops' → show: all                
+      'admin' → show: all                 
+      null → show: all (default safe      
+  fallback)                               
+                                          
+  Use SVG icons — do not use an icon      
+  library that isn't already in the       
+  project.                                
+  Check what icon approach the existing   
+  codebase uses and match it.             
+                                          
+  Top of sidebar:                         
+    Pandora logo / icon (24px, not a nav  
+  item, links to /concierge)              
+                                          
+  Bottom of sidebar:                      
+    Workspace name — truncated to fit 48px
+   collapsed (show tooltip on hover)      
+    Connection status dot — green if any  
+  connector is active                     
+    User initials avatar (28px circle,    
+  teal bg)                                
+    Role chip — only visible when         
+  expanded: tiny pill showing pandora_role
+                                          
+  Behavior:                               
+    Hover to expand: sidebar expands on   
+  mouseenter, collapses on mouseleave     
+      with a 300ms delay on collapse      
+  (prevents flicker on mouse travel)      
+    Click-to-pin: clicking the logo area  
+  toggles a pinned-open state             
+      (persists in localStorage as        
+  'sidebar_pinned')                       
+    On mobile (<768px): sidebar is hidden,
+   show a hamburger menu instead          
+                                          
+  Active state: read from current route   
+  (useLocation or equivalent).            
+  The active route's icon gets the teal   
+  left border treatment.                  
+                                          
+  ---                                     
+                                          
+  TASK 2: Concierge Page Shell —          
+  client/src/pages/ConciergeView.tsx      
+                                          
+  This page calls GET /api/workspaces/:wor
+  kspaceId/briefing/concierge             
+  and renders the structured briefing     
+  response.                               
+                                          
+  **IMPORTANT: On first load, console.log 
+  the full brief response and use the     
+  actual field names from the response —  
+  do not assume field names from this     
+  spec. The backend returns               
+  OpeningBriefData with these top-level   
+  keys: temporal, user, workspace,        
+  targets, pipeline, findings, movement,  
+  conversations, movementAnchorLabel.**   
+                                          
+  State management:                       
+    loading: boolean                      
+    brief: OpeningBriefData | null        
+    temporal: TemporalContext | null      
+    error: string | null                  
+    activeMathKey: string | null (controls
+   MathModal open/closed)                 
+    activeQuarterTab: 'early' | 'mid' |   
+  'late' | 'end'                          
+    activeSubTab: 'strategic' | 'tactical'
+   (VP) | 'deals' | 'pipeline' (rep)      
+                                          
+  On mount: fetch /briefing/concierge, set
+   brief and temporal.                    
+  Poll every 5 minutes for refresh        
+  (respects the server-side 5-min cache). 
+                                          
+  TOPBAR (inside page, not the global     
+  nav):                                   
+    [Pandora icon 22px teal]  Pandora     
+  [role chip]  ·  [temporal.urgencyLabel] 
+    [right: quarter label e.g. "Q2 · Week 
+  7 of 13"]  [Projection badge if future  
+  tab]                                    
+                                          
+  QUARTER TABS:                           
+    Four tabs across: W1–3 (Now) · W5–9   
+  (Execution) · W10–11 (Push) · W12–13    
+  (Close)                                 
+    Active tab = derived from             
+  temporal.quarterPhase:                  
+      'early' → W1–3 tab active           
+      'mid' → W5–9 tab active             
+      'late' → W10–11 tab active          
+      'final_week' → W12–13 tab active    
+    Future tabs (those after the current  
+  phase): show a small purple dot         
+  indicator                               
+    Clicking a future tab switches to     
+  projection mode with a purple banner:   
+      "↗ Projection — This is where       
+  {quarter position} typically stands.    
+  Based on                                
+       current pipeline velocity."        
+    Active tab: 2px bottom border in teal 
+  (#1D9E75), text #e8ecf4                 
+    Inactive: text #5a6578                
+                                          
+  SUB-TABS (below quarter tabs):          
+    If pandora_role is 'cro' or 'revops'  
+  or 'admin': show Strategic | Tactical   
+    If pandora_role is 'ae': show Deals | 
+  Pipeline                                
+    If pandora_role is 'manager': show    
+  Strategic | Tactical                    
+    Active sub-tab: 2px bottom border in  
+  blue (#378ADD for VP) or green (#1D9E75 
+  for rep)                                
+                                          
+  BRIEF CONTENT AREA:                     
+    Greeting: brief.user.name + "." —     
+  20px, weight 500, color #e8ecf4         
+    Situation line: brief summary — 13px, 
+  color #94a3b8, max-width 600px,         
+  margin-bottom 18px                      
+                                          
+    VERDICT BLOCK (if brief has headline  
+  metric):                                
+      Container: border 0.5px,            
+  border-radius 10px, padding 14px 16px,  
+  cursor pointer                          
+      Border color: derived from metric   
+  health (red if <80%, yellow if 80–95%,  
+  green if 95%+)                          
+      Large number: 32px, weight 500,     
+  color matches border                    
+      Label: 11px, color #5a6578          
+      Progress bar: 3px height,           
+  teal/yellow/red fill                    
+      Meta line: 11px, color #94a3b8      
+      "∑ Show math" text inline next to   
+  the number (10px, color #3a4252)        
+      onClick: openMathModal('coverage')  
+  or appropriate mathKey                  
+      This entire block is clickable —    
+  clicking anywhere on it opens Show Math.
+                                          
+    ACTIVITY LOG (admin/revops/manager    
+  tactical sub-tab only):                 
+      Section header: "Pandora overnight" 
+  — 10px uppercase #3a4252                
+      Each skill run as a log row:        
+        [colored dot: green=success,      
+  yellow=partial, red=failed]             
+        [skill name + finding count]      
+        [timestamp right-aligned, 10px    
+  #3a4252]                                
+                                          
+    BRIEF ITEMS (3–5 cards from           
+  brief.findings.topFindings):            
+      See TASK 3 for BriefCard component  
+  spec.                                   
+      Render in a single column, gap 8px. 
+      Map brief.findings.topFindings array
+   to BriefCard props.                    
+                                          
+    Loading skeleton: 3 placeholder card  
+  shapes (bg #0f1219, animated pulse)     
+  while                                   
+    fetching. Show skeleton for max 3     
+  seconds, then show error state if still 
+  loading.                                
+                                          
+  ---                                     
+                                          
+  TASK 3: Brief Card Component —          
+  client/src/components/BriefCard.tsx     
+                                          
+  Props:                                  
+    rank: number                          
+    category: 'risk' | 'opportunity' |    
+  'watch' | 'hygiene' | 'action'          
+    eyebrow: string                       
+    title: string (may contain drillable  
+  number spans — see below)               
+    body: string                          
+    chips: Array<{ text: string; status:  
+  'done' | 'pending' | 'needs' }>         
+    mathKey?: string                      
+    onClick: () => void                   
+                                          
+  Card styles:                            
+    background: #0f1219                   
+    border: 0.5px solid #1a1f2b           
+    border-radius: 10px                   
+    padding: 12px 13px                    
+    cursor: pointer                       
+    hover: border-color #242b3a           
+                                          
+  Category border-left accent (2px, no    
+  background change for the card border): 
+    risk → #ef4444 left border            
+    opportunity → #1D9E75 left border     
+    watch → #eab308 left border           
+    hygiene → #378ADD left border         
+    action → #a78bfa left border          
+                                          
+  Category badge (top-left):              
+    risk: bg rgba(239,68,68,.1), color    
+  #ef4444, border rgba(239,68,68,.22)     
+    opportunity: bg rgba(29,158,117,.1),  
+  color #1D9E75                           
+    watch: bg rgba(234,179,8,.1), color   
+  #eab308                                 
+    hygiene: bg rgba(55,138,221,.1), color
+   #378ADD                                
+    action: bg rgba(167,139,250,.1), color
+   #a78bfa                                
+                                          
+  Chips:                                  
+    done: green dot + green text, bg      
+  rgba(29,158,117,.1)                     
+    pending: yellow dot + yellow text     
+    needs: red exclamation + red text     
+                                          
+  Footer: "Tap to drill in →" — 10px,     
+  color #3a4252                           
+                                          
+  Numbers in title/body that have a       
+  mathKey should render as:               
+    <span style="border-bottom: 1px dashed
+   currentColor; cursor: pointer">        
+      {number}↗                           
+    </span>                               
+    onClick: calls openMathModal(mathKey) 
+  from parent context                     
+                                          
+  ---                                     
+                                          
+  TASK 4: Show Math Modal —               
+  client/src/components/MathModal.tsx     
+                                          
+  Triggered by: clicking the verdict      
+  block, clicking a drillable number span,
+  or clicking a BriefCard with a mathKey. 
+                                          
+  Data source: GET /api/workspaces/:worksp
+  aceId/briefing/math/:mathKey            
+                                          
+  Modal structure (fixed overlay,         
+  centered, max-width 660px, max-height   
+  88vh):                                  
+                                          
+    HEADER:                               
+      [∑ Show math — badge in color       
+  matching mathKey type]                  
+      [title from API response]           
+      [× close button]                    
+                                          
+    BODY (scrollable):                    
+      THE CALCULATION section:            
+        Three-part equation display:      
+          [numerator value + label]  ÷    
+  [denominator value + label]  =  [result 
+  in color]                               
+        Plain-English note (left-border   
+  accent, bg #141820, font-size 12px)     
+                                          
+      BREAKDOWN section:                  
+        Labeled container (bg #0f1219,    
+  border, border-radius 8px, padding 10px 
+  12px)                                   
+        Each row: label left, value right 
+          value color: red if warn:true,  
+  green if good:true, bold if bold:true   
+        Underlying records: collapsed by  
+  default                                 
+          Toggle label: "▸ Underlying     
+  records" / "▾ Collapse"                 
+          Table: font-size 11px, th in    
+  #5a6578, td in #94a3b8, last-td         
+  right-aligned #e8ecf4                   
+                                          
+      ACTIONS section (only if API returns
+   actions for this mathKey):             
+        Each action card:                 
+          pending: bg rgba(234,179,8,.1), 
+  border rgba(234,179,8,.22)              
+          in_progress: bg                 
+  rgba(55,138,221,.1)                     
+          done: bg rgba(29,158,117,.1)    
+        Buttons: Approve & execute (green 
+  bg), Modify (transparent border), Reject
+   (subtle)                               
+        On Approve: POST /api/workspaces/:
+  id/actions/:actionId/approve            
+          On success: update card to "✓   
+  Done" state, no page refresh            
+                                          
+    CHAT THREAD (bottom, flex-shrink 0):  
+      max-height 180px, overflow-y auto   
+      User messages: right-aligned, blue  
+  bg bubble                               
+      Pandora messages: left-aligned with 
+  small avatar                            
+      Action ready card: green bg, "Ready 
+  to execute: [action] — say 'go ahead' to
+   confirm"                               
+                                          
+      SUGGESTION CHIPS (above input, if   
+  API returns suggestions):               
+        Each chip: border, rounded,       
+  font-size 11px, cursor pointer          
+        On click: populates input and     
+  submits                                 
+                                          
+      INPUT ROW:                          
+        input (flex: 1, bg #141820,       
+  border, border-radius 8px)              
+        Send button (green bg)            
+        On submit: POST                   
+  /api/workspaces/:workspaceId/chat       
+          Body: { message: userInput,     
+  scope: { mathKey, workspaceId } }       
+          The backend routes this through 
+  the existing agent loop — no new LLM    
+  wiring needed.                          
+                                          
+    CLOSE: clicking overlay background or 
+  × closes the modal.                     
+    ESC key closes the modal.             
+                                          
+  ---                                     
+                                          
+  TASK 5: Inline Ask Pandora — AskBar     
+  component                               
+                                          
+  Add a persistent bar at the bottom of   
+  ConciergeView, above the viewport       
+  bottom.                                 
+                                          
+    position: sticky, bottom: 0           
+    background: #0a0d14                   
+    border-top: 0.5px solid #1a1f2b       
+    padding: 8px 14px 12px                
+                                          
+    TOP ROW (capability chips):           
+      ⚡ Live queries · ∑ Show math · ✓   
+  Action cards · 📄 Doc accumulator       
+      Each: 10px, border 0.5px #242b3a,   
+  color #3a4252, border-radius 99px,      
+  padding 2px 8px                         
+                                          
+    BOTTOM ROW:                           
+      input (flex: 1, placeholder from    
+  brief.suggestedQuestion or fallback     
+        placeholder text by role:         
+          cro/admin/revops: "Ask about    
+  your pipeline, forecast, or team        
+  performance…"                           
+          manager: "Ask about your team's 
+  pipeline, forecast call prep, or data   
+  quality…"                               
+          ae: "Ask about your deals, what 
+  to prioritize today, or how to prepare…"
+      )                                   
+      "Ask Pandora" button (green bg,     
+  font-size 11px)                         
+                                          
+    On submit: POST                       
+  /api/workspaces/:workspaceId/chat with  
+  body { message: userInput }             
+    Opens a conversation thread that      
+  slides up from the bottom of the brief  
+  content                                 
+    (or navigates to the Ask Pandora page 
+  with context pre-loaded — check which   
+    approach is cleaner given current     
+  routing).                               
+                                          
+  ---                                     
+                                          
+  TASK 6: Wire routes                     
+                                          
+  In App.tsx (or equivalent routing file):
+    Add route: /concierge → ConciergeView 
+    Add route:                            
+  /workspaces/:workspaceId/concierge →    
+  ConciergeView (if workspace-scoped)     
+    Check the existing routing pattern for
+   the correct format.                    
+                                          
+  Update the Sidebar so that:             
+    /concierge is the default redirect    
+  from / (or from /dashboard if that      
+  exists)                                 
+    The Concierge nav item is visually    
+  active when on /concierge               
+                                          
+  If there is currently an "Assistant" nav
+   item or route, rename it to "Concierge"
+  and update the route. Do not create a   
+  parallel route — replace in place.      
+                                          
+  ---                                     
+                                          
+  VALIDATE:                               
+                                          
+  1. Loading: visit /concierge — skeleton 
+  shows, then brief loads within 3 seconds
+  2. Topbar: shows correct role chip and  
+  temporal label                          
+  3. Quarter tabs: correct tab is         
+  pre-selected based on current date      
+  4. VP role: Strategic and Tactical      
+  sub-tabs appear                         
+  5. AE role: Deals and Pipeline sub-tabs 
+  appear; Agents and Skills nav items     
+  hidden                                  
+  6. Verdict block: clicking opens        
+  MathModal with coverage breakdown       
+  7. BriefCard: clicking opens MathModal  
+  with correct mathKey data               
+  8. MathModal: records table expands on  
+  toggle click                            
+  9. MathModal: action Approve button     
+  POSTs to correct endpoint               
+  10. Sidebar: collapses to 48px, expands 
+  on hover, pinning works                 
+  11. AskBar: submitting a question routes
+   to Ask Pandora with context            
+  12. Mobile (<768px): sidebar is hidden, 
+  hamburger appears                       
+                                          
+  Do not modify:                          
+  - server/context/opening-brief.ts       
+  (production-ready, no changes)          
+  - server/chat/orchestrator.ts (agent    
+  loop, no changes)                       
+  - server/chat/pandora-agent.ts (system  
+  prompt, no changes)                     
+  - Any existing migrations               
+                                          
+  ---                                     
+  ✅ Ready to Paste into Replit           
+                                          
+  Changes made:                           
+  1. Task 4: Added exact Ask Pandora      
+  endpoint path: POST                     
+  /api/workspaces/:workspaceId/chat       
+  2. Task 2:                              
+    - Added console.log instruction for   
+  debugging actual field names            
+    - Changed brief.userContext.name →    
+  brief.user.name                         
+    - Changed brief.atRiskDeals →         
+  brief.findings.topFindings              
+  3. Task 5: Added exact endpoint path for
+   AskBar submit                          
+                                          
+  All 12 validation points are preserved. 
+  Paste this into Replit and the          
+  integration test begins.  
