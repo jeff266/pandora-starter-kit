@@ -247,44 +247,53 @@ async function handleAttainmentMath(
   const targetScope = await getTargetPipelineScope(workspaceId);
   const { quota, hasTarget } = targetScope;
 
-  let closedSQL = `SELECT name, amount, close_date
-     FROM deals
-     WHERE workspace_id = $1
-       AND stage_normalized = 'closed_won'`;
-  const closedParams: any[] = [workspaceId];
+  let scopeWhere = '';
+  const scopeParams: any[] = [workspaceId];
   let paramIdx = 2;
 
   if (targetScope.periodStart) {
-    closedSQL += ` AND close_date >= $${paramIdx}`;
-    closedParams.push(targetScope.periodStart);
+    scopeWhere += ` AND close_date >= $${paramIdx}`;
+    scopeParams.push(targetScope.periodStart);
     paramIdx++;
   }
   if (targetScope.periodEnd) {
-    closedSQL += ` AND close_date <= $${paramIdx}`;
-    closedParams.push(targetScope.periodEnd);
+    scopeWhere += ` AND close_date <= $${paramIdx}`;
+    scopeParams.push(targetScope.periodEnd);
     paramIdx++;
   }
   if (targetScope.pipelineScopeId) {
-    closedSQL += ` AND scope_id = $${paramIdx}::text`;
-    closedParams.push(targetScope.pipelineScopeId);
+    scopeWhere += ` AND scope_id = $${paramIdx}::text`;
+    scopeParams.push(targetScope.pipelineScopeId);
     paramIdx++;
   }
 
-  closedSQL += ` ORDER BY amount DESC NULLS LAST LIMIT 20`;
+  const aggResult = await query<{ closed_won: string }>(
+    `SELECT COALESCE(SUM(amount), 0)::numeric as closed_won
+     FROM deals
+     WHERE workspace_id = $1
+       AND stage_normalized = 'closed_won'${scopeWhere}`,
+    scopeParams
+  );
+  const closedWon = Number(aggResult.rows[0]?.closed_won ?? 0);
 
   const closedResult = await query<{
     name: string;
     amount: string;
     close_date: string;
-  }>(closedSQL, closedParams);
+  }>(
+    `SELECT name, amount, close_date
+     FROM deals
+     WHERE workspace_id = $1
+       AND stage_normalized = 'closed_won'${scopeWhere}
+     ORDER BY amount DESC NULLS LAST LIMIT 20`,
+    scopeParams
+  );
 
   const closedDeals = closedResult.rows.map(row => ({
     name: row.name,
     amount: Number(row.amount),
     close_date: row.close_date,
   }));
-
-  const closedWon = closedDeals.reduce((sum, deal) => sum + deal.amount, 0);
   const pct = quota > 0 ? Math.round((closedWon / quota) * 100) : 0;
 
   const periodLabel = targetScope.periodStart && targetScope.periodEnd

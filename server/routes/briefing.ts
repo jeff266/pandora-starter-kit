@@ -276,21 +276,6 @@ router.get(
             [workspaceId, pipelineFilter]
           ).catch(() => ({ rows: [] as TargetRow[] }));
           targetRow = pipelineScopedResult.rows[0] ?? null;
-
-          if (!targetRow) {
-            const allScopeResult = await query<TargetRow>(
-              `SELECT amount, pipeline_id, pipeline_name, period_start, period_end
-               FROM targets
-               WHERE workspace_id = $1 AND is_active = true
-                 AND period_start <= CURRENT_DATE
-                 AND period_end >= CURRENT_DATE
-                 AND (pipeline_name IS NULL OR pipeline_name = 'All pipelines')
-               ORDER BY period_start DESC NULLS LAST
-               LIMIT 1`,
-              [workspaceId]
-            ).catch(() => ({ rows: [] as TargetRow[] }));
-            targetRow = allScopeResult.rows[0] ?? null;
-          }
         } else {
           const globalResult = await query<TargetRow>(
             `SELECT amount, pipeline_id, pipeline_name, period_start, period_end
