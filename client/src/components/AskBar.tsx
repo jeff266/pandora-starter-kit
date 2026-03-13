@@ -37,10 +37,10 @@ interface AskBarProps {
   pandoraRole?: PandoraRole;
   suggestedQuestion?: string;
   onChipClick?: (chipId: ChipId) => void;
-  contextPreamble?: string;
+  conciergeContext?: Record<string, unknown> | null;
 }
 
-export default function AskBar({ pandoraRole, suggestedQuestion, onChipClick, contextPreamble }: AskBarProps) {
+export default function AskBar({ pandoraRole, suggestedQuestion, onChipClick, conciergeContext }: AskBarProps) {
   const navigate = useNavigate();
   const [input, setInput] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -53,8 +53,12 @@ export default function AskBar({ pandoraRole, suggestedQuestion, onChipClick, co
     const msg = input.trim();
     if (!msg) return;
     setInput('');
-    const fullMessage = contextPreamble ? `${contextPreamble}\n\n${msg}` : msg;
-    navigate(window.location.pathname, { state: { openChatWithMessage: fullMessage } });
+    navigate(window.location.pathname, {
+      state: {
+        openChatWithMessage: msg,
+        conciergeContext: conciergeContext || undefined,
+      },
+    });
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {

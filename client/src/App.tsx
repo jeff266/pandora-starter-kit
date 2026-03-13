@@ -153,6 +153,7 @@ export default function App() {
   const [chatScope, setChatScope] = useState<{ type: string; entity_id?: string; entity_name?: string; rep_email?: string } | undefined>(undefined);
   const [chatInitialSession, setChatInitialSession] = useState<string | null>(null);
   const [chatPendingMessage, setChatPendingMessage] = useState<string | null>(null);
+  const [chatConciergeContext, setChatConciergeContext] = useState<Record<string, unknown> | null>(null);
   const isMobile = useIsMobile();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
@@ -184,11 +185,12 @@ export default function App() {
     navigate(location.pathname, { replace: true, state: {} });
   }, [location.state?.openChatSession]);
 
-  // Open chat with a pre-seeded message (e.g. from report deepdive right-click)
+  // Open chat with a pre-seeded message (e.g. from report deepdive right-click or Concierge)
   useEffect(() => {
     const msg = location.state?.openChatWithMessage;
     if (!msg) return;
     setChatPendingMessage(msg);
+    setChatConciergeContext(location.state?.conciergeContext ?? null);
     setChatInitialSession(null);
     setChatOpen(true);
     navigate(location.pathname, { replace: true, state: {} });
@@ -452,11 +454,12 @@ export default function App() {
       )}
       <ChatPanel
         isOpen={chatOpen}
-        onClose={() => { setChatOpen(false); setChatInitialSession(null); setChatPendingMessage(null); }}
+        onClose={() => { setChatOpen(false); setChatInitialSession(null); setChatPendingMessage(null); setChatConciergeContext(null); }}
         scope={chatScope}
         initialSessionId={chatInitialSession || undefined}
         pendingMessage={chatPendingMessage}
         onPendingMessageSent={() => setChatPendingMessage(null)}
+        conciergeContext={chatConciergeContext}
       />
       <style>{`
         @keyframes skeleton-pulse {

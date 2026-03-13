@@ -6,6 +6,7 @@ import { usePandoraRole, type PandoraRole } from '../context/PandoraRoleContext'
 import BriefCard from '../components/BriefCard';
 import MathModal from '../components/MathModal';
 import AskBar, { type ChipId } from '../components/AskBar';
+import { type ConciergeContext, formatConciergeContextPreamble } from '../types/concierge-context';
 import { colors as themeColors } from '../styles/theme';
 
 const S = {
@@ -309,42 +310,46 @@ export default function ConciergeView() {
   const openMathModal = useCallback((key: string) => setActiveMathKey(key), []);
   const closeMathModal = useCallback(() => setActiveMathKey(null), []);
 
-  const buildConciergeContext = useCallback((): string => {
-    if (!brief) return '';
-    const parts: string[] = ['[Concierge context]'];
+  const buildConciergeContext = useCallback((): ConciergeContext | null => {
+    if (!brief) return null;
     const temporal = brief.temporal as Record<string, unknown>;
     const quarter = temporal?.fiscalQuarter as string | undefined;
     const week = temporal?.weekOfQuarter as number | undefined;
     const urgency = temporal?.urgencyLabel as string | undefined;
-    if (quarter && week) parts.push(`Quarter: ${quarter}, Week ${week}${urgency ? ` (${urgency})` : ''}`);
-    const _hasTarget = brief.targets?.hasTarget !== false;
-    const _pct = brief.targets?.pctAttained;
-    if (_hasTarget && _pct != null) {
-      parts.push(`Attainment: ${Math.round(_pct)}% of ${fmtCurrency(brief.targets?.headline?.amount)}`);
-    }
-    if (brief.pipeline?.totalValue != null) {
-      parts.push(`Pipeline: ${fmtCurrency(brief.pipeline.totalValue)} (${brief.pipeline.dealCount ?? '?'} deals)`);
-    }
-    if (brief.pipeline?.coverageRatio != null) {
-      parts.push(`Coverage: ${brief.pipeline.coverageRatio.toFixed(1)}×`);
-    }
-    const topF = brief.findings?.topFindings?.slice(0, 3) ?? [];
-    if (topF.length > 0) {
-      parts.push('Top findings:');
-      topF.forEach((f: TopFinding) => {
-        parts.push(`  - [${f.severity}] ${cleanFindingMessage(f.message || '')}`);
-      });
-    }
-    return parts.join('\n');
+    const quarterLabel = quarter && week
+      ? `${quarter}, Week ${week}${urgency ? ` (${urgency})` : ''}`
+      : quarter || '';
+    const topF = (brief.findings?.topFindings?.slice(0, 3) ?? []).map((f: TopFinding) => ({
+      severity: f.severity,
+      message: cleanFindingMessage(f.message || ''),
+    }));
+    return {
+      quarter: quarterLabel,
+      attainmentPct: brief.targets?.hasTarget !== false ? (brief.targets?.pctAttained ?? null) : null,
+      pipelineScope: {
+        totalValue: brief.pipeline?.totalValue ?? null,
+        dealCount: brief.pipeline?.dealCount ?? null,
+        coverageRatio: brief.pipeline?.coverageRatio ?? null,
+      },
+      topFindings: topF,
+    };
   }, [brief]);
 
+  const navigateToChat = useCallback((message: string, ctx: ConciergeContext | null) => {
+    navigate(window.location.pathname, {
+      state: {
+        openChatWithMessage: message,
+        conciergeContext: ctx,
+      },
+    });
+  }, [navigate]);
+
   const handleChipClick = useCallback((chipId: ChipId) => {
+    const ctx = buildConciergeContext();
     switch (chipId) {
       case 'live_queries': {
         const q = brief?.suggestedQuestion || 'What should I focus on today?';
-        const ctx = buildConciergeContext();
-        const fullMsg = ctx ? `${ctx}\n\n${q}` : q;
-        navigate(window.location.pathname, { state: { openChatWithMessage: fullMsg } });
+        navigateToChat(q, ctx);
         break;
       }
       case 'show_math': {
@@ -356,23 +361,60 @@ export default function ConciergeView() {
         navigate('/actions');
         break;
       case 'doc_accumulator': {
-        const ctx = buildConciergeContext();
-        const wbrMsg = ctx
-          ? `${ctx}\n\nStart a WBR document — use the briefing context above as the opening contributions.`
-          : 'Start a WBR document from my current briefing.';
-        navigate(window.location.pathname, { state: { openChatWithMessage: wbrMsg } });
+        navigateToChat('Start a WBR document from my current briefing.', ctx);
         break;
       }
     }
-  }, [brief, buildConciergeContext, navigate, openMathModal]);
+  }, [brief, buildConciergeContext, navigate, navigateToChat, openMathModal]);
 
-  const handleStartWBR = useCallback(() => {
+  const handleStartWBR = useCallback(async () => {
     const ctx = buildConciergeContext();
-    const wbrMsg = ctx
-      ? `${ctx}\n\nAssemble a WBR from this briefing. Use the attainment, pipeline, and findings above as initial contributions.`
-      : 'Assemble a WBR from my current briefing.';
-    navigate(window.location.pathname, { state: { openChatWithMessage: wbrMsg } });
-  }, [buildConciergeContext, navigate]);
+    if (brief && currentWorkspace?.id) {
+      const contributions: Array<{ id: string; type: 'finding' | 'recommendation'; title: string; body: string; severity?: 'critical' | 'warning' | 'info' }> = [];
+      const _hasTarget = brief.targets?.hasTarget !== false;
+      const _pct = brief.targets?.pctAttained;
+      if (_hasTarget && _pct != null) {
+        contributions.push({
+          id: `seed-attainment-${Date.now()}`,
+          type: 'finding',
+          title: `Attainment: ${Math.round(_pct)}%`,
+          body: `Current attainment is ${Math.round(_pct)}% against a ${fmtCurrency(brief.targets?.headline?.amount)} target. ${brief.targets?.gap ? `Gap: ${typeof brief.targets.gap === 'number' ? fmtCurrency(brief.targets.gap) : brief.targets.gap}.` : ''}`,
+        });
+      }
+      if (brief.pipeline?.totalValue != null) {
+        contributions.push({
+          id: `seed-pipeline-${Date.now()}`,
+          type: 'finding',
+          title: `Pipeline: ${fmtCurrency(brief.pipeline.totalValue)}`,
+          body: `${brief.pipeline.dealCount ?? 0} deals in pipeline. ${brief.pipeline.coverageRatio != null ? `Coverage ratio: ${brief.pipeline.coverageRatio.toFixed(1)}×.` : ''} ${brief.pipeline.weightedValue != null ? `Weighted value: ${fmtCurrency(brief.pipeline.weightedValue)}.` : ''}`,
+        });
+      }
+      const topF = brief.findings?.topFindings?.slice(0, 3) ?? [];
+      topF.forEach((f: TopFinding, i: number) => {
+        contributions.push({
+          id: `seed-finding-${i}-${Date.now()}`,
+          type: 'finding',
+          title: f.dealName || cleanFindingMessage(f.message || '').slice(0, 60),
+          body: cleanFindingMessage(f.message || ''),
+          severity: f.severity === 'critical' ? 'critical' : f.severity === 'warning' ? 'warning' : 'info',
+        });
+      });
+      if (contributions.length > 0) {
+        try {
+          await api.post(`/sessions/${currentWorkspace.id}/sessions/seed-wbr`, {
+            sessionId: `wbr-${Date.now()}`,
+            contributions,
+          });
+        } catch (e) {
+          console.warn('[ConciergeView] WBR seed failed, proceeding with chat:', e);
+        }
+      }
+    }
+    navigateToChat(
+      'Assemble a WBR from this briefing. Use the attainment, pipeline, and findings as initial contributions.',
+      ctx,
+    );
+  }, [brief, currentWorkspace?.id, buildConciergeContext, navigateToChat]);
 
   const handleQuarterTab = (tab: QuarterTab) => {
     const currentPhaseOrder = tabPhaseOrder(phaseToTab(brief?.temporal?.quarterPhase));
@@ -872,7 +914,7 @@ export default function ConciergeView() {
         pandoraRole={pandoraRole}
         suggestedQuestion={brief?.suggestedQuestion}
         onChipClick={handleChipClick}
-        contextPreamble={buildConciergeContext()}
+        conciergeContext={buildConciergeContext() as Record<string, unknown> | null}
       />
 
       {/* MATH MODAL */}

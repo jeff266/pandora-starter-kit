@@ -1,9 +1,10 @@
 import { Router } from 'express';
 import { getConversationState, updateContext } from '../chat/conversation-state.js';
 import { getOrCreateSessionContext } from '../agents/session-context.js';
-import { overrideSection, removeContribution } from '../documents/accumulator.js';
+import { createAccumulatedDocument, addContribution, overrideSection, removeContribution } from '../documents/accumulator.js';
 import { synthesizeDocument } from '../documents/synthesizer.js';
 import { distributeDocument } from '../documents/distributor.js';
+import type { DocumentContribution } from '../documents/types.js';
 
 const router = Router();
 
@@ -125,6 +126,47 @@ router.post('/:workspaceId/sessions/:threadId/document/distribute', async (req: 
     res.json(result);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/:workspaceId/sessions/seed-wbr', async (req, res) => {
+  const { workspaceId } = req.params;
+  const { sessionId, contributions } = req.body as {
+    sessionId: string;
+    contributions: Array<{
+      id: string;
+      type: 'finding' | 'chart' | 'table' | 'recommendation';
+      title: string;
+      body?: string;
+      severity?: 'critical' | 'warning' | 'info';
+    }>;
+  };
+
+  if (!sessionId || !Array.isArray(contributions) || contributions.length === 0) {
+    return res.status(400).json({ error: 'sessionId and contributions[] required' });
+  }
+
+  try {
+    const doc = createAccumulatedDocument(sessionId, workspaceId, 'WBR');
+    const now = new Date().toISOString();
+
+    for (const c of contributions) {
+      const contribution: DocumentContribution = {
+        id: c.id,
+        type: c.type,
+        title: c.title,
+        body: c.body,
+        severity: c.severity,
+        timestamp: now,
+      };
+      addContribution(doc, contribution);
+    }
+
+    res.json({ document: doc, contributionCount: contributions.length });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    console.error('[Sessions] WBR seed error:', message);
+    res.status(500).json({ error: message });
   }
 });
 
