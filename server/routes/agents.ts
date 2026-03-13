@@ -57,6 +57,15 @@ agentsGlobalRouter.post('/agents', requireAdmin, (req: Request, res: Response) =
       createdBy: body.createdBy || 'api',
       createdAt: new Date(),
       updatedAt: new Date(),
+      // Operator model fields (optional)
+      ...(body.role && { role: body.role }),
+      ...(body.execution_mode && { execution_mode: body.execution_mode }),
+      ...(body.loop_config && { loop_config: body.loop_config }),
+      ...(body.post_action_playbook && { post_action_playbook: body.post_action_playbook }),
+      ...(body.autonomy_tier && { autonomy_tier: body.autonomy_tier }),
+      ...(body.promotion_history && { promotion_history: body.promotion_history }),
+      ...(body.goal && { goal: body.goal }),
+      ...(body.standing_questions && { standing_questions: body.standing_questions }),
     };
 
     const registry = getAgentRegistry();
@@ -80,6 +89,13 @@ agentsGlobalRouter.put('/agents/:agentId', requireAdmin, (req: Request, res: Res
     ...updates,
     id: existing.id,
     updatedAt: new Date(),
+    // Operator model fields are merged via spread operator above, but explicitly preserve if not provided
+    ...(updates.role !== undefined && { role: updates.role }),
+    ...(updates.execution_mode !== undefined && { execution_mode: updates.execution_mode }),
+    ...(updates.loop_config !== undefined && { loop_config: updates.loop_config }),
+    ...(updates.post_action_playbook !== undefined && { post_action_playbook: updates.post_action_playbook }),
+    ...(updates.autonomy_tier !== undefined && { autonomy_tier: updates.autonomy_tier }),
+    ...(updates.promotion_history !== undefined && { promotion_history: updates.promotion_history }),
   };
 
   registry.remove(existing.id);

@@ -84,6 +84,28 @@ export async function processFeedback(feedback: AgentFeedback): Promise<void> {
     }
   );
 
+  // CRITICAL FIX: Also write to agent_tuning_pairs (the table getTuningPairs reads from)
+  // This closes the feedback loop: user feedback → tuning pairs → agent improvement
+  await query(
+    `INSERT INTO agent_tuning_pairs
+       (workspace_id, agent_id, generation_id, skill_id, source, block_id, input_context, preferred_output)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     ON CONFLICT (workspace_id, agent_id, generation_id, block_id) DO UPDATE
+     SET preferred_output = EXCLUDED.preferred_output,
+         input_context = EXCLUDED.input_context,
+         source = EXCLUDED.source`,
+    [
+      feedback.workspace_id,
+      feedback.agent_id,
+      feedback.generation_id,
+      null, // skill_id - not specified in feedback, nullable
+      'user_feedback', // source
+      feedback.section_id || null, // block_id - use section_id if available
+      result.tuningKey, // input_context - store the tuning key for context
+      result.tuningValue.instruction, // preferred_output - the instruction text
+    ]
+  );
+
   logger.info('[FeedbackProcessor] Tuning pair created', {
     feedback_id: feedback.id,
     tuning_key: result.tuningKey,

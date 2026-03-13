@@ -21,6 +21,19 @@ export interface AgentDefinition {
   goal?: string;
   /** Recurring questions answered in every run briefing. */
   standing_questions?: string[];
+
+  // Operator model fields (all optional — existing agents don't have them)
+  role?: string;
+  execution_mode?: 'pipeline' | 'loop' | 'auto';
+  loop_config?: {
+    available_skills: string[];
+    max_iterations: number;
+    termination: 'goal_satisfied' | 'max_iterations';
+    planning_prompt?: string;
+  };
+  post_action_playbook?: PlaybookEntry[];
+  autonomy_tier?: 1 | 2 | 3;
+  promotion_history?: PromotionRecord[];
 }
 
 export interface AgentSkillStep {
@@ -89,4 +102,50 @@ export class AgentExecutionError extends Error {
     this.name = 'AgentExecutionError';
     this.cause = cause;
   }
+}
+
+// ============================================================================
+// Operator Model Types
+// ============================================================================
+
+export interface PlaybookEntry {
+  trigger: string;
+  actions: PlaybookAction[];
+}
+
+export interface PlaybookAction {
+  type: 'emit_action' | 'notify' | 'log_finding';
+  action_type?: string;
+  channel?: 'slack' | 'email';
+  template?: string;
+  payload_template?: Record<string, any>;
+}
+
+export interface PromotionRecord {
+  from_tier: number;
+  to_tier: number;
+  promoted_at: string;
+  promoted_by: string;
+  evidence: {
+    total_runs: number;
+    weeks_active: number;
+    approval_rate?: number;
+  };
+}
+
+export interface LoopIteration {
+  iteration: number;
+  observation: string;
+  plan: string;
+  skill_executed: string | null;
+  evaluation: string;
+  goal_progress: 'none' | 'partial' | 'satisfied';
+  tokens: number;
+}
+
+export interface LoopRunResult {
+  iterations: LoopIteration[];
+  termination_reason: 'goal_satisfied' | 'max_iterations' | 'token_limit' | 'error';
+  total_loop_tokens: number;
+  final_synthesis: string;
 }

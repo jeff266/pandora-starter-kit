@@ -451,3 +451,18 @@ export async function getAgent(agentId: string, workspaceId: string): Promise<Ag
   );
   return result.rows[0] ?? null;
 }
+
+export async function getBySlug(slug: string, workspaceId: string): Promise<Agent | null> {
+  // Normalize slug for comparison (lowercase, replace spaces/dashes with hyphens)
+  const normalizedSlug = slug.toLowerCase().replace(/[\s_]+/g, '-');
+
+  // Query by normalized name match
+  const result = await query<Agent>(
+    `SELECT * FROM agents
+     WHERE workspace_id=$1
+       AND LOWER(REPLACE(REPLACE(name, ' ', '-'), '_', '-')) = $2
+     LIMIT 1`,
+    [workspaceId, normalizedSlug]
+  );
+  return result.rows[0] ?? null;
+}

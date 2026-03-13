@@ -8,6 +8,7 @@ import type {
 } from './types.js';
 import { AgentExecutionError } from './types.js';
 import type { SkillEvidence } from '../skills/types.js';
+import { executeLoop } from './loop-executor.js';
 import { getAgentRegistry } from './registry.js';
 import { getSkillRegistry } from '../skills/registry.js';
 import { getSkillRuntime } from '../skills/runtime.js';
@@ -99,6 +100,70 @@ export class AgentRuntime {
     const skillEvidence: Record<string, SkillEvidence> = {};
 
     try {
+      // Determine execution mode (pipeline vs loop)
+      const mode = (agent as any).execution_mode || 'pipeline';
+      const effectiveMode = mode === 'auto'
+        ? 'pipeline' // TODO: Add classifier to decide between pipeline and loop
+        : mode;
+
+      // If loop mode is requested, try loop executor
+      if (effectiveMode === 'loop') {
+        try {
+          const loopConfig = (agent as any).loop_config || {};
+          const question = agent.standing_questions?.[0] || agent.goal || agent.description;
+
+          const loopResult = await executeLoop({
+            agent,
+            workspaceId,
+            runId,
+            question,
+          });
+
+          // Log loop-specific metadata to agent_runs
+          await query(
+            `UPDATE agent_runs
+             SET execution_mode = 'loop',
+                 loop_iterations = $1,
+                 loop_trace = $2,
+                 termination_reason = $3
+             WHERE run_id = $4`,
+            [
+              loopResult.iterations.length,
+              JSON.stringify(loopResult.iterations),
+              loopResult.termination_reason,
+              runId,
+            ]
+          );
+
+          // Return early with loop synthesis as final output
+          const duration = Date.now() - startTime;
+          await this.logAgentRun(runId, agentId, workspaceId, 'completed', loopResult.final_synthesis);
+
+          return {
+            runId,
+            agentId,
+            workspaceId,
+            status: 'completed',
+            duration,
+            skillResults: loopResult.iterations.map((it, i) => ({
+              skillId: it.skill_executed || 'planning',
+              status: 'completed',
+              duration: 0,
+            })),
+            synthesizedOutput: loopResult.final_synthesis,
+            tokenUsage: {
+              skills: loopResult.total_loop_tokens,
+              synthesis: 0,
+              total: loopResult.total_loop_tokens,
+            },
+          };
+        } catch (loopErr) {
+          console.error('[AgentRuntime] Loop executor failed, falling back to pipeline:', loopErr);
+          // Fall through to pipeline execution
+        }
+      }
+
+      // Pipeline execution (existing behavior)
       for (const step of agent.skills) {
         const skillStart = Date.now();
         try {
