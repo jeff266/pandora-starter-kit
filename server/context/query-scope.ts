@@ -12,10 +12,23 @@
 
 import { configLoader } from '../config/workspace-config-loader.js';
 import { getPandoraRole, type PandolaRole } from './pandora-role.js';
+import { query } from '../db.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
+
+export interface CalendarEventSummary {
+  id: string;
+  title: string | null;
+  start_time: string;
+  end_time: string;
+  attendee_names: string[];
+  attendee_emails: string[];
+  meet_link: string | null;
+  resolved_deal_ids: string[];
+  deal_names?: string[];  // populated if resolved_deal_ids is non-empty
+}
 
 export interface QueryScope {
   fiscalYearStartMonth: number;
@@ -34,6 +47,11 @@ export interface QueryScope {
   ownerLiteral: string;
 
   forecastedPipelines: string[];
+
+  // Calendar context (optional - only populated if calendar is connected)
+  todaysMeetings?: CalendarEventSummary[];
+  thisWeekMeetings?: CalendarEventSummary[];
+  upcomingMeetingsByDeal?: Record<string, CalendarEventSummary[]>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -141,6 +159,35 @@ export async function buildQueryScope(
     ownerLiteral = ` AND owner_email = '${escaped}'`;
   }
 
+  // Fetch today's meetings (non-blocking - if calendar not connected, skip)
+  const calendarResult = await query(
+    `SELECT ce.id, ce.title, ce.start_time, ce.end_time,
+            ce.attendees, ce.meet_link, ce.resolved_deal_ids,
+            array_agg(d.name) FILTER (WHERE d.name IS NOT NULL) as deal_names
+     FROM calendar_events ce
+     LEFT JOIN deals d ON d.id = ANY(ce.resolved_deal_ids) AND d.workspace_id = ce.workspace_id
+     WHERE ce.workspace_id = $1
+       AND ce.start_time::date = CURRENT_DATE
+       AND ce.status != 'cancelled'
+     GROUP BY ce.id, ce.title, ce.start_time, ce.end_time,
+              ce.attendees, ce.meet_link, ce.resolved_deal_ids
+     ORDER BY ce.start_time ASC`,
+    [workspaceId]
+  ).catch(() => ({ rows: [] }));
+
+  // Map to CalendarEventSummary[]
+  const todaysMeetings: CalendarEventSummary[] = calendarResult.rows.map(row => ({
+    id: row.id,
+    title: row.title,
+    start_time: row.start_time.toISOString(),
+    end_time: row.end_time.toISOString(),
+    attendee_names: (row.attendees || []).map((a: any) => a.displayName || a.email).filter(Boolean),
+    attendee_emails: (row.attendees || []).map((a: any) => a.email).filter(Boolean),
+    meet_link: row.meet_link,
+    resolved_deal_ids: row.resolved_deal_ids || [],
+    deal_names: row.deal_names || [],
+  }));
+
   return {
     fiscalYearStartMonth,
     currentFiscalQuarter,
@@ -154,5 +201,6 @@ export async function buildQueryScope(
     userEmail,
     ownerLiteral,
     forecastedPipelines,
+    ...(todaysMeetings.length > 0 && { todaysMeetings }),
   };
 }

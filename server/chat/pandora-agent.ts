@@ -923,6 +923,38 @@ const PANDORA_TOOLS: ToolDef[] = [
       required: ['deal_id'],
     },
   },
+  {
+    name: 'get_todays_meetings',
+    description: "Get today's calendar meetings for the workspace. Returns meeting titles, times, attendees, and any linked deals. Use when user asks about today's schedule, upcoming calls, or wants a pre-call brief.",
+    parameters: {
+      type: 'object',
+      properties: {
+        include_deal_context: {
+          type: 'boolean',
+          description: 'If true, fetch deal details for linked deals'
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'get_upcoming_meetings',
+    description: "Get upcoming calendar meetings for the next N days. Use when user asks about this week's calls, upcoming meetings, or wants to plan ahead.",
+    parameters: {
+      type: 'object',
+      properties: {
+        days: {
+          type: 'number',
+          description: 'Number of days ahead to look (default: 7)'
+        },
+        deal_id: {
+          type: 'string',
+          description: 'If provided, filter to meetings linked to this specific deal'
+        }
+      },
+      required: [],
+    },
+  },
 ];
 
 // ─── System prompt ────────────────────────────────────────────────────────────
