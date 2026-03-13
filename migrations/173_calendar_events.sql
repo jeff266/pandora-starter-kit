@@ -1,4 +1,4 @@
--- Migration 172: Calendar Events
+-- Migration 173: Calendar Events
 -- Adds Google Calendar integration with event storage and deal resolution
 
 CREATE TABLE calendar_events (
@@ -49,8 +49,6 @@ CREATE TABLE calendar_events (
 CREATE INDEX idx_calendar_events_workspace_date
   ON calendar_events(workspace_id, start_time);
 
-CREATE INDEX idx_calendar_events_workspace_today
-  ON calendar_events(workspace_id, (start_time::date));
 
 CREATE INDEX idx_calendar_events_deal
   ON calendar_events USING gin(resolved_deal_ids);
