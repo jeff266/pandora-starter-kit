@@ -17,6 +17,40 @@ const router = Router();
 router.use(requireWorkspaceAccess);
 
 /**
+ * Load the headline target and resolve its pipeline scope_id from analysis_scopes.
+ * This ensures the closed-won numerator and the quota denominator measure the same pipeline.
+ */
+async function getTargetPipelineScope(
+  workspaceId: string
+): Promise<{ quota: number; pipelineScopeId: string | null }> {
+  const targetResult = await query<{
+    amount: string;
+    pipeline_id: string | null;
+    pipeline_name: string | null;
+  }>(
+    `SELECT amount, pipeline_id, pipeline_name
+     FROM targets
+     WHERE workspace_id = $1 AND is_active = true
+       AND (period_start IS NULL OR period_start <= NOW())
+       AND (period_end IS NULL OR period_end >= NOW())
+     ORDER BY period_start DESC NULLS LAST LIMIT 1`,
+    [workspaceId]
+  );
+  const targetRow = targetResult.rows[0];
+  const quota = Number(targetRow?.amount ?? 0);
+  const pipelineRef = targetRow?.pipeline_id || targetRow?.pipeline_name || null;
+  if (!pipelineRef) return { quota, pipelineScopeId: null };
+
+  const scopeResult = await query<{ scope_id: string }>(
+    `SELECT scope_id FROM analysis_scopes
+     WHERE workspace_id = $1 AND (name = $2 OR scope_id = $2)
+     LIMIT 1`,
+    [workspaceId, pipelineRef]
+  );
+  return { quota, pipelineScopeId: scopeResult.rows[0]?.scope_id ?? null };
+}
+
+/**
  * GET /:workspaceId/briefing/math/:mathKey
  *
  * Returns detailed breakdown for a specific metric.
@@ -105,28 +139,31 @@ async function handleCoverageMath(
   dealScopeSQL: string,
   dealScopeParams: any[]
 ): Promise<void> {
-  // Get current quota period
-  const quotaPeriod = await configLoader.getQuotaPeriod(workspaceId).catch(() => null);
+  // Get current quota period and the target's pipeline scope in parallel
+  const [quotaPeriod, { quota: target, pipelineScopeId }] = await Promise.all([
+    configLoader.getQuotaPeriod(workspaceId).catch(() => null),
+    getTargetPipelineScope(workspaceId),
+  ]);
   const periodStart = quotaPeriod?.start ?? new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
 
-  // Get target (quota)
-  const targetResult = await query<{ amount: string }>(
-    `SELECT amount FROM targets
-     WHERE workspace_id = $1 AND is_primary = true
-     ORDER BY created_at DESC LIMIT 1`,
-    [workspaceId]
-  );
-  const target = Number(targetResult.rows[0]?.amount ?? 0);
+  // Build pipeline scope filter for closed won — must match the scope used for the quota
+  let pipelineSQL = '';
+  const pipelineParams: any[] = [];
+  if (pipelineScopeId) {
+    pipelineSQL = ` AND scope_id = $${3 + dealScopeParams.length}::text`;
+    pipelineParams.push(pipelineScopeId);
+  }
 
-  // Get closed won this period
+  // Get closed won this period — scoped to the same pipeline as the target
   const closedWonResult = await query<{ closed_won: string }>(
     `SELECT COALESCE(SUM(amount), 0)::numeric as closed_won
      FROM deals
      WHERE workspace_id = $1
        AND stage_normalized = 'closed_won'
        AND updated_at >= $2
-       ${dealScopeSQL}`,
-    [workspaceId, periodStart, ...dealScopeParams]
+       ${dealScopeSQL}
+       ${pipelineSQL}`,
+    [workspaceId, periodStart, ...dealScopeParams, ...pipelineParams]
   );
   const closedWon = Number(closedWonResult.rows[0]?.closed_won ?? 0);
 
@@ -183,20 +220,22 @@ async function handleAttainmentMath(
   dealScopeSQL: string,
   dealScopeParams: any[]
 ): Promise<void> {
-  // Get current quota period
-  const quotaPeriod = await configLoader.getQuotaPeriod(workspaceId).catch(() => null);
+  // Get current quota period and the target's pipeline scope in parallel
+  const [quotaPeriod, { quota, pipelineScopeId }] = await Promise.all([
+    configLoader.getQuotaPeriod(workspaceId).catch(() => null),
+    getTargetPipelineScope(workspaceId),
+  ]);
   const periodStart = quotaPeriod?.start ?? new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
 
-  // Get quota
-  const quotaResult = await query<{ amount: string }>(
-    `SELECT amount FROM targets
-     WHERE workspace_id = $1 AND is_primary = true
-     ORDER BY created_at DESC LIMIT 1`,
-    [workspaceId]
-  );
-  const quota = Number(quotaResult.rows[0]?.amount ?? 0);
+  // Build pipeline scope filter — must match the scope used for the quota
+  let pipelineSQL = '';
+  const pipelineParams: any[] = [];
+  if (pipelineScopeId) {
+    pipelineSQL = ` AND scope_id = $${3 + dealScopeParams.length}::text`;
+    pipelineParams.push(pipelineScopeId);
+  }
 
-  // Get closed won deals
+  // Get closed won deals scoped to the same pipeline as the target
   const closedResult = await query<{
     name: string;
     amount: string;
@@ -208,9 +247,10 @@ async function handleAttainmentMath(
        AND stage_normalized = 'closed_won'
        AND updated_at >= $2
        ${dealScopeSQL}
+       ${pipelineSQL}
      ORDER BY amount DESC NULLS LAST
      LIMIT 20`,
-    [workspaceId, periodStart, ...dealScopeParams]
+    [workspaceId, periodStart, ...dealScopeParams, ...pipelineParams]
   );
 
   const closedDeals = closedResult.rows.map(row => ({
@@ -222,6 +262,8 @@ async function handleAttainmentMath(
   const closedWon = closedDeals.reduce((sum, deal) => sum + deal.amount, 0);
   const pct = quota > 0 ? Math.round((closedWon / quota) * 100) : 0;
 
+  const scopeNote = pipelineScopeId ? ` Scoped to pipeline: ${pipelineScopeId}.` : '';
+
   res.json({
     mathKey: 'attainment',
     title: 'Quota Attainment',
@@ -229,7 +271,7 @@ async function handleAttainmentMath(
     denominator: { value: quota, label: 'Quota' },
     result: { value: pct, label: `${pct}% attainment`, unit: '%' },
     breakdown: closedDeals,
-    note: `Closed won deals since ${periodStart.toISOString().split('T')[0]}.`,
+    note: `Closed won deals since ${periodStart.toISOString().split('T')[0]}.${scopeNote}`,
   });
 }
 
@@ -245,8 +287,10 @@ async function handlePipelineMath(
   // Get quota for context
   const quotaResult = await query<{ amount: string }>(
     `SELECT amount FROM targets
-     WHERE workspace_id = $1 AND is_primary = true
-     ORDER BY created_at DESC LIMIT 1`,
+     WHERE workspace_id = $1 AND is_active = true
+       AND (period_start IS NULL OR period_start <= NOW())
+       AND (period_end IS NULL OR period_end >= NOW())
+     ORDER BY period_start DESC NULLS LAST LIMIT 1`,
     [workspaceId]
   );
   const quota = Number(quotaResult.rows[0]?.amount ?? 0);

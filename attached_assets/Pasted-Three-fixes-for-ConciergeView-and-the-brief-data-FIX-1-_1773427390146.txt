@@ -1,0 +1,47 @@
+Three fixes for ConciergeView and the brief data:
+
+FIX 1 — Narrative (Replit)
+The situation paragraph must explain stakes, not count findings.
+Replace the current derivation logic with this pattern:
+
+  Line 1: temporal position + urgency
+    "Week {weekOfQuarter} of Q1 — {urgencyLabel}."
+  
+  Line 2: the number (skip if pctAttained is unreliable / >200%)
+    Only show if brief.targets.pctAttained is between 0 and 200.
+    If pctAttained > 200, show pipeline coverage instead:
+    "Pipeline coverage is {coverageRatio}× against a {headline} target."
+  
+  Line 3: what needs attention
+    If critical > 0: "{critical} deal{s} flagged as critical risk this week."
+    If critical === 0 and warning > 0: "{warning} deals showing warning signals."
+    If both 0: omit this line.
+
+Do not show "19 critical and 28 warnings" as raw counts — that's noise.
+Show what it means at week 11 with 18 days left.
+
+FIX 2 — Card body text (Replit)
+Each BriefCard must show a body line explaining WHY this finding matters.
+The brief.findings.topFindings array has a `message` field (currently used
+as the title) and likely a `severity`, `dealName`, `skillName`, and `age` field.
+
+Restructure the card:
+  - eyebrow: skillName (cleaned, title-cased)
+  - title: dealName + amount if present, else first 60 chars of message
+  - body: the full message field — this is the "why"
+  - footer: "Tap to drill in →"
+
+If the message field IS the full explanation (e.g. "has only 1 contact"),
+then construct the body from age: "This finding is {age} days old."
+or from severity: "Severity: {severity}. This deal has no secondary contact
+and is at risk if the primary goes dark."
+
+FIX 3 — Selection rationale (Replit)
+Above the brief cards, add a one-line selection label:
+  "Showing {n} of {total} findings · sorted by severity"
+  where n = topFindings.length and total = findings.critical + findings.warning
+
+This tells the user these aren't random — they're the top findings by
+severity. It also signals there are more below.
+
+Make this label 11px, color #5a6578, margin-bottom 8px.

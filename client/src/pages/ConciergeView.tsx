@@ -185,25 +185,40 @@ function cleanFindingMessage(msg: string): string {
 
 function deriveSituationLine(brief: OpeningBriefData): string {
   const parts: string[] = [];
-  const urgency = brief.temporal?.urgencyLabel;
-  if (urgency) {
+  const temporal = brief.temporal as any;
+
+  // Line 1: week + quarter + urgency
+  const week = temporal?.weekOfQuarter;
+  const quarter = temporal?.fiscalQuarter;
+  const urgency = temporal?.urgencyLabel;
+  if (week && quarter) {
+    const urgencyPart = urgency ? ` — ${urgency}` : '';
+    parts.push(`Week ${week} of ${quarter}${urgencyPart}.`);
+  } else if (urgency) {
     parts.push(urgency.endsWith('.') ? urgency : `${urgency}.`);
   }
+
+  // Line 2: attainment (only if plausible 0–200%) or pipeline coverage if attainment is inflated
   const pct = brief.targets?.pctAttained;
   const headline = brief.targets?.headline;
-  if (pct != null && headline?.amount) {
-    parts.push(`Attainment is at ${pct}% against a ${fmtCurrency(headline.amount)} target.`);
-  } else if (pct != null) {
-    parts.push(`Attainment is at ${pct}%.`);
+  if (pct != null && pct >= 0 && pct <= 200) {
+    parts.push(`Attainment is at ${pct}% against a ${fmtCurrency(headline?.amount)} target.`);
+  } else if (pct != null && pct > 200) {
+    const coverage = brief.pipeline?.coverageRatio;
+    if (coverage != null) {
+      parts.push(`Pipeline coverage is ${coverage.toFixed(1)}× against a ${fmtCurrency(headline?.amount)} target.`);
+    }
   }
+
+  // Line 3: critical or warning signal count — stake-first, no noisy "and X warnings"
   const critical = brief.findings?.critical ?? 0;
   const warning = brief.findings?.warning ?? 0;
-  if (critical > 0 || warning > 0) {
-    const critStr = critical > 0 ? `${critical} critical` : '';
-    const warnStr = warning > 0 ? `${warning} warning${warning === 1 ? '' : 's'}` : '';
-    const combined = [critStr, warnStr].filter(Boolean).join(' and ');
-    parts.push(`${combined} active.`);
+  if (critical > 0) {
+    parts.push(`${critical} deal${critical === 1 ? '' : 's'} flagged as critical risk this week.`);
+  } else if (warning > 0) {
+    parts.push(`${warning} deal${warning === 1 ? '' : 's'} showing warning signals.`);
   }
+
   return parts.join(' ');
 }
 
@@ -334,21 +349,59 @@ export default function ConciergeView() {
           </div>
         </div>
 
-        {/* PROJECTION BANNER */}
-        {isProjection && (
-          <div style={{
-            background: 'rgba(167,139,250,0.08)', border: `0.5px solid rgba(167,139,250,0.25)`,
-            borderRadius: 8, padding: '8px 14px', marginBottom: 14, fontSize: 12, color: '#c4b5fd',
-          }}>
-            ↗ Projection — This is where{brief?.temporal?.quarterLabel ? ` ${brief.temporal.quarterLabel}` : ' this quarter'} typically stands. Based on current pipeline velocity.
-          </div>
-        )}
+        {/* PROJECTION / PAST BANNER */}
+        {(() => {
+          if (!brief) return null;
+          const currentOrder = tabPhaseOrder(phaseToTab(brief.temporal?.quarterPhase));
+          const activeOrder = tabPhaseOrder(activeQuarterTab);
+          const isFutureTab = activeOrder > currentOrder;
+          const isPastTab = activeOrder < currentOrder;
+          if (!isFutureTab && !isPastTab) return null;
+
+          const coverage = brief.pipeline?.coverageRatio != null
+            ? brief.pipeline.coverageRatio.toFixed(1) + '×'
+            : '—';
+          const critCount = brief.findings?.critical ?? 0;
+          const qLabel = (brief.temporal as any)?.fiscalQuarter ?? 'Q1';
+
+          let bannerText = '';
+          if (isPastTab) {
+            bannerText = `↩ Past · W1–3 · Planning — This is how ${qLabel} started. Historical data from this period.`;
+          } else if (activeQuarterTab === 'end') {
+            const critStr = critCount > 0 ? ` ${critCount} critical finding${critCount === 1 ? '' : 's'} active.` : '';
+            bannerText = `↗ Projection · W12–13 · Close — Based on current pipeline velocity, here's how this quarter is likely to finish. Pipeline coverage today is ${coverage}.${critStr}`;
+          } else if (activeQuarterTab === 'mid') {
+            bannerText = `↗ Projection · W5–9 · Execution — At the midpoint, top performers have 60%+ of quota in late stage. Current weighted coverage is ${coverage}.`;
+          } else if (activeQuarterTab === 'late') {
+            bannerText = `↗ Projection · W10–11 · Push — Three weeks from close, the number is largely set. Key question: which deals are real?`;
+          }
+          if (!bannerText) return null;
+
+          const isProj = isFutureTab;
+          return (
+            <div style={{
+              background: isProj ? 'rgba(167,139,250,0.08)' : 'rgba(90,101,120,0.06)',
+              border: `0.5px solid ${isProj ? 'rgba(167,139,250,0.3)' : 'rgba(90,101,120,0.2)'}`,
+              borderLeft: `2px solid ${isProj ? '#a78bfa' : '#5a6578'}`,
+              borderRadius: 8,
+              padding: '9px 13px',
+              marginBottom: 16,
+              fontSize: 12,
+              color: isProj ? '#a78bfa' : '#5a6578',
+              lineHeight: 1.5,
+            }}>
+              {bannerText}
+            </div>
+          );
+        })()}
 
         {/* QUARTER TABS */}
         <div style={{ display: 'flex', borderBottom: `0.5px solid ${S.border}`, marginBottom: 0 }}>
           {QUARTER_TABS.map(tab => {
             const currentPhaseOrder = tabPhaseOrder(phaseToTab(brief?.temporal?.quarterPhase));
-            const isFuture = tabPhaseOrder(tab.key) > currentPhaseOrder;
+            const tabOrder = tabPhaseOrder(tab.key);
+            const isFuture = tabOrder > currentPhaseOrder;
+            const isPast = tabOrder < currentPhaseOrder;
             const isActive = activeQuarterTab === tab.key;
             return (
               <button
@@ -357,7 +410,7 @@ export default function ConciergeView() {
                 style={{
                   flex: 1, padding: '10px 8px', background: 'none', border: 'none', cursor: 'pointer',
                   fontSize: 11, fontWeight: isActive ? 600 : 400,
-                  color: isActive ? S.text : S.textMuted,
+                  color: isActive ? S.text : isPast ? S.textDim : S.textMuted,
                   borderBottom: isActive ? `2px solid ${S.teal}` : '2px solid transparent',
                   fontFamily: S.font, position: 'relative', transition: 'color 0.1s',
                   whiteSpace: 'nowrap',
@@ -368,6 +421,12 @@ export default function ConciergeView() {
                   <span style={{
                     display: 'inline-block', width: 5, height: 5, borderRadius: '50%',
                     background: S.purple, marginLeft: 5, verticalAlign: 'middle', marginBottom: 1,
+                  }} />
+                )}
+                {isPast && (
+                  <span style={{
+                    display: 'inline-block', width: 5, height: 5, borderRadius: '50%',
+                    background: '#5a6578', marginLeft: 5, verticalAlign: 'middle', marginBottom: 1,
                   }} />
                 )}
               </button>
@@ -506,20 +565,32 @@ export default function ConciergeView() {
             {/* BRIEF ITEMS */}
             {brief.findings?.topFindings && brief.findings.topFindings.length > 0 && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {brief.findings.topFindings.slice(0, 5).map((finding, i) => (
-                  <BriefCard
-                    key={i}
-                    rank={i + 1}
-                    category={severityToCategory(finding.severity)}
-                    eyebrow={toTitleCaseSkillName(finding.skillName || finding.dealName || '')}
-                    title={cleanFindingMessage(finding.message || '')}
-                    body={''}
-                    chips={[]}
-                    mathKey={finding.mathKey}
-                    onClick={() => finding.mathKey ? openMathModal(finding.mathKey) : undefined}
-                    onMathClick={openMathModal}
-                  />
-                ))}
+                {/* Selection rationale */}
+                <div style={{ fontSize: 11, color: '#5a6578', marginBottom: 8 }}>
+                  Showing {Math.min(brief.findings.topFindings.length, 5)} of {(brief.findings.critical ?? 0) + (brief.findings.warning ?? 0)} findings · sorted by severity
+                </div>
+                {brief.findings.topFindings.slice(0, 5).map((finding, i) => {
+                  const eyebrow = toTitleCaseSkillName(finding.skillName || finding.dealName || '');
+                  const fullMsg = cleanFindingMessage(finding.message || '');
+                  const title = finding.dealName
+                    ? finding.dealName
+                    : fullMsg.slice(0, 60) + (fullMsg.length > 60 ? '…' : '');
+                  const body = fullMsg;
+                  return (
+                    <BriefCard
+                      key={i}
+                      rank={i + 1}
+                      category={severityToCategory(finding.severity)}
+                      eyebrow={eyebrow}
+                      title={title}
+                      body={body}
+                      chips={[]}
+                      mathKey={finding.mathKey}
+                      onClick={() => finding.mathKey ? openMathModal(finding.mathKey) : undefined}
+                      onMathClick={openMathModal}
+                    />
+                  );
+                })}
               </div>
             )}
 

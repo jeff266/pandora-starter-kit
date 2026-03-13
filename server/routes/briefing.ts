@@ -11,7 +11,6 @@ import {
   type TemporalContext,
 } from '../context/opening-brief.js';
 import { configLoader } from '../config/workspace-config-loader.js';
-import { resolveDefaultPipeline } from '../chat/pipeline-resolver.js';
 import { requireWorkspaceAccess } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/permissions.js';
 
@@ -255,18 +254,35 @@ router.get(
       // Re-compute pctAttained scoped to the target's pipeline so the
       // numerator (closed won) and denominator (quota) measure the same thing.
       try {
-        const pandoraRole = await getPandoraRole(workspaceId, userId).catch(() => null);
-        const [quotaPeriod, pipelineResolution] = await Promise.all([
-          configLoader.getQuotaPeriod(workspaceId).catch(() => null),
-          resolveDefaultPipeline(workspaceId, 'attainment', pandoraRole ?? 'admin', '').catch(() => null),
-        ]);
+        const [quotaPeriod, targetRow, scopeRow] = await (async () => {
+          const qp = await configLoader.getQuotaPeriod(workspaceId).catch(() => null);
+          const tr = await query<{ amount: string; pipeline_id: string | null; pipeline_name: string | null }>(
+            `SELECT amount, pipeline_id, pipeline_name FROM targets
+             WHERE workspace_id = $1 AND is_active = true
+               AND (period_start IS NULL OR period_start <= NOW())
+               AND (period_end IS NULL OR period_end >= NOW())
+             ORDER BY period_start DESC NULLS LAST LIMIT 1`,
+            [workspaceId]
+          ).then(r => r.rows[0]).catch(() => null);
+          const pipelineRef = tr?.pipeline_id || tr?.pipeline_name || null;
+          const sr = pipelineRef
+            ? await query<{ scope_id: string }>(
+                `SELECT scope_id FROM analysis_scopes
+                 WHERE workspace_id = $1 AND (name = $2 OR scope_id = $2) LIMIT 1`,
+                [workspaceId, pipelineRef]
+              ).then(r => r.rows[0]).catch(() => null)
+            : null;
+          return [qp, tr, sr];
+        })();
+
         const periodStart = quotaPeriod?.start ?? new Date(Date.now() - 90 * 86400000);
+        const pipelineScopeId = scopeRow?.scope_id ?? null;
 
         const cwParams: unknown[] = [workspaceId, periodStart];
         let cwScope = '';
-        if (pipelineResolution?.scope_ids?.length) {
-          cwScope = ` AND scope_id = ANY($3::text[])`;
-          cwParams.push(pipelineResolution.scope_ids);
+        if (pipelineScopeId) {
+          cwScope = ` AND scope_id = $3::text`;
+          cwParams.push(pipelineScopeId);
         }
 
         const cwResult = await query<{ closed_won_value: string }>(
@@ -279,7 +295,7 @@ router.get(
           cwParams
         );
         const scopedClosedWon = Number(cwResult.rows[0]?.closed_won_value ?? 0);
-        const targetAmount = brief.targets.headline?.amount ?? 0;
+        const targetAmount = brief.targets.headline?.amount ?? Number(targetRow?.amount ?? 0);
         if (targetAmount > 0) {
           brief.targets.pctAttained = Math.round((scopedClosedWon / targetAmount) * 100);
           brief.targets.closedWonValue = scopedClosedWon;

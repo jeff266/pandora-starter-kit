@@ -1,0 +1,57 @@
+Two fixes for the quarter tab behavior:
+
+FIX 1 — Purple projection banner contrast (Replit)
+The projection banner on future tabs is unreadable in light mode.
+The current implementation uses purple text on a purple-tinted background
+with insufficient contrast.
+
+Fix the banner style:
+  background: rgba(167,139,250,0.08)
+  border: 0.5px solid rgba(167,139,250,0.3)
+  border-left: 2px solid #a78bfa
+  color: #a78bfa
+  font-size: 12px
+  padding: 9px 13px
+  border-radius: 8px
+  margin-bottom: 16px
+
+This ensures it reads clearly in both light and dark mode.
+
+FIX 2 — Projection banner content (Replit)
+Replace the static generic text with something specific to the
+quarter position being viewed:
+
+  W12–13 tab (when current week < 12):
+    "↗ Projection · W12–13 · Close — Based on current pipeline velocity,
+    here's how this quarter is likely to finish. Pipeline coverage today
+    is {brief.pipeline.coverageRatio}×. {brief.findings.critical} critical
+    findings are active."
+
+  W5–9 tab (when current week < 5 or > 9):
+    "↗ Projection · W5–9 · Execution — At the midpoint, top performers
+    have 60%+ of quota in late stage. Current weighted coverage is
+    {brief.pipeline.coverageRatio}×."
+
+  W10–11 tab (when current week < 10):
+    "↗ Projection · W10–11 · Push — Three weeks from close, the number
+    is largely set. Key question: which deals are real?"
+
+  W1–3 tab (when current week > 3):
+    Do not show a projection banner — W1–3 is the past.
+    Instead show a past-state note:
+    "↩ Past · W1–3 · Planning — This is how Q{n} started.
+    Historical data from this period."
+
+Use the actual brief data fields where available. If a field is null,
+omit that sentence.
+
+FIX 3 — Past tab indicator (Replit)
+Tabs for periods that have already passed (before the current
+quarterPhase) should visually signal they are historical, not projected.
+
+  Past tabs: show a small gray dot (instead of the purple dot on future tabs)
+  or no dot at all, and label them with muted text color (#5a6578)
+  Future tabs: keep the purple dot as currently implemented
+  Current tab: teal underline as currently implemented
+
+This gives the user a visual map of: past (gray) · now (teal) · future (purple)
