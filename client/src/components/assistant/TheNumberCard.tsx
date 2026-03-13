@@ -235,12 +235,9 @@ interface AttainmentMathResponse {
   mathKey: string;
   title: string;
   hasTarget: boolean;
-  numerator: { value: number; label: string };
-  denominator: { value: number; label: string };
-  result: { value: number; label: string; unit: string };
-  breakdown: AttainmentDeal[];
+  calculation: { numerator: { value: string; label: string }; denominator: { value: string; label: string }; result: { value: string }; note: string };
+  deals: AttainmentDeal[];
   total_count: number;
-  note: string;
 }
 
 function AttainmentMathPanel({ summary }: { summary: AttainmentSummary }) {
@@ -256,7 +253,7 @@ function AttainmentMathPanel({ summary }: { summary: AttainmentSummary }) {
     (api.get('/briefing/math/attainment') as Promise<AttainmentMathResponse>)
       .then((data) => {
         if (cancelled) return;
-        setDeals(data.breakdown ?? []);
+        setDeals(data.deals ?? []);
         setTotalCount(data.total_count ?? 0);
       })
       .catch(() => { if (!cancelled) setError(true); })

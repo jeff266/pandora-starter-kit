@@ -13,6 +13,16 @@ import { getWorkspaceMember } from '../middleware/permissions.js';
 import { query } from '../db.js';
 
 const router = Router();
+
+function fmtDollar(n: number): string {
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `$${(n / 1_000).toFixed(0)}K`;
+  return `$${n.toFixed(0)}`;
+}
+
+function stageName(s: string): string {
+  return s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
 router.use(requireWorkspaceAccess);
 
 /**
@@ -224,14 +234,23 @@ async function handleCoverageMath(
   const weightedPipeline = breakdown.reduce((sum, row) => sum + row.weighted_value, 0);
   const ratio = gap > 0 ? Math.round((weightedPipeline / gap) * 10) / 10 : 0;
 
+  const formattedBreakdown: Array<{ label: string; value: string; bold?: boolean }> = breakdown.map(row => ({
+    label: `${stageName(row.stage)} (${row.count} deal${row.count !== 1 ? 's' : ''})`,
+    value: fmtDollar(row.weighted_value),
+  }));
+  formattedBreakdown.push({ label: 'Total weighted', value: fmtDollar(weightedPipeline), bold: true });
+
   res.json({
     mathKey: 'coverage',
     title: 'Pipeline Coverage Ratio',
-    numerator: { value: weightedPipeline, label: 'Weighted pipeline' },
-    denominator: { value: gap, label: 'Gap to target' },
-    result: { value: ratio, label: `${ratio}x coverage`, unit: 'x' },
-    breakdown,
-    note: `Weighted pipeline uses probability % per deal. Coverage shows how many times over you can cover the remaining gap to target.`,
+    type: 'coverage',
+    calculation: {
+      numerator: { value: fmtDollar(weightedPipeline), label: 'Weighted pipeline' },
+      denominator: { value: fmtDollar(gap), label: 'Gap to target' },
+      result: { value: `${ratio}x` },
+      note: `Weighted pipeline uses probability % per deal. Coverage shows how many times over you can cover the remaining gap to target.`,
+    },
+    breakdown: formattedBreakdown,
   });
 }
 
@@ -310,16 +329,26 @@ async function handleAttainmentMath(
     : 'current period';
   const scopeNote = targetScope.pipelineScopeId ? ` Scoped to pipeline: ${targetScope.pipelineScopeId}.` : '';
 
+  const formattedBreakdown: Array<{ label: string; value: string; bold?: boolean }> = closedDeals.map(deal => ({
+    label: deal.name,
+    value: fmtDollar(deal.amount),
+  }));
+  formattedBreakdown.push({ label: `Total (${totalCount} deal${totalCount !== 1 ? 's' : ''})`, value: fmtDollar(closedWon), bold: true });
+
   res.json({
     mathKey: 'attainment',
     title: 'Quota Attainment',
+    type: 'attainment',
     hasTarget,
-    numerator: { value: closedWon, label: 'Closed won' },
-    denominator: { value: quota, label: 'Quota' },
-    result: { value: pct, label: `${pct}% attainment`, unit: '%' },
-    breakdown: closedDeals,
+    calculation: {
+      numerator: { value: fmtDollar(closedWon), label: 'Closed won' },
+      denominator: { value: fmtDollar(quota), label: 'Quota' },
+      result: { value: `${pct}%` },
+      note: `Closed won deals in ${periodLabel}.${scopeNote}`,
+    },
+    breakdown: formattedBreakdown,
+    deals: closedDeals,
     total_count: totalCount,
-    note: `Closed won deals in ${periodLabel}.${scopeNote}`,
   });
 }
 
@@ -375,15 +404,25 @@ async function handlePipelineMath(
   const weightedPipeline = breakdown.reduce((sum, row) => sum + row.weighted_value, 0);
   const coverageRatio = quota > 0 ? Math.round((rawPipeline / quota) * 10) / 10 : 0;
 
+  const formattedBreakdown: Array<{ label: string; value: string; bold?: boolean }> = breakdown.map(row => ({
+    label: `${stageName(row.stage)} (${row.count} deal${row.count !== 1 ? 's' : ''})`,
+    value: fmtDollar(row.raw_value),
+  }));
+  formattedBreakdown.push({ label: 'Total raw', value: fmtDollar(rawPipeline), bold: true });
+  formattedBreakdown.push({ label: 'Total weighted', value: fmtDollar(weightedPipeline), bold: true });
+
   res.json({
     mathKey: 'pipeline',
     title: 'Open Pipeline',
-    numerator: { value: rawPipeline, label: 'Raw pipeline' },
-    denominator: { value: quota, label: 'Quota (for context)' },
-    result: { value: coverageRatio, label: `${coverageRatio}x quota`, unit: 'x' },
-    breakdown,
+    type: 'pipeline',
+    calculation: {
+      numerator: { value: fmtDollar(rawPipeline), label: 'Raw pipeline' },
+      denominator: { value: fmtDollar(quota), label: 'Quota (for context)' },
+      result: { value: `${coverageRatio}x` },
+      note: `Raw pipeline shows total value of open deals. Weighted uses probability %.`,
+    },
+    breakdown: formattedBreakdown,
     weighted_total: weightedPipeline,
-    note: `Raw pipeline shows total value of open deals. Weighted uses probability %.`,
   });
 }
 
