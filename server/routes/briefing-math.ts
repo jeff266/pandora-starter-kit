@@ -232,7 +232,6 @@ async function handleCoverageMath(
   }));
 
   const weightedPipeline = breakdown.reduce((sum, row) => sum + row.weighted_value, 0);
-  const ratio = gap > 0 ? Math.round((weightedPipeline / gap) * 10) / 10 : 0;
 
   const formattedBreakdown: Array<{ label: string; value: string; bold?: boolean }> = breakdown.map(row => ({
     label: `${stageName(row.stage)} (${row.count} deal${row.count !== 1 ? 's' : ''})`,
@@ -240,18 +239,35 @@ async function handleCoverageMath(
   }));
   formattedBreakdown.push({ label: 'Total weighted', value: fmtDollar(weightedPipeline), bold: true });
 
-  res.json({
-    mathKey: 'coverage',
-    title: 'Pipeline Coverage Ratio',
-    type: 'coverage',
-    calculation: {
-      numerator: { value: fmtDollar(weightedPipeline), label: 'Weighted pipeline' },
-      denominator: { value: fmtDollar(gap), label: 'Gap to target' },
-      result: { value: `${ratio}x` },
-      note: `Weighted pipeline uses probability % per deal. Coverage shows how many times over you can cover the remaining gap to target.`,
-    },
-    breakdown: formattedBreakdown,
-  });
+  if (gap > 0) {
+    const ratio = Math.round((weightedPipeline / gap) * 10) / 10;
+    res.json({
+      mathKey: 'coverage',
+      title: 'Pipeline Coverage Ratio',
+      type: 'coverage',
+      calculation: {
+        numerator: { value: fmtDollar(weightedPipeline), label: 'Weighted pipeline' },
+        denominator: { value: fmtDollar(gap), label: 'Gap to target' },
+        result: { value: `${ratio}x` },
+        note: `Weighted pipeline uses probability % per deal. Coverage shows how many times over you can cover the remaining gap to target.`,
+      },
+      breakdown: formattedBreakdown,
+    });
+  } else {
+    const quotaRatio = target > 0 ? Math.round((weightedPipeline / target) * 10) / 10 : 0;
+    res.json({
+      mathKey: 'coverage',
+      title: 'Pipeline Coverage (Quota Met)',
+      type: 'coverage',
+      calculation: {
+        numerator: { value: fmtDollar(weightedPipeline), label: 'Weighted pipeline' },
+        denominator: { value: fmtDollar(target), label: 'Original quota' },
+        result: { value: `${quotaRatio}x` },
+        note: `Quota already met — no remaining gap. Coverage shown against the original ${fmtDollar(target)} quota for context. Closed won: ${fmtDollar(closedWon)}.`,
+      },
+      breakdown: formattedBreakdown,
+    });
+  }
 }
 
 /**

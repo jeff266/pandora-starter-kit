@@ -491,7 +491,7 @@ export default function ConciergeView() {
             {/* VERDICT BLOCK */}
             {hasTarget && pct !== undefined && pct !== null ? (
               <div
-                onClick={() => openMathModal('coverage')}
+                onClick={() => openMathModal('attainment')}
                 style={{
                   border: `0.5px solid ${verdictColor}44`,
                   borderRadius: 10,
@@ -534,7 +534,7 @@ export default function ConciergeView() {
                   {brief.targets?.gap !== undefined && brief.targets.gap !== null && (
                     <span style={{ fontSize: 11, color: S.textMuted }}>{typeof brief.targets.gap === 'number' ? fmtCurrency(brief.targets.gap) : brief.targets.gap} gap</span>
                   )}
-                  {brief.pipeline?.coverageRatio != null && (
+                  {brief.pipeline?.coverageRatio != null && pct < 100 && (
                     <span
                       onClick={e => { e.stopPropagation(); openMathModal('coverage'); }}
                       style={{ fontSize: 11, color: S.textMuted, cursor: 'pointer', textDecoration: 'underline dotted' }}
@@ -542,11 +542,19 @@ export default function ConciergeView() {
                       {brief.pipeline.coverageRatio.toFixed(1)}x pipeline coverage
                     </span>
                   )}
+                  {pct >= 100 && brief.pipeline?.totalValue != null && (
+                    <span
+                      onClick={e => { e.stopPropagation(); openMathModal('pipeline'); }}
+                      style={{ fontSize: 11, color: S.textMuted, cursor: 'pointer', textDecoration: 'underline dotted' }}
+                    >
+                      {fmtCurrency(brief.pipeline.totalValue)} open pipeline
+                    </span>
+                  )}
                 </div>
               </div>
             ) : !hasTarget && brief?.pipeline?.coverageRatio != null ? (
               <div
-                onClick={() => openMathModal('coverage')}
+                onClick={() => openMathModal('pipeline')}
                 style={{
                   border: `0.5px solid ${S.blue}44`,
                   borderRadius: 10,
