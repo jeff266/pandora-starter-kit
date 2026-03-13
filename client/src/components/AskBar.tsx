@@ -24,19 +24,23 @@ const PLACEHOLDERS: Record<string, string> = {
   default:'Ask Pandora anything about your revenue…',
 };
 
-const CAPABILITY_CHIPS = [
-  '⚡ Live queries',
-  '∑ Show math',
-  '✓ Action cards',
-  '📄 Doc accumulator',
+export type ChipId = 'live_queries' | 'show_math' | 'action_cards' | 'doc_accumulator';
+
+const CAPABILITY_CHIPS: { id: ChipId; label: string }[] = [
+  { id: 'live_queries', label: '⚡ Live queries' },
+  { id: 'show_math', label: '∑ Show math' },
+  { id: 'action_cards', label: '✓ Action cards' },
+  { id: 'doc_accumulator', label: '📄 Doc accumulator' },
 ];
 
 interface AskBarProps {
   pandoraRole?: PandoraRole;
   suggestedQuestion?: string;
+  onChipClick?: (chipId: ChipId) => void;
+  contextPreamble?: string;
 }
 
-export default function AskBar({ pandoraRole, suggestedQuestion }: AskBarProps) {
+export default function AskBar({ pandoraRole, suggestedQuestion, onChipClick, contextPreamble }: AskBarProps) {
   const navigate = useNavigate();
   const [input, setInput] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -49,11 +53,18 @@ export default function AskBar({ pandoraRole, suggestedQuestion }: AskBarProps) 
     const msg = input.trim();
     if (!msg) return;
     setInput('');
-    navigate(window.location.pathname, { state: { openChatWithMessage: msg } });
+    const fullMessage = contextPreamble ? `${contextPreamble}\n\n${msg}` : msg;
+    navigate(window.location.pathname, { state: { openChatWithMessage: fullMessage } });
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmit(); }
+  };
+
+  const handleChipClick = (chipId: ChipId) => {
+    if (onChipClick) {
+      onChipClick(chipId);
+    }
   };
 
   return (
@@ -69,16 +80,27 @@ export default function AskBar({ pandoraRole, suggestedQuestion }: AskBarProps) 
       {/* Capability chips */}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
         {CAPABILITY_CHIPS.map(chip => (
-          <span key={chip} style={{
-            fontSize: 10,
-            color: S.textDim,
-            border: `0.5px solid ${S.border2}`,
-            borderRadius: 99,
-            padding: '2px 8px',
-            userSelect: 'none',
-          }}>
-            {chip}
-          </span>
+          <button
+            key={chip.id}
+            type="button"
+            onClick={() => handleChipClick(chip.id)}
+            style={{
+              fontSize: 10,
+              color: S.textDim,
+              border: `0.5px solid ${S.border2}`,
+              borderRadius: 99,
+              padding: '2px 8px',
+              userSelect: 'none',
+              background: 'none',
+              cursor: 'pointer',
+              fontFamily: S.font,
+              transition: 'border-color 0.15s, color 0.15s',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = S.teal; e.currentTarget.style.color = S.text; }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = S.border2; e.currentTarget.style.color = S.textDim; }}
+          >
+            {chip.label}
+          </button>
         ))}
       </div>
 

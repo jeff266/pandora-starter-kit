@@ -5,7 +5,7 @@ import { useWorkspace } from '../context/WorkspaceContext';
 import { usePandoraRole, type PandoraRole } from '../context/PandoraRoleContext';
 import BriefCard from '../components/BriefCard';
 import MathModal from '../components/MathModal';
-import AskBar from '../components/AskBar';
+import AskBar, { type ChipId } from '../components/AskBar';
 import { colors as themeColors } from '../styles/theme';
 
 const S = {
@@ -308,6 +308,71 @@ export default function ConciergeView() {
 
   const openMathModal = useCallback((key: string) => setActiveMathKey(key), []);
   const closeMathModal = useCallback(() => setActiveMathKey(null), []);
+
+  const buildConciergeContext = useCallback((): string => {
+    if (!brief) return '';
+    const parts: string[] = ['[Concierge context]'];
+    const temporal = brief.temporal as Record<string, unknown>;
+    const quarter = temporal?.fiscalQuarter as string | undefined;
+    const week = temporal?.weekOfQuarter as number | undefined;
+    const urgency = temporal?.urgencyLabel as string | undefined;
+    if (quarter && week) parts.push(`Quarter: ${quarter}, Week ${week}${urgency ? ` (${urgency})` : ''}`);
+    const _hasTarget = brief.targets?.hasTarget !== false;
+    const _pct = brief.targets?.pctAttained;
+    if (_hasTarget && _pct != null) {
+      parts.push(`Attainment: ${Math.round(_pct)}% of ${fmtCurrency(brief.targets?.headline?.amount)}`);
+    }
+    if (brief.pipeline?.totalValue != null) {
+      parts.push(`Pipeline: ${fmtCurrency(brief.pipeline.totalValue)} (${brief.pipeline.dealCount ?? '?'} deals)`);
+    }
+    if (brief.pipeline?.coverageRatio != null) {
+      parts.push(`Coverage: ${brief.pipeline.coverageRatio.toFixed(1)}×`);
+    }
+    const topF = brief.findings?.topFindings?.slice(0, 3) ?? [];
+    if (topF.length > 0) {
+      parts.push('Top findings:');
+      topF.forEach((f: TopFinding) => {
+        parts.push(`  - [${f.severity}] ${cleanFindingMessage(f.message || '')}`);
+      });
+    }
+    return parts.join('\n');
+  }, [brief]);
+
+  const handleChipClick = useCallback((chipId: ChipId) => {
+    switch (chipId) {
+      case 'live_queries': {
+        const q = brief?.suggestedQuestion || 'What should I focus on today?';
+        const ctx = buildConciergeContext();
+        const fullMsg = ctx ? `${ctx}\n\n${q}` : q;
+        navigate(window.location.pathname, { state: { openChatWithMessage: fullMsg } });
+        break;
+      }
+      case 'show_math': {
+        const _hasTarget = brief?.targets?.hasTarget !== false;
+        openMathModal(_hasTarget ? 'attainment' : 'pipeline');
+        break;
+      }
+      case 'action_cards':
+        navigate('/actions');
+        break;
+      case 'doc_accumulator': {
+        const ctx = buildConciergeContext();
+        const wbrMsg = ctx
+          ? `${ctx}\n\nStart a WBR document — use the briefing context above as the opening contributions.`
+          : 'Start a WBR document from my current briefing.';
+        navigate(window.location.pathname, { state: { openChatWithMessage: wbrMsg } });
+        break;
+      }
+    }
+  }, [brief, buildConciergeContext, navigate, openMathModal]);
+
+  const handleStartWBR = useCallback(() => {
+    const ctx = buildConciergeContext();
+    const wbrMsg = ctx
+      ? `${ctx}\n\nAssemble a WBR from this briefing. Use the attainment, pipeline, and findings above as initial contributions.`
+      : 'Assemble a WBR from my current briefing.';
+    navigate(window.location.pathname, { state: { openChatWithMessage: wbrMsg } });
+  }, [buildConciergeContext, navigate]);
 
   const handleQuarterTab = (tab: QuarterTab) => {
     const currentPhaseOrder = tabPhaseOrder(phaseToTab(brief?.temporal?.quarterPhase));
@@ -662,6 +727,27 @@ export default function ConciergeView() {
               </div>
             )}
 
+            {/* START WBR CTA */}
+            {brief.findings?.topFindings && brief.findings.topFindings.length > 0 && (
+              <button
+                type="button"
+                onClick={handleStartWBR}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  width: '100%', marginTop: 12, padding: '10px 14px',
+                  background: 'none', border: `0.5px solid ${S.border}`,
+                  borderRadius: 8, cursor: 'pointer', fontFamily: S.font,
+                  fontSize: 12, color: S.textSub, transition: 'border-color 0.15s, background 0.15s',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = S.teal; e.currentTarget.style.background = `${S.teal}08`; }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = S.border; e.currentTarget.style.background = 'none'; }}
+              >
+                <span style={{ fontSize: 14 }}>📄</span>
+                <span>Assemble WBR from this briefing</span>
+                <span style={{ marginLeft: 'auto', fontSize: 10, color: S.textDim }}>→</span>
+              </button>
+            )}
+
             {/* EMPTY STATE */}
             {(!brief.findings?.topFindings || brief.findings.topFindings.length === 0) && (
               <div style={{ textAlign: 'center', padding: '48px 24px', color: S.textMuted, fontSize: 13 }}>
@@ -782,7 +868,12 @@ export default function ConciergeView() {
       </div>
 
       {/* ASK BAR — sticky bottom */}
-      <AskBar pandoraRole={pandoraRole} suggestedQuestion={brief?.suggestedQuestion} />
+      <AskBar
+        pandoraRole={pandoraRole}
+        suggestedQuestion={brief?.suggestedQuestion}
+        onChipClick={handleChipClick}
+        contextPreamble={buildConciergeContext()}
+      />
 
       {/* MATH MODAL */}
       <MathModal mathKey={activeMathKey} onClose={closeMathModal} />
