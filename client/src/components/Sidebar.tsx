@@ -29,6 +29,7 @@ interface NavDef {
 const NAV_ITEMS: NavDef[] = [
   { path: '/concierge', label: 'Concierge', icon: '◈', roles: 'all' },
   { path: '/pipeline',  label: 'Pipeline',  icon: '◯', roles: ['admin', 'manager', 'cro', 'revops', null] },
+  { path: '/targets',   label: 'Targets',   icon: '◎', roles: ['admin', 'manager', 'cro', 'revops', null] },
   { path: '/actions',   label: 'Actions',   icon: '⚡', roles: 'all' },
   { path: '/agents',    label: 'Agents',    icon: '◎', roles: ['admin', 'cro', 'revops', null] },
   { path: '/skills',    label: 'Skills',    icon: '⊞', roles: ['admin', 'revops', null] },
