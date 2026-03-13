@@ -192,8 +192,16 @@ export default function ConciergeView() {
   const fetchBrief = useCallback(async (silent = false) => {
     if (!currentWorkspace?.id) return;
     if (!silent) setLoading(true);
+
+    if (!silent) {
+      skeletonTimer.current = setTimeout(() => {
+        setLoading(prev => { if (prev) { setError('Brief is taking longer than expected. Please refresh.'); return false; } return prev; });
+      }, 3000);
+    }
+
     try {
       const data: OpeningBriefData = await api.get('/briefing/concierge');
+      if (skeletonTimer.current) { clearTimeout(skeletonTimer.current); skeletonTimer.current = null; }
       console.log('[ConciergeView] brief response:', data);
       setBrief(data);
       setError(null);
@@ -210,6 +218,7 @@ export default function ConciergeView() {
       const subTabs = getSubTabs(role);
       setActiveSubTab(subTabs[0]);
     } catch (e: unknown) {
+      if (skeletonTimer.current) { clearTimeout(skeletonTimer.current); skeletonTimer.current = null; }
       if (!silent) setError('Could not load your brief. Please refresh.');
     } finally {
       if (!silent) setLoading(false);

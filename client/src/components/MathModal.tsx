@@ -72,7 +72,7 @@ function typeColor(type?: string) {
 }
 
 export default function MathModal({ mathKey, onClose }: MathModalProps) {
-  const { currentWorkspace } = useWorkspace();
+  const { currentWorkspace, user } = useWorkspace();
   const [data, setData] = useState<MathData | null>(null);
   const [loading, setLoading] = useState(false);
   const [recordsOpen, setRecordsOpen] = useState(false);
@@ -108,14 +108,14 @@ export default function MathModal({ mathKey, onClose }: MathModalProps) {
   }, [messages]);
 
   const handleApprove = useCallback(async (actionId: string) => {
-    if (!currentWorkspace?.id) return;
+    if (!currentWorkspace?.id || !user?.id) return;
     setActionLoading(prev => ({ ...prev, [actionId]: true }));
     try {
-      await api.post(`/actions/${actionId}/approve`, {});
+      await api.post(`/actions/${actionId}/execute-inline`, { user_id: user.id });
       setActionDone(prev => new Set([...prev, actionId]));
     } catch {}
     setActionLoading(prev => ({ ...prev, [actionId]: false }));
-  }, [currentWorkspace?.id]);
+  }, [currentWorkspace?.id, user?.id]);
 
   const handleSend = useCallback(async (msg?: string) => {
     const text = msg ?? input.trim();
@@ -129,7 +129,7 @@ export default function MathModal({ mathKey, onClose }: MathModalProps) {
         message: text,
         scope: { mathKey, workspaceId: currentWorkspace.id },
       });
-      const reply = resp?.response || resp?.message || resp?.content || JSON.stringify(resp);
+      const reply = resp?.answer || resp?.response || resp?.message || JSON.stringify(resp);
       setMessages(prev => [...prev, { role: 'assistant', content: reply }]);
     } catch {
       setMessages(prev => [...prev, { role: 'assistant', content: 'Sorry, something went wrong.' }]);
