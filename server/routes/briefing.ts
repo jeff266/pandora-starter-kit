@@ -243,50 +243,80 @@ router.get(
     }
 
     const refresh = req.query.refresh === 'true';
-    const pipelineFilter = (req.query.pipeline as string | undefined) || null;
+    const rawPipeline = (req.query.pipeline as string | undefined) || null;
+    const pipelineFilter = rawPipeline === 'All Data' ? null : rawPipeline;
 
     try {
       const brief: OpeningBriefData = refresh
         ? await assembleOpeningBrief(workspaceId, userId)
         : await getOrAssembleBrief(workspaceId, userId);
 
+      let hasTarget = false;
       try {
-        const targetRow = await query<{
+        interface TargetRow {
           amount: string;
           pipeline_id: string | null;
           pipeline_name: string | null;
           period_start: string | null;
           period_end: string | null;
-        }>(
-          `SELECT amount, pipeline_id, pipeline_name, period_start, period_end
-           FROM targets
-           WHERE workspace_id = $1 AND is_active = true
-             AND period_start <= CURRENT_DATE
-             AND period_end >= CURRENT_DATE
-           ORDER BY amount ASC
-           LIMIT 1`,
-          [workspaceId]
-        ).then(r => r.rows[0]).catch(() => null);
-
-        let hasTarget = !!targetRow;
-        const targetPipeline = targetRow?.pipeline_id || targetRow?.pipeline_name || null;
-
-        if (pipelineFilter && targetPipeline && targetPipeline !== pipelineFilter
-            && targetPipeline !== 'All pipelines') {
-          hasTarget = false;
         }
 
+        let targetRow: TargetRow | null = null;
+
+        if (pipelineFilter) {
+          const pipelineScopedResult = await query<TargetRow>(
+            `SELECT amount, pipeline_id, pipeline_name, period_start, period_end
+             FROM targets
+             WHERE workspace_id = $1 AND is_active = true
+               AND period_start <= CURRENT_DATE
+               AND period_end >= CURRENT_DATE
+               AND (pipeline_name = $2 OR pipeline_id = $2)
+             ORDER BY period_start DESC NULLS LAST
+             LIMIT 1`,
+            [workspaceId, pipelineFilter]
+          ).catch(() => ({ rows: [] as TargetRow[] }));
+          targetRow = pipelineScopedResult.rows[0] ?? null;
+
+          if (!targetRow) {
+            const allScopeResult = await query<TargetRow>(
+              `SELECT amount, pipeline_id, pipeline_name, period_start, period_end
+               FROM targets
+               WHERE workspace_id = $1 AND is_active = true
+                 AND period_start <= CURRENT_DATE
+                 AND period_end >= CURRENT_DATE
+                 AND (pipeline_name IS NULL OR pipeline_name = 'All pipelines')
+               ORDER BY period_start DESC NULLS LAST
+               LIMIT 1`,
+              [workspaceId]
+            ).catch(() => ({ rows: [] as TargetRow[] }));
+            targetRow = allScopeResult.rows[0] ?? null;
+          }
+        } else {
+          const globalResult = await query<TargetRow>(
+            `SELECT amount, pipeline_id, pipeline_name, period_start, period_end
+             FROM targets
+             WHERE workspace_id = $1 AND is_active = true
+               AND period_start <= CURRENT_DATE
+               AND period_end >= CURRENT_DATE
+             ORDER BY period_start DESC NULLS LAST
+             LIMIT 1`,
+            [workspaceId]
+          ).catch(() => ({ rows: [] as TargetRow[] }));
+          targetRow = globalResult.rows[0] ?? null;
+        }
+
+        hasTarget = !!targetRow;
         const periodStart = targetRow?.period_start ? new Date(targetRow.period_start) : null;
         const periodEnd = targetRow?.period_end ? new Date(targetRow.period_end) : null;
+        const targetPipeline = targetRow?.pipeline_id || targetRow?.pipeline_name || null;
 
-        const pipelineRef = targetPipeline;
         let pipelineScopeId: string | null = null;
-        if (pipelineRef) {
+        if (targetPipeline) {
           const sr = await query<{ scope_id: string }>(
             `SELECT scope_id FROM analysis_scopes
              WHERE workspace_id = $1 AND (name = $2 OR scope_id = $2) LIMIT 1`,
-            [workspaceId, pipelineRef]
-          ).catch(() => ({ rows: [] as any[] }));
+            [workspaceId, targetPipeline]
+          ).catch(() => ({ rows: [] as { scope_id: string }[] }));
           pipelineScopeId = sr.rows[0]?.scope_id ?? null;
         }
 
@@ -322,29 +352,56 @@ router.get(
         const scopedClosedWon = Number(cwResult.rows[0]?.closed_won_value ?? 0);
         const targetAmount = brief.targets.headline?.amount ?? Number(targetRow?.amount ?? 0);
 
-        (brief.targets as any).hasTarget = hasTarget;
-
         if (hasTarget && targetAmount > 0) {
           brief.targets.pctAttained = Math.round((scopedClosedWon / targetAmount) * 100);
           brief.targets.closedWonValue = scopedClosedWon;
           brief.targets.gap = Math.max(0, targetAmount - scopedClosedWon);
-        } else if (!hasTarget) {
+        } else {
           brief.targets.pctAttained = null;
           brief.targets.closedWonValue = scopedClosedWon;
           brief.targets.gap = null;
         }
 
-        if (pipelineFilter && brief.findings?.topFindings) {
-          const dealIdsRes = await query<{ id: string }>(
-            `SELECT id FROM deals WHERE workspace_id = $1 AND pipeline = $2`,
+        if (pipelineFilter) {
+          const pipeMetrics = await query<{
+            total_value: string;
+            deal_count: string;
+            weighted_value: string;
+          }>(
+            `SELECT
+               COALESCE(SUM(amount), 0)::numeric as total_value,
+               COUNT(*)::text as deal_count,
+               COALESCE(SUM(amount * COALESCE(probability, 0) / 100.0), 0)::numeric as weighted_value
+             FROM deals
+             WHERE workspace_id = $1
+               AND stage_normalized NOT IN ('closed_won', 'closed_lost')
+               AND pipeline = $2`,
             [workspaceId, pipelineFilter]
-          ).catch(() => ({ rows: [] as any[] }));
-          const dealIdSet = new Set(dealIdsRes.rows.map((r: any) => r.id));
-          const filtered = brief.findings.topFindings.filter((f: any) => {
-            if (!f.dealId) return true;
-            return dealIdSet.has(f.dealId);
-          });
-          brief.findings.topFindings = filtered;
+          );
+          const pm = pipeMetrics.rows[0];
+          if (pm) {
+            brief.pipeline.totalValue = Number(pm.total_value);
+            brief.pipeline.dealCount = Number(pm.deal_count);
+            brief.pipeline.weightedValue = Number(pm.weighted_value);
+            const gapForCoverage = hasTarget && targetAmount > 0
+              ? Math.max(0, targetAmount - scopedClosedWon)
+              : targetAmount;
+            brief.pipeline.coverageRatio = gapForCoverage > 0
+              ? Math.round((Number(pm.weighted_value) / gapForCoverage) * 10) / 10
+              : 0;
+          }
+
+          if (brief.findings?.topFindings) {
+            const dealIdsRes = await query<{ id: string }>(
+              `SELECT id FROM deals WHERE workspace_id = $1 AND pipeline = $2`,
+              [workspaceId, pipelineFilter]
+            ).catch(() => ({ rows: [] as { id: string }[] }));
+            const dealIdSet = new Set(dealIdsRes.rows.map((r) => r.id));
+            brief.findings.topFindings = brief.findings.topFindings.filter((f) => {
+              if (!(f as Record<string, unknown>).dealId) return true;
+              return dealIdSet.has((f as Record<string, unknown>).dealId as string);
+            });
+          }
         }
       } catch {
       }
@@ -352,7 +409,7 @@ router.get(
       const temporal: TemporalContext = await computeTemporalContext(workspaceId);
 
       res.json({
-        brief,
+        brief: { ...brief, targets: { ...brief.targets, hasTarget } },
         temporal,
         generatedAt: new Date().toISOString(),
         workspaceId,
@@ -394,12 +451,16 @@ router.get(
       );
 
       const targetMap = new Map<string, number>();
+      let workspaceWideTarget: number | null = null;
       for (const t of targetsRes.rows) {
-        const key = t.pipeline_name || t.pipeline_id || 'All pipelines';
-        targetMap.set(key, Number(t.amount));
+        const key = t.pipeline_name || t.pipeline_id || null;
+        if (!key || key === 'All pipelines') {
+          workspaceWideTarget = Number(t.amount);
+        } else {
+          targetMap.set(key, Number(t.amount));
+        }
       }
 
-      const hasAnyTarget = targetsRes.rows.length > 0;
       const pipelines: Array<{
         name: string;
         value: string | null;
@@ -409,8 +470,8 @@ router.get(
         {
           name: 'All Data',
           value: null,
-          hasTarget: hasAnyTarget,
-          ...(hasAnyTarget ? { targetAmount: targetMap.values().next().value } : {}),
+          hasTarget: workspaceWideTarget !== null || targetsRes.rows.length > 0,
+          ...(workspaceWideTarget !== null ? { targetAmount: workspaceWideTarget } : {}),
         },
       ];
 

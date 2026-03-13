@@ -41,7 +41,7 @@ async function getTargetPipelineScope(
      WHERE workspace_id = $1 AND is_active = true
        AND period_start <= CURRENT_DATE
        AND period_end >= CURRENT_DATE
-     ORDER BY amount ASC
+     ORDER BY period_start DESC NULLS LAST
      LIMIT 1`,
     [workspaceId]
   );
