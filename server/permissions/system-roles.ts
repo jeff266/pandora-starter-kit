@@ -58,6 +58,12 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<string, PermissionSet> = {
     'data.reps_view_team': false,
     'data.reps_view_all': false,
     'data.export': true,
+
+    // Briefing: view
+    'briefing.view': true,
+
+    // Settings: manage
+    'settings.manage': true,
   },
 
   manager: {
@@ -109,6 +115,12 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<string, PermissionSet> = {
     'data.reps_view_team': true,
     'data.reps_view_all': true,
     'data.export': true,
+
+    // Briefing: view
+    'briefing.view': true,
+
+    // Settings: manage
+    'settings.manage': true,
   },
 
   analyst: {
@@ -160,6 +172,12 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<string, PermissionSet> = {
     'data.reps_view_team': false,
     'data.reps_view_all': false,
     'data.export': false,
+
+    // Briefing: view
+    'briefing.view': true,
+
+    // Settings: none
+    'settings.manage': false,
   },
 
   viewer: {
@@ -211,5 +229,11 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<string, PermissionSet> = {
     'data.reps_view_team': false,
     'data.reps_view_all': false,
     'data.export': false,
+
+    // Briefing: none (viewer role excluded)
+    'briefing.view': false,
+
+    // Settings: none
+    'settings.manage': false,
   },
 };
