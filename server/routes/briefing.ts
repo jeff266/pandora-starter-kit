@@ -415,9 +415,67 @@ router.get(
 
       const temporal: TemporalContext = await computeTemporalContext(workspaceId);
 
+      const [overnightSkills, overnightFindings, pendingCount, executedCount, recentExecuted] = await Promise.all([
+        query<{ skill_id: string; status: string; started_at: string; completed_at: string | null }>(
+          `SELECT skill_id, status, started_at, completed_at
+           FROM skill_runs
+           WHERE workspace_id = $1 AND status = 'completed'
+             AND started_at > now() - interval '48 hours'
+           ORDER BY completed_at DESC`,
+          [workspaceId]
+        ).catch(() => ({ rows: [] as any[] })),
+
+        query<{ cnt: string }>(
+          `SELECT COUNT(*)::text as cnt
+           FROM findings
+           WHERE workspace_id = $1 AND found_at > now() - interval '48 hours'`,
+          [workspaceId]
+        ).catch(() => ({ rows: [{ cnt: '0' }] })),
+
+        query<{ cnt: string }>(
+          `SELECT COUNT(*)::text as cnt
+           FROM actions
+           WHERE workspace_id = $1 AND approval_status = 'pending'
+             AND execution_status = 'open'`,
+          [workspaceId]
+        ).catch(() => ({ rows: [{ cnt: '0' }] })),
+
+        query<{ cnt: string }>(
+          `SELECT COUNT(*)::text as cnt
+           FROM actions
+           WHERE workspace_id = $1 AND execution_status = 'executed'
+             AND executed_at > now() - interval '48 hours'`,
+          [workspaceId]
+        ).catch(() => ({ rows: [{ cnt: '0' }] })),
+
+        query<{ title: string; action_type: string; executed_at: string }>(
+          `SELECT title, action_type, executed_at
+           FROM actions
+           WHERE workspace_id = $1 AND execution_status = 'executed'
+             AND executed_at > now() - interval '48 hours'
+           ORDER BY executed_at DESC
+           LIMIT 5`,
+          [workspaceId]
+        ).catch(() => ({ rows: [] as any[] })),
+      ]);
+
+      const overnightSummary = {
+        skillsRun: overnightSkills.rows.length,
+        findingsSurfaced: Number(overnightFindings.rows[0]?.cnt ?? 0),
+        autonomousActionsCompleted: Number(executedCount.rows[0]?.cnt ?? 0),
+        pendingApprovalCount: Number(pendingCount.rows[0]?.cnt ?? 0),
+        recentActions: recentExecuted.rows.map(r => ({
+          title: r.title,
+          actionType: r.action_type,
+          executedAt: r.executed_at,
+        })),
+        lastRunAt: overnightSkills.rows[0]?.completed_at ?? null,
+      };
+
       res.json({
         brief: { ...brief, targets: { ...brief.targets, hasTarget } },
         temporal,
+        overnightSummary,
         generatedAt: new Date().toISOString(),
         workspaceId,
       });
