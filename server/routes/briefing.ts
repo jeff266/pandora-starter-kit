@@ -452,7 +452,8 @@ router.get(
           `SELECT COUNT(*)::text as cnt
            FROM actions
            WHERE workspace_id = $1 AND execution_status = 'executed'
-             AND executed_at > now() - interval '48 hours'`,
+             AND executed_at > now() - interval '48 hours'
+             AND executed_by = 'system'`,
           [workspaceId]
         ).catch(() => zeroCount),
 
@@ -461,6 +462,7 @@ router.get(
            FROM actions
            WHERE workspace_id = $1 AND execution_status = 'executed'
              AND executed_at > now() - interval '48 hours'
+             AND executed_by = 'system'
            ORDER BY executed_at DESC
            LIMIT 5`,
           [workspaceId]
