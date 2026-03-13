@@ -5,17 +5,18 @@ import { usePandoraRole, type PandoraRole } from '../context/PandoraRoleContext'
 import BriefCard from '../components/BriefCard';
 import MathModal from '../components/MathModal';
 import AskBar from '../components/AskBar';
+import { colors as themeColors } from '../styles/theme';
 
 const S = {
-  bg: '#0a0d14',
-  surface: '#0f1219',
-  surface2: '#141820',
-  border: '#1a1f2b',
-  border2: '#242b3a',
-  text: '#e8ecf4',
-  textSub: '#94a3b8',
-  textMuted: '#5a6578',
-  textDim: '#3a4252',
+  bg: themeColors.bg,
+  surface: themeColors.surface,
+  surface2: themeColors.surfaceRaised,
+  border: themeColors.border,
+  border2: themeColors.borderLight,
+  text: themeColors.text,
+  textSub: themeColors.textSecondary,
+  textMuted: themeColors.textMuted,
+  textDim: themeColors.textDim,
   teal: '#1D9E75',
   blue: '#378ADD',
   yellow: '#eab308',
@@ -193,15 +194,8 @@ export default function ConciergeView() {
     if (!currentWorkspace?.id) return;
     if (!silent) setLoading(true);
 
-    if (!silent) {
-      skeletonTimer.current = setTimeout(() => {
-        setLoading(prev => { if (prev) { setError('Brief is taking longer than expected. Please refresh.'); return false; } return prev; });
-      }, 3000);
-    }
-
     try {
       const data: OpeningBriefData = await api.get('/briefing/concierge');
-      if (skeletonTimer.current) { clearTimeout(skeletonTimer.current); skeletonTimer.current = null; }
       console.log('[ConciergeView] brief response:', data);
       setBrief(data);
       setError(null);
@@ -218,7 +212,6 @@ export default function ConciergeView() {
       const subTabs = getSubTabs(role);
       setActiveSubTab(subTabs[0]);
     } catch (e: unknown) {
-      if (skeletonTimer.current) { clearTimeout(skeletonTimer.current); skeletonTimer.current = null; }
       if (!silent) setError('Could not load your brief. Please refresh.');
     } finally {
       if (!silent) setLoading(false);

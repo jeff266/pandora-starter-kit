@@ -4,6 +4,7 @@ import { useWorkspace } from '../context/WorkspaceContext';
 import { usePandoraRole, type PandoraRole } from '../context/PandoraRoleContext';
 import { useDemoMode } from '../contexts/DemoModeContext';
 import { useIsMobile } from '../hooks/useIsMobile';
+import PalettePicker from './PalettePicker';
 
 const S = {
   bg: '#0a0d14',
@@ -286,6 +287,15 @@ export default function Sidebar({
                 {wsName}
               </span>
             )}
+          </div>
+
+          {/* Palette picker */}
+          <div style={{
+            padding: expanded ? '4px 14px' : '4px 0',
+            display: 'flex',
+            justifyContent: expanded ? 'flex-start' : 'center',
+          }}>
+            <PalettePicker />
           </div>
 
           {/* User avatar row */}

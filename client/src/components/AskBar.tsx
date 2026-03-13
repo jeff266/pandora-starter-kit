@@ -1,16 +1,17 @@
 import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { type PandoraRole } from '../context/PandoraRoleContext';
+import { colors as themeColors } from '../styles/theme';
 
 const S = {
-  bg: '#0a0d14',
-  border: '#1a1f2b',
-  border2: '#242b3a',
+  bg: themeColors.surface,
+  border: themeColors.border,
+  border2: themeColors.borderLight,
   teal: '#1D9E75',
-  textMuted: '#5a6578',
-  textDim: '#3a4252',
-  text: '#e8ecf4',
-  surface2: '#141820',
+  textMuted: themeColors.textMuted,
+  textDim: themeColors.textDim,
+  text: themeColors.text,
+  surface2: themeColors.surfaceRaised,
   font: "'IBM Plex Sans', -apple-system, sans-serif",
 };
 
