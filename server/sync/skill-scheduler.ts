@@ -470,7 +470,7 @@ export function startSkillScheduler(): void {
           }
 
           console.log(`[Agent Scheduler] Running agent ${agentId} for workspace ${workspace.name}`);
-          agentRuntime.executeAgent(agentId, workspace.id)
+          agentRuntime.executeAgent(agentId, workspace.id, { triggerType: 'scheduled' })
             .then(result => console.log(`[Agent Scheduler] Agent ${agentId} completed for ${workspace.name} in ${result.duration}ms`))
             .catch(err => console.error(`[Agent Scheduler] Agent ${agentId} failed for ${workspace.name}:`, err.message));
         }

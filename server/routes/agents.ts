@@ -115,11 +115,15 @@ agentsGlobalRouter.delete('/agents/:agentId', requireAdmin, (req: Request, res: 
 agentsWorkspaceRouter.post('/:workspaceId/agents/:agentId/run', requirePermission('skills.run_manual'), async (req: Request, res: Response) => {
   const workspaceId = req.params.workspaceId as string;
   const agentId = req.params.agentId as string;
-  const { dryRun } = req.body || {};
+  const { dryRun, question } = req.body || {};
 
   try {
     const runtime = getAgentRuntime();
-    const result = await runtime.executeAgent(agentId, workspaceId, { dryRun });
+    const result = await runtime.executeAgent(agentId, workspaceId, {
+      dryRun,
+      question: question || undefined,
+      triggerType: question ? 'conversational' : 'manual',
+    });
     res.json(result);
   } catch (err: any) {
     console.error(`[Agent Route] Agent ${agentId} failed:`, err.message);

@@ -45,7 +45,11 @@ export class AgentRuntime {
   async executeAgent(
     agentId: string,
     workspaceId: string,
-    options?: { dryRun?: boolean }
+    options?: {
+      dryRun?: boolean;
+      question?: string;
+      triggerType?: 'scheduled' | 'conversational' | 'manual';
+    }
   ): Promise<AgentRunResult> {
     const registry = getAgentRegistry();
     let agent: AgentDefinition | undefined = registry.get(agentId);
@@ -81,6 +85,8 @@ export class AgentRuntime {
         enabled: true,
         ...(dbAgent.goal ? { goal: dbAgent.goal } : {}),
         ...(dbAgent.standing_questions?.length ? { standing_questions: dbAgent.standing_questions } : {}),
+        ...(dbAgent.execution_mode ? { execution_mode: dbAgent.execution_mode } : {}),
+        ...(dbAgent.loop_config ? { loop_config: dbAgent.loop_config } : {}),
       };
     }
 
@@ -102,15 +108,21 @@ export class AgentRuntime {
     try {
       // Determine execution mode (pipeline vs loop)
       const mode = (agent as any).execution_mode || 'pipeline';
+      const { question: optionsQuestion, triggerType } = options || {};
+
+      // Auto mode: use loop when invoked conversationally or with a question;
+      // fall back to pipeline for scheduled runs or bare manual triggers.
       const effectiveMode = mode === 'auto'
-        ? 'pipeline' // TODO: Add classifier to decide between pipeline and loop
+        ? (triggerType === 'scheduled' ? 'pipeline' : (optionsQuestion || triggerType === 'conversational') ? 'loop' : 'pipeline')
         : mode;
+
+      console.log(`[Agent ${agentId}] mode=${mode} effective=${effectiveMode} triggerType=${triggerType || 'none'} hasQuestion=${!!optionsQuestion}`);
 
       // If loop mode is requested, try loop executor
       if (effectiveMode === 'loop') {
         try {
           const loopConfig = (agent as any).loop_config || {};
-          const question = agent.standing_questions?.[0] || agent.goal || agent.description;
+          const question = optionsQuestion || agent.standing_questions?.[0] || agent.goal || agent.description;
 
           const loopResult = await executeLoop({
             agent,

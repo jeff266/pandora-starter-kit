@@ -57,6 +57,13 @@ export const BRIEFING_TEMPLATES: AgentTemplateRow[] = [
       data_window: { primary: 'current_week', comparison: 'previous_period' },
       output_formats: ['pdf', 'slack', 'email'],
       schedule: { type: 'cron', cron: '0 7 * * 1' },
+      execution_mode: 'auto',
+      loop_config: {
+        available_skills: ['pipeline-hygiene', 'deal-risk-review', 'forecast-rollup'],
+        max_iterations: 4,
+        termination: 'goal_satisfied',
+        planning_prompt: null,
+      },
     },
     prep_agent: {
       skills: ['pipeline-hygiene', 'single-thread-alert', 'pipeline-coverage', 'deal-risk-review', 'forecast-rollup', 'conversation-intelligence'],
