@@ -195,8 +195,14 @@ export default function ConciergeView() {
     if (!silent) setLoading(true);
 
     try {
-      const data: OpeningBriefData = await api.get('/briefing/concierge');
-      console.log('[ConciergeView] brief response:', data);
+      const raw = await api.get('/briefing/concierge') as any;
+      // Server returns { brief: OpeningBriefData, temporal: TemporalContext, ... }
+      // Merge fresh temporal over the brief object so all fields are at the top level.
+      const data: OpeningBriefData = {
+        ...(raw.brief ?? raw),
+        temporal: raw.temporal ?? raw.brief?.temporal,
+      };
+      console.log('[ConciergeView] brief data:', data);
       setBrief(data);
       setError(null);
 
