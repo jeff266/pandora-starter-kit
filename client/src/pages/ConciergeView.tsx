@@ -194,6 +194,10 @@ function cleanFindingMessage(msg: string): string {
   return msg.replace(/\s+[—–]\s+[a-z][a-z0-9_]*$/, '').trim();
 }
 
+function formatActionType(actionType: string): string {
+  return actionType.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
 function deriveSituationLine(brief: OpeningBriefData): string {
   const parts: string[] = [];
   const temporal = brief.temporal as any;
@@ -242,6 +246,7 @@ export default function ConciergeView() {
   const [loading, setLoading] = useState(true);
   const [brief, setBrief] = useState<OpeningBriefData | null>(null);
   const [overnight, setOvernight] = useState<OvernightSummary | null>(null);
+  const [overnightExpanded, setOvernightExpanded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeMathKey, setActiveMathKey] = useState<string | null>(null);
   const [activeQuarterTab, setActiveQuarterTab] = useState<QuarterTab>('early');
@@ -625,80 +630,6 @@ export default function ConciergeView() {
               </div>
             )}
 
-            {/* PANDORA OVERNIGHT — strategic sub-tab */}
-            {(pandoraRole !== 'ae') && activeSubTab === 'strategic' && overnight && (overnight.skillsRun > 0 || overnight.findingsSurfaced > 0 || overnight.autonomousActionsCompleted > 0 || overnight.pendingApprovalCount > 0) && (
-              <div style={{
-                border: `0.5px solid ${S.border}`,
-                borderRadius: 10,
-                padding: '14px 16px',
-                marginBottom: 20,
-                background: S.surface,
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontSize: 10, fontWeight: 700, color: S.textDim, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                      Pandora ran overnight
-                    </span>
-                    {overnight.lastRunAt && (
-                      <span style={{ fontSize: 10, color: S.textDim }}>· {fmtTs(overnight.lastRunAt)}</span>
-                    )}
-                  </div>
-                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: S.teal, flexShrink: 0 }} />
-                </div>
-
-                <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: overnight.recentActions.length > 0 || overnight.pendingApprovalCount > 0 ? 12 : 0 }}>
-                  {overnight.skillsRun > 0 && (
-                    <span style={{ fontSize: 12, color: S.textSub }}>
-                      <strong style={{ color: S.text }}>{overnight.skillsRun}</strong> skill{overnight.skillsRun === 1 ? '' : 's'} run
-                    </span>
-                  )}
-                  {overnight.findingsSurfaced > 0 && (
-                    <span style={{ fontSize: 12, color: S.textSub }}>
-                      <strong style={{ color: S.text }}>{overnight.findingsSurfaced}</strong> finding{overnight.findingsSurfaced === 1 ? '' : 's'} surfaced
-                    </span>
-                  )}
-                  {overnight.autonomousActionsCompleted > 0 && (
-                    <span style={{ fontSize: 12, color: S.textSub }}>
-                      <strong style={{ color: S.text }}>{overnight.autonomousActionsCompleted}</strong> action{overnight.autonomousActionsCompleted === 1 ? '' : 's'} completed
-                    </span>
-                  )}
-                </div>
-
-                {overnight.recentActions.length > 0 && (
-                  <div style={{ borderTop: `0.5px solid ${S.border}`, paddingTop: 10, marginBottom: overnight.pendingApprovalCount > 0 ? 12 : 0 }}>
-                    {overnight.recentActions.map((action, i) => (
-                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
-                        <span style={{ width: 5, height: 5, borderRadius: '50%', background: S.teal, flexShrink: 0 }} />
-                        <span style={{ flex: 1, fontSize: 11, color: S.textSub, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {action.title}
-                        </span>
-                        <span style={{ fontSize: 10, color: S.textDim, flexShrink: 0 }}>{fmtTs(action.executedAt)}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {overnight.pendingApprovalCount > 0 && (
-                  <div
-                    onClick={() => navigate('/settings/automations')}
-                    style={{
-                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                      padding: '8px 12px', borderRadius: 6, cursor: 'pointer',
-                      background: 'rgba(249,115,22,0.08)', border: '0.5px solid rgba(249,115,22,0.25)',
-                      transition: 'background 0.15s',
-                    }}
-                    onMouseEnter={e => { e.currentTarget.style.background = 'rgba(249,115,22,0.14)'; }}
-                    onMouseLeave={e => { e.currentTarget.style.background = 'rgba(249,115,22,0.08)'; }}
-                  >
-                    <span style={{ fontSize: 12, fontWeight: 500, color: '#f97316' }}>
-                      {overnight.pendingApprovalCount} action{overnight.pendingApprovalCount === 1 ? '' : 's'} pending your approval
-                    </span>
-                    <span style={{ fontSize: 11, color: '#f97316' }}>Review →</span>
-                  </div>
-                )}
-              </div>
-            )}
-
             {/* BRIEF ITEMS */}
             {brief.findings?.topFindings && brief.findings.topFindings.length > 0 && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -736,6 +667,114 @@ export default function ConciergeView() {
               <div style={{ textAlign: 'center', padding: '48px 24px', color: S.textMuted, fontSize: 13 }}>
                 <div style={{ fontSize: 24, marginBottom: 12 }}>✓</div>
                 No findings right now — your pipeline looks healthy.
+              </div>
+            )}
+
+            {/* PANDORA OVERNIGHT — strategic sub-tab, below findings */}
+            {(pandoraRole !== 'ae') && activeSubTab === 'strategic' && overnight && (overnight.skillsRun > 0 || overnight.findingsSurfaced > 0 || overnight.autonomousActionsCompleted > 0 || overnight.pendingApprovalCount > 0) && (
+              <div style={{
+                border: `0.5px solid ${S.border}`,
+                borderRadius: 10,
+                marginTop: 20,
+                marginBottom: 20,
+                background: S.surface,
+                overflow: 'hidden',
+              }}>
+                <div
+                  onClick={() => setOvernightExpanded(prev => !prev)}
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '12px 16px', cursor: 'pointer', userSelect: 'none',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: S.teal, flexShrink: 0 }} />
+                    <span style={{ fontSize: 10, fontWeight: 700, color: S.textDim, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                      Pandora ran overnight
+                    </span>
+                    {overnight.lastRunAt && (
+                      <span style={{ fontSize: 10, color: S.textDim }}>· {fmtTs(overnight.lastRunAt)}</span>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <div style={{ display: 'flex', gap: 12 }}>
+                      {overnight.skillsRun > 0 && (
+                        <span style={{ fontSize: 11, color: S.textMuted }}>
+                          {overnight.skillsRun} skill{overnight.skillsRun === 1 ? '' : 's'}
+                        </span>
+                      )}
+                      {overnight.findingsSurfaced > 0 && (
+                        <span style={{ fontSize: 11, color: S.textMuted }}>
+                          {overnight.findingsSurfaced} finding{overnight.findingsSurfaced === 1 ? '' : 's'}
+                        </span>
+                      )}
+                      {overnight.autonomousActionsCompleted > 0 && (
+                        <span style={{ fontSize: 11, color: S.textMuted }}>
+                          {overnight.autonomousActionsCompleted} action{overnight.autonomousActionsCompleted === 1 ? '' : 's'}
+                        </span>
+                      )}
+                    </div>
+                    <span style={{ fontSize: 10, color: S.textDim, transition: 'transform 0.15s', transform: overnightExpanded ? 'rotate(180deg)' : 'rotate(0deg)' }}>▼</span>
+                  </div>
+                </div>
+
+                {overnightExpanded && (
+                  <div style={{ padding: '0 16px 14px', borderTop: `0.5px solid ${S.border}` }}>
+                    <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', padding: '12px 0' }}>
+                      <span style={{ fontSize: 12, color: S.textSub }}>
+                        <strong style={{ color: S.text }}>{overnight.skillsRun}</strong> skill{overnight.skillsRun === 1 ? '' : 's'} run
+                      </span>
+                      <span style={{ fontSize: 12, color: S.textSub }}>
+                        <strong style={{ color: S.text }}>{overnight.findingsSurfaced}</strong> finding{overnight.findingsSurfaced === 1 ? '' : 's'} surfaced
+                      </span>
+                      <span style={{ fontSize: 12, color: S.textSub }}>
+                        <strong style={{ color: S.text }}>{overnight.autonomousActionsCompleted}</strong> action{overnight.autonomousActionsCompleted === 1 ? '' : 's'} completed
+                      </span>
+                    </div>
+
+                    {overnight.recentActions.length > 0 && (
+                      <div style={{ borderTop: `0.5px solid ${S.border}`, paddingTop: 10, marginBottom: overnight.pendingApprovalCount > 0 ? 12 : 0 }}>
+                        {overnight.recentActions.map((action, i) => (
+                          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
+                            <span style={{ width: 5, height: 5, borderRadius: '50%', background: S.teal, flexShrink: 0 }} />
+                            <span style={{ fontSize: 10, color: S.textDim, flexShrink: 0 }}>{formatActionType(action.actionType)}</span>
+                            <span style={{ flex: 1, fontSize: 11, color: S.textSub, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {action.title}
+                            </span>
+                            <span style={{ fontSize: 10, color: S.textDim, flexShrink: 0 }}>{fmtTs(action.executedAt)}</span>
+                          </div>
+                        ))}
+                        {overnight.autonomousActionsCompleted > 5 && (
+                          <div
+                            onClick={() => navigate('/settings/automations')}
+                            style={{ fontSize: 11, color: S.teal, cursor: 'pointer', paddingTop: 6 }}
+                          >
+                            See all {overnight.autonomousActionsCompleted} actions →
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {overnight.pendingApprovalCount > 0 && (
+                      <div
+                        onClick={() => navigate('/settings/automations')}
+                        style={{
+                          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                          padding: '8px 12px', borderRadius: 6, cursor: 'pointer',
+                          background: 'rgba(249,115,22,0.08)', border: '0.5px solid rgba(249,115,22,0.25)',
+                          transition: 'background 0.15s',
+                        }}
+                        onMouseEnter={e => { e.currentTarget.style.background = 'rgba(249,115,22,0.14)'; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = 'rgba(249,115,22,0.08)'; }}
+                      >
+                        <span style={{ fontSize: 12, fontWeight: 500, color: '#f97316' }}>
+                          {overnight.pendingApprovalCount} action{overnight.pendingApprovalCount === 1 ? '' : 's'} pending your approval
+                        </span>
+                        <span style={{ fontSize: 11, color: '#f97316' }}>Review →</span>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </>

@@ -415,40 +415,48 @@ router.get(
 
       const temporal: TemporalContext = await computeTemporalContext(workspaceId);
 
+      interface SkillRunRow { skill_id: string; status: string; started_at: string; completed_at: string | null }
+      interface CountRow { cnt: string }
+      interface RecentActionRow { title: string; action_type: string; executed_at: string }
+      const emptySkillRows: { rows: SkillRunRow[] } = { rows: [] };
+      const zeroCount: { rows: CountRow[] } = { rows: [{ cnt: '0' }] };
+      const emptyActionRows: { rows: RecentActionRow[] } = { rows: [] };
+
       const [overnightSkills, overnightFindings, pendingCount, executedCount, recentExecuted] = await Promise.all([
-        query<{ skill_id: string; status: string; started_at: string; completed_at: string | null }>(
+        query<SkillRunRow>(
           `SELECT skill_id, status, started_at, completed_at
            FROM skill_runs
            WHERE workspace_id = $1 AND status = 'completed'
              AND started_at > now() - interval '48 hours'
            ORDER BY completed_at DESC`,
           [workspaceId]
-        ).catch(() => ({ rows: [] as any[] })),
+        ).catch(() => emptySkillRows),
 
-        query<{ cnt: string }>(
+        query<CountRow>(
           `SELECT COUNT(*)::text as cnt
            FROM findings
            WHERE workspace_id = $1 AND found_at > now() - interval '48 hours'`,
           [workspaceId]
-        ).catch(() => ({ rows: [{ cnt: '0' }] })),
+        ).catch(() => zeroCount),
 
-        query<{ cnt: string }>(
+        query<CountRow>(
           `SELECT COUNT(*)::text as cnt
            FROM actions
            WHERE workspace_id = $1 AND approval_status = 'pending'
-             AND execution_status = 'open'`,
+             AND execution_status = 'open'
+             AND created_at > now() - interval '48 hours'`,
           [workspaceId]
-        ).catch(() => ({ rows: [{ cnt: '0' }] })),
+        ).catch(() => zeroCount),
 
-        query<{ cnt: string }>(
+        query<CountRow>(
           `SELECT COUNT(*)::text as cnt
            FROM actions
            WHERE workspace_id = $1 AND execution_status = 'executed'
              AND executed_at > now() - interval '48 hours'`,
           [workspaceId]
-        ).catch(() => ({ rows: [{ cnt: '0' }] })),
+        ).catch(() => zeroCount),
 
-        query<{ title: string; action_type: string; executed_at: string }>(
+        query<RecentActionRow>(
           `SELECT title, action_type, executed_at
            FROM actions
            WHERE workspace_id = $1 AND execution_status = 'executed'
@@ -456,7 +464,7 @@ router.get(
            ORDER BY executed_at DESC
            LIMIT 5`,
           [workspaceId]
-        ).catch(() => ({ rows: [] as any[] })),
+        ).catch(() => emptyActionRows),
       ]);
 
       const overnightSummary = {
