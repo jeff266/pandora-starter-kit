@@ -10,6 +10,8 @@ import {
   type OpeningBriefData,
   type TemporalContext,
 } from '../context/opening-brief.js';
+import { configLoader } from '../config/workspace-config-loader.js';
+import { resolveDefaultPipeline } from '../chat/pipeline-resolver.js';
 import { requireWorkspaceAccess } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/permissions.js';
 
@@ -249,6 +251,43 @@ router.get(
       const brief: OpeningBriefData = refresh
         ? await assembleOpeningBrief(workspaceId, userId)
         : await getOrAssembleBrief(workspaceId, userId);
+
+      // Re-compute pctAttained scoped to the target's pipeline so the
+      // numerator (closed won) and denominator (quota) measure the same thing.
+      try {
+        const pandoraRole = await getPandoraRole(workspaceId, userId).catch(() => null);
+        const [quotaPeriod, pipelineResolution] = await Promise.all([
+          configLoader.getQuotaPeriod(workspaceId).catch(() => null),
+          resolveDefaultPipeline(workspaceId, 'attainment', pandoraRole ?? 'admin', '').catch(() => null),
+        ]);
+        const periodStart = quotaPeriod?.start ?? new Date(Date.now() - 90 * 86400000);
+
+        const cwParams: unknown[] = [workspaceId, periodStart];
+        let cwScope = '';
+        if (pipelineResolution?.scope_ids?.length) {
+          cwScope = ` AND scope_id = ANY($3::text[])`;
+          cwParams.push(pipelineResolution.scope_ids);
+        }
+
+        const cwResult = await query<{ closed_won_value: string }>(
+          `SELECT COALESCE(SUM(amount), 0)::numeric as closed_won_value
+           FROM deals
+           WHERE workspace_id = $1
+             AND stage_normalized = 'closed_won'
+             AND updated_at >= $2
+             ${cwScope}`,
+          cwParams
+        );
+        const scopedClosedWon = Number(cwResult.rows[0]?.closed_won_value ?? 0);
+        const targetAmount = brief.targets.headline?.amount ?? 0;
+        if (targetAmount > 0) {
+          brief.targets.pctAttained = Math.round((scopedClosedWon / targetAmount) * 100);
+          brief.targets.closedWonValue = scopedClosedWon;
+          brief.targets.gap = Math.max(0, targetAmount - scopedClosedWon);
+        }
+      } catch {
+        // Non-fatal: keep original values if scoped query fails
+      }
 
       // Fetch temporal context (always fresh, it's cheap to compute)
       const temporal: TemporalContext = await computeTemporalContext(workspaceId);

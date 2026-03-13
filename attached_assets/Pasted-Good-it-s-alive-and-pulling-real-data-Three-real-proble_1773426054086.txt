@@ -1,0 +1,83 @@
+Good — it's alive and pulling real data. Three real problems to fix, two different targets.
+
+**Replit fixes (styling + tab + narrative):**
+
+```
+Three fixes needed on ConciergeView:
+
+1. CARD STYLING — The BriefCard background (#0f1219 black) doesn't match 
+the page theme. The page is using the Slate theme. Replace the hardcoded 
+black background on BriefCard with the app's CSS variable for card surface 
+(whatever the existing Command Center or Pipeline cards use — match that 
+exactly). Do not hardcode #0f1219. Check how other cards in the app are 
+styled and use the same token.
+
+2. TAB PRE-SELECTION BUG — The active tab shows W1–3 but the header 
+correctly says "Week 11 of Q1 — late quarter." The tab initialization is 
+not reading temporal.quarterPhase. Fix the useEffect or useState 
+initialization so that on mount, activeQuarterTab is set from 
+temporal.quarterPhase before the first render:
+  'early' → W1–3 active
+  'mid' → W5–9 active  
+  'late' → W10–11 active
+  'final_week' → W12–13 active
+This must happen on mount, not on the first user interaction.
+
+3. SITUATION NARRATIVE — The brief content area should show a 2–3 sentence 
+situation paragraph between the greeting and the verdict block. This is not 
+a generated paragraph — derive it directly from the brief data:
+  - brief.targets.pctAttained (as %) 
+  - brief.pipeline.coverageRatio
+  - brief.temporal.urgencyLabel
+  - brief.findings.critical + brief.findings.warning counts
+
+Example output: "Q1 is in week 11 with 18 days to close. Attainment is at 
+[pctAttained]% against a $[headline] target. [critical] critical findings 
+and [warning] warnings are active."
+
+Keep it factual and specific — no filler. If any field is null, omit that 
+sentence rather than showing undefined.
+
+4. FINDING LABELS — The skill name "single-thread-alert" and tags like 
+"small_org", "rep_not_prospecting" are raw internal identifiers. Either:
+  - Display brief.findings.topFindings[n].message as the card title (it's 
+    already human-readable), and use skillName only as the eyebrow in a 
+    cleaned format (replace hyphens with spaces, title-case it), OR
+  - Map known skillName values to display names: 
+    'single-thread-alert' → 'Single Thread Alert'
+    'pipeline-hygiene' → 'Pipeline Hygiene'
+    etc.
+The card title should ONLY be the message field, not a concatenation of 
+deal name + message + tag.
+```
+
+**Claude Code fix (target scoping):**
+
+```
+The attainment calculation in briefing-math.ts is wrong. It's comparing 
+ALL closed won deals ($3.2M) against a single pipeline target ($350K), 
+producing 927% — meaningless.
+
+The fix: scope the closed won query to match the target's pipeline 
+definition. The targets table likely has a pipeline_id, pipeline_name, or 
+scope field that identifies which pipeline the $350K applies to.
+
+Read the targets table schema and find how targets are scoped to pipelines. 
+Then in the attainment math key handler:
+  1. Load the headline target including its pipeline scope
+  2. Filter closed won deals to ONLY deals in that pipeline scope
+  3. Return the scoped closed won value as the numerator
+
+If the targets table has no pipeline scope field yet, filter by 
+deals.pipeline (or equivalent) matching the target's label. The goal: 
+numerator and denominator must measure the same thing.
+
+Also check the /briefing/concierge endpoint — the same scoping issue 
+affects brief.targets.pctAttained. That field should be recomputed using 
+the scoped closed won value, not total closed won.
+
+Do not change opening-brief.ts. Only change briefing-math.ts and 
+briefing.ts (the concierge route).
+```
+
+The 927% is the most trust-damaging thing on the screen right now. Fix the target scoping in Claude Code first — that's the one that breaks credibility with a real user. The Replit styling and narrative fixes can run in parallel.

@@ -152,7 +152,7 @@ function severityToCategory(severity: string): 'risk' | 'opportunity' | 'watch' 
 function SkeletonCard() {
   return (
     <div style={{
-      background: '#0f1219', borderRadius: 10, padding: '16px',
+      background: S.surface, borderRadius: 10, padding: '16px',
       border: `0.5px solid ${S.border}`, animation: 'skeleton-pulse 1.5s ease-in-out infinite',
     }}>
       <div style={{ height: 10, width: '40%', background: S.border2, borderRadius: 4, marginBottom: 10 }} />
@@ -173,6 +173,38 @@ function fmtTs(ts?: string | null): string {
     const d = new Date(ts);
     return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   } catch { return ''; }
+}
+
+function toTitleCaseSkillName(s: string): string {
+  return s.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function cleanFindingMessage(msg: string): string {
+  return msg.replace(/\s+[—–]\s+[a-z][a-z0-9_]*$/, '').trim();
+}
+
+function deriveSituationLine(brief: OpeningBriefData): string {
+  const parts: string[] = [];
+  const urgency = brief.temporal?.urgencyLabel;
+  if (urgency) {
+    parts.push(urgency.endsWith('.') ? urgency : `${urgency}.`);
+  }
+  const pct = brief.targets?.pctAttained;
+  const headline = brief.targets?.headline;
+  if (pct != null && headline?.amount) {
+    parts.push(`Attainment is at ${pct}% against a ${fmtCurrency(headline.amount)} target.`);
+  } else if (pct != null) {
+    parts.push(`Attainment is at ${pct}%.`);
+  }
+  const critical = brief.findings?.critical ?? 0;
+  const warning = brief.findings?.warning ?? 0;
+  if (critical > 0 || warning > 0) {
+    const critStr = critical > 0 ? `${critical} critical` : '';
+    const warnStr = warning > 0 ? `${warning} warning${warning === 1 ? '' : 's'}` : '';
+    const combined = [critStr, warnStr].filter(Boolean).join(' and ');
+    parts.push(`${combined} active.`);
+  }
+  return parts.join(' ');
 }
 
 export default function ConciergeView() {
@@ -232,6 +264,12 @@ export default function ConciergeView() {
       if (skeletonTimer.current) clearTimeout(skeletonTimer.current);
     };
   }, [fetchBrief]);
+
+  useEffect(() => {
+    if (brief?.temporal?.quarterPhase) {
+      setActiveQuarterTab(phaseToTab(brief.temporal.quarterPhase));
+    }
+  }, [brief?.temporal?.quarterPhase]);
 
   const openMathModal = useCallback((key: string) => setActiveMathKey(key), []);
   const closeMathModal = useCallback(() => setActiveMathKey(null), []);
@@ -379,11 +417,14 @@ export default function ConciergeView() {
                 {brief.user.name}.
               </div>
             )}
-            {brief.situationLine && (
-              <div style={{ fontSize: 13, color: S.textSub, maxWidth: 600, marginBottom: 18, lineHeight: 1.6 }}>
-                {brief.situationLine}
-              </div>
-            )}
+            {(() => {
+              const line = brief.situationLine || deriveSituationLine(brief);
+              return line ? (
+                <div style={{ fontSize: 13, color: S.textSub, maxWidth: 600, marginBottom: 18, lineHeight: 1.6 }}>
+                  {line}
+                </div>
+              ) : null;
+            })()}
 
             {/* VERDICT BLOCK */}
             {pct !== undefined && pct !== null && (
@@ -470,8 +511,8 @@ export default function ConciergeView() {
                     key={i}
                     rank={i + 1}
                     category={severityToCategory(finding.severity)}
-                    eyebrow={finding.skillName || finding.dealName || ''}
-                    title={finding.message || ''}
+                    eyebrow={toTitleCaseSkillName(finding.skillName || finding.dealName || '')}
+                    title={cleanFindingMessage(finding.message || '')}
                     body={''}
                     chips={[]}
                     mathKey={finding.mathKey}

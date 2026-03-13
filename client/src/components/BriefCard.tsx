@@ -1,4 +1,5 @@
 import React from 'react';
+import { colors } from '../styles/theme';
 
 type Category = 'risk' | 'opportunity' | 'watch' | 'hygiene' | 'action';
 type ChipStatus = 'done' | 'pending' | 'needs';
@@ -66,8 +67,8 @@ export default function BriefCard({ rank, category, eyebrow, title, body, chips,
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
-        background: '#0f1219',
-        border: `0.5px solid ${hovered ? '#242b3a' : '#1a1f2b'}`,
+        background: colors.surface,
+        border: `0.5px solid ${hovered ? colors.borderLight : colors.border}`,
         borderRadius: 10,
         borderLeft: `2px solid ${cat.border}`,
         padding: '12px 13px',
@@ -78,7 +79,7 @@ export default function BriefCard({ rank, category, eyebrow, title, body, chips,
     >
       {/* TOP ROW: rank + badge + eyebrow */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-        <span style={{ fontSize: 10, color: '#3a4252', fontWeight: 600, minWidth: 14 }}>#{rank}</span>
+        <span style={{ fontSize: 10, color: colors.textDim, fontWeight: 600, minWidth: 14 }}>#{rank}</span>
         <span style={{
           fontSize: 9,
           fontWeight: 600,
@@ -92,18 +93,18 @@ export default function BriefCard({ rank, category, eyebrow, title, body, chips,
         }}>
           {cat.label}
         </span>
-        <span style={{ fontSize: 11, color: '#5a6578', flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        <span style={{ fontSize: 11, color: colors.textMuted, flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {eyebrow}
         </span>
       </div>
 
       {/* TITLE */}
-      <div style={{ fontSize: 13, fontWeight: 500, color: '#e8ecf4', marginBottom: 5, lineHeight: 1.4 }}>
+      <div style={{ fontSize: 13, fontWeight: 500, color: colors.text, marginBottom: 5, lineHeight: 1.4 }}>
         {renderTitle(title, mathKey, onMathClick)}
         {mathKey && (
           <span
             onClick={e => { e.stopPropagation(); if (onMathClick) onMathClick(mathKey); }}
-            style={{ fontSize: 10, color: '#3a4252', marginLeft: 6, cursor: 'pointer' }}
+            style={{ fontSize: 10, color: colors.textDim, marginLeft: 6, cursor: 'pointer' }}
           >
             ∑ Show math
           </span>
@@ -112,7 +113,7 @@ export default function BriefCard({ rank, category, eyebrow, title, body, chips,
 
       {/* BODY */}
       {body && (
-        <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.5, marginBottom: chips && chips.length ? 8 : 0 }}>
+        <div style={{ fontSize: 12, color: colors.textSecondary, lineHeight: 1.5, marginBottom: chips && chips.length ? 8 : 0 }}>
           {body}
         </div>
       )}
@@ -144,7 +145,7 @@ export default function BriefCard({ rank, category, eyebrow, title, body, chips,
       )}
 
       {/* FOOTER */}
-      <div style={{ fontSize: 10, color: '#3a4252', marginTop: 4 }}>
+      <div style={{ fontSize: 10, color: colors.textDim, marginTop: 4 }}>
         Tap to drill in →
       </div>
     </div>
