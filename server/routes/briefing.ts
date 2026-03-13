@@ -335,7 +335,7 @@ router.get(
 
         const cwResult = await query<{ closed_won_value: string }>(cwSQL, cwParams);
         const scopedClosedWon = Number(cwResult.rows[0]?.closed_won_value ?? 0);
-        const targetAmount = brief.targets.headline?.amount ?? Number(targetRow?.amount ?? 0);
+        const targetAmount = targetRow ? Number(targetRow.amount ?? 0) : (brief.targets.headline?.amount ?? 0);
 
         if (hasTarget && targetAmount > 0) {
           brief.targets.pctAttained = Math.round((scopedClosedWon / targetAmount) * 100);
@@ -376,16 +376,37 @@ router.get(
               : 0;
           }
 
-          if (brief.findings?.topFindings) {
+          if (brief.findings) {
             const dealIdsRes = await query<{ id: string }>(
               `SELECT id FROM deals WHERE workspace_id = $1 AND pipeline = $2`,
               [workspaceId, pipelineFilter]
             ).catch(() => ({ rows: [] as { id: string }[] }));
             const dealIdSet = new Set(dealIdsRes.rows.map((r) => r.id));
-            brief.findings.topFindings = brief.findings.topFindings.filter((f) => {
-              if (!(f as Record<string, unknown>).dealId) return true;
-              return dealIdSet.has((f as Record<string, unknown>).dealId as string);
-            });
+
+            if (brief.findings.topFindings) {
+              brief.findings.topFindings = brief.findings.topFindings.filter((f) => {
+                if (!(f as Record<string, unknown>).dealId) return true;
+                return dealIdSet.has((f as Record<string, unknown>).dealId as string);
+              });
+            }
+
+            const scopedCounts = await query<{ severity: string; cnt: string }>(
+              `SELECT severity, COUNT(*)::text as cnt
+               FROM findings
+               WHERE workspace_id = $1 AND deal_id = ANY($2::text[])
+                 AND status = 'open'
+               GROUP BY severity`,
+              [workspaceId, Array.from(dealIdSet)]
+            ).catch(() => ({ rows: [] as { severity: string; cnt: string }[] }));
+
+            let critical = 0;
+            let warning = 0;
+            for (const r of scopedCounts.rows) {
+              if (r.severity === 'critical' || r.severity === 'high') critical += Number(r.cnt);
+              else if (r.severity === 'warning' || r.severity === 'medium') warning += Number(r.cnt);
+            }
+            brief.findings.critical = critical;
+            brief.findings.warning = warning;
           }
         }
       } catch {
