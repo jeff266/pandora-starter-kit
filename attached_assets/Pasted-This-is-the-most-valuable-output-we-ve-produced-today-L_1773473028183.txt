@@ -1,0 +1,112 @@
+This is the most valuable output we've produced today. Look at what just surfaced:
+
+```
+ABS Kids - AB + RAB:        $200K  · 36 days cold
+BlueSprig Autism:           $144K  · 40 days cold  
+Easterseals NC:             $112K  · 37 days cold
+Beacon Services CT:         $108K  · 240 days cold (!)
+Behavioral Framework - AB:  $105K  · 44 days cold
+```
+
+$669K in high-value pipeline that has been sitting invisible in the database. Beacon Services at 240 days cold is particularly striking — that's a $108K deal that last had activity in July. Without RFM scoring feeding into the brief, that deal would never surface in Concierge. It would just sit in the pipeline inflating the coverage number while decaying.
+
+This is exactly the "so what" that was missing from the earlier cards. The brief can now say:
+
+> "$669K of your AB pipeline has gone cold. The 5 largest at-risk deals average $134K and haven't had activity in 36–240 days. Beacon Services CT at $108K has been silent for 8 months — either re-engage or clean it up. The other 4 are recoverable with outreach this week."
+
+That's a card a VP RevOps acts on.
+
+---
+
+## What Just Changed About the Product
+
+Step back for a second. Three sessions ago, Concierge was showing three Fellowship Pipeline single-thread alerts as the top findings — Fellowship deals that weren't in the target pipeline, with no explanation of why they mattered to the goal.
+
+Now the brief surfaces:
+- The correct target period (Q1 FY2027 · $350K)
+- Pipeline segmented by product line (AB vs DB vs DP)
+- 15 "Big Deal at Risk" deals identified by RFM scoring
+- Top 5 ranked by dollar value × recency signal × severity
+- Beacon Services CT flagged as 240 days cold — something no skill had caught before
+
+The data layer is now doing real work. The brief is now telling you things you didn't already know.
+
+---
+
+## The Immediate Next Session
+
+Two things left before Concierge is genuinely ready for a design partner demo:
+
+**Session A — Synthesis prompt rewrite (Claude Code)**
+
+The `BRIEF_SYSTEM_PROMPT` in `opening-brief.ts` lines 720–752 needs to receive the new `BIG DEALS AT RISK` block and reason about it properly. Right now Claude gets the context but may not know what weight to give it relative to the findings.
+
+```
+Read server/context/opening-brief.ts lines 720–752 
+(the BRIEF_SYSTEM_PROMPT) and lines 597–701 
+(renderBriefContext).
+
+ONE TASK ONLY.
+
+The brief context now includes a BIG DEALS AT RISK section
+with RFM-scored high-value deals. The synthesis prompt needs
+to know how to use it.
+
+Update BRIEF_SYSTEM_PROMPT to add these instructions after
+the existing output structure guidance:
+
+"BIG DEALS AT RISK: If the context includes a BIG DEALS AT 
+RISK section, treat these as the highest-priority findings 
+regardless of the ATTENTION section order. A $200K deal that 
+has gone cold for 36 days is more important than any 
+low-dollar hygiene finding. Surface at least one Big Deal at 
+Risk as the first finding if any exist, with:
+  - The specific dollar amount and days cold
+  - Why it matters to the quarterly number (use targets.gap 
+    if gap > 0, or next quarter pipeline if gap = 0)
+  - One specific action (not generic — name the deal and 
+    the recommended outreach type based on stage)
+
+VOICE RULES (unchanged — non-negotiable):
+  - No fear language
+  - No generic phrases
+  - Name specific deals, amounts, days
+  - If gap = 0 (target already hit), frame around Q2 setup
+    not Q1 urgency"
+
+Do not change anything else in opening-brief.ts.
+Report the updated prompt section only.
+```
+
+**Session B — BriefInteraction table (separate Claude Code session after A)**
+
+The feedback loop needs to start capturing data now that the brief is surfacing meaningful content. Every time a Big Deal at Risk card is shown and ignored vs. acted on is a training signal.
+
+That prompt is already written in the comprehensive review doc. Run it after Session A validates.
+
+---
+
+## The State of Play
+
+```
+COMPLETE ✓
+  RFM engine with product-line segmentation
+  Monetary quintiles accurate for HIGH_VALUE deals
+  15 "Big Deal at Risk" deals identified
+  RFM urgency multiplier in finding scoring
+  Big Deals at Risk in brief context
+  deal-rfm-scoring skill narrative fixed
+
+NEXT SESSION (today)
+  Synthesis prompt updated to prioritize Big Deals at Risk
+  
+FOLLOWING SESSION
+  BriefInteraction instrumentation table
+  
+AFTER THAT
+  calibrateBriefPriorities() as system prompt context
+  Proactive Ask Pandora synthesis prompt rewrite
+  Re-engagement surface (closed lost + enrichment signals)
+```
+
+One more session and the brief is ready for a real design partner review. Run Session A.
