@@ -77,6 +77,18 @@ const DEFAULT_GLOBAL_RECENCY: number[] = [7, 14, 21, 30];
 const rfmMetaCache = new Map<string, { meta: RFMWorkspaceMeta; cachedAt: number }>();
 const RFM_META_TTL_MS = 6 * 60 * 60 * 1000;
 
+function detectProductLine(dealName: string): string {
+  if (!dealName) return 'other';
+  const lower = dealName.toLowerCase();
+  if (lower.includes('fellowship')) return 'fellowship';
+  if (lower.includes(' - ab')) return 'ab';
+  if (lower.includes(' - db')) return 'db';
+  if (lower.includes(' - rab')) return 'rab';
+  if (lower.includes(' - dp')) return 'dp';
+  if (lower.includes('pilot')) return 'pilot';
+  return 'other';
+}
+
 export async function ensureRFMColumns(): Promise<void> {
   const sql = `
     ALTER TABLE deals ADD COLUMN IF NOT EXISTS rfm_recency_days NUMERIC;
@@ -674,9 +686,40 @@ export async function computeAndStoreRFMScores(workspaceId: string): Promise<{
     return { scored: 0, mode, coverage, meta: emptyMeta };
   }
 
+  // Fetch deal names for product line detection
+  const dealNameMap = new Map<string, string>();
+  const dealIds = Array.from(rawValues.keys());
+  if (dealIds.length > 0) {
+    const namesResult = await query<{ id: string; name: string }>(
+      `SELECT id, name FROM deals WHERE id = ANY($1)`,
+      [dealIds]
+    );
+    for (const row of namesResult.rows) {
+      dealNameMap.set(row.id, row.name);
+    }
+  }
+
+  // Segment by product line: HIGH_VALUE (ab, db, fellowship, rab) vs LOW_VALUE (dp, pilot, other)
+  const highValueDealIds = new Set<string>();
+  const lowValueDealIds = new Set<string>();
+  for (const [dealId, raw] of rawValues) {
+    const dealName = dealNameMap.get(dealId) || '';
+    const productLine = detectProductLine(dealName);
+    if (['ab', 'db', 'fellowship', 'rab'].includes(productLine)) {
+      highValueDealIds.add(dealId);
+    } else {
+      lowValueDealIds.add(dealId);
+    }
+  }
+
+  // Compute monetary quintiles only for HIGH_VALUE deals
+  const highValueMonetary = Array.from(highValueDealIds)
+    .map(id => rawValues.get(id)?.monetaryValue ?? 0)
+    .filter(v => v > 0);
+  
   const recencyValues = [...rawValues.values()].map(v => v.recencyDays);
   const frequencyValues = mode !== 'r_only' ? [...rawValues.values()].map(v => v.frequencyCount) : null;
-  const monetaryValues = [...rawValues.values()].filter(v => v.monetaryValue > 0).map(v => v.monetaryValue);
+  const monetaryValues = highValueMonetary;
 
   const windowStart = new Date();
   windowStart.setMonth(windowStart.getMonth() - 24);
@@ -726,14 +769,27 @@ export async function computeAndStoreRFMScores(workspaceId: string): Promise<{
       stageThresholds
     );
 
-    const freqEntry = adjustedFrequencyMap.get(dealId);
-    const adjustedFrequency = freqEntry?.adjusted ?? raw.frequencyCount;
-    const threadingFactor = freqEntry?.factor ?? null;
+    const isLowValue = lowValueDealIds.has(dealId);
+    
+    let f: number | null = null;
+    let m = 1;
+    let scoreMode = mode;
+    
+    if (isLowValue) {
+      // LOW_VALUE deals: r_only mode, no monetary scoring
+      m = 1; // null converted to 1 for display
+      scoreMode = 'r_only';
+    } else {
+      // HIGH_VALUE deals: normal scoring
+      const freqEntry = adjustedFrequencyMap.get(dealId);
+      const adjustedFrequency = freqEntry?.adjusted ?? raw.frequencyCount;
+      const threadingFactor = freqEntry?.factor ?? null;
 
-    const f = mode !== 'r_only' && breakpoints.frequency !== null
-      ? assignQuintile(adjustedFrequency, breakpoints.frequency)
-      : null;
-    const m = raw.monetaryValue > 0 ? assignQuintile(raw.monetaryValue, breakpoints.monetary) : 1;
+      f = mode !== 'r_only' && breakpoints.frequency !== null
+        ? assignQuintile(adjustedFrequency, breakpoints.frequency)
+        : null;
+      m = raw.monetaryValue > 0 ? assignQuintile(raw.monetaryValue, breakpoints.monetary) : 1;
+    }
 
     scores.set(dealId, {
       recencyDays: raw.recencyDays,
@@ -743,11 +799,11 @@ export async function computeAndStoreRFMScores(workspaceId: string): Promise<{
       monetaryValue: raw.monetaryValue,
       recencyQuintile: r,
       frequencyQuintile: f,
-      monetaryQuintile: m,
+      monetaryQuintile: isLowValue ? 1 : m,
       rfmSegment: buildRFMSegment(r, f, m),
-      rfmGrade: assignRFMGrade(r, f, m, mode),
-      rfmLabel: assignRFMLabel(r, f, m, mode),
-      mode,
+      rfmGrade: isLowValue ? 'F' : assignRFMGrade(r, f, m, mode),
+      rfmLabel: isLowValue ? 'Low-Value Tier — not scored on monetary' : assignRFMLabel(r, f, m, mode),
+      mode: scoreMode,
       isReliable: raw.recencySource !== 'record_update',
       stageNormalized: raw.stageNormalized,
       stageThreshold,

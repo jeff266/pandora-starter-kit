@@ -1,0 +1,107 @@
+Read server/analysis/rfm-scoring.ts before making any changes.
+
+CONTEXT — Frontera Health pipeline structure:
+  AB deals:  58 open, avg $33K, range $225–$300K, 89% of pipeline value
+  DB deals:   6 open, avg $34K, range $75–$150K, 9.5% of pipeline value
+  DP deals:   4 open, avg $1.3K, homogeneous pricing, 0.2% of value
+  Pilot/Other: 6 deals, negligible value
+  
+  AB and DB are economically comparable (~$33K avg each).
+  DP is a different product at a different price point entirely.
+  The current RFM monetary quintiles are distorted because all 
+  deal types were scored together, compressing Q4 to ">$7,200"
+  when the real high-value deals are $30K–$300K.
+
+TASK 1 — Add product line detection to rfm-scoring.ts
+
+Add a function detectProductLine(dealName: string): string that
+maps deal names to product lines using these patterns:
+
+  'Fellowship' in name → 'fellowship'
+  '- AB' in name (case insensitive) → 'ab'
+  '- DB' in name → 'db'  
+  '- RAB' in name → 'rab'
+  '- DP' in name → 'dp'
+  'Pilot' in name → 'pilot'
+  default → 'other'
+
+Store the result in a new computed field or use it inline
+in the scoring computation. Do NOT add a new database column
+for this — derive it at compute time from deal name.
+
+TASK 2 — Segment monetary quintiles by product line group
+
+Modify computeAndStoreRFMScores() to compute monetary 
+quintiles within two groups rather than workspace-wide:
+
+  HIGH_VALUE group: product lines 'ab', 'db', 'fellowship', 'rab'
+    These are economically comparable (~$30K avg)
+    Compute monetary quintiles across this group only
+    
+  LOW_VALUE group: product lines 'dp', 'pilot', 'other'
+    Do NOT score on monetary dimension
+    Force monetary_quintile = null for these deals
+    Force mode = 'r_only' for these deals regardless of 
+    workspace-wide activity coverage
+    Add rfm_label = 'Low-Value Tier — not scored on monetary'
+
+Recency scoring remains workspace-wide (a deal is stale 
+regardless of product line).
+
+TASK 3 — Re-run RFM for Frontera Health with new segmentation
+
+After modifying the scoring function:
+  
+  await computeAndStoreRFMScores(
+    '4160191d-73bc-414b-97dd-5a1853190378'
+  );
+
+Report the new grade distribution separately for:
+  - HIGH_VALUE group (AB + DB deals)
+  - LOW_VALUE group (DP + Pilot + Other)
+  - Overall
+
+The HIGH_VALUE grade distribution is the one that matters
+for Concierge. It should now reflect actual deal health
+rather than a distorted monetary comparison.
+
+TASK 4 — Verify monetary quintile breakpoints after re-run
+
+The new Q4 threshold for HIGH_VALUE deals should be
+significantly higher than the current $7,200.
+With 64 deals averaging $33K, expect:
+  Q1 (bottom): roughly ≤$5K–$10K
+  Q4 (top): roughly >$50K–$100K
+
+Report the actual breakpoints. If they still look distorted,
+there may be additional outliers in AB/DB to investigate.
+
+TASK 5 — Update assembleBriefData() in opening-brief.ts
+
+Add product_line detection to the pipeline summary query
+so the brief can show segmented pipeline data:
+
+  pipeline: {
+    totalValue: number,
+    dealCount: number,
+    weightedValue: number,
+    coverageRatio: number,
+    // NEW — product line breakdown
+    byProductLine: {
+      ab: { count, totalValue, avgAmount },
+      db: { count, totalValue, avgAmount },
+      dp: { count, totalValue, avgAmount },
+      other: { count, totalValue, avgAmount }
+    }
+  }
+
+Derive product_line from deal name at query time using 
+CASE WHEN syntax — do not add a column to the deals table.
+
+DO NOT TOUCH:
+  - server/chat/orchestrator.ts
+  - server/chat/pandora-agent.ts
+  - Any existing migrations
+  - The targets table
+
+Report results for each task before marking complete.

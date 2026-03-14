@@ -60,6 +60,12 @@ export interface OpeningBriefData {
     closingThisWeek: { count: number; value: number; dealNames: string[] };
     closingThisMonth: { count: number; value: number };
     newThisWeek: { count: number; value: number };
+    byProductLine?: {
+      ab?: { count: number; totalValue: number; avgAmount: number };
+      db?: { count: number; totalValue: number; avgAmount: number };
+      dp?: { count: number; totalValue: number; avgAmount: number };
+      other?: { count: number; totalValue: number; avgAmount: number };
+    };
   };
   findings: {
     critical: number;
