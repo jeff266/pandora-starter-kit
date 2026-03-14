@@ -1,0 +1,79 @@
+Read client/src/pages/ConciergeView.tsx and check 
+what brief.recentSkillRuns and brief.pendingActions 
+contain in the API response. Console.log both.
+
+TWO TASKS ONLY.
+
+TASK 1 — Render Pandora overnight activity log
+
+Between the verdict block and the finding cards, 
+add an activity log section using the real data 
+from the brief response.
+
+Section header: "Pandora overnight" 
+Font: 11px, uppercase, color #5a6578, letter-spacing 0.07em
+Margin-bottom: 8px
+
+For each item in brief.recentSkillRuns:
+  [green dot] [skill display name] · [finding count] 
+              findings · [time ago]
+  
+  Display name mapping:
+    'pipeline-hygiene' → 'Pipeline Hygiene'
+    'single-thread-alert' → 'Single Thread Alert'  
+    'deal-rfm-scoring' → 'RFM Scoring'
+    'deal-risk-review' → 'Deal Risk Review'
+    'data-quality-audit' → 'Data Quality Audit'
+    default → capitalize and replace hyphens with spaces
+
+  Time ago: format createdAt as relative time
+    < 1 hour → "just now"
+    1–23 hours → "[n] hours ago"
+    1+ days → "[n] days ago"
+
+For each item in brief.pendingActions (max 3):
+  [yellow dot] [action.title] · awaiting your approval
+
+  Make each pending action row clickable.
+  On click: open a simple inline action card below 
+  the row showing:
+    - action.description
+    - [Approve] button → POST /actions/:id/approve
+    - [Reject] button → POST /actions/:id/reject
+  On approve/reject: update dot to green/gray, 
+  collapse the inline card. No page refresh.
+
+If brief.recentSkillRuns is empty: 
+  Show "No skills have run yet for this workspace."
+  
+If brief.pendingActions is empty:
+  Show nothing (omit the pending section entirely,
+  don't show "no pending actions")
+
+TASK 2 — Update the count line above cards
+
+Change:
+  "5 big deals at risk · 3 of 47 findings · sorted by severity"
+
+To:
+  "5 big deals at risk · 3 of 47 findings · 
+   [n] actions overnight[· [n] awaiting approval 
+   if pendingActions.length > 0]"
+
+Where n = brief.recentSkillRuns.length for overnight
+and brief.pendingActions.length for awaiting.
+
+Example:
+  "5 big deals at risk · 3 of 47 findings · 
+   3 skills ran overnight · 2 awaiting approval"
+
+DO NOT modify:
+  - Any backend files
+  - The Tactical sub-tab (separate session)
+  - MathModal
+  - BriefCard component
+  - AskBar
+
+Validate: the activity log shows real skill run data,
+pending actions show with yellow dots and expand on click,
+count line updates correctly.

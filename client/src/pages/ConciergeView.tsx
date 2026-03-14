@@ -65,6 +65,16 @@ interface OvernightSummary {
   lastRunAt: string | null;
 }
 
+interface PendingAction {
+  id: string;
+  title: string;
+  description?: string;
+  rule_name?: string;
+  deal_name?: string;
+  action_type?: string;
+  created_at?: string;
+}
+
 interface OpeningBriefData {
   temporal: TemporalContext;
   user: { name: string; email: string; pandoraRole: string; workspaceRole: string };
@@ -307,6 +317,29 @@ function formatActionType(actionType: string): string {
   return actionType.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
+function fmtSkillDisplayName(name: string): string {
+  const map: Record<string, string> = {
+    'pipeline-hygiene': 'Pipeline Hygiene',
+    'single-thread-alert': 'Single Thread Alert',
+    'deal-rfm-scoring': 'RFM Scoring',
+    'deal-risk-review': 'Deal Risk Review',
+    'data-quality-audit': 'Data Quality Audit',
+  };
+  return map[name] ?? toTitleCaseSkillName(name);
+}
+
+function fmtTimeAgo(ts?: string | null): string {
+  if (!ts) return '';
+  try {
+    const diff = Date.now() - new Date(ts).getTime();
+    const hours = Math.floor(diff / (1000 * 60 * 60));
+    if (hours < 1) return 'just now';
+    if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+    const days = Math.floor(hours / 24);
+    return `${days} day${days === 1 ? '' : 's'} ago`;
+  } catch { return ''; }
+}
+
 function deriveSituationLine(brief: OpeningBriefData): string {
   const parts: string[] = [];
   const temporal = brief.temporal as any;
@@ -360,6 +393,9 @@ export default function ConciergeView() {
   const [activeQuarterTab, setActiveQuarterTab] = useState<QuarterTab>('early');
   const [activeSubTab, setActiveSubTab] = useState<SubTab>('strategic');
   const [isProjection, setIsProjection] = useState(false);
+  const [pendingActions, setPendingActions] = useState<PendingAction[]>([]);
+  const [expandedActionId, setExpandedActionId] = useState<string | null>(null);
+  const [actionStates, setActionStates] = useState<Record<string, 'pending' | 'approved' | 'rejected'>>({});
 
   const skeletonTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -403,8 +439,15 @@ export default function ConciergeView() {
         temporal: raw.temporal ?? raw.brief?.temporal,
       };
       console.log('[ConciergeView] brief data:', data);
+      console.log('[ConciergeView] recentSkillRuns:', data.findings?.skillRuns);
       setBrief(data);
       setOvernight(raw.overnightSummary ?? null);
+      try {
+        const actionsRaw = await api.get('/workflow-rules/pending') as any;
+        const fetched: PendingAction[] = actionsRaw.pending_actions ?? [];
+        setPendingActions(fetched);
+        console.log('[ConciergeView] pendingActions:', fetched);
+      } catch { /* silent — pending actions are non-critical */ }
       setError(null);
 
       const role = (data?.user?.pandoraRole ?? null) as PandoraRole;
@@ -848,6 +891,80 @@ export default function ConciergeView() {
               </div>
             ) : null}
 
+            {/* ACTIVITY LOG — strategic sub-tab */}
+            {activeSubTab === 'strategic' && (
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: '#5a6578', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>
+                  Pandora overnight
+                </div>
+                {(brief.findings?.skillRuns?.length ?? 0) === 0 ? (
+                  <div style={{ fontSize: 12, color: S.textDim, padding: '4px 0' }}>No skills have run yet for this workspace.</div>
+                ) : (
+                  brief.findings!.skillRuns!.map((run, i) => (
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0', borderBottom: `0.5px solid ${S.border}` }}>
+                      <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: S.teal, flexShrink: 0 }} />
+                      <span style={{ flex: 1, fontSize: 12, color: S.textSub }}>
+                        {fmtSkillDisplayName(run.skillName)}
+                        {run.findingCount !== undefined ? ` · ${run.findingCount} finding${run.findingCount === 1 ? '' : 's'}` : ''}
+                      </span>
+                      <span style={{ fontSize: 10, color: S.textDim }}>{fmtTimeAgo(run.ranAt)}</span>
+                    </div>
+                  ))
+                )}
+                {pendingActions.slice(0, 3).map((action, i, arr) => {
+                  const state = actionStates[action.id] ?? 'pending';
+                  const dotColor = state === 'approved' ? S.teal : state === 'rejected' ? '#6b7280' : S.yellow;
+                  const isExpanded = expandedActionId === action.id;
+                  return (
+                    <div key={action.id}>
+                      <div
+                        onClick={() => { if (state === 'pending') setExpandedActionId(isExpanded ? null : action.id); }}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0',
+                          cursor: state === 'pending' ? 'pointer' : 'default',
+                          borderBottom: (i < arr.length - 1 || isExpanded) ? `0.5px solid ${S.border}` : 'none',
+                        }}
+                      >
+                        <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: dotColor, flexShrink: 0 }} />
+                        <span style={{ flex: 1, fontSize: 12, color: S.textSub }}>
+                          {action.title} · awaiting your approval
+                        </span>
+                      </div>
+                      {isExpanded && (
+                        <div style={{ padding: '10px 14px', background: S.surface2, borderRadius: 8, marginBottom: 6, marginTop: 2 }}>
+                          {action.description && (
+                            <div style={{ fontSize: 12, color: S.textSub, lineHeight: 1.5, marginBottom: 10 }}>{action.description}</div>
+                          )}
+                          <div style={{ display: 'flex', gap: 8 }}>
+                            <button
+                              onClick={async () => {
+                                try {
+                                  await api.post(`/workflow-rules/pending/${action.id}/approve`, {});
+                                  setActionStates(prev => ({ ...prev, [action.id]: 'approved' }));
+                                  setExpandedActionId(null);
+                                } catch {}
+                              }}
+                              style={{ fontSize: 11, padding: '4px 12px', background: S.teal, color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer' }}
+                            >Approve</button>
+                            <button
+                              onClick={async () => {
+                                try {
+                                  await api.post(`/workflow-rules/pending/${action.id}/reject`, {});
+                                  setActionStates(prev => ({ ...prev, [action.id]: 'rejected' }));
+                                  setExpandedActionId(null);
+                                } catch {}
+                              }}
+                              style={{ fontSize: 11, padding: '4px 12px', background: 'transparent', color: S.textSub, border: `0.5px solid ${S.border}`, borderRadius: 6, cursor: 'pointer' }}
+                            >Reject</button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
             {/* ACTIVITY LOG — tactical sub-tab for non-ae roles */}
             {(pandoraRole !== 'ae') && activeSubTab === 'tactical' && brief.findings?.skillRuns && brief.findings.skillRuns.length > 0 && (
               <div style={{ marginBottom: 20 }}>
@@ -900,12 +1017,18 @@ export default function ConciergeView() {
                 }
               }
 
+              const skillRunCount = brief.findings?.skillRuns?.length ?? 0;
+              const overnightPart = skillRunCount > 0 ? `${skillRunCount} skill${skillRunCount === 1 ? '' : 's'} ran overnight` : null;
+              const pendingPart = pendingActions.length > 0 ? `${pendingActions.length} awaiting approval` : null;
+              const tailParts = [overnightPart, pendingPart].filter(Boolean);
+              const countTail = tailParts.length > 0 ? tailParts.join(' · ') : 'sorted by severity';
+
               return (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   <div style={{ fontSize: 11, color: '#5a6578', marginBottom: 8 }}>
                     {riskDeals.length > 0
-                      ? `${riskDeals.length} big deal${riskDeals.length > 1 ? 's' : ''} at risk · ${Math.min(topFindings.length, 5)} of ${totalCount} findings · sorted by severity`
-                      : `Showing ${Math.min(topFindings.length, 5)} of ${totalCount} findings · sorted by severity`}
+                      ? `${riskDeals.length} big deal${riskDeals.length > 1 ? 's' : ''} at risk · ${Math.min(topFindings.length, 5)} of ${totalCount} findings · ${countTail}`
+                      : `Showing ${Math.min(topFindings.length, 5)} of ${totalCount} findings · ${countTail}`}
                   </div>
 
                   {/* Q2 context narrative — shown when Q1 is won and cold deals exist */}
