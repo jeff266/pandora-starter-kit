@@ -715,4 +715,77 @@ router.post(
   }
 );
 
+// ===== FINDING PREFERENCE ENDPOINTS =====
+// Watch / Dismiss signals from the Concierge brief card buttons.
+// Persisted per user per finding so they survive page reloads and cache refreshes.
+
+router.post(
+  '/:workspaceId/briefing/findings/:findingId/preference',
+  requireWorkspaceAccess,
+  async (req: Request, res: Response): Promise<void> => {
+    const workspaceId = req.params.workspaceId as string;
+    const findingId   = req.params.findingId   as string;
+    const userId      = (req as any).user?.user_id as string;
+
+    if (!userId) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+
+    const { preference } = req.body as { preference?: string };
+    if (preference !== 'watch' && preference !== 'dismissed') {
+      res.status(400).json({ error: 'preference must be "watch" or "dismissed"' });
+      return;
+    }
+
+    const expiresAt = preference === 'dismissed'
+      ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 days
+      : null;
+
+    try {
+      await query(
+        `INSERT INTO finding_preferences (workspace_id, user_id, finding_id, preference, expires_at)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (workspace_id, user_id, finding_id)
+         DO UPDATE SET preference = EXCLUDED.preference,
+                       expires_at = EXCLUDED.expires_at`,
+        [workspaceId, userId, findingId, preference, expiresAt]
+      );
+      res.json({ ok: true });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[briefing] preference upsert error:', msg);
+      res.status(500).json({ error: msg });
+    }
+  }
+);
+
+router.delete(
+  '/:workspaceId/briefing/findings/:findingId/preference',
+  requireWorkspaceAccess,
+  async (req: Request, res: Response): Promise<void> => {
+    const workspaceId = req.params.workspaceId as string;
+    const findingId   = req.params.findingId   as string;
+    const userId      = (req as any).user?.user_id as string;
+
+    if (!userId) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+
+    try {
+      await query(
+        `DELETE FROM finding_preferences
+         WHERE workspace_id = $1 AND user_id = $2 AND finding_id = $3`,
+        [workspaceId, userId, findingId]
+      );
+      res.json({ ok: true });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[briefing] preference delete error:', msg);
+      res.status(500).json({ error: msg });
+    }
+  }
+);
+
 export default router;

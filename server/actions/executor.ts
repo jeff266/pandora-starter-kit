@@ -242,6 +242,33 @@ function buildOperations(
         });
       }
       break;
+
+    case 'assign_to_rep':
+      // Log a CRM note on the deal record (PM tool integration is future work)
+      if (externalId && crmSource) {
+        const noteBody = [
+          `Task: ${payload.task_title || action.title}`,
+          payload.task_note ? `Note: ${payload.task_note}` : '',
+          payload.assignee_email ? `Assigned to: ${payload.assignee_email}` : '',
+          payload.due_date ? `Due: ${payload.due_date}` : '',
+          '',
+          `Source: Pandora concierge`,
+          `Created: ${new Date().toISOString()}`,
+        ].filter(Boolean).join('\n');
+
+        ops.push({
+          type: 'crm_note',
+          target: `${crmSource}:${externalId}`,
+          payload: {
+            crmSource,
+            externalId,
+            title: `Pandora Task: ${payload.task_title || action.title}`,
+            body: noteBody,
+          },
+        });
+      }
+      // If no CRM connection, the action record itself is the audit trail
+      return ops;
   }
 
   if (action.action_type === 'notify_rep' || action.action_type === 'notify_manager') {

@@ -14,6 +14,7 @@ import { resolveStageToCRM } from '../actions/stage-resolver.js';
 import { getCredentials } from '../connectors/adapters/credentials.js';
 import { HubSpotClient } from '../connectors/hubspot/client.js';
 import { SalesforceClient } from '../connectors/salesforce/client.js';
+import { requireWorkspaceAccess } from '../middleware/auth.js';
 
 const router = Router();
 
@@ -806,5 +807,133 @@ router.post('/:workspaceId/suggested-actions/sync', async (req: Request, res: Re
 
   return res.json({ cards });
 });
+
+/**
+ * POST /api/workspaces/:workspaceId/actions/assign-to-rep
+ *
+ * Creates a task-assignment action for a deal and executes it immediately.
+ * Resolves the deal owner, creates an action record, and executes via the
+ * existing executor (CRM note if no PM tool connected).
+ */
+router.post(
+  '/:workspaceId/actions/assign-to-rep',
+  requireWorkspaceAccess,
+  async (req: Request<WorkspaceParams>, res: Response) => {
+    const workspaceId = req.params.workspaceId;
+    const userId      = (req as any).user?.user_id as string;
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    const { dealId, taskTitle, taskNote, dueDate } = req.body as {
+      dealId: string;
+      taskTitle?: string;
+      taskNote?: string;
+      dueDate?: string; // ISO date string, defaults to tomorrow
+    };
+
+    if (!dealId) {
+      return res.status(400).json({ error: 'dealId is required' });
+    }
+
+    try {
+      // 1. Load the deal to resolve owner
+      const dealResult = await dbQuery(
+        `SELECT id, name, amount, owner_email, stage_normalized, source, source_id, external_id
+         FROM deals WHERE id = $1 AND workspace_id = $2`,
+        [dealId, workspaceId]
+      );
+
+      if (dealResult.rows.length === 0) {
+        return res.status(404).json({ error: 'Deal not found' });
+      }
+
+      const deal = dealResult.rows[0];
+      const assigneeEmail: string = deal.owner_email ?? '';
+
+      // 2. Resolve workspace member for the owner email
+      const memberResult = await dbQuery(
+        `SELECT u.id, u.name, u.email
+         FROM users u
+         JOIN workspace_members wm ON wm.user_id = u.id
+         WHERE wm.workspace_id = $1 AND u.email = $2
+         LIMIT 1`,
+        [workspaceId, assigneeEmail]
+      );
+      const assignedUser = memberResult.rows[0] ?? null;
+
+      // 3. Resolve acting user email for audit
+      const actorResult = await dbQuery(
+        `SELECT email FROM users WHERE id = $1 LIMIT 1`,
+        [userId]
+      );
+      const actorEmail: string = actorResult.rows[0]?.email ?? 'system';
+
+      // 4. Build the task payload
+      const resolvedTitle = taskTitle || `Follow up on ${deal.name}`;
+      const resolvedNote  = taskNote  || `Task assigned by Pandora — deal: ${deal.name}`;
+      const resolvedDue   = dueDate   || new Date(Date.now() + 86400000).toISOString().split('T')[0];
+
+      const executionPayload = {
+        deal_id: dealId,
+        deal_name: deal.name,
+        task_title: resolvedTitle,
+        task_note: resolvedNote,
+        due_date: resolvedDue,
+        assignee_email: assigneeEmail,
+        assignee_user_id: assignedUser?.id ?? null,
+        crm_updates: [],
+        // Fallback CRM note body if no PM tool
+        crm_note_body: `Pandora: ${resolvedTitle} — ${resolvedNote} (due ${resolvedDue})`,
+      };
+
+      // 5. Insert the action record
+      const insertResult = await dbQuery(
+        `INSERT INTO actions (
+           workspace_id, action_type, title, summary,
+           target_deal_id, target_entity_name,
+           severity, approval_status, execution_status,
+           execution_payload, source_skill, created_at, updated_at
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())
+         RETURNING id`,
+        [
+          workspaceId,
+          'assign_to_rep',
+          resolvedTitle,
+          resolvedNote,
+          dealId,
+          deal.name,
+          'info',
+          'approved',
+          'open',
+          JSON.stringify(executionPayload),
+          'concierge',
+        ]
+      );
+
+      const actionId: string = insertResult.rows[0].id;
+
+      // 6. Execute immediately (bypass judgment — user explicitly triggered this)
+      const execResult = await executeAction(dbPool, {
+        actionId,
+        workspaceId,
+        actor: actorEmail,
+        bypassJudgment: true,
+      });
+
+      res.json({
+        ok: true,
+        actionId,
+        assignedTo: assigneeEmail || null,
+        taskCreated: execResult.success,
+        operations: execResult.operations,
+      });
+    } catch (err) {
+      console.error('[assign-to-rep]', err);
+      res.status(500).json({ error: (err as Error).message });
+    }
+  }
+);
 
 export default router;

@@ -1,0 +1,514 @@
+Good question. Let me think across everything we've discussed today and separate what's genuinely Claude Code work from what's Replit work.
+
+---
+
+## What Claude Code Should Build — Prioritized
+
+**Tier 1 — Needed before Frontera demo or immediately after**
+
+**1. Finding preferences table + API**
+Powers the Watch and Dismiss buttons. Without persistence, every time the brief reloads, dismissed cards come back.
+
+```
+Migration: findings_preferences table
+  { id, workspace_id, finding_id, user_id, 
+    preference: 'watch'|'dismissed', 
+    expires_at (7 days for dismiss, null for watch) }
+
+Endpoints:
+  POST /briefing/findings/:findingId/preference
+  DELETE /briefing/findings/:findingId/preference
+  
+Brief assembly: filter out dismissed findings,
+  flag watched findings with watch indicator
+```
+
+**2. Assign to rep action**
+The actions engine supports task creation but it needs deal owner resolution — pulling `deals.owner_email`, matching to a workspace member, and creating a targeted task.
+
+```
+Extend the actions engine:
+  action_type: 'assign_to_rep'
+  payload: { deal_id, task_title, due_date?, note? }
+  
+Resolves: deals.owner_email → workspace_members
+  → creates task via connected PM tool (Asana/ClickUp)
+  OR logs CRM note if no PM tool connected
+
+Endpoint:
+  POST /actions/assign-to-rep
+```
+
+**3. Q2 coverage rollover calculation**
+The 0.8× figure is misleading without rollover. This is a backend computation, not a frontend fix.
+
+```
+In assembleBriefData(), add:
+
+function estimateQ2Coverage(
+  openDeals: Deal[],
+  q2Target: number,
+  q1PeriodEnd: Date
+): RolloverEstimate
+
+Logic:
+  For each open deal:
+    If close_date > q1PeriodEnd OR stage is early:
+      → count as Q2 pipeline at stage-weighted probability
+    If close_date <= q1PeriodEnd AND stage is late:
+      → count as Q1 close attempt, 
+        30% chance of slipping to Q2
+
+  Sum Q2-weighted pipeline ÷ Q2 target = estimated coverage
+
+Return:
+  { 
+    openPipelineWeighted: number,
+    expectedRollover: number,
+    estimatedQ2Coverage: number,
+    rolloverDealCount: number,
+    note: 'Estimate includes stage-weighted rollover'
+  }
+
+Add to renderBriefContext() and OpeningBriefData.
+```
+
+**4. calibrateBriefPriorities() — the frame shift function**
+We designed this extensively but never built it. At 137% attainment with $0 gap, the brief should shift frame to Q2. Right now it does this only because the synthesis prompt has the Big Deals at Risk instruction. Without the calibration function, the frame is inconsistent across different attainment + temporal combinations.
+
+```
+server/context/brief-priorities.ts
+
+export function calibrateBriefPriorities(
+  temporal: TemporalContext,
+  briefData: BriefData
+): BriefPriorityFrame {
+  
+  // 12-cell grid: quarter position × attainment state
+  // Returns ordered topic list with weights
+  
+  Topics: q2_setup, q1_close_risk, rep_variance,
+    crm_hygiene, board_narrative, pipeline_velocity,
+    big_deals_at_risk, expansion_signal, coaching_signal
+  
+  Weight rules:
+    attainment >= 100 AND daysRemaining <= 21:
+      q2_setup: 2.0, q1_close_risk: 0.3
+    attainment < 85 AND daysRemaining <= 21:
+      q1_close_risk: 2.0, board_narrative: 1.5
+    attainment 85-100 AND daysRemaining > 21:
+      pipeline_velocity: 1.5, rep_variance: 1.2
+    // etc for all 12 cells
+  
+  Returns prioritized topic list that feeds
+  into the synthesis prompt as context
+}
+
+Inject into renderBriefContext() as:
+  PRIORITY FRAME: [topic list with weights]
+  CURRENT CELL: [position × attainment label]
+```
+
+**5. Re-engagement surface — closed lost deals**
+We designed this but never built the query. Recoverable losses surfaced in the brief as Q2 opportunity cards.
+
+```
+In assembleBriefData(), add:
+
+SELECT d.id, d.name, d.amount, d.close_date,
+  c.email as champion_email,
+  EXTRACT(DAYS FROM NOW() - d.close_date) as days_since_loss
+FROM deals d
+LEFT JOIN contacts c ON c.deal_id = d.id 
+  AND c.is_primary = true
+WHERE d.workspace_id = $1
+  AND d.stage_normalized = 'closed_lost'
+  AND d.close_date >= NOW() - INTERVAL '9 months'
+  AND d.close_date <= NOW() - INTERVAL '3 months'
+  AND d.amount >= 10000
+ORDER BY d.amount DESC
+LIMIT 5;
+
+Add to OpeningBriefData as recoverableLosses[]
+Add to renderBriefContext() as RECOVERABLE LOSSES section
+```
+
+**6. Synthesis prompt rewrite — proactive reasoning**
+Replace the template-fill approach with genuine Claude reasoning. The current prompt says "here are the top findings, write a card for each." The better prompt says "here is the full situation, reason about what matters most."
+
+```
+In opening-brief.ts, update BRIEF_SYSTEM_PROMPT:
+
+Remove: instruction to format findings as cards
+Add: 
+  - The 12-cell calibration grid as framework context
+  - Instruction to reason about which cell applies
+  - Instruction to surface findings that matter to
+    the goal, not just the highest severity ones
+  - The "show your math" contract on every number
+  - Voice rules (unchanged)
+
+This is a prompt edit, not a code change.
+One file, high leverage.
+```
+
+---
+
+**Tier 2 — Next sprint after design partner feedback**
+
+**7. BriefInteraction analysis query**
+The table is live and collecting data. After 2–4 weeks of Frontera usage, build a query that reads the patterns:
+
+```
+What findings get drilled into most?
+What findings get dismissed most?
+What follow-up questions come after the brief?
+Which cards lead to approved actions?
+```
+
+This feeds the learning loop. Claude Code task, runs against brief_interactions table.
+
+**8. Rep variance surface**
+At 137% team attainment, individual rep performance varies. The brief should surface "team hit 137% but Jordan is at 45% — coaching conversation needed this week." Requires Rep Scorecard skill output + brief integration.
+
+**9. Pipeline velocity projection**
+"At current velocity you'll enter Q2 at 1.6× coverage. To reach 3×, you need $X more pipeline in Y weeks — that's Z discovery calls per week above current pace." Pure SQL + arithmetic, no LLM.
+
+---
+
+**Tier 3 — Q2 roadmap**
+
+**10. Quarterly retrospective skill**
+Single run per quarter. Reads existing skill_runs by date range and builds phase-level snapshots. Powers the past tab views in Concierge.
+
+**11. Win/loss intelligence skill**
+Auto-analyze every closed lost deal. Classify loss reason. Accumulate patterns. Surface "7 of 12 Q1 losses happened after a competitor was mentioned in call 2."
+
+**12. Segments table**
+Custom deal filters (New Business, West Region, Product Line) that targets and skills can optionally reference. Foundation for multi-dimensional analysis.
+
+---
+
+## The Claude Code Prompt
+
+Here's what to send now — Tier 1 items 1–4, which are the most foundational and can run in one session:
+
+---
+
+```
+Read server/context/opening-brief.ts, 
+server/routes/briefing.ts,
+server/routes/briefing-math.ts,
+server/actions/ (whatever the actions engine files are),
+and replit.md for the next migration number.
+
+FOUR TASKS. Build in order. Report after each before 
+proceeding.
+
+---
+
+TASK 1 — Finding preferences table and API
+
+Migration: [next number]_finding_preferences.sql
+
+  CREATE TABLE finding_preferences (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    workspace_id UUID NOT NULL 
+      REFERENCES workspaces(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL,
+    finding_id TEXT NOT NULL,
+    preference TEXT NOT NULL 
+      CHECK (preference IN ('watch', 'dismissed')),
+    expires_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(workspace_id, user_id, finding_id)
+  );
+  
+  CREATE INDEX idx_finding_prefs_lookup
+    ON finding_preferences(workspace_id, user_id, finding_id);
+
+Endpoints in server/routes/briefing.ts:
+
+  POST /api/workspaces/:workspaceId/briefing/findings/:findingId/preference
+    Auth: requireWorkspaceAccess
+    Body: { preference: 'watch'|'dismissed' }
+    Sets expires_at = NOW() + 7 days for 'dismissed'
+    Sets expires_at = NULL for 'watch'
+    Upserts on (workspace_id, user_id, finding_id)
+    Returns: { ok: true }
+
+  DELETE /api/workspaces/:workspaceId/briefing/findings/:findingId/preference
+    Removes the preference row
+    Returns: { ok: true }
+
+Modify assembleBriefData():
+  Before returning topFindings, filter out findings
+  where a 'dismissed' preference exists for this user
+  AND expires_at > NOW() (or expires_at IS NULL).
+  
+  Add is_watched: boolean to each finding in topFindings
+  based on whether a 'watch' preference exists.
+  
+  Use Promise.allSettled — if preference query fails,
+  return findings unfiltered (safe fallback).
+
+---
+
+TASK 2 — Assign to rep action
+
+Read how the existing actions engine creates tasks.
+Find the action_type definitions and the execution path.
+
+Add action_type: 'assign_to_rep' to the actions engine.
+
+Payload shape:
+  {
+    deal_id: string,
+    deal_name: string,
+    task_title: string,    
+    task_note: string,
+    due_date: string,      // ISO date, default = tomorrow
+    assignee_email: string // from deals.owner_email
+  }
+
+Execution logic:
+  1. Resolve deals.owner_email for the deal_id
+  2. Match owner_email to workspace_members to get user_id
+  3. If PM tool connected (Asana/ClickUp):
+     Create task via existing task creation infrastructure
+     Assign to resolved user
+  4. If no PM tool:
+     Log a CRM note via existing CRM write infrastructure:
+     "Pandora: [task_title] — [task_note]"
+     Written to the deal record
+
+New endpoint:
+  POST /api/workspaces/:workspaceId/actions/assign-to-rep
+  Auth: requireWorkspaceAccess
+  Body: { dealId, taskTitle?, taskNote?, dueDate? }
+  
+  Handler:
+    1. Pull deal from deals table
+    2. Build payload with owner resolution
+    3. Create action record with action_type = 'assign_to_rep'
+       and execution_mode = 'auto' (no approval needed for
+       task creation)
+    4. Execute immediately
+    5. Return: { ok: true, actionId, assignedTo, taskCreated }
+
+---
+
+TASK 3 — Q2 coverage rollover calculation
+
+In server/context/opening-brief.ts, add function:
+
+  function estimateQ2Coverage(
+    openDeals: OpenDeal[],
+    q2Target: number,
+    q1PeriodEnd: Date,
+    stageWeights: Record<string, number>
+  ): RolloverEstimate
+
+Logic:
+  For each open deal, classify as Q1 or Q2:
+  
+  Q1_CLOSE (contributes to Q1 attainment):
+    close_date <= q1PeriodEnd
+    AND stage_normalized IN ('contract', 'proposal')
+    → 70% chance of closing in Q1 as expected
+    → 30% chance of slipping to Q2
+  
+  Q2_PIPELINE (will be Q2 regardless):
+    close_date > q1PeriodEnd
+    OR stage_normalized IN ('evaluation','demo','discovery')
+    → use stage weight for Q2 probability
+    
+  For Q2 coverage:
+    Q2 weighted = 
+      SUM(Q2_PIPELINE deals × stage_weight)
+      + SUM(Q1_CLOSE deals × amount × 0.30)
+    
+  Return:
+    {
+      openPipelineWeighted: number,
+      expectedRolloverValue: number,
+      rolloverDealCount: number,
+      estimatedQ2Coverage: number,  // total ÷ q2Target
+      q2Target: number,
+      confidence: 'estimate',
+      note: string
+    }
+
+Stage weights to use (match existing pipeline weights):
+  contract: 0.85
+  proposal: 0.70
+  demo: 0.40
+  evaluation: 0.20
+  discovery: 0.10
+
+Call this function in assembleBriefData() after the
+existing pipeline stats are computed.
+
+Add estimatedQ2Coverage to OpeningBriefData interface.
+
+Add to renderBriefContext():
+  Q2 COVERAGE ESTIMATE:
+  Open pipeline (weighted): $[X]
+  Expected Q1 rollover: $[X] ([n] deals)
+  Estimated Q2 coverage: [X]× (target: [Q2 target])
+  Note: estimate — includes stage-weighted probability
+
+---
+
+TASK 4 — calibrateBriefPriorities()
+
+Create server/context/brief-priorities.ts
+
+  export interface BriefPriorityFrame {
+    cell: string;              // e.g. 'late_above_target'
+    primaryTopics: string[];   // ordered by weight
+    weights: Record<string, number>;
+    frameLabel: string;        // human-readable
+    suppressTopics: string[];  // topics to deprioritize
+  }
+
+  export function calibrateBriefPriorities(
+    temporal: TemporalContext,
+    attainmentPct: number,
+    coverageRatio: number,
+    hasTarget: boolean
+  ): BriefPriorityFrame
+
+Attainment states:
+  below:  attainmentPct < 85
+  at:     attainmentPct >= 85 AND < 105
+  above:  attainmentPct >= 105
+
+Quarter positions (from temporal.quarterPhase):
+  early: 'early'
+  mid: 'mid'
+  late: 'late'
+  end: 'final_week'
+
+Weight table (12 cells):
+
+  early_below:
+    primaryTopics: ['coverage_gap','icp_quality','rep_ramp']
+    suppressTopics: ['board_narrative','crm_hygiene']
+    frameLabel: 'Building the foundation'
+
+  early_at:
+    primaryTopics: ['pipeline_velocity','coverage_trend']
+    suppressTopics: ['board_narrative']
+    frameLabel: 'On track — maintain momentum'
+
+  early_above:
+    primaryTopics: ['q2_setup','rep_variance','expansion']
+    suppressTopics: ['q1_close_risk']
+    frameLabel: 'Ahead — protect margin and build Q2'
+
+  mid_below:
+    primaryTopics: ['deal_reality','rep_coaching',
+                    'forecast_prep','big_deals_at_risk']
+    suppressTopics: ['q2_setup']
+    frameLabel: 'Behind — focus on what can close'
+
+  mid_at:
+    primaryTopics: ['fragile_deals','q2_coverage',
+                    'big_deals_at_risk']
+    suppressTopics: []
+    frameLabel: 'On pace — protect what\'s real'
+
+  mid_above:
+    primaryTopics: ['q2_setup','rep_variance',
+                    'big_deals_at_risk','expansion']
+    suppressTopics: ['q1_close_risk']
+    frameLabel: 'Ahead — seed Q2 while closing Q1'
+
+  late_below:
+    primaryTopics: ['recovery_path','closable_deals',
+                    'board_narrative','big_deals_at_risk']
+    suppressTopics: ['q2_setup','rep_coaching']
+    frameLabel: 'Behind at week 10 — what can close'
+
+  late_at:
+    primaryTopics: ['protect_number','crm_hygiene',
+                    'q2_coverage','big_deals_at_risk']
+    suppressTopics: []
+    frameLabel: 'On target — protect and set up Q2'
+
+  late_above:
+    primaryTopics: ['q2_setup','rep_variance',
+                    'big_deals_at_risk','crm_hygiene']
+    suppressTopics: ['q1_close_risk','deal_hygiene']
+    frameLabel: 'Won — build Q2 this week'
+    // THIS IS FRONTERA'S CURRENT CELL
+
+  end_below:
+    primaryTopics: ['damage_control','board_narrative',
+                    'q2_story','closable_now']
+    suppressTopics: ['q2_setup','rep_coaching']
+    frameLabel: 'Final week — close what can close'
+
+  end_at:
+    primaryTopics: ['close_decisions','crm_hygiene',
+                    'q2_story','board_narrative']
+    suppressTopics: []
+    frameLabel: 'Final week — close and clean up'
+
+  end_above:
+    primaryTopics: ['q2_pipeline','crm_hygiene',
+                    'rep_recognition','q2_story']
+    suppressTopics: ['q1_close_risk']
+    frameLabel: 'Final week — won, seed Q2'
+
+No-target case (hasTarget = false):
+  primaryTopics: ['pipeline_velocity','big_deals_at_risk',
+                  'coverage_trend','rep_variance']
+  frameLabel: 'Pipeline health — no target configured'
+
+Call calibrateBriefPriorities() in assembleBriefData()
+and add the result to OpeningBriefData as priorityFrame.
+
+Add to renderBriefContext():
+  PRIORITY FRAME: [frameLabel]
+  CURRENT CELL: [cell]
+  FOCUS TOPICS: [primaryTopics joined with ', ']
+  DEPRIORITIZE: [suppressTopics joined with ', ']
+
+This context block tells Claude which topics to
+surface and which to suppress — replacing the need
+for hand-coded template logic in the synthesis prompt.
+
+---
+
+DO NOT TOUCH:
+  - server/chat/orchestrator.ts
+  - server/chat/pandora-agent.ts
+  - Any existing skill library files
+  - Any existing migrations (add new ones only)
+
+CRITICAL on every new endpoint:
+  Verify requireWorkspaceAccess or requirePermission
+  import path matches existing routes exactly.
+  Missing imports cause startup crashes.
+
+Report results after each task.
+Complete in order — do not skip ahead.
+```
+
+---
+
+After this session, the Replit session wires the buttons:
+
+```
+- Watch / Dismiss → POST /briefing/findings/:id/preference
+- Mark lost → existing actions engine CRM write endpoint
+- Assign to rep → POST /actions/assign-to-rep
+- Ask → opens Ask Pandora with deal context pre-loaded
+- Q2 coverage metric → reads estimatedQ2Coverage 
+  from brief response
+- Priority frame → brief narrative uses frameLabel
+```
+
+That's the full picture. Send the Claude Code prompt first.

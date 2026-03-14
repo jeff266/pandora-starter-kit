@@ -2,6 +2,7 @@ import { query } from '../db.js';
 import { configLoader } from '../config/workspace-config-loader.js';
 import { getPandoraRole, getHeadlineTarget, type PandolaRole } from './pandora-role.js';
 import { resolveDefaultPipeline } from '../chat/pipeline-resolver.js';
+import { calibrateBriefPriorities, type BriefPriorityFrame } from './brief-priorities.js';
 
 // ===== TYPES =====
 
@@ -71,6 +72,7 @@ export interface OpeningBriefData {
       skillName: string;
       dealName?: string;
       age: string;
+      is_watched?: boolean;
     }[];
     lastSkillRunAt: string | null;
   };
@@ -104,6 +106,16 @@ export interface OpeningBriefData {
     primaryConcern: string | null;
     lastRunAt: Date | null;
   } | null;
+  estimatedQ2Coverage: {
+    openPipelineWeighted: number;
+    expectedRolloverValue: number;
+    rolloverDealCount: number;
+    estimatedQ2Coverage: number;
+    q2Target: number;
+    confidence: 'estimate';
+    note: string;
+  } | null;
+  priorityFrame: BriefPriorityFrame | null;
 }
 
 // ===== CACHE =====
@@ -455,6 +467,7 @@ export async function assembleOpeningBrief(
     ),
     // Top findings with RFM urgency data — fetch 10, sort by urgency score in JS, take top 3
     query<{
+      id: string;
       severity: string;
       message: string;
       skill_id: string;
@@ -464,7 +477,7 @@ export async function assembleOpeningBrief(
       rfm_label: string | null;
       amount: string | null;
     }>(
-      `SELECT f.severity, f.message, f.skill_id, f.entity_name, f.created_at::text,
+      `SELECT f.id::text, f.severity, f.message, f.skill_id, f.entity_name, f.created_at::text,
               d.rfm_grade, d.rfm_label, d.amount
        FROM findings f
        LEFT JOIN deals d ON d.id = f.deal_id AND d.workspace_id = f.workspace_id
@@ -546,6 +559,23 @@ export async function assembleOpeningBrief(
       return scoreB - scoreA;
     })
     .slice(0, 3);
+
+  // Finding preferences (Watch/Dismiss signals) — safe fallback: if table missing, return empty
+  const prefRows = await query<{ finding_id: string; preference: string }>(
+    `SELECT finding_id, preference FROM finding_preferences
+     WHERE workspace_id = $1 AND user_id = $2
+       AND (expires_at IS NULL OR expires_at > NOW())`,
+    [workspaceId, userId]
+  ).then(r => r.rows).catch(() => [] as { finding_id: string; preference: string }[]);
+
+  const dismissedIds = new Set(prefRows.filter(p => p.preference === 'dismissed').map(p => p.finding_id));
+  const watchedIds   = new Set(prefRows.filter(p => p.preference === 'watch').map(p => p.finding_id));
+
+  // Filter out dismissed findings; tag watched ones
+  const filteredTopF = topF
+    .filter(f => !dismissedIds.has(f.id))
+    .map(f => ({ ...f, is_watched: watchedIds.has(f.id) }));
+
   const lastRun = lastSkillRun.status === 'fulfilled' ? lastSkillRun.value.rows[0]?.max_started ?? null : null;
   const mv = movementRow.status === 'fulfilled' ? movementRow.value.rows[0] : null;
   const ds = dealStatsRow.status === 'fulfilled' ? dealStatsRow.value.rows[0] : null;
@@ -659,6 +689,72 @@ export async function assembleOpeningBrief(
     lastRunAt:     pipelineMovementRow.created_at ? new Date(pipelineMovementRow.created_at) : null,
   } : null;
 
+  // ===== Q2 COVERAGE ESTIMATE =====
+  // Use current-quarter target as Q2 target proxy when no separate Q2 target exists.
+  const q2TargetAmount = targetAmount > 0 ? targetAmount : 0;
+  let estimatedQ2Coverage: OpeningBriefData['estimatedQ2Coverage'] = null;
+
+  if (q2TargetAmount > 0 && quarterEnd) {
+    const q2Est = await query<{
+      q2_pipeline_weighted: string;
+      expected_rollover: string;
+      rollover_deal_count: string;
+    }>(
+      `SELECT
+         COALESCE(SUM(
+           CASE stage_normalized
+             WHEN 'contract'    THEN amount * 0.85
+             WHEN 'proposal'    THEN amount * 0.70
+             WHEN 'demo'        THEN amount * 0.40
+             WHEN 'evaluation'  THEN amount * 0.20
+             WHEN 'discovery'   THEN amount * 0.10
+             ELSE                    amount * 0.15
+           END
+         ) FILTER (
+           WHERE close_date > $2
+              OR stage_normalized IN ('evaluation', 'demo', 'discovery')
+         ), 0)::numeric AS q2_pipeline_weighted,
+         COALESCE(SUM(amount * 0.30) FILTER (
+           WHERE close_date <= $2
+             AND stage_normalized IN ('contract', 'proposal')
+         ), 0)::numeric AS expected_rollover,
+         COUNT(*) FILTER (
+           WHERE close_date <= $2
+             AND stage_normalized IN ('contract', 'proposal')
+         )::text AS rollover_deal_count
+       FROM deals
+       WHERE workspace_id = $1
+         AND stage_normalized NOT IN ('closed_won', 'closed_lost')`,
+      [workspaceId, quarterEnd]
+    ).then(r => r.rows[0] ?? null).catch(() => null);
+
+    if (q2Est) {
+      const openPipelineWeighted  = Number(q2Est.q2_pipeline_weighted ?? 0);
+      const expectedRolloverValue = Number(q2Est.expected_rollover ?? 0);
+      const rolloverDealCount     = Number(q2Est.rollover_deal_count ?? 0);
+      const totalQ2Weighted       = openPipelineWeighted + expectedRolloverValue;
+      const q2CoverageRatio       = Math.round((totalQ2Weighted / q2TargetAmount) * 100) / 100;
+
+      estimatedQ2Coverage = {
+        openPipelineWeighted,
+        expectedRolloverValue,
+        rolloverDealCount,
+        estimatedQ2Coverage: q2CoverageRatio,
+        q2Target: q2TargetAmount,
+        confidence: 'estimate',
+        note: 'Estimate includes stage-weighted open pipeline plus 30% Q1 slip probability for late-stage deals',
+      };
+    }
+  }
+
+  // ===== PRIORITY FRAME =====
+  const priorityFrame = calibrateBriefPriorities(
+    temporal,
+    pctAttained,
+    coverageRatio,
+    targetAmount > 0
+  );
+
   return {
     temporal,
     user: {
@@ -700,12 +796,13 @@ export async function assembleOpeningBrief(
     findings: {
       critical: Number(fCounts?.critical ?? 0),
       warning: Number(fCounts?.warning ?? 0),
-      topFindings: topF.map(f => ({
+      topFindings: filteredTopF.map(f => ({
         severity: f.severity === 'act' ? 'critical' : 'warning',
         message: f.message,
         skillName: f.skill_id,
         dealName: f.entity_name ?? undefined,
         age: fmtAge(f.created_at),
+        is_watched: f.is_watched,
       })),
       lastSkillRunAt: lastRun,
     },
@@ -723,6 +820,8 @@ export async function assembleOpeningBrief(
     movementAnchorLabel,
     bigDealsAtRisk,
     pipelineMovement,
+    estimatedQ2Coverage,
+    priorityFrame,
   };
 }
 
@@ -868,6 +967,27 @@ export function renderBriefContext(data: OpeningBriefData): string {
     if (pm.lastRunAt) {
       const daysAgo = Math.floor((Date.now() - pm.lastRunAt.getTime()) / 86400000);
       lines.push(`- Data as of: ${daysAgo === 0 ? 'today' : `${daysAgo}d ago`}`);
+    }
+  }
+
+  // Q2 Coverage Estimate
+  if (data.estimatedQ2Coverage) {
+    const q2 = data.estimatedQ2Coverage;
+    lines.push(``, `Q2 COVERAGE ESTIMATE:`);
+    lines.push(`- Open pipeline (weighted): ${fmt(q2.openPipelineWeighted)}`);
+    lines.push(`- Expected Q1 rollover: ${fmt(q2.expectedRolloverValue)} (${q2.rolloverDealCount} deals)`);
+    lines.push(`- Estimated Q2 coverage: ${q2.estimatedQ2Coverage}× (target: ${fmt(q2.q2Target)})`);
+    lines.push(`- Note: ${q2.note}`);
+  }
+
+  // Priority Frame
+  if (data.priorityFrame) {
+    const pf = data.priorityFrame;
+    lines.push(``, `PRIORITY FRAME: ${pf.frameLabel}`);
+    lines.push(`CURRENT CELL: ${pf.cell}`);
+    lines.push(`FOCUS TOPICS: ${pf.primaryTopics.join(', ')}`);
+    if (pf.suppressTopics.length > 0) {
+      lines.push(`DEPRIORITIZE: ${pf.suppressTopics.join(', ')}`);
     }
   }
 
