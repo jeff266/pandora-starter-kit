@@ -60,12 +60,7 @@ export interface OpeningBriefData {
     closingThisWeek: { count: number; value: number; dealNames: string[] };
     closingThisMonth: { count: number; value: number };
     newThisWeek: { count: number; value: number };
-    byProductLine?: {
-      ab?: { count: number; totalValue: number; avgAmount: number };
-      db?: { count: number; totalValue: number; avgAmount: number };
-      dp?: { count: number; totalValue: number; avgAmount: number };
-      other?: { count: number; totalValue: number; avgAmount: number };
-    };
+    byProductLine?: Record<string, { count: number; totalValue: number; avgAmount: number }>;
   };
   findings: {
     critical: number;
@@ -528,6 +523,38 @@ export async function assembleOpeningBrief(
     [workspaceId, movementAnchor]
   ).then(r => Number(r.rows[0]?.count ?? 0)).catch(() => 0);
 
+  // Product line breakdown (inferred from deal name suffix)
+  const plRows = await query<{ product_line: string; count: string; total_value: string }>(
+    `SELECT
+       CASE
+         WHEN LOWER(name) LIKE '%fellowship%' THEN 'fellowship'
+         WHEN LOWER(name) LIKE '% - ab' THEN 'ab'
+         WHEN LOWER(name) LIKE '% - db' THEN 'db'
+         WHEN LOWER(name) LIKE '% - rab' THEN 'rab'
+         WHEN LOWER(name) LIKE '% - dp' THEN 'dp'
+         WHEN LOWER(name) LIKE '%pilot%' THEN 'pilot'
+         ELSE 'other'
+       END AS product_line,
+       COUNT(*) AS count,
+       COALESCE(SUM(amount), 0)::numeric AS total_value
+     FROM deals
+     WHERE workspace_id = $1
+       AND stage_normalized NOT IN ('closed_won', 'closed_lost')
+     GROUP BY 1`,
+    [workspaceId]
+  ).then(r => r.rows).catch(() => [] as { product_line: string; count: string; total_value: string }[]);
+
+  const byProductLine: NonNullable<OpeningBriefData['pipeline']['byProductLine']> = {};
+  for (const row of plRows) {
+    const count = Number(row.count);
+    const totalValue = Number(row.total_value);
+    byProductLine[row.product_line as keyof typeof byProductLine] = {
+      count,
+      totalValue,
+      avgAmount: count > 0 ? Math.round(totalValue / count) : 0,
+    };
+  }
+
   return {
     temporal,
     user: {
@@ -564,6 +591,7 @@ export async function assembleOpeningBrief(
         count: Number(newW?.count ?? 0),
         value: Number(newW?.value ?? 0),
       },
+      byProductLine: Object.keys(byProductLine).length > 0 ? byProductLine : undefined,
     },
     findings: {
       critical: Number(fCounts?.critical ?? 0),
@@ -663,6 +691,18 @@ export function renderBriefContext(data: OpeningBriefData): string {
   }
   if (data.pipeline.newThisWeek.count > 0) {
     lines.push(`- New this week: ${data.pipeline.newThisWeek.count} deals, ${fmt(data.pipeline.newThisWeek.value)}`);
+  }
+
+  // Product line breakdown (suppressed if all deals are in one bucket)
+  if (data.pipeline.byProductLine && Object.keys(data.pipeline.byProductLine).length > 1) {
+    const HIGH_VALUE = ['ab', 'db', 'fellowship', 'rab'];
+    const plSummary = Object.entries(data.pipeline.byProductLine)
+      .sort((a, b) => b[1].totalValue - a[1].totalValue)
+      .map(([pl, s]) => {
+        const tier = HIGH_VALUE.includes(pl) ? 'HIGH_VALUE' : 'LOW_VALUE';
+        return `${pl.toUpperCase()} [${tier}]: ${s.count} deals, ${fmt(s.totalValue)} total, avg ${fmt(s.avgAmount)}`;
+      });
+    lines.push(`- BY PRODUCT LINE: ${plSummary.join(' | ')}`);
   }
 
   // Findings

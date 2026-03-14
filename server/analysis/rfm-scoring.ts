@@ -354,17 +354,19 @@ function assignQuintile(value: number, breakpoints: number[]): number {
   return 5;
 }
 
-function buildRFMSegment(r: number, f: number | null, m: number): string {
+function buildRFMSegment(r: number, f: number | null, m: number | null): string {
+  if (m === null) return `R${r}`;
   if (f !== null) return `R${r}-F${f}-M${m}`;
   return `R${r}-M${m}`;
 }
 
-function assignRFMGrade(r: number, f: number | null, m: number, mode: string): 'A' | 'B' | 'C' | 'D' | 'F' {
-  if (mode === 'r_only') {
-    if (r >= 4 && m >= 4) return 'A';
-    if (r >= 3 && m >= 3) return 'B';
-    if (r >= 2 && m >= 2) return 'C';
-    if (r >= 2 || m >= 4) return 'D';
+function assignRFMGrade(r: number, f: number | null, m: number | null, mode: string): 'A' | 'B' | 'C' | 'D' | 'F' {
+  if (mode === 'r_only' || m === null) {
+    // Recency-only grading (used for LOW_VALUE product lines)
+    if (r >= 5) return 'A';
+    if (r >= 4) return 'B';
+    if (r >= 3) return 'C';
+    if (r >= 2) return 'D';
     return 'F';
   }
   const freq = f ?? 3;
@@ -379,7 +381,17 @@ function assignRFMGrade(r: number, f: number | null, m: number, mode: string): '
   return 'F';
 }
 
-function assignRFMLabel(r: number, f: number | null, m: number, mode: string): string {
+function assignRFMLabel(r: number, f: number | null, m: number | null, mode: string): string {
+  if (m === null) {
+    const grade = assignRFMGrade(r, null, null, 'r_only');
+    switch (grade) {
+      case 'A': return 'Hot Opportunity';
+      case 'B': return 'Healthy Pipeline';
+      case 'C': return 'Needs Attention';
+      case 'D': return 'Losing Momentum';
+      default: return 'Likely Dead';
+    }
+  }
   if (m >= 4 && r <= 2 && (f ?? 3) <= 2) return 'Big Deal at Risk';
   if (m >= 4 && r <= 2) return 'High Value, Going Cold';
   if (r >= 4 && (f ?? 3) >= 4 && m <= 2) return 'Active but Small';
@@ -770,26 +782,33 @@ export async function computeAndStoreRFMScores(workspaceId: string): Promise<{
     );
 
     const isLowValue = lowValueDealIds.has(dealId);
-    
+
     let f: number | null = null;
     let m = 1;
+    let threadingFactor: number | null = null;
     let scoreMode = mode;
-    
+
     if (isLowValue) {
-      // LOW_VALUE deals: r_only mode, no monetary scoring
-      m = 1; // null converted to 1 for display
+      // LOW_VALUE deals: r_only mode, excluded from monetary quintiles
       scoreMode = 'r_only';
     } else {
-      // HIGH_VALUE deals: normal scoring
+      // HIGH_VALUE deals: normal RM (or full RFM) scoring against HIGH_VALUE monetary breakpoints
       const freqEntry = adjustedFrequencyMap.get(dealId);
       const adjustedFrequency = freqEntry?.adjusted ?? raw.frequencyCount;
-      const threadingFactor = freqEntry?.factor ?? null;
+      threadingFactor = freqEntry?.factor ?? null;
 
       f = mode !== 'r_only' && breakpoints.frequency !== null
         ? assignQuintile(adjustedFrequency, breakpoints.frequency)
         : null;
       m = raw.monetaryValue > 0 ? assignQuintile(raw.monetaryValue, breakpoints.monetary) : 1;
     }
+
+    const grade = isLowValue
+      ? assignRFMGrade(r, null, null, 'r_only')
+      : assignRFMGrade(r, f, m, mode);
+    const label = isLowValue
+      ? `${assignRFMLabel(r, null, null, 'r_only')} (Low-Value Tier — scored on recency only)`
+      : assignRFMLabel(r, f, m, mode);
 
     scores.set(dealId, {
       recencyDays: raw.recencyDays,
@@ -799,10 +818,10 @@ export async function computeAndStoreRFMScores(workspaceId: string): Promise<{
       monetaryValue: raw.monetaryValue,
       recencyQuintile: r,
       frequencyQuintile: f,
-      monetaryQuintile: isLowValue ? 1 : m,
-      rfmSegment: buildRFMSegment(r, f, m),
-      rfmGrade: isLowValue ? 'F' : assignRFMGrade(r, f, m, mode),
-      rfmLabel: isLowValue ? 'Low-Value Tier — not scored on monetary' : assignRFMLabel(r, f, m, mode),
+      monetaryQuintile: m,
+      rfmSegment: buildRFMSegment(r, f, isLowValue ? null : m),
+      rfmGrade: grade,
+      rfmLabel: label,
       mode: scoreMode,
       isReliable: raw.recencySource !== 'record_update',
       stageNormalized: raw.stageNormalized,
