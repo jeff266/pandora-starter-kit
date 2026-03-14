@@ -101,7 +101,7 @@ const PANDORA_TOOLS: ToolDef[] = [
   {
     name: 'query_accounts',
     description:
-      'Query account/company records. Returns name, domain, industry, employee_count, owner, open deal count, total pipeline value, last activity date. Use to look up companies, find accounts by name or domain, or get account-level views.',
+      'Returns account/company records with open deal count and total pipeline value. Use when the user asks about specific companies, wants to look up accounts by name or domain, or needs an account-level view of pipeline. For aggregate pipeline metrics across all accounts, use compute_metric or query_deals instead.',
     parameters: {
       type: 'object',
       properties: {
@@ -381,7 +381,7 @@ const PANDORA_TOOLS: ToolDef[] = [
   },
   {
     name: 'compute_competitive_rates',
-    description: 'Calculate win/loss rates when specific competitors are present vs absent. Shows which competitors hurt your win rate most, where they appear in the funnel, and recent deal outcomes. Sources competitor data from call recordings, deal insights, and CRM custom fields.',
+    description: 'Returns win/loss rates when specific competitors are present vs absent, showing which competitors most hurt win rate, funnel position, and recent deal outcomes. Use when the user asks about competitive win rates, how a specific competitor affects deals, or which competitors appear most often. Sources from call recordings, deal insights, and CRM custom fields.',
     parameters: {
       type: 'object',
       properties: {
@@ -405,7 +405,7 @@ const PANDORA_TOOLS: ToolDef[] = [
   },
   {
     name: 'compute_shrink_rate',
-    description: 'Calculates how much deal amounts shrink from initial value to closed-won amount. Returns avg_shrink_pct, median, confidence level, and optional segmentation by rep or deal size.',
+    description: 'Returns how much deal amounts shrink from initial value to closed-won amount (avg_shrink_pct, median, confidence level). Use when the user asks about discounting patterns, how much deals typically shrink, whether reps are padding amounts, or wants to apply a realistic haircut to pipeline projections.',
     parameters: {
       type: 'object',
       properties: {
@@ -417,7 +417,7 @@ const PANDORA_TOOLS: ToolDef[] = [
   },
   {
     name: 'infer_contact_role',
-    description: "Infers a contact's buying role (economic_buyer, champion, technical_evaluator, coach, blocker, unknown) using their job title and call participation history. Returns confidence score and signals.",
+    description: "Infers a contact's buying role (economic_buyer, champion, technical_evaluator, coach, blocker, unknown) using job title and call participation history. Use when the user asks what role a specific contact plays, whether a champion has been identified on a deal, or wants to understand a contact's influence on a purchase decision. Returns confidence score and supporting signals.",
     parameters: {
       type: 'object',
       properties: {
@@ -606,7 +606,7 @@ const PANDORA_TOOLS: ToolDef[] = [
   {
     name: 'score_icp_fit',
     description:
-      'Get ICP fit score for an account or deal. Returns 0-100 score with firmographic/engagement/signal/relationship breakdown, grade (A-F), scoring mode, and synthesis text. Looks up existing scores from the ICP scoring system.',
+      'Returns ICP fit score (0-100, grade A-F) for an account or deal with firmographic, engagement, signal, and relationship breakdown. Use when the user asks how well an account fits the ICP, whether a deal is a good strategic fit, or wants to prioritize accounts by ICP alignment. Reads pre-computed scores — does not re-run scoring.',
     parameters: {
       type: 'object',
       properties: {
@@ -659,7 +659,7 @@ const PANDORA_TOOLS: ToolDef[] = [
   {
     name: 'compute_source_conversion',
     description:
-      'Analyze lead source effectiveness: win rates, deal sizes, cycle times, and revenue by source. Answers "which lead sources convert best?" and "which sources produce the largest deals?"',
+      'Returns win rates, deal sizes, cycle times, and revenue segmented by lead source. Use when the user asks which lead sources convert best, which channels produce the largest deals, or wants to compare source quality for pipeline planning.',
     parameters: {
       type: 'object',
       properties: {
@@ -952,6 +952,50 @@ const PANDORA_TOOLS: ToolDef[] = [
           description: 'If provided, filter to meetings linked to this specific deal'
         }
       },
+      required: [],
+    },
+  },
+  {
+    name: 'get_pipeline_movement',
+    description:
+      'Retrieves week-over-week pipeline movement analysis. Use when the user asks about pipeline changes, trends, week-over-week comparisons, coverage trajectory, whether the quarter is on track, what changed since last week, or pipeline velocity. Returns pre-computed headline, net delta, coverage trend, on-track status, and primary concern. Prefer this over raw queries when a recent run exists.',
+    parameters: {
+      type: 'object',
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: 'get_rfm_scores',
+    description:
+      'Retrieves behavioral deal health scores (RFM grades A-F) for open deals. Use when the user asks about deal engagement, which deals are going cold, behavioral pipeline quality, big deals at risk, or deals with no recent activity. Returns grade distribution and top at-risk deals by value.',
+    parameters: {
+      type: 'object',
+      properties: {
+        min_amount: { type: 'number', description: 'Minimum deal amount to include (default 10000)' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'get_skill_run',
+    description:
+      "Retrieves the most recent output from any named skill. Use when the user asks about a specific skill's findings, the last time a skill ran, or wants to see what a particular analysis found. Supports: pipeline-hygiene, single-thread-alert, deal-risk-review, deal-rfm-scoring, pipeline-movement, rep-scorecard, data-quality-audit, forecast-rollup, pipeline-waterfall, weekly-recap, coaching-intelligence. For structured claim-based evidence, prefer get_skill_evidence instead.",
+    parameters: {
+      type: 'object',
+      properties: {
+        skill_id: { type: 'string', description: 'The skill ID to retrieve the latest run for (e.g. "pipeline-hygiene", "pipeline-movement")' },
+      },
+      required: ['skill_id'],
+    },
+  },
+  {
+    name: 'get_skill_status',
+    description:
+      'Returns the run status of all configured skills for this workspace — when each last ran, whether it succeeded, and total run count. Use when the user asks why data seems stale, when a skill last ran, whether a skill is configured and active, or to explain why a skill has no data yet.',
+    parameters: {
+      type: 'object',
+      properties: {},
       required: [],
     },
   },

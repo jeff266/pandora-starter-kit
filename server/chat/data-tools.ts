@@ -417,6 +417,14 @@ export async function executeDataTool(
         result = await getTodaysMeetings(workspaceId, params); break;
       case 'get_upcoming_meetings':
         result = await getUpcomingMeetings(workspaceId, params); break;
+      case 'get_pipeline_movement':
+        result = await getPipelineMovement(workspaceId, params); break;
+      case 'get_rfm_scores':
+        result = await getRfmScores(workspaceId, params); break;
+      case 'get_skill_run':
+        result = await getSkillRun(workspaceId, params); break;
+      case 'get_skill_status':
+        result = await getSkillStatus(workspaceId, params); break;
       default:
         throw new Error(`Unknown tool: ${toolName}`);
     }
@@ -4557,6 +4565,188 @@ async function runMeddicCoverageSkill(workspaceId: string, params: Record<string
 }
 
 // ============================================================================
+// Skill Output Read Tools
+// ============================================================================
+
+async function getPipelineMovement(workspaceId: string, _params: Record<string, any>): Promise<any> {
+  const result = await query<{ result_data: any; created_at: string }>(
+    `SELECT result_data, created_at
+     FROM skill_runs
+     WHERE workspace_id = $1
+       AND skill_id = 'pipeline-movement'
+       AND status IN ('completed', 'success')
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [workspaceId]
+  );
+
+  if (result.rows.length === 0) {
+    return {
+      found: false,
+      headline: 'No pipeline movement data yet. Run the Pipeline Movement skill from the Skills page to generate this analysis.',
+      query_description: 'Queried latest pipeline-movement skill run — no successful runs found',
+    };
+  }
+
+  const row = result.rows[0];
+  const resultData = row.result_data ?? {};
+  const summary = resultData.summary ?? null;
+
+  return {
+    found: true,
+    run_at: row.created_at,
+    data_age_hours: Math.round((Date.now() - new Date(row.created_at).getTime()) / 3600000),
+    ...(summary ?? {}),
+    net_delta: resultData.net_delta ?? null,
+    stage_movements: resultData.stage_movements ?? null,
+    stalled_deals: resultData.stalled_deals ?? null,
+    query_description: `Retrieved pipeline movement analysis from ${row.created_at}`,
+  };
+}
+
+async function getRfmScores(workspaceId: string, params: Record<string, any>): Promise<any> {
+  const minAmount = params.min_amount ?? 10000;
+
+  const gradeResult = await query(
+    `SELECT
+       rfm_grade,
+       rfm_label,
+       COUNT(*)::int AS count,
+       COALESCE(SUM(amount), 0)::numeric AS total_value,
+       ROUND(AVG(rfm_recency_days))::int AS avg_days_cold
+     FROM deals
+     WHERE workspace_id = $1
+       AND COALESCE(stage_normalized, '') NOT IN ('closed_won', 'closed_lost')
+       AND rfm_grade IS NOT NULL
+       AND COALESCE(amount, 0) >= $2
+     GROUP BY rfm_grade, rfm_label
+     ORDER BY
+       CASE rfm_grade
+         WHEN 'F' THEN 1 WHEN 'D' THEN 2
+         WHEN 'C' THEN 3 WHEN 'B' THEN 4
+         WHEN 'A' THEN 5 ELSE 6 END`,
+    [workspaceId, minAmount]
+  );
+
+  const atRiskResult = await query(
+    `SELECT name, amount, rfm_label, rfm_recency_days, stage_normalized
+     FROM deals
+     WHERE workspace_id = $1
+       AND rfm_grade = 'F'
+       AND COALESCE(amount, 0) >= $2
+       AND COALESCE(stage_normalized, '') NOT IN ('closed_won', 'closed_lost')
+     ORDER BY amount DESC NULLS LAST
+     LIMIT 5`,
+    [workspaceId, minAmount]
+  );
+
+  if (gradeResult.rows.length === 0) {
+    return {
+      found: false,
+      message: 'No RFM scores found for open deals. Run the Deal RFM Scoring skill from the Skills page to generate behavioral health scores.',
+      query_description: 'Queried RFM scores — no scored deals found',
+    };
+  }
+
+  const totalDeals = gradeResult.rows.reduce((s: number, r: any) => s + r.count, 0);
+  const totalValue = gradeResult.rows.reduce((s: number, r: any) => s + parseFloat(r.total_value), 0);
+
+  return {
+    grade_distribution: gradeResult.rows,
+    top_at_risk_deals: atRiskResult.rows,
+    summary: {
+      total_scored_deals: totalDeals,
+      total_pipeline_value: totalValue,
+      min_amount_filter: minAmount,
+    },
+    query_description: `RFM grade distribution for ${totalDeals} open deals >= $${minAmount.toLocaleString()}`,
+  };
+}
+
+async function getSkillRun(workspaceId: string, params: Record<string, any>): Promise<any> {
+  const skillId = params.skill_id;
+  if (!skillId) throw new Error('skill_id is required');
+
+  const result = await query<{
+    result_data: any;
+    created_at: string;
+    status: string;
+    duration_ms: number | null;
+    tokens_used: number | null;
+  }>(
+    `SELECT result_data, created_at, status, duration_ms, tokens_used
+     FROM skill_runs
+     WHERE workspace_id = $1
+       AND skill_id = $2
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [workspaceId, skillId]
+  );
+
+  if (result.rows.length === 0) {
+    return {
+      found: false,
+      message: `No runs found for ${skillId}. Trigger it from the Skills page.`,
+      query_description: `Queried skill runs for ${skillId} — no runs found`,
+    };
+  }
+
+  const row = result.rows[0];
+  return {
+    found: true,
+    skill_id: skillId,
+    status: row.status,
+    run_at: row.created_at,
+    data_age_hours: Math.round((Date.now() - new Date(row.created_at).getTime()) / 3600000),
+    duration_ms: row.duration_ms,
+    tokens_used: row.tokens_used,
+    result_data: row.result_data,
+    query_description: `Retrieved latest run of ${skillId} from ${row.created_at} (status: ${row.status})`,
+  };
+}
+
+async function getSkillStatus(workspaceId: string, _params: Record<string, any>): Promise<any> {
+  const result = await query(
+    `SELECT
+       skill_id,
+       MAX(created_at) AS last_run_at,
+       MAX(CASE WHEN status IN ('completed', 'success') THEN created_at END) AS last_success_at,
+       (SELECT status FROM skill_runs sr2
+        WHERE sr2.workspace_id = $1
+          AND sr2.skill_id = sr.skill_id
+        ORDER BY created_at DESC LIMIT 1) AS latest_status,
+       COUNT(*)::int AS total_runs
+     FROM skill_runs sr
+     WHERE workspace_id = $1
+     GROUP BY skill_id
+     ORDER BY last_run_at DESC`,
+    [workspaceId]
+  );
+
+  if (result.rows.length === 0) {
+    return {
+      skills: [],
+      message: 'No skill runs recorded for this workspace yet.',
+      query_description: 'Queried skill run status — no runs found',
+    };
+  }
+
+  return {
+    skills: result.rows.map((r: any) => ({
+      skill_id: r.skill_id,
+      latest_status: r.latest_status,
+      last_run_at: r.last_run_at,
+      last_success_at: r.last_success_at,
+      total_runs: r.total_runs,
+      data_age_hours: r.last_run_at
+        ? Math.round((Date.now() - new Date(r.last_run_at).getTime()) / 3600000)
+        : null,
+    })),
+    total_skills_with_runs: result.rows.length,
+    query_description: `Retrieved run status for ${result.rows.length} skill(s)`,
+  };
+}
+
 // Calendar Tools
 // ============================================================================
 
