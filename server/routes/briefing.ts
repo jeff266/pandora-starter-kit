@@ -7,6 +7,8 @@ import {
   computeTemporalContext,
   assembleOpeningBrief,
   getOrAssembleBrief,
+  logBriefInteraction,
+  type BriefInteraction,
   type OpeningBriefData,
   type TemporalContext,
 } from '../context/opening-brief.js';
@@ -14,6 +16,35 @@ import { requireWorkspaceAccess } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/permissions.js';
 
 const router = Router();
+
+// ===== BRIEF SESSION STORE =====
+// Short-lived in-memory store keyed by sessionId.
+// Captures brief context at generation time so the interaction endpoint
+// can merge server-side context (role, phase, findings_shown) with
+// client-reported signals (cards clicked, time on brief, etc.).
+// 1-hour TTL — ephemeral only, never persisted.
+
+interface BriefSessionSnapshot {
+  workspaceId: string;
+  userId: string;
+  pandoraRole: string | null;
+  quarterPhase: string | null;
+  attainmentPct: number | null;
+  daysRemaining: number | null;
+  findingsShown: unknown;
+  bigDealsShown: unknown;
+  expiresAt: number;
+}
+
+const BRIEF_SESSION_TTL_MS = 60 * 60 * 1000; // 1 hour
+const briefSessionStore = new Map<string, BriefSessionSnapshot>();
+
+function pruneExpiredSessions(): void {
+  const now = Date.now();
+  for (const [key, val] of briefSessionStore.entries()) {
+    if (val.expiresAt <= now) briefSessionStore.delete(key);
+  }
+}
 
 async function getUserFirstName(workspaceId: string, userId?: string): Promise<string | undefined> {
   if (!userId) return undefined;
@@ -245,6 +276,7 @@ router.get(
     const refresh = req.query.refresh === 'true';
     const rawPipeline = (req.query.pipeline as string | undefined) || null;
     const pipelineFilter = rawPipeline === 'All Data' ? null : rawPipeline;
+    const sessionId = (req.query.sessionId as string | undefined) ?? null;
 
     try {
       const brief: OpeningBriefData = refresh
@@ -482,6 +514,32 @@ router.get(
         lastRunAt: overnightSkills.rows[0]?.completed_at ?? null,
       };
 
+      // Store brief context snapshot for the interaction endpoint to merge
+      if (sessionId) {
+        pruneExpiredSessions();
+        briefSessionStore.set(sessionId, {
+          workspaceId,
+          userId,
+          pandoraRole: brief.user.pandoraRole ?? null,
+          quarterPhase: temporal.quarterPhase ?? null,
+          attainmentPct: brief.targets.pctAttained ?? null,
+          daysRemaining: temporal.daysRemainingInQuarter ?? null,
+          findingsShown: brief.findings.topFindings.map((f, i) => ({
+            rank: i + 1,
+            skill_id: f.skillName,
+            amount: null,
+          })),
+          bigDealsShown: (brief.bigDealsAtRisk ?? []).map(d => ({
+            id: d.id,
+            deal_name: d.name,
+            amount: d.amount,
+            rfm_grade: d.rfmGrade,
+            days_cold: d.daysSinceActivity,
+          })),
+          expiresAt: Date.now() + BRIEF_SESSION_TTL_MS,
+        });
+      }
+
       res.json({
         brief: { ...brief, targets: { ...brief.targets, hasTarget } },
         temporal,
@@ -565,6 +623,95 @@ router.get(
       console.error('[briefing] pipelines error:', err);
       res.status(500).json({ error: err.message || 'Failed to fetch pipelines' });
     }
+  }
+);
+
+// ===== BRIEF INTERACTION ENDPOINT =====
+// POST /:workspaceId/briefing/interaction
+//
+// Records behavioral signals from a Concierge session.
+// userId is always taken from the authenticated session (req.user),
+// never from the request body. The session store supplies server-side
+// context (role, phase, findings_shown) that the client cannot forge.
+//
+// FRONTEND TODO (next session):
+//   Call this endpoint:
+//   - When a card is clicked           → cardsDrilledInto
+//   - When a math modal is opened      → mathModalsOpened
+//   - When an action is approved       → actionsApproved
+//   - When an action is seen but skipped → actionsIgnored
+//   - When Ask Pandora is used after brief → followUpQuestions
+//   - On page unload with elapsed time → timeOnBriefSeconds
+
+router.post(
+  '/:workspaceId/briefing/interaction',
+  requireWorkspaceAccess,
+  async (req: Request, res: Response): Promise<void> => {
+    const workspaceId = req.params.workspaceId as string;
+    const userId = (req as any).user?.user_id as string;
+
+    if (!userId) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+
+    const {
+      sessionId,
+      cardsDrilledInto,
+      mathModalsOpened,
+      actionsApproved,
+      actionsIgnored,
+      followUpQuestions,
+      timeOnBriefSeconds,
+      returnedWithinHour,
+    } = req.body as {
+      sessionId?: string;
+      cardsDrilledInto?: string[];
+      mathModalsOpened?: string[];
+      actionsApproved?: string[];
+      actionsIgnored?: string[];
+      followUpQuestions?: string[];
+      timeOnBriefSeconds?: number;
+      returnedWithinHour?: boolean;
+    };
+
+    if (!sessionId) {
+      res.status(400).json({ error: 'sessionId is required' });
+      return;
+    }
+
+    // Retrieve server-side context snapshot (populated at brief generation time)
+    const snapshot = briefSessionStore.get(sessionId);
+
+    // Infer brief relevance: user acted on something the brief surfaced
+    const briefWasRelevant = Array.isArray(cardsDrilledInto) && cardsDrilledInto.length > 0
+      ? true
+      : Array.isArray(followUpQuestions) && followUpQuestions.length > 0
+        ? null  // asked questions — ambiguous signal
+        : null;
+
+    // Non-blocking — fire and forget
+    void logBriefInteraction({
+      workspace_id: workspaceId,
+      user_id: userId,
+      session_id: sessionId,
+      pandora_role: snapshot?.pandoraRole ?? undefined,
+      quarter_phase: snapshot?.quarterPhase ?? undefined,
+      attainment_pct: snapshot?.attainmentPct ?? null,
+      days_remaining: snapshot?.daysRemaining ?? null,
+      findings_shown: snapshot?.findingsShown ?? undefined,
+      big_deals_shown: snapshot?.bigDealsShown ?? undefined,
+      cards_drilled_into: cardsDrilledInto,
+      math_modals_opened: mathModalsOpened,
+      actions_approved: actionsApproved,
+      actions_ignored: actionsIgnored,
+      follow_up_questions: followUpQuestions,
+      time_on_brief_seconds: timeOnBriefSeconds ?? null,
+      returned_within_hour: returnedWithinHour ?? false,
+      brief_was_relevant: briefWasRelevant,
+    } satisfies Partial<BriefInteraction>);
+
+    res.json({ ok: true });
   }
 );
 

@@ -1,0 +1,108 @@
+Read server/context/opening-brief.ts and replit.md 
+(for next migration number) before writing any code.
+
+ONE TASK: Create the BriefInteraction instrumentation table.
+
+This table captures behavioral signals from every Concierge
+session — what the brief surfaced vs. what the user actually
+engaged with. It's the foundation for the learning loop that
+will improve brief quality over time.
+
+MIGRATION: Create migrations/[next_number]_brief_interactions.sql
+
+  CREATE TABLE brief_interactions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    workspace_id UUID NOT NULL 
+      REFERENCES workspaces(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL,
+    session_id UUID NOT NULL,
+    
+    -- Context at time of brief generation
+    pandora_role TEXT,
+    quarter_phase TEXT,        -- 'early'|'mid'|'late'|'final_week'
+    attainment_pct NUMERIC,
+    days_remaining INTEGER,
+    
+    -- What the brief surfaced (top 3 finding IDs in rank order)
+    findings_shown JSONB,      -- [{id, skill_id, deal_id, amount, rank}]
+    big_deals_shown JSONB,     -- [{id, deal_name, amount, rfm_grade, days_cold}]
+    
+    -- What the user did
+    cards_drilled_into JSONB,  -- finding IDs the user clicked
+    math_modals_opened JSONB,  -- math keys opened
+    actions_approved JSONB,    -- action IDs approved
+    actions_ignored JSONB,     -- action IDs seen but skipped
+    follow_up_questions JSONB, -- text of Ask Pandora questions after brief
+    time_on_brief_seconds INTEGER,
+    returned_within_hour BOOLEAN DEFAULT false,
+    
+    -- Implicit quality signal
+    -- true = user engaged with what brief surfaced
+    -- false = user ignored brief and asked about something else
+    brief_was_relevant BOOLEAN,
+    
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  CREATE INDEX idx_brief_interactions_workspace 
+    ON brief_interactions(workspace_id, created_at DESC);
+  CREATE INDEX idx_brief_interactions_user 
+    ON brief_interactions(user_id, created_at DESC);
+
+BACKEND: Add a logging function to opening-brief.ts
+
+  export async function logBriefInteraction(
+    data: Partial<BriefInteraction>
+  ): Promise<void>
+
+  Wraps INSERT into brief_interactions. 
+  Uses safeExecute pattern — never throws, logs errors only.
+  Non-blocking: caller does not await this.
+
+BACKEND: Add one API endpoint in server/routes/briefing.ts
+
+  POST /api/workspaces/:workspaceId/briefing/interaction
+  
+  Body: {
+    sessionId: string,
+    cardsDrilledInto?: string[],    // finding IDs
+    mathModalsOpened?: string[],
+    actionsApproved?: string[],
+    actionsIgnored?: string[],
+    followUpQuestions?: string[],
+    timeOnBriefSeconds?: number,
+    returnedWithinHour?: boolean
+  }
+  
+  Auth: requireAuth (existing)
+  No requirePermission needed — users can only log their own
+  interactions (enforce: userId from req.user, not from body)
+  
+  On receive: call logBriefInteraction() with merged data
+  from the session context (role, quarter_phase, attainment_pct,
+  findings_shown — these come from the brief that was generated,
+  not from the client request)
+  
+  The brief generation endpoint already has this context.
+  Store it in a short-lived server-side session keyed by
+  sessionId so the interaction endpoint can retrieve it.
+  Use a simple in-memory Map with 1-hour TTL — not Redis,
+  not a database table. This is ephemeral context only.
+
+REPLIT NOTE (do not implement — just note in a comment):
+  The frontend needs to call POST /briefing/interaction:
+  - When a card is clicked (cardsDrilledInto)
+  - When a math modal is opened (mathModalsOpened)  
+  - When an action is approved or ignored
+  - When Ask Pandora is used after viewing the brief
+  - On page unload with timeOnBriefSeconds
+  This is a Replit task for the next session.
+
+DO NOT TOUCH:
+  - server/chat/orchestrator.ts
+  - server/chat/pandora-agent.ts
+  - opening-brief.ts synthesis logic
+  - Any existing migrations
+
+Report: migration number used, table created, 
+logBriefInteraction function signature, endpoint path.

@@ -909,3 +909,66 @@ export function invalidateBriefCache(workspaceId: string, userId?: string): void
     }
   }
 }
+
+// ===== BRIEF INTERACTION LOGGING =====
+
+export interface BriefInteraction {
+  workspace_id: string;
+  user_id: string;
+  session_id: string;
+  pandora_role?: string;
+  quarter_phase?: string;
+  attainment_pct?: number | null;
+  days_remaining?: number | null;
+  findings_shown?: unknown;
+  big_deals_shown?: unknown;
+  cards_drilled_into?: unknown;
+  math_modals_opened?: unknown;
+  actions_approved?: unknown;
+  actions_ignored?: unknown;
+  follow_up_questions?: unknown;
+  time_on_brief_seconds?: number | null;
+  returned_within_hour?: boolean;
+  brief_was_relevant?: boolean | null;
+}
+
+export async function logBriefInteraction(data: Partial<BriefInteraction>): Promise<void> {
+  try {
+    if (!data.workspace_id || !data.user_id || !data.session_id) return;
+    await query(
+      `INSERT INTO brief_interactions (
+        workspace_id, user_id, session_id,
+        pandora_role, quarter_phase, attainment_pct, days_remaining,
+        findings_shown, big_deals_shown,
+        cards_drilled_into, math_modals_opened,
+        actions_approved, actions_ignored,
+        follow_up_questions, time_on_brief_seconds,
+        returned_within_hour, brief_was_relevant
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7,
+        $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
+      )`,
+      [
+        data.workspace_id,
+        data.user_id,
+        data.session_id,
+        data.pandora_role ?? null,
+        data.quarter_phase ?? null,
+        data.attainment_pct ?? null,
+        data.days_remaining ?? null,
+        data.findings_shown != null ? JSON.stringify(data.findings_shown) : null,
+        data.big_deals_shown != null ? JSON.stringify(data.big_deals_shown) : null,
+        data.cards_drilled_into != null ? JSON.stringify(data.cards_drilled_into) : null,
+        data.math_modals_opened != null ? JSON.stringify(data.math_modals_opened) : null,
+        data.actions_approved != null ? JSON.stringify(data.actions_approved) : null,
+        data.actions_ignored != null ? JSON.stringify(data.actions_ignored) : null,
+        data.follow_up_questions != null ? JSON.stringify(data.follow_up_questions) : null,
+        data.time_on_brief_seconds ?? null,
+        data.returned_within_hour ?? false,
+        data.brief_was_relevant ?? null,
+      ]
+    );
+  } catch (err) {
+    console.error('[BriefInteraction] Failed to log interaction:', err instanceof Error ? err.message : err);
+  }
+}
