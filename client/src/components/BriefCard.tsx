@@ -9,6 +9,13 @@ interface Chip {
   status: ChipStatus;
 }
 
+interface CardAction {
+  label: string;
+  variant: 'primary' | 'secondary' | 'danger';
+  onClick: (e: React.MouseEvent) => void;
+  disabled?: boolean;
+}
+
 interface BriefCardProps {
   rank: number;
   category: Category;
@@ -19,6 +26,9 @@ interface BriefCardProps {
   mathKey?: string;
   onClick: () => void;
   onMathClick?: (mathKey: string) => void;
+  actions?: CardAction[];
+  is_watched?: boolean;
+  dismissed?: boolean;
 }
 
 const CATEGORY_STYLES: Record<Category, { border: string; badgeBg: string; badgeColor: string; badgeBorder: string; label: string }> = {
@@ -33,6 +43,12 @@ const CHIP_STYLES: Record<ChipStatus, { bg: string; color: string; dot: string; 
   done:    { bg: 'rgba(29,158,117,0.10)',  color: '#1D9E75', dot: '#1D9E75' },
   pending: { bg: 'rgba(234,179,8,0.10)',   color: '#eab308', dot: '#eab308' },
   needs:   { bg: 'rgba(239,68,68,0.10)',   color: '#ef4444', dot: '#ef4444', icon: '!' },
+};
+
+const VARIANT_STYLES: Record<'primary' | 'secondary' | 'danger', React.CSSProperties> = {
+  primary:   { background: '#1D9E75', color: '#fff', border: 'none' },
+  secondary: { background: 'transparent', color: '#94a3b8', border: '0.5px solid #242b3a' },
+  danger:    { background: 'transparent', color: '#ef4444', border: '0.5px solid rgba(239,68,68,0.5)' },
 };
 
 const NUMBER_RE = /(\d[\d,.$%]*(?:\.\d+)?[KMB%]?)/g;
@@ -57,7 +73,7 @@ function renderTitle(title: string, mathKey?: string, onMathClick?: (k: string) 
   });
 }
 
-export default function BriefCard({ rank, category, eyebrow, title, body, chips, mathKey, onClick, onMathClick }: BriefCardProps) {
+export default function BriefCard({ rank, category, eyebrow, title, body, chips, mathKey, onClick, onMathClick, actions, is_watched, dismissed }: BriefCardProps) {
   const cat = CATEGORY_STYLES[category] || CATEGORY_STYLES.watch;
   const [hovered, setHovered] = React.useState(false);
 
@@ -73,11 +89,14 @@ export default function BriefCard({ rank, category, eyebrow, title, body, chips,
         borderLeft: `2px solid ${cat.border}`,
         padding: '12px 13px',
         cursor: 'pointer',
-        transition: 'border-color 0.15s',
+        transition: dismissed ? 'opacity 0.2s, max-height 0.2s' : 'border-color 0.15s',
+        opacity: dismissed ? 0 : 1,
+        maxHeight: dismissed ? 0 : undefined,
+        overflow: dismissed ? 'hidden' : undefined,
         fontFamily: "'IBM Plex Sans', -apple-system, sans-serif",
       }}
     >
-      {/* TOP ROW: rank + badge + eyebrow */}
+      {/* TOP ROW: rank + badge + eyebrow + watched indicator */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
         <span style={{ fontSize: 10, color: colors.textDim, fontWeight: 600, minWidth: 14 }}>#{rank}</span>
         <span style={{
@@ -96,6 +115,14 @@ export default function BriefCard({ rank, category, eyebrow, title, body, chips,
         <span style={{ fontSize: 11, color: colors.textMuted, flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {eyebrow}
         </span>
+        {is_watched && (
+          <span
+            title="You're watching this deal"
+            style={{ fontSize: 12, color: '#eab308', flexShrink: 0, cursor: 'default', lineHeight: 1 }}
+          >
+            👁
+          </span>
+        )}
       </div>
 
       {/* TITLE */}
@@ -141,6 +168,34 @@ export default function BriefCard({ rank, category, eyebrow, title, body, chips,
               </span>
             );
           })}
+        </div>
+      )}
+
+      {/* ACTION BUTTONS */}
+      {actions && actions.length > 0 && (
+        <div
+          onClick={e => e.stopPropagation()}
+          style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10, marginBottom: 2 }}
+        >
+          {actions.map((action, i) => (
+            <button
+              key={i}
+              disabled={action.disabled}
+              onClick={e => { e.stopPropagation(); action.onClick(e); }}
+              style={{
+                fontSize: 11,
+                padding: '4px 11px',
+                borderRadius: 6,
+                cursor: action.disabled ? 'default' : 'pointer',
+                fontFamily: "'IBM Plex Sans', -apple-system, sans-serif",
+                opacity: action.disabled ? 0.6 : 1,
+                transition: 'opacity 0.15s',
+                ...VARIANT_STYLES[action.variant],
+              }}
+            >
+              {action.label}
+            </button>
+          ))}
         </div>
       )}
 

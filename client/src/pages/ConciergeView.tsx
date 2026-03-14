@@ -41,12 +41,14 @@ interface TemporalContext {
 }
 
 interface TopFinding {
+  id?: string;
   severity: string;
   message: string;
   skillName?: string;
   dealName?: string;
   age?: number | string;
   mathKey?: string;
+  is_watched?: boolean;
 }
 
 interface SkillRunLog {
@@ -141,6 +143,13 @@ interface OpeningBriefData {
   movementAnchorLabel?: string;
   situationLine?: string;
   suggestedQuestion?: string;
+  estimatedQ2Coverage?: number | null;
+  priorityFrame?: {
+    frameLabel: string;
+    primaryTopics: string[];
+    suppressTopics: string[];
+    cell?: string;
+  } | null;
   [key: string]: unknown;
 }
 
@@ -197,6 +206,19 @@ function fmtCurrency(val?: number): string {
   return `$${val}`;
 }
 
+interface RiskCardAction {
+  label: string;
+  variant: 'primary' | 'secondary' | 'danger';
+  onClick: (e: React.MouseEvent) => void;
+  disabled?: boolean;
+}
+
+const RISK_ACTION_VARIANT: Record<'primary' | 'secondary' | 'danger', React.CSSProperties> = {
+  primary:   { background: '#1D9E75', color: '#fff', border: 'none' },
+  secondary: { background: 'transparent', color: '#94a3b8', border: '0.5px solid #242b3a' },
+  danger:    { background: 'transparent', color: '#ef4444', border: '0.5px solid rgba(239,68,68,0.5)' },
+};
+
 interface RiskDealCardProps {
   rank: number;
   eyebrow: string;
@@ -214,9 +236,10 @@ interface RiskDealCardProps {
   textDim: string;
   font: string;
   onClick: () => void;
+  actions?: RiskCardAction[];
 }
 
-function RiskDealCard({ rank, eyebrow, title, body, dormantLine, soWhat, borderColor, surface, border, borderLight, textColor, textSub, textMuted, textDim, font, onClick }: RiskDealCardProps) {
+function RiskDealCard({ rank, eyebrow, title, body, dormantLine, soWhat, borderColor, surface, border, borderLight, textColor, textSub, textMuted, textDim, font, onClick, actions }: RiskDealCardProps) {
   const [hovered, setHovered] = React.useState(false);
   return (
     <div
@@ -268,6 +291,33 @@ function RiskDealCard({ rank, eyebrow, title, body, dormantLine, soWhat, borderC
       {soWhat && (
         <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 6, fontStyle: 'italic', lineHeight: 1.5 }}>
           {soWhat}
+        </div>
+      )}
+      {/* ACTION BUTTONS */}
+      {actions && actions.length > 0 && (
+        <div
+          onClick={e => e.stopPropagation()}
+          style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10, marginBottom: 2 }}
+        >
+          {actions.map((action, i) => (
+            <button
+              key={i}
+              disabled={action.disabled}
+              onClick={e => { e.stopPropagation(); action.onClick(e); }}
+              style={{
+                fontSize: 11,
+                padding: '4px 11px',
+                borderRadius: 6,
+                cursor: action.disabled ? 'default' : 'pointer',
+                fontFamily: font,
+                opacity: action.disabled ? 0.6 : 1,
+                transition: 'opacity 0.15s',
+                ...RISK_ACTION_VARIANT[action.variant],
+              }}
+            >
+              {action.label}
+            </button>
+          ))}
         </div>
       )}
       {/* FOOTER */}
@@ -410,6 +460,12 @@ export default function ConciergeView() {
   const [pendingActions, setPendingActions] = useState<PendingAction[]>([]);
   const [expandedActionId, setExpandedActionId] = useState<string | null>(null);
   const [actionStates, setActionStates] = useState<Record<string, 'pending' | 'approved' | 'rejected'>>({});
+  const [assignedDealIds, setAssignedDealIds] = useState<Set<string>>(new Set());
+  const [lostDealIds, setLostDealIds] = useState<Set<string>>(new Set());
+  const [watchedFindingIds, setWatchedFindingIds] = useState<Set<string>>(new Set());
+  const [unwatchedFindingIds, setUnwatchedFindingIds] = useState<Set<string>>(new Set());
+  const [dismissedFindingIds, setDismissedFindingIds] = useState<Set<string>>(new Set());
+  const [overnightTopExpanded, setOvernightTopExpanded] = useState(false);
 
   const skeletonTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -580,6 +636,52 @@ export default function ConciergeView() {
     );
   }, [brief, buildConciergeContext, navigateToChat]);
 
+  const assignToRep = useCallback(async (deal: { id: string; name: string; daysSinceActivity: number }) => {
+    if (!currentWorkspace?.id) return;
+    try {
+      await api.post('/actions/assign-to-rep', {
+        dealId: deal.id,
+        taskTitle: `Follow up — ${deal.name}`,
+        taskNote: `Cold for ${Math.round(deal.daysSinceActivity)} days. Re-engage for Q2 pipeline.`,
+      });
+      setAssignedDealIds(prev => new Set([...prev, deal.id]));
+    } catch {}
+  }, [currentWorkspace?.id]);
+
+  const markLost = useCallback(async (deal: { id: string }) => {
+    setLostDealIds(prev => new Set([...prev, deal.id]));
+  }, []);
+
+  const watchFinding = useCallback(async (finding: { id?: string }) => {
+    if (!currentWorkspace?.id || !finding.id) return;
+    try {
+      await api.post(`/briefing/findings/${finding.id}/preference`, { preference: 'watch' });
+      setWatchedFindingIds(prev => new Set([...prev, finding.id!]));
+    } catch {}
+  }, [currentWorkspace?.id]);
+
+  const unwatchFinding = useCallback(async (finding: { id?: string }) => {
+    if (!currentWorkspace?.id || !finding.id) return;
+    try {
+      await api.delete(`/briefing/findings/${finding.id}/preference`);
+      setUnwatchedFindingIds(prev => new Set([...prev, finding.id!]));
+      setWatchedFindingIds(prev => { const s = new Set(prev); s.delete(finding.id!); return s; });
+    } catch {}
+  }, [currentWorkspace?.id]);
+
+  const dismissFinding = useCallback(async (finding: { id?: string }) => {
+    if (!currentWorkspace?.id || !finding.id) return;
+    try {
+      await api.post(`/briefing/findings/${finding.id}/preference`, { preference: 'dismissed' });
+      setDismissedFindingIds(prev => new Set([...prev, finding.id!]));
+    } catch {}
+  }, [currentWorkspace?.id]);
+
+  const openAskPandora = useCallback((deal: { id: string; name: string }) => {
+    const ctx = buildConciergeContext();
+    navigateToChat(`Tell me about ${deal.name}`, ctx);
+  }, [buildConciergeContext, navigateToChat]);
+
   const handleChipClick = useCallback((chipId: ChipId) => {
     switch (chipId) {
       case 'live_queries': {
@@ -612,7 +714,6 @@ export default function ConciergeView() {
   const subTabs = getSubTabs(pandoraRole);
   const hasTarget = brief?.targets?.hasTarget !== false;
   const pct = brief?.targets?.pctAttained;
-  const verdictColor = hasTarget ? healthColor(pct) : S.blue;
   const wsName = brief?.workspace?.name || currentWorkspace?.name || 'Pandora';
 
   return (
@@ -799,220 +900,222 @@ export default function ConciergeView() {
               ) : null;
             })()}
 
-            {/* VERDICT BLOCK */}
-            {hasTarget && pct !== undefined && pct !== null ? (
-              <div
-                onClick={() => openMathModal('attainment')}
-                style={{
-                  border: `0.5px solid ${verdictColor}44`,
-                  borderRadius: 10,
-                  padding: '14px 16px',
-                  cursor: 'pointer',
+            {/* 4-COLUMN METRIC ROW */}
+            {(() => {
+              const estQ2 = brief.estimatedQ2Coverage ?? null;
+              const q2Color = estQ2 === null ? S.textMuted : estQ2 >= 3 ? S.teal : estQ2 >= 1.5 ? S.yellow : S.red;
+              const attainColor = pct == null ? S.teal : pct >= 100 ? S.teal : pct >= 85 ? S.yellow : S.red;
+              const periodLabel = (typeof brief.targets?.headline === 'object' && brief.targets?.headline?.label)
+                ? brief.targets.headline.label
+                : 'Q1';
+              const metricCellStyle: React.CSSProperties = {
+                padding: '12px 14px',
+                cursor: 'pointer',
+                background: S.surface,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 2,
+                userSelect: 'none',
+              };
+              return (
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(4, 1fr)',
+                  gap: 1,
                   marginBottom: 20,
-                  background: `${verdictColor}06`,
-                  transition: 'border-color 0.15s',
-                }}
-                onMouseEnter={e => { e.currentTarget.style.borderColor = `${verdictColor}88`; }}
-                onMouseLeave={e => { e.currentTarget.style.borderColor = `${verdictColor}44`; }}
-              >
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 4 }}>
-                  <span style={{ fontSize: 32, fontWeight: 500, color: verdictColor }}>
-                    {fmtPct(pct)}
-                  </span>
-                  {brief.targets?.headline != null && (
-                    <span style={{ fontSize: 13, color: S.textSub }}>
-                      {typeof brief.targets.headline === 'object'
-                        ? `${brief.targets.headline.label} · ${fmtCurrency(brief.targets.headline.amount)}`
-                        : brief.targets.headline}
-                    </span>
-                  )}
-                  <span
-                    onClick={e => { e.stopPropagation(); openMathModal('attainment'); }}
-                    style={{ fontSize: 10, color: S.textDim, marginLeft: 'auto', cursor: 'pointer' }}
-                  >
-                    ∑ Show math
-                  </span>
-                </div>
-
-                <div style={{ height: 3, background: S.border2, borderRadius: 2, marginBottom: 8, overflow: 'hidden' }}>
-                  <div style={{ height: '100%', width: `${Math.min(pct, 100)}%`, background: verdictColor, borderRadius: 2, transition: 'width 0.5s ease' }} />
-                </div>
-
-                <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-                  {brief.targets?.closedWonValue !== undefined && (
-                    <span style={{ fontSize: 11, color: S.textMuted }}>{fmtCurrency(brief.targets.closedWonValue)} closed won</span>
-                  )}
-                  {brief.targets?.gap !== undefined && brief.targets.gap !== null && (
-                    <span style={{ fontSize: 11, color: S.textMuted }}>{typeof brief.targets.gap === 'number' ? fmtCurrency(brief.targets.gap) : brief.targets.gap} gap</span>
-                  )}
-                  {brief.pipeline?.coverageRatio != null && pct < 100 && (
-                    <span
-                      onClick={e => { e.stopPropagation(); openMathModal('coverage'); }}
-                      style={{ fontSize: 11, color: S.textMuted, cursor: 'pointer', textDecoration: 'underline dotted' }}
-                    >
-                      {brief.pipeline.coverageRatio.toFixed(1)}x pipeline coverage
-                    </span>
-                  )}
-                  {pct >= 100 && brief.pipeline?.totalValue != null && (
-                    <span
-                      onClick={e => { e.stopPropagation(); openMathModal('pipeline'); }}
-                      style={{ fontSize: 11, color: S.textMuted, cursor: 'pointer', textDecoration: 'underline dotted' }}
-                    >
-                      {fmtCurrency(brief.pipeline.totalValue)} open pipeline
-                    </span>
-                  )}
-                </div>
-              </div>
-            ) : !hasTarget && brief?.pipeline?.coverageRatio != null ? (
-              <div
-                onClick={() => openMathModal('pipeline')}
-                style={{
-                  border: `0.5px solid ${S.blue}44`,
+                  border: `0.5px solid ${S.border}`,
                   borderRadius: 10,
-                  padding: '14px 16px',
-                  cursor: 'pointer',
-                  marginBottom: 20,
-                  background: `${S.blue}06`,
-                  transition: 'border-color 0.15s',
-                }}
-                onMouseEnter={e => { e.currentTarget.style.borderColor = `${S.blue}88`; }}
-                onMouseLeave={e => { e.currentTarget.style.borderColor = `${S.blue}44`; }}
-              >
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 4 }}>
-                  <span style={{ fontSize: 32, fontWeight: 500, color: S.blue }}>
-                    {brief.pipeline.coverageRatio.toFixed(1)}×
-                  </span>
-                  <span style={{ fontSize: 13, color: S.textSub }}>Pipeline coverage</span>
-                  <span
-                    onClick={e => { e.stopPropagation(); openMathModal('pipeline'); }}
-                    style={{ fontSize: 10, color: S.textDim, marginLeft: 'auto', cursor: 'pointer' }}
+                  overflow: 'hidden',
+                  background: S.border,
+                }}>
+                  {/* Col 1: Attainment */}
+                  <div
+                    onClick={() => openMathModal('attainment')}
+                    style={metricCellStyle}
                   >
-                    ∑ Show math
-                  </span>
+                    <span style={{ fontSize: 22, fontWeight: 500, color: attainColor, lineHeight: 1.2 }}>
+                      {pct != null ? fmtPct(pct) : '—'}
+                    </span>
+                    <span style={{ fontSize: 10, color: S.textSub, fontWeight: 600 }}>Attained</span>
+                    <span style={{ fontSize: 10, color: S.textDim }}>
+                      {pct != null && pct >= 100 ? 'Q1 done' : 'Q1 in progress'}
+                    </span>
+                  </div>
+                  {/* Col 2: Closed */}
+                  <div
+                    onClick={() => openMathModal('attainment')}
+                    style={metricCellStyle}
+                  >
+                    <span style={{ fontSize: 22, fontWeight: 500, color: S.teal, lineHeight: 1.2 }}>
+                      {fmtCurrency(brief.targets?.closedWonValue)}
+                    </span>
+                    <span style={{ fontSize: 10, color: S.textSub, fontWeight: 600 }}>Closed</span>
+                    <span style={{ fontSize: 10, color: S.textDim }}>{periodLabel}</span>
+                  </div>
+                  {/* Col 3: Open pipeline */}
+                  <div
+                    onClick={() => openMathModal('pipeline')}
+                    style={metricCellStyle}
+                  >
+                    <span style={{ fontSize: 22, fontWeight: 500, color: '#94a3b8', lineHeight: 1.2 }}>
+                      {fmtCurrency(brief.pipeline?.totalValue)}
+                    </span>
+                    <span style={{ fontSize: 10, color: S.textSub, fontWeight: 600 }}>Open</span>
+                    <span style={{ fontSize: 10, color: S.textDim }}>pipeline</span>
+                  </div>
+                  {/* Col 4: Est. Q2 coverage */}
+                  <div
+                    onClick={() => openMathModal('coverage')}
+                    title="Includes stage-weighted open pipeline and expected Q1 rollover deals"
+                    style={metricCellStyle}
+                  >
+                    <span style={{ fontSize: 22, fontWeight: 500, color: q2Color, lineHeight: 1.2 }}>
+                      {estQ2 != null ? `~${estQ2.toFixed(1)}×` : '—'}
+                    </span>
+                    <span style={{ fontSize: 10, color: S.textSub, fontWeight: 600 }}>Est. Q2 coverage</span>
+                    <span style={{ fontSize: 10, color: S.textDim }}>target: 3×</span>
+                  </div>
                 </div>
+              );
+            })()}
+            {/* ∑ Show math hint */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: -14, marginBottom: 10 }}>
+              <span style={{ fontSize: 10, color: '#3a4252' }}>∑ Show math</span>
+            </div>
 
-                <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-                  {brief.pipeline?.totalValue !== undefined && (
-                    <span style={{ fontSize: 11, color: S.textMuted }}>{fmtCurrency(brief.pipeline.totalValue)} open pipeline</span>
-                  )}
-                  {brief.pipeline?.weightedValue !== undefined && (
-                    <span style={{ fontSize: 11, color: S.textMuted }}>{fmtCurrency(brief.pipeline.weightedValue)} weighted</span>
-                  )}
-                  {brief.targets?.closedWonValue !== undefined && brief.targets.closedWonValue > 0 && (
-                    <span style={{ fontSize: 11, color: S.textMuted }}>{fmtCurrency(brief.targets.closedWonValue)} closed won</span>
-                  )}
-                </div>
-              </div>
-            ) : null}
-
-            {/* ACTIVITY LOG — strategic sub-tab */}
-            {activeSubTab === 'strategic' && (
+            {/* ACTIVITY LOG — strategic sub-tab (collapsible overnight) */}
+            {activeSubTab === 'strategic' && (brief.findings?.skillRuns?.length ?? 0) > 0 && (
               <div style={{ marginBottom: 20 }}>
-                <div style={{ fontSize: 11, fontWeight: 600, color: '#5a6578', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>
-                  Pandora overnight
+                {/* HEADER ROW — always visible */}
+                <div
+                  onClick={() => setOvernightTopExpanded(prev => !prev)}
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', marginBottom: 6, userSelect: 'none' }}
+                >
+                  <span style={{ fontSize: 11, fontWeight: 600, color: '#5a6578', textTransform: 'uppercase' as const, letterSpacing: '0.07em' }}>
+                    Pandora overnight
+                  </span>
+                  <span style={{ fontSize: 10, color: S.textDim, transition: 'transform 0.15s', display: 'inline-block', transform: overnightTopExpanded ? 'rotate(180deg)' : 'rotate(0deg)' }}>▾</span>
                 </div>
-                {(brief.findings?.skillRuns?.length ?? 0) === 0 ? (
-                  <div style={{ fontSize: 12, color: S.textDim, padding: '4px 0' }}>No skills have run yet for this workspace.</div>
-                ) : (
-                  brief.findings!.skillRuns!.map((run, i) => (
-                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0', borderBottom: `0.5px solid ${S.border}` }}>
-                      <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: S.teal, flexShrink: 0 }} />
-                      <span style={{ flex: 1, fontSize: 12, color: S.textSub }}>
-                        {fmtSkillDisplayName(run.skillName)}
-                        {run.findingCount !== undefined ? ` · ${run.findingCount} finding${run.findingCount === 1 ? '' : 's'}` : ''}
-                      </span>
-                      <span style={{ fontSize: 10, color: S.textDim }}>{fmtTimeAgo(run.ranAt)}</span>
-                    </div>
-                  ))
-                )}
-                {pendingActions.slice(0, 3).map((action, i, arr) => {
-                  const state = actionStates[action.id] ?? 'pending';
-                  const isExecuted = state === 'approved' || action.execution_status === 'completed';
-                  const dotColor = state === 'approved' ? S.teal : state === 'rejected' ? '#6b7280' : isExecuted ? S.teal : S.yellow;
-                  const isExpanded = expandedActionId === action.id;
-                  const isClickable = state === 'pending' && !isExecuted;
 
-                  // HITL-aware label derivation.
-                  // Full hitl_required / is_always_queue columns are not yet on the actions table.
-                  // Fallback: use block_reason to detect always-queue, category for sub-label.
-                  let mainLabel: string;
-                  let subLabel: string | null = null;
-                  let rowTooltip: string | undefined;
-
-                  if (action.hitl_required === true && action.is_always_queue === true) {
-                    // Full HITL path — available once columns are added to the DB + endpoint
-                    mainLabel = `${action.title} · protected field — always requires approval`;
-                    rowTooltip = 'Fields like close date, amount, and forecast category always require human review regardless of automation settings.';
-                  } else if (action.hitl_required === true && action.is_always_queue === false) {
-                    // Full HITL path — available once columns are added to the DB + endpoint
-                    mainLabel = `${action.title} · awaiting approval`;
-                    subLabel = action.category ? `${action.category} actions require approval in your current settings` : null;
-                  } else if (action.hitl_required === false && isExecuted) {
-                    // Full HITL path — available once columns are added to the DB + endpoint
-                    mainLabel = `${action.title} · executed automatically`;
-                  } else if (action.block_reason) {
-                    // Fallback: block_reason present → treat as always-queue protected field
-                    mainLabel = `${action.title} · protected field — always requires approval`;
-                    rowTooltip = 'Fields like close date, amount, and forecast category always require human review regardless of automation settings.';
-                  } else if (isExecuted) {
-                    mainLabel = `${action.title} · executed automatically`;
-                  } else {
-                    // Default fallback: pending with optional category sub-label
-                    mainLabel = `${action.title} · awaiting approval`;
-                    subLabel = action.category ? `${action.category} actions require approval in your current settings` : null;
-                  }
-
-                  return (
-                    <div key={action.id}>
-                      <div
-                        onClick={() => { if (isClickable) setExpandedActionId(isExpanded ? null : action.id); }}
-                        title={rowTooltip}
-                        style={{
-                          display: 'flex', alignItems: 'flex-start', gap: 8, padding: '5px 0',
-                          cursor: isClickable ? 'pointer' : rowTooltip ? 'help' : 'default',
-                          borderBottom: (i < arr.length - 1 || isExpanded) ? `0.5px solid ${S.border}` : 'none',
-                        }}
-                      >
-                        <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: dotColor, flexShrink: 0, marginTop: 4 }} />
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontSize: 12, color: S.textSub }}>{mainLabel}</div>
-                          {subLabel && (
-                            <div style={{ fontSize: 11, color: '#5a6578', marginTop: 1 }}>{subLabel}</div>
-                          )}
-                        </div>
+                {/* COLLAPSED: compact skill run lines + pending count */}
+                {!overnightTopExpanded && (
+                  <>
+                    {brief.findings!.skillRuns!.map((run, i) => (
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0', borderBottom: `0.5px solid ${S.border}` }}>
+                        <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: run.status === 'failed' ? S.red : run.status === 'partial' ? S.yellow : S.teal, flexShrink: 0 }} />
+                        <span style={{ flex: 1, fontSize: 12, color: S.textSub }}>
+                          {fmtSkillDisplayName(run.skillName)}
+                          {run.findingCount !== undefined ? ` · ${run.findingCount} finding${run.findingCount === 1 ? '' : 's'}` : ''}
+                        </span>
+                        <span style={{ fontSize: 10, color: S.textDim }}>{fmtTimeAgo(run.ranAt)}</span>
                       </div>
-                      {isExpanded && (
-                        <div style={{ padding: '10px 14px', background: S.surface2, borderRadius: 8, marginBottom: 6, marginTop: 2 }}>
-                          {action.description && (
-                            <div style={{ fontSize: 12, color: S.textSub, lineHeight: 1.5, marginBottom: 10 }}>{action.description}</div>
-                          )}
-                          <div style={{ display: 'flex', gap: 8 }}>
-                            <button
-                              onClick={async () => {
-                                try {
-                                  await api.post(`/workflow-rules/pending/${action.id}/approve`, {});
-                                  setActionStates(prev => ({ ...prev, [action.id]: 'approved' }));
-                                  setExpandedActionId(null);
-                                } catch {}
-                              }}
-                              style={{ fontSize: 11, padding: '4px 12px', background: S.teal, color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer' }}
-                            >Approve</button>
-                            <button
-                              onClick={async () => {
-                                try {
-                                  await api.post(`/workflow-rules/pending/${action.id}/reject`, {});
-                                  setActionStates(prev => ({ ...prev, [action.id]: 'rejected' }));
-                                  setExpandedActionId(null);
-                                } catch {}
-                              }}
-                              style={{ fontSize: 11, padding: '4px 12px', background: 'transparent', color: S.textSub, border: `0.5px solid ${S.border}`, borderRadius: 6, cursor: 'pointer' }}
-                            >Reject</button>
+                    ))}
+                    {pendingActions.length > 0 && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
+                        <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: S.yellow, flexShrink: 0 }} />
+                        <span style={{ fontSize: 12, color: S.textSub }}>
+                          {pendingActions.length} action{pendingActions.length === 1 ? '' : 's'} pending approval
+                        </span>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {/* EXPANDED: full log with approve/reject */}
+                {overnightTopExpanded && (
+                  <>
+                    {brief.findings!.skillRuns!.map((run, i) => (
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0', borderBottom: `0.5px solid ${S.border}` }}>
+                        <StatusDot status={run.status} />
+                        <span style={{ flex: 1, fontSize: 12, color: S.textSub }}>
+                          {fmtSkillDisplayName(run.skillName)}
+                          {run.findingCount !== undefined ? ` · ${run.findingCount} finding${run.findingCount === 1 ? '' : 's'}` : ''}
+                        </span>
+                        <span style={{ fontSize: 10, color: S.textDim }}>{fmtTimeAgo(run.ranAt)}</span>
+                      </div>
+                    ))}
+                    {pendingActions.slice(0, 3).map((action, i, arr) => {
+                      const state = actionStates[action.id] ?? 'pending';
+                      const isExecuted = state === 'approved' || action.execution_status === 'completed';
+                      const dotColor = state === 'approved' ? S.teal : state === 'rejected' ? '#6b7280' : isExecuted ? S.teal : S.yellow;
+                      const isExpanded = expandedActionId === action.id;
+                      const isClickable = state === 'pending' && !isExecuted;
+
+                      let mainLabel: string;
+                      let subLabel: string | null = null;
+                      let rowTooltip: string | undefined;
+
+                      if (action.hitl_required === true && action.is_always_queue === true) {
+                        mainLabel = `${action.title} · protected field — always requires approval`;
+                        rowTooltip = 'Fields like close date, amount, and forecast category always require human review regardless of automation settings.';
+                      } else if (action.hitl_required === true && action.is_always_queue === false) {
+                        mainLabel = `${action.title} · awaiting approval`;
+                        subLabel = action.category ? `${action.category} actions require approval in your current settings` : null;
+                      } else if (action.hitl_required === false && isExecuted) {
+                        mainLabel = `${action.title} · executed automatically`;
+                      } else if (action.block_reason) {
+                        mainLabel = `${action.title} · protected field — always requires approval`;
+                        rowTooltip = 'Fields like close date, amount, and forecast category always require human review regardless of automation settings.';
+                      } else if (isExecuted) {
+                        mainLabel = `${action.title} · executed automatically`;
+                      } else {
+                        mainLabel = `${action.title} · awaiting approval`;
+                        subLabel = action.category ? `${action.category} actions require approval in your current settings` : null;
+                      }
+
+                      return (
+                        <div key={action.id}>
+                          <div
+                            onClick={() => { if (isClickable) setExpandedActionId(isExpanded ? null : action.id); }}
+                            title={rowTooltip}
+                            style={{
+                              display: 'flex', alignItems: 'flex-start', gap: 8, padding: '5px 0',
+                              cursor: isClickable ? 'pointer' : rowTooltip ? 'help' : 'default',
+                              borderBottom: (i < arr.length - 1 || isExpanded) ? `0.5px solid ${S.border}` : 'none',
+                            }}
+                          >
+                            <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: dotColor, flexShrink: 0, marginTop: 4 }} />
+                            <div style={{ flex: 1 }}>
+                              <div style={{ fontSize: 12, color: S.textSub }}>{mainLabel}</div>
+                              {subLabel && (
+                                <div style={{ fontSize: 11, color: '#5a6578', marginTop: 1 }}>{subLabel}</div>
+                              )}
+                            </div>
                           </div>
+                          {isExpanded && (
+                            <div style={{ padding: '10px 14px', background: S.surface2, borderRadius: 8, marginBottom: 6, marginTop: 2 }}>
+                              {action.description && (
+                                <div style={{ fontSize: 12, color: S.textSub, lineHeight: 1.5, marginBottom: 10 }}>{action.description}</div>
+                              )}
+                              <div style={{ display: 'flex', gap: 8 }}>
+                                <button
+                                  onClick={async () => {
+                                    try {
+                                      await api.post(`/workflow-rules/pending/${action.id}/approve`, {});
+                                      setActionStates(prev => ({ ...prev, [action.id]: 'approved' }));
+                                      setExpandedActionId(null);
+                                    } catch {}
+                                  }}
+                                  style={{ fontSize: 11, padding: '4px 12px', background: S.teal, color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer' }}
+                                >Approve</button>
+                                <button
+                                  onClick={async () => {
+                                    try {
+                                      await api.post(`/workflow-rules/pending/${action.id}/reject`, {});
+                                      setActionStates(prev => ({ ...prev, [action.id]: 'rejected' }));
+                                      setExpandedActionId(null);
+                                    } catch {}
+                                  }}
+                                  style={{ fontSize: 11, padding: '4px 12px', background: 'transparent', color: S.textSub, border: `0.5px solid ${S.border}`, borderRadius: 6, cursor: 'pointer' }}
+                                >Reject</button>
+                              </div>
+                            </div>
+                          )}
                         </div>
-                      )}
-                    </div>
-                  );
-                })}
+                      );
+                    })}
+                  </>
+                )}
               </div>
             )}
 
@@ -1052,19 +1155,40 @@ export default function ConciergeView() {
                 ? Math.round(riskDeals.reduce((s, d) => s + d.amount, 0) / riskDeals.length)
                 : 0;
 
-              // Context narrative for when Q1 is won but risk deals exist
+              // Priority-framed narrative (Task 2)
               let contextNarrative: string | null = null;
-              if (riskDeals.length > 0 && _pctAttained >= 100 && q2Coverage !== null) {
+              const priorityFrame = brief.priorityFrame ?? null;
+              if (priorityFrame) {
+                const topics = priorityFrame.primaryTopics ?? [];
+                const estQ2 = brief.estimatedQ2Coverage ?? null;
+                let frameSentence = '';
+                if (topics.includes('q2_setup') && (estQ2 === null || estQ2 < 3)) {
+                  const coldTotal = riskDeals.reduce((s, d) => s + d.amount, 0);
+                  if (riskDeals.length > 0) {
+                    frameSentence = `${riskDeals.length} cold deal${riskDeals.length !== 1 ? 's' : ''} worth ${fmtCurrency(coldTotal)} are your fastest path to 3× Q2 coverage.`;
+                  } else {
+                    frameSentence = `Build Q2 pipeline now — current coverage estimate is ${estQ2 != null ? `~${estQ2.toFixed(1)}×` : 'below'} the 3× threshold.`;
+                  }
+                } else if (topics.includes('rep_variance')) {
+                  frameSentence = 'Rep performance varies — review coverage by rep before the quarter closes.';
+                } else if (topics.includes('q1_close_risk')) {
+                  const daysLeft = (brief.temporal as any)?.daysRemainingInQuarter;
+                  frameSentence = daysLeft
+                    ? `Deals at risk with ${daysLeft} days left to close — act now.`
+                    : 'Deals at risk this quarter need action before close.';
+                } else if (topics.includes('big_deals_at_risk')) {
+                  frameSentence = `${riskDeals.length > 0 ? riskDeals.length : 'High-value'} deal${riskDeals.length !== 1 ? 's' : ''} at risk — prioritize re-engagement this week.`;
+                }
+                if (frameSentence) {
+                  contextNarrative = `${priorityFrame.frameLabel} — ${frameSentence}`;
+                }
+              } else if (riskDeals.length > 0 && _pctAttained >= 100 && q2Coverage !== null) {
                 const covStr = `${q2Coverage.toFixed(1)}×`;
                 const dealWord = riskDeals.length === 1 ? 'deal' : 'deals';
-                if (q2Coverage < 1) {
-                  contextNarrative = `Q1 is won at ${Math.round(_pctAttained)}%. Q2 coverage is at ${covStr} — well below the 3× threshold. These ${riskDeals.length} cold ${dealWord} averaging ${fmtCurrency(avgRiskAmt)} aren't Q1 problems, they're Q2 opportunities. Re-engaging them this week adds pipeline buffer before the quarter turns.`;
-                } else if (q2Coverage < 2) {
-                  contextNarrative = `Q1 is won at ${Math.round(_pctAttained)}%. But Q2 coverage is at ${covStr} — significantly short of the 3× threshold. These ${riskDeals.length} cold ${dealWord} averaging ${fmtCurrency(avgRiskAmt)} aren't Q1 problems, they're Q2 opportunities. Re-engaging them this week adds pipeline buffer before the quarter turns.`;
-                } else if (q2Coverage < 3) {
-                  contextNarrative = `Q1 is won at ${Math.round(_pctAttained)}%. But Q2 coverage is at ${covStr} — just short of the 3× threshold. These ${riskDeals.length} cold ${dealWord} averaging ${fmtCurrency(avgRiskAmt)} aren't Q1 problems, they're Q2 opportunities. Re-engaging them this week adds pipeline buffer before the quarter turns.`;
+                if (q2Coverage < 3) {
+                  contextNarrative = `Q1 is won at ${Math.round(_pctAttained)}%. Q2 coverage is at ${covStr} — short of the 3× threshold. These ${riskDeals.length} cold ${dealWord} averaging ${fmtCurrency(avgRiskAmt)} are Q2 opportunities. Re-engaging them this week adds pipeline buffer before the quarter turns.`;
                 } else {
-                  contextNarrative = `Q1 is won at ${Math.round(_pctAttained)}%. Q2 coverage is at ${covStr} — above threshold. These ${riskDeals.length} cold ${dealWord} averaging ${fmtCurrency(avgRiskAmt)} build additional buffer and reduce dependency on new pipeline generation.`;
+                  contextNarrative = `Q1 is won at ${Math.round(_pctAttained)}%. Q2 coverage is at ${covStr} — above threshold. These ${riskDeals.length} cold ${dealWord} averaging ${fmtCurrency(avgRiskAmt)} build additional buffer.`;
                 }
               }
 
@@ -1082,22 +1206,17 @@ export default function ConciergeView() {
                       : `Showing ${Math.min(topFindings.length, 5)} of ${totalCount} findings · ${countTail}`}
                   </div>
 
-                  {/* Q2 context narrative — shown when Q1 is won and cold deals exist */}
+                  {/* Priority-framed narrative — plain text, no gray box */}
                   {contextNarrative && (
                     <div style={{
-                      fontSize: 13, color: S.textSub, lineHeight: 1.6,
-                      padding: '10px 14px',
-                      background: `${S.teal}08`,
-                      border: `0.5px solid ${S.teal}30`,
-                      borderRadius: 8,
-                      marginBottom: 4,
+                      fontSize: 14, color: S.text, lineHeight: 1.5, marginBottom: 4,
                     }}>
                       {contextNarrative}
                     </div>
                   )}
 
                   {/* Big Deals at Risk — always first */}
-                  {riskDeals.map((deal, i) => {
+                  {riskDeals.filter(d => !lostDealIds.has(d.id)).map((deal, i) => {
                     const dormant = deal.daysSinceActivity > 120;
                     const borderColor = dormant ? '#ef4444' : '#f87171';
                     const eyebrow = dormant
@@ -1126,6 +1245,40 @@ export default function ConciergeView() {
                       }
                     }
 
+                    const isAssigned = assignedDealIds.has(deal.id);
+                    const riskActions: RiskCardAction[] = dormant
+                      ? [
+                          {
+                            label: isAssigned ? '✓ Assigned' : 'Re-engage',
+                            variant: 'primary',
+                            disabled: isAssigned,
+                            onClick: () => assignToRep(deal),
+                          },
+                          {
+                            label: 'Mark lost',
+                            variant: 'danger',
+                            onClick: () => markLost(deal),
+                          },
+                          {
+                            label: 'Ask →',
+                            variant: 'secondary',
+                            onClick: () => openAskPandora(deal),
+                          },
+                        ]
+                      : [
+                          {
+                            label: isAssigned ? '✓ Assigned' : 'Assign to rep',
+                            variant: 'primary',
+                            disabled: isAssigned,
+                            onClick: () => assignToRep(deal),
+                          },
+                          {
+                            label: 'Ask →',
+                            variant: 'secondary',
+                            onClick: () => openAskPandora(deal),
+                          },
+                        ];
+
                     return (
                       <RiskDealCard
                         key={`risk-${deal.id}`}
@@ -1144,29 +1297,69 @@ export default function ConciergeView() {
                         textMuted={S.textMuted}
                         textDim={S.textDim}
                         font={S.font}
+                        actions={riskActions}
                         onClick={() => trackInteraction({ cardsDrilledInto: [`risk-${deal.id}`] })}
                       />
                     );
                   })}
 
                   {/* Findings — ranked after big deals */}
-                  {topFindings.slice(0, 5).map((finding, i) => {
+                  {topFindings.slice(0, 5).filter(f => !dismissedFindingIds.has(f.id ?? '')).map((finding, i) => {
                     const eyebrow = toTitleCaseSkillName(finding.skillName || finding.dealName || '');
                     const fullMsg = cleanFindingMessage(finding.message || '');
                     const title = finding.dealName
                       ? finding.dealName
                       : fullMsg.slice(0, 60) + (fullMsg.length > 60 ? '…' : '');
                     const body = fullMsg;
+
+                    const isWatched = watchedFindingIds.has(finding.id ?? '') || (finding.is_watched && !unwatchedFindingIds.has(finding.id ?? ''));
+                    const dealForFinding = finding.dealName
+                      ? { id: finding.id ?? String(i), name: finding.dealName }
+                      : null;
+
+                    const findingActions = [
+                      ...(dealForFinding ? [{
+                        label: assignedDealIds.has(finding.id ?? '') ? '✓ Assigned' : 'Assign to rep',
+                        variant: 'primary' as const,
+                        disabled: assignedDealIds.has(finding.id ?? ''),
+                        onClick: (_e: React.MouseEvent) => assignToRep({ id: dealForFinding.id, name: dealForFinding.name, daysSinceActivity: 0 }),
+                      }] : []),
+                      ...(finding.id ? (isWatched
+                        ? [{
+                            label: 'Unwatch',
+                            variant: 'secondary' as const,
+                            onClick: (_e: React.MouseEvent) => unwatchFinding(finding),
+                          }]
+                        : [{
+                            label: 'Watch',
+                            variant: 'secondary' as const,
+                            onClick: (_e: React.MouseEvent) => watchFinding(finding),
+                          }]
+                      ) : []),
+                      ...(finding.id ? [{
+                        label: 'Dismiss',
+                        variant: 'secondary' as const,
+                        onClick: (_e: React.MouseEvent) => dismissFinding(finding),
+                      }] : []),
+                      ...(dealForFinding ? [{
+                        label: 'Ask →',
+                        variant: 'secondary' as const,
+                        onClick: (_e: React.MouseEvent) => openAskPandora(dealForFinding),
+                      }] : []),
+                    ];
+
                     return (
                       <BriefCard
-                        key={i}
-                        rank={riskDeals.length + i + 1}
+                        key={finding.id ?? i}
+                        rank={riskDeals.filter(d => !lostDealIds.has(d.id)).length + i + 1}
                         category={severityToCategory(finding.severity)}
                         eyebrow={eyebrow}
                         title={title}
                         body={body}
                         chips={[]}
                         mathKey={finding.mathKey}
+                        is_watched={isWatched}
+                        actions={findingActions}
                         onClick={() => {
                           const cardId = finding.mathKey || `finding-${i}`;
                           trackInteraction({ cardsDrilledInto: [cardId] });

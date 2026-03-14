@@ -1,0 +1,270 @@
+All four tasks clean. Migration 175 applied, no startup crashes, all endpoints live.
+
+The most important thing that shipped is `calibrateBriefPriorities()`. Frontera is now in `late_above` — "Won — build Q2 this week" — and Claude's synthesis prompt receives that frame explicitly. Every brief generation from here forward will suppress `q1_close_risk` and `deal_hygiene` and lead with `q2_setup`, `rep_variance`, and `big_deals_at_risk`. That's the context-aware behavior we've been building toward all day.
+
+---
+
+## Now Run the Replit Session
+
+This wires the buttons and surfaces the new backend data in the UI:
+
+---
+
+```
+Read client/src/pages/ConciergeView.tsx and
+client/src/components/BriefCard.tsx before writing
+any code. Console.log the full brief response on
+load and confirm these fields exist:
+  - brief.estimatedQ2Coverage
+  - brief.findings.topFindings[0].is_watched
+  - brief.priorityFrame
+
+FIVE TASKS ONLY. Build in order.
+
+---
+
+TASK 1 — Replace metric row with 4-column scannable stats
+
+Replace the current verdict block with a compact
+4-column metric row:
+
+  ┌──────────┬──────────┬──────────┬──────────────┐
+  │  137%    │  $481K   │  $291K   │   ~1.6×      │
+  │ Attained │ Closed   │ Open     │ Est. Q2 cov  │
+  │ Q1 done  │ Q1 FY27  │ pipeline │ target: 3×   │
+  └──────────┴──────────┴──────────┴──────────────┘
+
+Column 1: brief.targets.pctAttained formatted as %
+  Label: "Attained"
+  Sub-label: "Q1 done" if pctAttained >= 100,
+             "Q1 in progress" otherwise
+  Color: green if >= 100, yellow if 85-99, red if < 85
+
+Column 2: brief.targets.closedWonValue formatted as $
+  Label: "Closed"
+  Sub-label: brief.targets.periodLabel (e.g. "Q1 FY27")
+  Color: always green
+
+Column 3: brief.pipeline.totalValue formatted as $
+  Label: "Open"
+  Sub-label: "pipeline"
+  Color: neutral (var(--text2) or #94a3b8)
+
+Column 4: brief.estimatedQ2Coverage formatted as ~X.X×
+  Label: "Est. Q2 coverage"
+  Sub-label: "target: 3×"
+  Color: green if >= 3, yellow if 1.5-2.9, red if < 1.5
+  Prefix with ~ to signal it's an estimate
+  Tooltip on hover: "Includes stage-weighted open
+    pipeline and expected Q1 rollover deals"
+
+Each column is clickable → opens MathModal with
+the appropriate mathKey:
+  Column 1 → showMath('attainment')
+  Column 2 → showMath('attainment')
+  Column 3 → showMath('pipeline')
+  Column 4 → showMath('coverage')
+
+Remove the progress bar — it's redundant with
+the percentage. Remove the "$0 gap" line — covered
+by the attainment column.
+
+Add "∑ Show math" hint text (10px, #3a4252)
+at the bottom right of the metric row.
+
+---
+
+TASK 2 — Replace narrative box with priority-framed
+         single sentence
+
+The gray narrative box currently shows a 2-sentence
+paragraph. Replace with:
+
+  [priorityFrame.frameLabel] — [one sentence derived
+  from the most urgent topic]
+
+Example for late_above:
+  "Won — build Q2 this week. 5 cold deals worth
+   $669K are your fastest path to 3× Q2 coverage."
+
+Derive the sentence from:
+  If primaryTopics includes 'q2_setup' AND
+  brief.estimatedQ2Coverage < 3:
+    "[$n] cold deals worth [$total] are your
+     fastest path to [3×] Q2 coverage."
+  
+  If primaryTopics includes 'rep_variance':
+    "Rep performance varies — [n] reps are
+     below [X]% of quota."
+  
+  If primaryTopics includes 'q1_close_risk':
+    "[$n] deals at risk with [$daysRemaining]
+     days to close."
+
+If brief.priorityFrame is null, fall back to
+the existing narrative text.
+
+Style: 14px, color var(--text) or #e8ecf4,
+margin-bottom 16px. No gray box. Just text.
+
+---
+
+TASK 3 — Replace card buttons with real actions
+
+Update BriefCard to accept an actions prop:
+  actions: Array<{
+    label: string,
+    variant: 'primary'|'secondary'|'danger',
+    onClick: () => void
+  }>
+
+In ConciergeView, pass different action sets
+based on card type:
+
+For Big Deal at Risk cards:
+  If deal.daysSinceActivity > 120:
+    actions: [
+      { label: 'Re-engage', variant: 'primary',
+        onClick: () => assignToRep(deal) },
+      { label: 'Mark lost', variant: 'danger',
+        onClick: () => markLost(deal) },
+      { label: 'Ask →', variant: 'secondary',
+        onClick: () => openAskPandora(deal) }
+    ]
+  Else:
+    actions: [
+      { label: 'Assign to rep', variant: 'primary',
+        onClick: () => assignToRep(deal) },
+      { label: 'Watch', variant: 'secondary',
+        onClick: () => watchFinding(finding) },
+      { label: 'Dismiss', variant: 'secondary',
+        onClick: () => dismissFinding(finding) },
+      { label: 'Ask →', variant: 'secondary',
+        onClick: () => openAskPandora(deal) }
+    ]
+
+For Single Thread Alert and other finding cards:
+  actions: [
+    { label: 'Assign to rep', variant: 'primary',
+      onClick: () => assignToRep(deal) },
+    { label: 'Watch', variant: 'secondary',
+      onClick: () => watchFinding(finding) },
+    { label: 'Dismiss', variant: 'secondary',
+      onClick: () => dismissFinding(finding) },
+    { label: 'Ask →', variant: 'secondary',
+      onClick: () => openAskPandora(deal) }
+  ]
+
+Button styles:
+  primary: green bg (#1D9E75), white text, 
+           border-radius 6px, 11px font
+  secondary: transparent, border 0.5px #242b3a,
+             color #94a3b8
+  danger: transparent, border 0.5px red border,
+          color #ef4444
+
+Action implementations:
+
+assignToRep(deal):
+  POST /api/workspaces/:id/actions/assign-to-rep
+  Body: { dealId: deal.id, 
+          taskTitle: `Follow up — ${deal.name}`,
+          taskNote: `Cold for ${deal.daysSinceActivity} 
+                     days. Re-engage for Q2 pipeline.` }
+  On success: show "✓ Assigned" in place of button
+
+markLost(deal):
+  POST to existing actions/CRM write endpoint
+  Sets stage to closed_lost
+  On success: remove card from brief list
+
+watchFinding(finding):
+  POST /api/workspaces/:id/briefing/findings/
+       ${finding.id}/preference
+  Body: { preference: 'watch' }
+  On success: show watch indicator (👁 or eye icon)
+  on the card eyebrow
+
+dismissFinding(finding):
+  POST /api/workspaces/:id/briefing/findings/
+       ${finding.id}/preference
+  Body: { preference: 'dismissed' }
+  On success: animate card out (opacity 0, 
+  height collapse, 200ms), remove from list
+
+openAskPandora(deal):
+  POST /api/workspaces/:id/chat
+  Body: { 
+    message: `Tell me about ${deal.name}`,
+    scope: { 
+      entityType: 'deal',
+      entityId: deal.id,
+      entityName: deal.name 
+    }
+  }
+  Then open Ask Pandora panel with the response
+
+---
+
+TASK 4 — Collapse Pandora overnight by default
+
+The PANDORA OVERNIGHT section should be collapsed
+by default. Show only:
+
+  Pandora overnight  [▾ expand]
+  [green dot] Pipeline Hygiene · 47 findings · 2h ago
+  [yellow dot] 2 actions pending approval
+
+On click of expand: show full log as currently built.
+On click of collapse: hide again.
+
+Store expanded state in useState — does not persist
+across page loads.
+
+If recentSkillRuns is empty:
+  Show nothing — omit the section entirely.
+  (Don't show "no skills have run yet")
+
+---
+
+TASK 5 — Wire is_watched indicator on cards
+
+If brief.findings.topFindings[n].is_watched = true:
+  Show a small eye icon (👁 or SVG) in the card
+  eyebrow next to the skill name
+  Tooltip: "You're watching this deal"
+  
+  Replace Watch button with:
+  { label: 'Unwatch', variant: 'secondary',
+    onClick: () => unwatchFinding(finding) }
+  
+  unwatchFinding:
+    DELETE /briefing/findings/${finding.id}/preference
+    On success: remove eye indicator, restore Watch button
+
+---
+
+DO NOT modify:
+  - Any backend files
+  - MathModal internals
+  - AskBar
+  - Tactical sub-tab
+
+Validate:
+  1. 4-column metric row shows correct values,
+     all clickable, Q2 coverage shows ~1.6×
+  2. Narrative shows priority frame label +
+     one specific sentence
+  3. Assign to rep button POSTs correctly,
+     shows ✓ Assigned on success
+  4. Dismiss animates card out
+  5. Watch shows eye indicator, Unwatch removes it
+  6. Mark lost removes the card
+  7. Pandora overnight collapsed by default,
+     expands on click
+  8. Ask → opens Ask Pandora with deal context
+```
+
+---
+
+After this session the brief is complete — correct data, intelligent framing, real actions, clean layout. Show it to Frontera.
