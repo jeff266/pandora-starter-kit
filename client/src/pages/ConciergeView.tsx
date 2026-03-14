@@ -96,6 +96,16 @@ interface OpeningBriefData {
     lastSkillRunAt?: string | null;
     skillRuns?: SkillRunLog[];
   };
+  bigDealsAtRisk?: Array<{
+    id: string;
+    name: string;
+    amount: number;
+    stage: string;
+    rfmGrade: string;
+    rfmLabel: string;
+    daysSinceActivity: number;
+    ownerEmail: string;
+  }>;
   movement?: {
     dealsAdvanced?: number;
     dealsClosed?: number;
@@ -206,11 +216,10 @@ function deriveSituationLine(brief: OpeningBriefData): string {
   const week = temporal?.weekOfQuarter;
   const quarter = temporal?.fiscalQuarter;
   const urgency = temporal?.urgencyLabel;
-  if (week && quarter) {
-    const urgencyPart = urgency ? ` — ${urgency}` : '';
-    parts.push(`Week ${week} of ${quarter}${urgencyPart}.`);
-  } else if (urgency) {
+  if (urgency) {
     parts.push(urgency.endsWith('.') ? urgency : `${urgency}.`);
+  } else if (week && quarter) {
+    parts.push(`Week ${week} of ${quarter}.`);
   }
 
   const hasTarget = brief.targets?.hasTarget !== false;
@@ -760,40 +769,63 @@ export default function ConciergeView() {
             )}
 
             {/* BRIEF ITEMS */}
-            {brief.findings?.topFindings && brief.findings.topFindings.length > 0 && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {/* Selection rationale */}
-                <div style={{ fontSize: 11, color: '#5a6578', marginBottom: 8 }}>
-                  Showing {Math.min(brief.findings.topFindings.length, 5)} of {(brief.findings.critical ?? 0) + (brief.findings.warning ?? 0)} findings · sorted by severity
-                </div>
-                {brief.findings.topFindings.slice(0, 5).map((finding, i) => {
-                  const eyebrow = toTitleCaseSkillName(finding.skillName || finding.dealName || '');
-                  const fullMsg = cleanFindingMessage(finding.message || '');
-                  const title = finding.dealName
-                    ? finding.dealName
-                    : fullMsg.slice(0, 60) + (fullMsg.length > 60 ? '…' : '');
-                  const body = fullMsg;
-                  return (
+            {(() => {
+              const riskDeals = brief.bigDealsAtRisk ?? [];
+              const topFindings = brief.findings?.topFindings ?? [];
+              const totalCount = (brief.findings?.critical ?? 0) + (brief.findings?.warning ?? 0);
+              if (riskDeals.length === 0 && topFindings.length === 0) return null;
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div style={{ fontSize: 11, color: '#5a6578', marginBottom: 8 }}>
+                    {riskDeals.length > 0
+                      ? `${riskDeals.length} big deal${riskDeals.length > 1 ? 's' : ''} at risk · ${Math.min(topFindings.length, 5)} of ${totalCount} findings · sorted by severity`
+                      : `Showing ${Math.min(topFindings.length, 5)} of ${totalCount} findings · sorted by severity`}
+                  </div>
+
+                  {/* Big Deals at Risk — always first */}
+                  {riskDeals.map((deal, i) => (
                     <BriefCard
-                      key={i}
+                      key={`risk-${deal.id}`}
                       rank={i + 1}
-                      category={severityToCategory(finding.severity)}
-                      eyebrow={eyebrow}
-                      title={title}
-                      body={body}
+                      category="risk"
+                      eyebrow="Big Deal at Risk · RFM"
+                      title={deal.name}
+                      body={`${fmtCurrency(deal.amount)} · ${deal.daysSinceActivity} days no activity · ${deal.rfmLabel}`}
                       chips={[]}
-                      mathKey={finding.mathKey}
-                      onClick={() => {
-                        const cardId = finding.mathKey || `finding-${i}`;
-                        trackInteraction({ cardsDrilledInto: [cardId] });
-                        if (finding.mathKey) openMathModal(finding.mathKey);
-                      }}
-                      onMathClick={openMathModal}
+                      onClick={() => trackInteraction({ cardsDrilledInto: [`risk-${deal.id}`] })}
                     />
-                  );
-                })}
-              </div>
-            )}
+                  ))}
+
+                  {/* Findings — ranked after big deals */}
+                  {topFindings.slice(0, 5).map((finding, i) => {
+                    const eyebrow = toTitleCaseSkillName(finding.skillName || finding.dealName || '');
+                    const fullMsg = cleanFindingMessage(finding.message || '');
+                    const title = finding.dealName
+                      ? finding.dealName
+                      : fullMsg.slice(0, 60) + (fullMsg.length > 60 ? '…' : '');
+                    const body = fullMsg;
+                    return (
+                      <BriefCard
+                        key={i}
+                        rank={riskDeals.length + i + 1}
+                        category={severityToCategory(finding.severity)}
+                        eyebrow={eyebrow}
+                        title={title}
+                        body={body}
+                        chips={[]}
+                        mathKey={finding.mathKey}
+                        onClick={() => {
+                          const cardId = finding.mathKey || `finding-${i}`;
+                          trackInteraction({ cardsDrilledInto: [cardId] });
+                          if (finding.mathKey) openMathModal(finding.mathKey);
+                        }}
+                        onMathClick={openMathModal}
+                      />
+                    );
+                  })}
+                </div>
+              );
+            })()}
 
             {/* START WBR CTA */}
             {brief.findings?.topFindings && brief.findings.topFindings.length > 0 && (
@@ -817,7 +849,7 @@ export default function ConciergeView() {
             )}
 
             {/* EMPTY STATE */}
-            {(!brief.findings?.topFindings || brief.findings.topFindings.length === 0) && (
+            {(!brief.findings?.topFindings || brief.findings.topFindings.length === 0) && (!brief.bigDealsAtRisk || brief.bigDealsAtRisk.length === 0) && (
               <div style={{ textAlign: 'center', padding: '48px 24px', color: S.textMuted, fontSize: 13 }}>
                 <div style={{ fontSize: 24, marginBottom: 12 }}>✓</div>
                 No findings right now — your pipeline looks healthy.
