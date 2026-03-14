@@ -940,8 +940,13 @@ export default function ConciergeView() {
                         const pctOfGap = Math.round(deal.amount / _gap * 100);
                         soWhat = `Losing this deal costs ${pctOfGap}% of the remaining ${fmtCurrency(_gap)} gap.`;
                       } else if ((_gap === 0 || _gap === null) && q2Coverage !== null && q2Coverage < 3 && _headlineAmt) {
-                        const pctOfQ2 = Math.round(deal.amount / (_headlineAmt * 3) * 100);
-                        soWhat = `At $0 gap this quarter, this deal feeds Q2. It represents ${pctOfQ2}% of 3× Q2 coverage.`;
+                        const isEarlyStage = ['awareness', 'evaluation', 'discovery', 'prospecting'].includes((deal.stage || '').toLowerCase());
+                        if (isEarlyStage) {
+                          soWhat = `Starting the conversation now seeds Q2 pipeline — not a Q2 close, but builds the buffer you need.`;
+                        } else {
+                          const pctOfQ2 = Math.round(deal.amount / (_headlineAmt * 3) * 100);
+                          soWhat = `At $0 gap this quarter, this deal closes in Q2. It represents ${pctOfQ2}% of 3× Q2 coverage.`;
+                        }
                       } else if ((_gap === 0 || _gap === null) && q2Coverage !== null && q2Coverage >= 3) {
                         soWhat = `Q1 is won. Re-engaging this deal builds Q2 buffer above the 3× coverage threshold.`;
                       }
