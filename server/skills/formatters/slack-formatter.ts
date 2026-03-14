@@ -49,6 +49,8 @@ export function formatForSlack(result: SkillResult, skill: SkillDefinition): Sla
     return formatPipelineCoverage(result);
   } else if (skill.slackTemplate === 'icp-discovery') {
     return formatICPDiscovery(result);
+  } else if (skill.slackTemplate === 'pipeline-movement') {
+    return formatPipelineMovement(result, skill);
   }
 
   // Generic formatter fallback
@@ -1638,6 +1640,118 @@ export function buildActionButtons(ctx: ActionButtonContext): SlackBlock[] {
       })),
     });
   }
+
+  return blocks;
+}
+
+/**
+ * Pipeline Movement Slack formatter
+ *
+ * Renders the week-over-week delta with headline, key metrics, and narrative.
+ */
+function formatPipelineMovement(result: SkillResult, skill: SkillDefinition): SlackBlock[] {
+  const blocks: SlackBlock[] = [];
+
+  // Extract the <summary> JSON from the Claude output if present
+  let narrative = typeof result.output === 'string' ? result.output : '';
+  let summaryJson: any = null;
+  const summaryMatch = narrative.match(/<summary>([\s\S]*?)<\/summary>/);
+  if (summaryMatch) {
+    try { summaryJson = JSON.parse(summaryMatch[1].trim()); } catch { /* ignore */ }
+    narrative = narrative.replace(/<summary>[\s\S]*?<\/summary>/, '').trim();
+  }
+
+  // Also check result_data.summary (written by the runtime)
+  const summary = summaryJson || (result.resultData as any)?.summary || null;
+  const netDelta = (result.resultData as any)?.net_delta || null;
+
+  const headline    = summary?.headline ?? skill.name;
+  const trendSignal = summary?.trend_signal ?? 'neutral';
+  const onTrack     = summary?.on_track;
+  const concern     = summary?.primary_concern;
+  const action      = summary?.recommended_action;
+
+  const trendEmoji = trendSignal === 'positive' ? '📈' : trendSignal === 'negative' ? '📉' : '➡️';
+  const trackEmoji = onTrack === true ? '✅' : onTrack === false ? '⚠️' : '';
+
+  // Header
+  blocks.push({
+    type: 'header',
+    text: { type: 'plain_text', text: `${trendEmoji} Pipeline Movement`, emoji: true },
+  });
+
+  blocks.push({
+    type: 'context',
+    elements: [{
+      type: 'mrkdwn',
+      text: `Completed: <!date^${Math.floor(result.completedAt.getTime() / 1000)}^{date_short_pretty} at {time}|${result.completedAt.toISOString()}>`,
+    }],
+  });
+
+  blocks.push({ type: 'divider' });
+
+  // Headline
+  blocks.push({
+    type: 'section',
+    text: { type: 'mrkdwn', text: `*${headline}*` },
+  });
+
+  // Key metrics row
+  const metricParts: string[] = [];
+  if (netDelta?.pipelineValueDelta != null) {
+    const sign = netDelta.pipelineValueDelta >= 0 ? '+' : '';
+    metricParts.push(`Net delta: *${sign}${formatCurrency(Math.abs(netDelta.pipelineValueDelta))}*`);
+  }
+  if (netDelta?.coverageTrend) {
+    const trendLabel = netDelta.coverageTrend === 'improving' ? '↑ improving' : netDelta.coverageTrend === 'declining' ? '↓ declining' : '→ stable';
+    metricParts.push(`Coverage: *${netDelta.coverageRatioNow ?? '—'}×* (${trendLabel})`);
+  }
+  if (onTrack != null) {
+    metricParts.push(`${trackEmoji} On track: *${onTrack ? 'Yes' : 'No'}*`);
+  }
+  if (metricParts.length > 0) {
+    blocks.push({
+      type: 'section',
+      text: { type: 'mrkdwn', text: metricParts.join('   |   ') },
+    });
+  }
+
+  blocks.push({ type: 'divider' });
+
+  // Narrative
+  if (narrative) {
+    const sections = parseTextIntoSections(markdownToSlack(narrative));
+    for (const section of sections) {
+      blocks.push({ type: 'section', text: { type: 'mrkdwn', text: section } });
+    }
+  }
+
+  // Concern + Action
+  if (concern || action) {
+    blocks.push({ type: 'divider' });
+    if (concern) {
+      blocks.push({
+        type: 'section',
+        text: { type: 'mrkdwn', text: `*Primary concern:* ${concern}` },
+      });
+    }
+    if (action) {
+      blocks.push({
+        type: 'section',
+        text: { type: 'mrkdwn', text: `*Recommended action:* ${action}` },
+      });
+    }
+  }
+
+  // Footer
+  blocks.push({ type: 'divider' });
+  blocks.push({
+    type: 'context',
+    elements: [{
+      type: 'mrkdwn',
+      text: `Duration: ${formatDuration(result.totalDuration_ms)} | Tokens: Claude ${result.totalTokenUsage.claude}, DeepSeek ${result.totalTokenUsage.deepseek} | Run ID: \`${result.runId}\``,
+    }],
+  });
 
   return blocks;
 }

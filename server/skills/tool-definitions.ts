@@ -8703,6 +8703,162 @@ const meddicCoverageExecute: ToolDefinition = {
 };
 
 // ============================================================================
+// Pipeline Movement Compute Tools
+// ============================================================================
+
+import {
+  computePipelineSnapshotNow   as _computePipelineSnapshotNow,
+  computePipelineSnapshotLastWeek as _computePipelineSnapshotLastWeek,
+  computeDealMovements         as _computeDealMovements,
+  computeStageVelocity         as _computeStageVelocity,
+  getTrendFromSkillRuns        as _getTrendFromSkillRuns,
+  computeNetDelta              as _computeNetDelta,
+} from '../analysis/pipeline-movement.js';
+
+const computePipelineSnapshotNowTool: ToolDefinition = {
+  name: 'computePipelineSnapshotNow',
+  description: 'Compute current pipeline state aggregated by stage (deal count, value, health)',
+  tier: 'compute',
+  parameters: { type: 'object', properties: {}, required: [] },
+  execute: async (_params, context) => {
+    return safeExecute('computePipelineSnapshotNow', async () => {
+      return await _computePipelineSnapshotNow(context.workspaceId);
+    }, _params);
+  },
+};
+
+const computePipelineSnapshotLastWeekTool: ToolDefinition = {
+  name: 'computePipelineSnapshotLastWeek',
+  description: 'Reconstruct pipeline state from 7 days ago using deal_stage_history',
+  tier: 'compute',
+  parameters: { type: 'object', properties: {}, required: [] },
+  execute: async (_params, context) => {
+    return safeExecute('computePipelineSnapshotLastWeek', async () => {
+      return await _computePipelineSnapshotLastWeek(context.workspaceId);
+    }, _params);
+  },
+};
+
+const computeDealMovementsThisWeekTool: ToolDefinition = {
+  name: 'computeDealMovementsThisWeek',
+  description: 'Classify each deal as advanced / fell_back / closed_won / closed_lost / new_entry / stalled this week',
+  tier: 'compute',
+  parameters: { type: 'object', properties: {}, required: [] },
+  execute: async (_params, context) => {
+    return safeExecute('computeDealMovementsThisWeek', async () => {
+      return await _computeDealMovements(context.workspaceId);
+    }, _params);
+  },
+};
+
+const computeStageVelocityDeltasTool: ToolDefinition = {
+  name: 'computeStageVelocityDeltas',
+  description: 'Compare this week average time-in-stage to historical average per stage; flags accelerating / slowing stages',
+  tier: 'compute',
+  parameters: { type: 'object', properties: {}, required: [] },
+  execute: async (_params, context) => {
+    return safeExecute('computeStageVelocityDeltas', async () => {
+      return await _computeStageVelocity(context.workspaceId);
+    }, _params);
+  },
+};
+
+const getTrendFromPipelineRunsTool: ToolDefinition = {
+  name: 'getTrendFromPipelineRuns',
+  description: 'Pull last N pipeline-movement skill_runs to extract 4-week coverage and new-pipeline trend',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {
+      limit: { type: 'number', description: 'How many prior runs to pull (default 4)' },
+    },
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('getTrendFromPipelineRuns', async () => {
+      const limit = typeof params.limit === 'number' ? params.limit : 4;
+      return await _getTrendFromSkillRuns(context.workspaceId, limit);
+    }, params);
+  },
+};
+
+const computeNetPipelineDeltaTool: ToolDefinition = {
+  name: 'computeNetPipelineDelta',
+  description: 'Combine all pipeline-movement compute results into a single NetDelta summary with coverage trend and on-track flag',
+  tier: 'compute',
+  parameters: { type: 'object', properties: {}, required: [] },
+  execute: async (_params, context) => {
+    return safeExecute('computeNetPipelineDelta', async () => {
+      const sr = context.stepResults as any;
+      const snapshotNow      = sr.snapshot_now;
+      const snapshotLastWeek = sr.snapshot_last_week;
+      const movements        = sr.movements;
+      const trend            = sr.trend;
+
+      if (!snapshotNow || !snapshotLastWeek || !movements || !trend) {
+        throw new Error('computeNetPipelineDelta requires snapshot_now, snapshot_last_week, movements, and trend in context');
+      }
+
+      // Fetch active quota target and period end for gap + weeks-remaining
+      const [targetResult, periodResult, closedWonResult] = await Promise.all([
+        query<{ amount: string }>(`
+          SELECT amount::numeric AS amount
+          FROM targets
+          WHERE workspace_id = $1
+            AND is_active = true
+            AND period_start <= CURRENT_DATE
+            AND period_end >= CURRENT_DATE
+          ORDER BY period_start DESC
+          LIMIT 1
+        `, [context.workspaceId]).catch(() => ({ rows: [] as any[] })),
+
+        query<{ period_end: string }>(`
+          SELECT period_end::text AS period_end
+          FROM targets
+          WHERE workspace_id = $1
+            AND is_active = true
+            AND period_start <= CURRENT_DATE
+            AND period_end >= CURRENT_DATE
+          ORDER BY period_start DESC
+          LIMIT 1
+        `, [context.workspaceId]).catch(() => ({ rows: [] as any[] })),
+
+        query<{ total: string }>(`
+          SELECT COALESCE(SUM(amount), 0)::numeric AS total
+          FROM deals
+          WHERE workspace_id = $1
+            AND stage_normalized = 'closed_won'
+            AND close_date >= (
+              SELECT period_start::date
+              FROM targets
+              WHERE workspace_id = $1
+                AND is_active = true
+                AND period_start <= CURRENT_DATE
+                AND period_end >= CURRENT_DATE
+              ORDER BY period_start DESC
+              LIMIT 1
+            )
+        `, [context.workspaceId]).catch(() => ({ rows: [] as any[] })),
+      ]);
+
+      const targetAmount  = parseFloat(targetResult.rows[0]?.amount   ?? '0') || 0;
+      const closedWonVal  = parseFloat(closedWonResult.rows[0]?.total  ?? '0') || 0;
+      const gapToTarget   = targetAmount > 0 ? Math.max(0, targetAmount - closedWonVal) : null;
+
+      let weeksRemaining: number | null = null;
+      if (periodResult.rows[0]?.period_end) {
+        const periodEnd = new Date(periodResult.rows[0].period_end);
+        const now       = new Date();
+        const daysLeft  = Math.max(0, (periodEnd.getTime() - now.getTime()) / 86400000);
+        weeksRemaining  = Math.floor(daysLeft / 7);
+      }
+
+      return _computeNetDelta({ snapshotNow, snapshotLastWeek, movements, trend, gapToTarget, weeksRemaining });
+    }, _params);
+  },
+};
+
+// ============================================================================
 
 export const toolRegistry = new Map<string, ToolDefinition>([
   ['queryDeals', queryDeals],
@@ -8848,6 +9004,12 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['persistAccuracyScores', persistAccuracyScores],
   ['persistVelocityBenchmarks', persistVelocityBenchmarks],
   ['meddicCoverageExecute', meddicCoverageExecute],
+  ['computePipelineSnapshotNow',      computePipelineSnapshotNowTool],
+  ['computePipelineSnapshotLastWeek', computePipelineSnapshotLastWeekTool],
+  ['computeDealMovementsThisWeek',    computeDealMovementsThisWeekTool],
+  ['computeStageVelocityDeltas',      computeStageVelocityDeltasTool],
+  ['getTrendFromPipelineRuns',        getTrendFromPipelineRunsTool],
+  ['computeNetPipelineDelta',         computeNetPipelineDeltaTool],
 ]);
 
 // ============================================================================

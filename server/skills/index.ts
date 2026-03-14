@@ -44,6 +44,7 @@ import { stageMismatchDetectorSkill } from './library/stage-mismatch-detector.js
 import { behavioralWinningPathSkill } from './library/behavioral-winning-path.js';
 import { coachingSkill } from './library/coaching.js';
 import { meddicCoverageSkill } from './implementations/meddic-coverage/index.js';
+import { pipelineMovementSkill } from './library/pipeline-movement.js';
 
 // Types
 export type {
@@ -190,6 +191,7 @@ export function registerBuiltInSkills(): void {
   registry.register(behavioralWinningPathSkill);
   registry.register(coachingSkill);
   registry.register(meddicCoverageSkill);
+  registry.register(pipelineMovementSkill);
 
   // Register evidence builders for "Show the Work" evidence assembly
   registerAllEvidenceBuilders();

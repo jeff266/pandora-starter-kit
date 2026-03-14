@@ -96,6 +96,14 @@ export interface OpeningBriefData {
     daysSinceActivity: number;
     ownerEmail: string;
   }>;
+  pipelineMovement: {
+    headline: string | null;
+    netDelta: number | null;
+    coverageTrend: 'improving' | 'declining' | 'stable' | null;
+    onTrack: boolean | null;
+    primaryConcern: string | null;
+    lastRunAt: Date | null;
+  } | null;
 }
 
 // ===== CACHE =====
@@ -626,6 +634,31 @@ export async function assembleOpeningBrief(
     };
   }
 
+  // Pipeline Movement — most recent skill run (feeds brief PIPELINE MOVEMENT section)
+  const pipelineMovementRow = await query<{
+    result_data: any;
+    created_at: string;
+  }>(`
+    SELECT result_data, created_at
+    FROM skill_runs
+    WHERE workspace_id = $1
+      AND skill_id = 'pipeline-movement'
+      AND status = 'success'
+    ORDER BY created_at DESC
+    LIMIT 1
+  `, [workspaceId]).then(r => r.rows[0] ?? null).catch(() => null);
+
+  const pmSummary    = pipelineMovementRow?.result_data?.summary ?? null;
+  const pmNetDelta   = pipelineMovementRow?.result_data?.net_delta ?? null;
+  const pipelineMovement: OpeningBriefData['pipelineMovement'] = pipelineMovementRow ? {
+    headline:      pmSummary?.headline   ?? null,
+    netDelta:      pmNetDelta?.pipelineValueDelta ?? null,
+    coverageTrend: pmNetDelta?.coverageTrend ?? null,
+    onTrack:       pmNetDelta?.onTrack   ?? pmSummary?.on_track ?? null,
+    primaryConcern: pmSummary?.primary_concern ?? null,
+    lastRunAt:     pipelineMovementRow.created_at ? new Date(pipelineMovementRow.created_at) : null,
+  } : null;
+
   return {
     temporal,
     user: {
@@ -689,6 +722,7 @@ export async function assembleOpeningBrief(
     } : null,
     movementAnchorLabel,
     bigDealsAtRisk,
+    pipelineMovement,
   };
 }
 
@@ -817,6 +851,24 @@ export function renderBriefContext(data: OpeningBriefData): string {
       ? `, ${data.conversations.unlinkedCalls} not linked to a deal`
       : '';
     lines.push(``, `CALLS: ${data.conversations.recentCallCount} calls this week${unlinked}`);
+  }
+
+  // Pipeline Movement (week-over-week delta, from most recent pipeline-movement skill run)
+  if (data.pipelineMovement) {
+    const pm = data.pipelineMovement;
+    lines.push(``, `PIPELINE MOVEMENT (week-over-week):`);
+    if (pm.headline) lines.push(`- ${pm.headline}`);
+    if (pm.netDelta !== null) {
+      const sign   = pm.netDelta >= 0 ? '+' : '';
+      lines.push(`- Net delta: ${sign}${fmt(pm.netDelta)} this week`);
+    }
+    if (pm.coverageTrend) lines.push(`- Coverage trend: ${pm.coverageTrend}`);
+    if (pm.onTrack !== null) lines.push(`- On track for quarter: ${pm.onTrack ? 'Yes' : 'No'}`);
+    if (pm.primaryConcern) lines.push(`- Primary concern: ${pm.primaryConcern}`);
+    if (pm.lastRunAt) {
+      const daysAgo = Math.floor((Date.now() - pm.lastRunAt.getTime()) / 86400000);
+      lines.push(`- Data as of: ${daysAgo === 0 ? 'today' : `${daysAgo}d ago`}`);
+    }
   }
 
   // Role emphasis
