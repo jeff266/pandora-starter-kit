@@ -149,11 +149,109 @@ function healthColor(pct?: number): string {
   return S.teal;
 }
 
+function fmtStage(stage: string): string {
+  const map: Record<string, string> = {
+    evaluation: 'Evaluation',
+    proposal: 'Proposal',
+    contract: 'Contract Review',
+    demo: 'Demo',
+  };
+  return map[(stage || '').toLowerCase()] || (stage ? stage.charAt(0).toUpperCase() + stage.slice(1) : '');
+}
+
+function fmtDormantAge(days: number): string {
+  if (days > 365) { const y = Math.round(days / 365); return `${y} year${y === 1 ? '' : 's'} ago`; }
+  if (days > 60)  { const m = Math.round(days / 30);  return `${m} month${m === 1 ? '' : 's'} ago`; }
+  if (days > 30)  { const w = Math.round(days / 7);   return `${w} week${w === 1 ? '' : 's'} ago`; }
+  return `${Math.round(days)} days ago`;
+}
+
 function fmtCurrency(val?: number): string {
   if (val === undefined || val === null) return '—';
   if (val >= 1_000_000) return `$${(val / 1_000_000).toFixed(1)}M`;
   if (val >= 1_000) return `$${(val / 1_000).toFixed(0)}K`;
   return `$${val}`;
+}
+
+interface RiskDealCardProps {
+  rank: number;
+  eyebrow: string;
+  title: string;
+  body: string;
+  dormantLine: string | null;
+  soWhat: string | null;
+  borderColor: string;
+  surface: string;
+  border: string;
+  borderLight: string;
+  textColor: string;
+  textSub: string;
+  textMuted: string;
+  textDim: string;
+  font: string;
+  onClick: () => void;
+}
+
+function RiskDealCard({ rank, eyebrow, title, body, dormantLine, soWhat, borderColor, surface, border, borderLight, textColor, textSub, textMuted, textDim, font, onClick }: RiskDealCardProps) {
+  const [hovered, setHovered] = React.useState(false);
+  return (
+    <div
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        background: surface,
+        border: `0.5px solid ${hovered ? borderLight : border}`,
+        borderRadius: 10,
+        borderLeft: `2px solid ${borderColor}`,
+        padding: '12px 13px',
+        cursor: 'pointer',
+        transition: 'border-color 0.15s',
+        fontFamily: font,
+      }}
+    >
+      {/* TOP ROW */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+        <span style={{ fontSize: 10, color: textDim, fontWeight: 600, minWidth: 14 }}>#{rank}</span>
+        <span style={{
+          fontSize: 9, fontWeight: 600, color: '#ef4444',
+          background: 'rgba(239,68,68,0.10)',
+          border: '0.5px solid rgba(239,68,68,0.22)',
+          borderRadius: 99, padding: '2px 7px',
+          textTransform: 'uppercase' as const, letterSpacing: '0.04em',
+        }}>
+          Risk
+        </span>
+        <span style={{ fontSize: 11, color: textMuted, flex: 1, whiteSpace: 'nowrap' as const, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {eyebrow}
+        </span>
+      </div>
+      {/* TITLE */}
+      <div style={{ fontSize: 13, fontWeight: 500, color: textColor, marginBottom: 5, lineHeight: 1.4 }}>
+        {title}
+      </div>
+      {/* BODY */}
+      <div style={{ fontSize: 12, color: textSub, lineHeight: 1.5 }}>
+        {body}
+      </div>
+      {/* DORMANT SECONDARY LINE */}
+      {dormantLine && (
+        <div style={{ fontSize: 11, color: '#5a6578', marginTop: 4, lineHeight: 1.5 }}>
+          {dormantLine}
+        </div>
+      )}
+      {/* SO WHAT */}
+      {soWhat && (
+        <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 6, fontStyle: 'italic', lineHeight: 1.5 }}>
+          {soWhat}
+        </div>
+      )}
+      {/* FOOTER */}
+      <div style={{ fontSize: 10, color: textDim, marginTop: 4 }}>
+        Tap to drill in →
+      </div>
+    </div>
+  );
 }
 
 function fmtPct(val?: number): string {
@@ -783,18 +881,55 @@ export default function ConciergeView() {
                   </div>
 
                   {/* Big Deals at Risk — always first */}
-                  {riskDeals.map((deal, i) => (
-                    <BriefCard
-                      key={`risk-${deal.id}`}
-                      rank={i + 1}
-                      category="risk"
-                      eyebrow="Big Deal at Risk · RFM"
-                      title={deal.name}
-                      body={`${fmtCurrency(deal.amount)} · ${deal.daysSinceActivity} days no activity · ${deal.rfmLabel}`}
-                      chips={[]}
-                      onClick={() => trackInteraction({ cardsDrilledInto: [`risk-${deal.id}`] })}
-                    />
-                  ))}
+                  {riskDeals.map((deal, i) => {
+                    const dormant = deal.daysSinceActivity > 120;
+                    const borderColor = dormant ? '#ef4444' : '#f87171';
+                    const eyebrow = dormant
+                      ? 'Big Deal at Risk · RFM · Long dormant'
+                      : 'Big Deal at Risk · RFM';
+                    const body = `${fmtCurrency(deal.amount)} · ${Math.round(deal.daysSinceActivity)} days no activity · ${fmtStage(deal.stage)} stage`;
+                    const dormantLine = dormant
+                      ? `Last activity was ${fmtDormantAge(deal.daysSinceActivity)} — consider closing or a re-engagement campaign before Q2.`
+                      : null;
+
+                    const gap = typeof brief.targets?.gap === 'number' ? brief.targets.gap : null;
+                    const headlineAmt = typeof brief.targets?.headline === 'object' ? brief.targets.headline?.amount : null;
+                    const coverageRatio = brief.pipeline?.coverageRatio ?? null;
+                    let soWhat: string | null = null;
+                    if (deal.amount != null && brief.targets != null) {
+                      if (gap != null && gap > 0) {
+                        const pctOfGap = Math.round(deal.amount / gap * 100);
+                        soWhat = `Losing this deal costs ${pctOfGap}% of the remaining ${fmtCurrency(gap)} gap.`;
+                      } else if ((gap === 0 || gap === null) && coverageRatio != null && coverageRatio < 3 && headlineAmt) {
+                        const pctOfQ2 = Math.round(deal.amount / (headlineAmt * 3) * 100);
+                        soWhat = `At $0 gap this quarter, this deal feeds Q2. It represents ${pctOfQ2}% of 3× Q2 coverage.`;
+                      } else if ((gap === 0 || gap === null) && coverageRatio != null && coverageRatio >= 3) {
+                        soWhat = `Q1 is won. Re-engaging this deal builds Q2 buffer above the 3× coverage threshold.`;
+                      }
+                    }
+
+                    return (
+                      <RiskDealCard
+                        key={`risk-${deal.id}`}
+                        rank={i + 1}
+                        eyebrow={eyebrow}
+                        title={deal.name}
+                        body={body}
+                        dormantLine={dormantLine}
+                        soWhat={soWhat}
+                        borderColor={borderColor}
+                        surface={S.surface}
+                        border={S.border}
+                        borderLight={S.border2}
+                        textColor={S.text}
+                        textSub={S.textSub}
+                        textMuted={S.textMuted}
+                        textDim={S.textDim}
+                        font={S.font}
+                        onClick={() => trackInteraction({ cardsDrilledInto: [`risk-${deal.id}`] })}
+                      />
+                    );
+                  })}
 
                   {/* Findings — ranked after big deals */}
                   {topFindings.slice(0, 5).map((finding, i) => {

@@ -1,0 +1,122 @@
+Read client/src/pages/ConciergeView.tsx and 
+client/src/components/BriefCard.tsx before writing anything.
+
+THREE FIXES ONLY. No other changes.
+
+---
+
+FIX 1 — Remove redundant "Big Deal at Risk" from card body
+
+The Big Deal at Risk cards currently show:
+  eyebrow: "Big Deal at Risk · RFM"
+  body: "$200K · 36 days no activity · Big Deal at Risk"
+
+"Big Deal at Risk" appears twice. Replace the body with:
+  "$[amount] · [days] days no activity · [stage] stage"
+
+Where stage is the deal's current stage_normalized, 
+cleaned for display:
+  'evaluation' → 'Evaluation'
+  'proposal' → 'Proposal'  
+  'contract' → 'Contract Review'
+  'demo' → 'Demo'
+  default → capitalize first letter
+
+Example result:
+  eyebrow: "Big Deal at Risk · RFM"
+  body: "$200K · 36 days no activity · Evaluation stage"
+
+---
+
+FIX 2 — Flag Beacon Services separately
+
+Any Big Deal at Risk card where daysSinceActivity > 120
+should render differently from the standard cold cards:
+
+  eyebrow: "Big Deal at Risk · RFM · Long dormant"
+  body: "$108K · 240 days no activity · [stage] stage"
+  
+  Add a second line below the body in muted text (color 
+  #5a6578, font-size 11px):
+  "Last activity was 8 months ago — consider closing 
+  or a re-engagement campaign before Q2."
+  
+  Where "8 months ago" is computed from daysSinceActivity:
+    > 365 days → "[n] years ago"
+    > 60 days  → "[n] months ago"  
+    > 30 days  → "[n] weeks ago"
+    default    → "[n] days ago"
+
+The card border-left color for >120 day cards should be
+#ef4444 (red) vs the standard risk color. This visually 
+distinguishes "cold but recoverable" from "probably lost."
+
+---
+
+FIX 3 — Add "so what" line to Big Deal at Risk cards
+
+After the body line, add a "so what" sentence derived 
+from live brief data.
+
+The brief response contains:
+  brief.targets.gap          (remaining gap to target)
+  brief.pipeline.coverageRatio  (Q2 pipeline coverage)
+  deal.amount                (this deal's value)
+
+Logic:
+
+  If brief.targets.gap > 0:
+    // Target not yet hit — frame against Q1 gap
+    const pctOfGap = Math.round(deal.amount / brief.targets.gap * 100);
+    soWhat = `Losing this deal costs ${pctOfGap}% of the 
+              remaining $${formatAmount(brief.targets.gap)} gap.`
+
+  If brief.targets.gap === 0 AND brief.pipeline.coverageRatio < 3:
+    // Target hit but Q2 coverage is thin
+    const pctOfQ2 = Math.round(
+      deal.amount / (brief.targets.headline * 3) * 100
+    );
+    soWhat = `At $0 gap this quarter, this deal feeds Q2. 
+              It represents ${pctOfQ2}% of 3× Q2 coverage.`
+
+  If brief.targets.gap === 0 AND brief.pipeline.coverageRatio >= 3:
+    // Target hit, Q2 looks fine
+    soWhat = `Q1 is won. Re-engaging this deal builds Q2 
+              buffer above the 3× coverage threshold.`
+
+  If deal.amount is null or brief.targets is null:
+    // Omit the so what line entirely
+
+Render the so what line as:
+  font-size: 12px
+  color: var(--color-text-secondary) or #94a3b8
+  margin-top: 6px
+  font-style: italic
+
+---
+
+VALIDATE:
+
+1. ABS Kids card reads:
+   eyebrow: "Big Deal at Risk · RFM"
+   body: "$200K · 36 days no activity · [stage] stage"
+   so what: "At $0 gap this quarter, this deal feeds Q2.
+             It represents X% of 3× Q2 coverage."
+
+2. Beacon Services card reads:
+   eyebrow: "Big Deal at Risk · RFM · Long dormant"  
+   body: "$108K · 240 days no activity · [stage] stage"
+   second line: "Last activity was 8 months ago — 
+                 consider closing or a re-engagement 
+                 campaign before Q2."
+   so what: [Q2 framing as above]
+   border-left: red (#ef4444)
+
+3. Standard Single Thread Alert cards below are unchanged.
+
+DO NOT modify:
+  - Any backend files
+  - BriefCard category badge colors
+  - The findings cards below the Big Deals section
+  - MathModal
+  - AskBar
