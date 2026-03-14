@@ -40,9 +40,10 @@ interface AskBarProps {
   conciergeContext?: Record<string, unknown> | null;
   prefillValue?: string;
   onPrefillConsumed?: () => void;
+  onSubmit?: (message: string) => void;
 }
 
-export default function AskBar({ pandoraRole, suggestedQuestion, onChipClick, conciergeContext, prefillValue, onPrefillConsumed }: AskBarProps) {
+export default function AskBar({ pandoraRole, suggestedQuestion, onChipClick, conciergeContext, prefillValue, onPrefillConsumed, onSubmit }: AskBarProps) {
   const navigate = useNavigate();
   const [input, setInput] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -62,6 +63,7 @@ export default function AskBar({ pandoraRole, suggestedQuestion, onChipClick, co
   const handleSubmit = () => {
     const msg = input.trim();
     if (!msg) return;
+    onSubmit?.(msg);
     setInput('');
     navigate(window.location.pathname, {
       state: {

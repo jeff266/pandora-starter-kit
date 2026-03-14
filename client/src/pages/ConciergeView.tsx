@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api } from '../lib/api';
+import { api, getAuthToken } from '../lib/api';
 import { useWorkspace } from '../context/WorkspaceContext';
 import { usePandoraRole, type PandoraRole } from '../context/PandoraRoleContext';
 import BriefCard from '../components/BriefCard';
@@ -257,12 +257,38 @@ export default function ConciergeView() {
   const skeletonTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  const [sessionId] = useState(() => crypto.randomUUID());
+  const pageLoadTime = useRef(Date.now());
+
+  const trackInteraction = useCallback((payload: Record<string, unknown>) => {
+    if (!currentWorkspace?.id) return;
+    void api.post('/briefing/interaction', { sessionId, ...payload }).catch(() => {});
+  }, [currentWorkspace?.id, sessionId]);
+
+  useEffect(() => {
+    const handleUnload = () => {
+      if (!currentWorkspace?.id) return;
+      const timeOnBriefSeconds = Math.round((Date.now() - pageLoadTime.current) / 1000);
+      fetch(`/api/workspaces/${currentWorkspace.id}/briefing/interaction`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${getAuthToken()}`,
+        },
+        body: JSON.stringify({ sessionId, timeOnBriefSeconds }),
+        keepalive: true,
+      });
+    };
+    window.addEventListener('beforeunload', handleUnload);
+    return () => window.removeEventListener('beforeunload', handleUnload);
+  }, [currentWorkspace?.id, sessionId]);
+
   const fetchBrief = useCallback(async (silent = false) => {
     if (!currentWorkspace?.id) return;
     if (!silent) setLoading(true);
 
     try {
-      const raw = await api.get('/briefing/concierge') as any;
+      const raw = await api.get(`/briefing/concierge?sessionId=${sessionId}`) as any;
       // Server returns { brief: OpeningBriefData, temporal: TemporalContext, ... }
       // Merge fresh temporal over the brief object so all fields are at the top level.
       const data: OpeningBriefData = {
@@ -290,7 +316,7 @@ export default function ConciergeView() {
     } finally {
       if (!silent) setLoading(false);
     }
-  }, [currentWorkspace?.id, setPandoraRole]);
+  }, [currentWorkspace?.id, setPandoraRole, sessionId]);
 
   useEffect(() => {
     fetchBrief();
@@ -307,7 +333,10 @@ export default function ConciergeView() {
     }
   }, [brief?.temporal?.quarterPhase]);
 
-  const openMathModal = useCallback((key: string) => setActiveMathKey(key), []);
+  const openMathModal = useCallback((key: string) => {
+    setActiveMathKey(key);
+    trackInteraction({ mathModalsOpened: [key] });
+  }, [trackInteraction]);
   const closeMathModal = useCallback(() => setActiveMathKey(null), []);
 
   const buildConciergeContext = useCallback((): ConciergeContext | null => {
@@ -754,7 +783,11 @@ export default function ConciergeView() {
                       body={body}
                       chips={[]}
                       mathKey={finding.mathKey}
-                      onClick={() => finding.mathKey ? openMathModal(finding.mathKey) : undefined}
+                      onClick={() => {
+                        const cardId = finding.mathKey || `finding-${i}`;
+                        trackInteraction({ cardsDrilledInto: [cardId] });
+                        if (finding.mathKey) openMathModal(finding.mathKey);
+                      }}
                       onMathClick={openMathModal}
                     />
                   );
@@ -910,10 +943,16 @@ export default function ConciergeView() {
         conciergeContext={buildConciergeContext() as Record<string, unknown> | null}
         prefillValue={askBarPrefill}
         onPrefillConsumed={() => setAskBarPrefill('')}
+        onSubmit={(msg) => trackInteraction({ followUpQuestions: [msg] })}
       />
 
       {/* MATH MODAL */}
-      <MathModal mathKey={activeMathKey} onClose={closeMathModal} />
+      <MathModal
+        mathKey={activeMathKey}
+        onClose={closeMathModal}
+        onActionApproved={(actionId) => trackInteraction({ actionsApproved: [actionId] })}
+        onActionsIgnored={(actionIds) => trackInteraction({ actionsIgnored: actionIds })}
+      />
 
       <style>{`
         @keyframes skeleton-pulse { 0%,100% { opacity:0.4; } 50% { opacity:0.8; } }

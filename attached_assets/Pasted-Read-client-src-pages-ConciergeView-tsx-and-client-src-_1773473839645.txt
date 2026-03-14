@@ -1,0 +1,91 @@
+Read client/src/pages/ConciergeView.tsx and 
+client/src/components/MathModal.tsx before writing any code.
+
+ONE TASK: Wire the BriefInteraction event tracking.
+
+The backend endpoint is live at:
+  POST /api/workspaces/:workspaceId/briefing/interaction
+
+The GET /briefing/concierge endpoint now accepts a ?sessionId= 
+param and stores session context server-side. Generate a 
+sessionId (UUID) on ConciergeView mount and pass it in every 
+subsequent request.
+
+STEP 1 — Generate sessionId on mount
+
+In ConciergeView, on component mount:
+  const sessionId = crypto.randomUUID();
+  
+Store in useState. Pass as ?sessionId= on the 
+GET /briefing/concierge fetch.
+
+STEP 2 — Wire card click tracking
+
+When a BriefCard is clicked (opens MathModal or drill-in):
+  POST /briefing/interaction
+  Body: {
+    sessionId,
+    cardsDrilledInto: [findingId]
+  }
+  
+Fire-and-forget — do not await, do not block the UI.
+
+STEP 3 — Wire math modal tracking
+
+When MathModal opens:
+  POST /briefing/interaction
+  Body: {
+    sessionId,
+    mathModalsOpened: [mathKey]
+  }
+
+STEP 4 — Wire action tracking
+
+When an action card is approved:
+  POST /briefing/interaction
+  Body: { sessionId, actionsApproved: [actionId] }
+
+When an action card is visible but user closes modal 
+without approving:
+  POST /briefing/interaction  
+  Body: { sessionId, actionsIgnored: [actionId] }
+
+STEP 5 — Wire Ask Pandora tracking
+
+When the user submits a question via the AskBar after 
+viewing the brief:
+  POST /briefing/interaction
+  Body: { 
+    sessionId, 
+    followUpQuestions: [questionText] 
+  }
+
+STEP 6 — Wire page unload
+
+On window beforeunload:
+  navigator.sendBeacon(
+    `/api/workspaces/${workspaceId}/briefing/interaction`,
+    JSON.stringify({ 
+      sessionId, 
+      timeOnBriefSeconds: Math.round(
+        (Date.now() - pageLoadTime) / 1000
+      )
+    })
+  )
+  
+Store pageLoadTime = Date.now() on mount alongside sessionId.
+Use sendBeacon for unload — not fetch, which gets cancelled.
+
+All six event types should POST to the same endpoint.
+The backend merges them into the same brief_interactions row
+via the sessionId key.
+
+DO NOT modify:
+  - Any backend files
+  - The brief fetch logic
+  - The MathModal data fetching
+  - BriefCard rendering
+
+Validate: open Concierge, click a card, check the 
+brief_interactions table has a row with the sessionId
+and cardsDrilledInto populated.

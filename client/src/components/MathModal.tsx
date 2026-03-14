@@ -44,6 +44,8 @@ interface ChatMessage {
 interface MathModalProps {
   mathKey: string | null;
   onClose: () => void;
+  onActionApproved?: (actionId: string) => void;
+  onActionsIgnored?: (actionIds: string[]) => void;
 }
 
 const S = {
@@ -71,7 +73,7 @@ function typeColor(type?: string) {
   return S.teal;
 }
 
-export default function MathModal({ mathKey, onClose }: MathModalProps) {
+export default function MathModal({ mathKey, onClose, onActionApproved, onActionsIgnored }: MathModalProps) {
   const { currentWorkspace, user } = useWorkspace();
   const [data, setData] = useState<MathData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -113,9 +115,18 @@ export default function MathModal({ mathKey, onClose }: MathModalProps) {
     try {
       await api.post(`/actions/${actionId}/execute-inline`, { user_id: user.id });
       setActionDone(prev => new Set([...prev, actionId]));
+      onActionApproved?.(actionId);
     } catch {}
     setActionLoading(prev => ({ ...prev, [actionId]: false }));
-  }, [currentWorkspace?.id, user?.id]);
+  }, [currentWorkspace?.id, user?.id, onActionApproved]);
+
+  const handleClose = useCallback(() => {
+    if (onActionsIgnored && actions.length > 0) {
+      const ignoredIds = actions.filter(a => !actionDone.has(a.id)).map(a => a.id);
+      if (ignoredIds.length > 0) onActionsIgnored(ignoredIds);
+    }
+    onClose();
+  }, [actions, actionDone, onActionsIgnored, onClose]);
 
   const handleSend = useCallback(async (msg?: string) => {
     const text = msg ?? input.trim();
@@ -143,7 +154,7 @@ export default function MathModal({ mathKey, onClose }: MathModalProps) {
 
   return (
     <div
-      onClick={onClose}
+      onClick={handleClose}
       style={{
         position: 'fixed', inset: 0, zIndex: 1000,
         background: 'rgba(0,0,0,0.6)', display: 'flex',
@@ -178,7 +189,7 @@ export default function MathModal({ mathKey, onClose }: MathModalProps) {
           <span style={{ flex: 1, fontSize: 14, fontWeight: 600, color: S.text }}>
             {loading ? 'Loading…' : (data?.title || mathKey)}
           </span>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', color: S.textMuted, fontSize: 18, cursor: 'pointer', lineHeight: 1 }}>×</button>
+          <button onClick={handleClose} style={{ background: 'none', border: 'none', color: S.textMuted, fontSize: 18, cursor: 'pointer', lineHeight: 1 }}>×</button>
         </div>
 
         {/* BODY */}
