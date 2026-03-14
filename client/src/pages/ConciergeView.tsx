@@ -73,6 +73,20 @@ interface PendingAction {
   deal_name?: string;
   action_type?: string;
   created_at?: string;
+  // Available from actions table — used for HITL-aware labels
+  category?: string | null;
+  block_reason?: string | null;
+  approval_status?: string | null;
+  execution_status?: string | null;
+  // NOTE: columns hitl_required (boolean), is_always_queue (boolean), and hitl_reason (text)
+  // do not yet exist on the actions table. Once added and included in the
+  // /workflow-rules/pending SELECT, replace the block_reason fallback below
+  // with: action.hitl_required && action.is_always_queue → "protected field — always requires approval"
+  //        action.hitl_required && !action.is_always_queue → "awaiting approval" + category sub-label
+  //        !action.hitl_required && action.status === 'executed' → "executed automatically"
+  hitl_required?: boolean;
+  is_always_queue?: boolean;
+  hitl_reason?: string | null;
 }
 
 interface OpeningBriefData {
@@ -913,22 +927,59 @@ export default function ConciergeView() {
                 )}
                 {pendingActions.slice(0, 3).map((action, i, arr) => {
                   const state = actionStates[action.id] ?? 'pending';
-                  const dotColor = state === 'approved' ? S.teal : state === 'rejected' ? '#6b7280' : S.yellow;
+                  const isExecuted = state === 'approved' || action.execution_status === 'completed';
+                  const dotColor = state === 'approved' ? S.teal : state === 'rejected' ? '#6b7280' : isExecuted ? S.teal : S.yellow;
                   const isExpanded = expandedActionId === action.id;
+                  const isClickable = state === 'pending' && !isExecuted;
+
+                  // HITL-aware label derivation.
+                  // Full hitl_required / is_always_queue columns are not yet on the actions table.
+                  // Fallback: use block_reason to detect always-queue, category for sub-label.
+                  let mainLabel: string;
+                  let subLabel: string | null = null;
+                  let rowTooltip: string | undefined;
+
+                  if (action.hitl_required === true && action.is_always_queue === true) {
+                    // Full HITL path — available once columns are added to the DB + endpoint
+                    mainLabel = `${action.title} · protected field — always requires approval`;
+                    rowTooltip = 'Fields like close date, amount, and forecast category always require human review regardless of automation settings.';
+                  } else if (action.hitl_required === true && action.is_always_queue === false) {
+                    // Full HITL path — available once columns are added to the DB + endpoint
+                    mainLabel = `${action.title} · awaiting approval`;
+                    subLabel = action.category ? `${action.category} actions require approval in your current settings` : null;
+                  } else if (action.hitl_required === false && isExecuted) {
+                    // Full HITL path — available once columns are added to the DB + endpoint
+                    mainLabel = `${action.title} · executed automatically`;
+                  } else if (action.block_reason) {
+                    // Fallback: block_reason present → treat as always-queue protected field
+                    mainLabel = `${action.title} · protected field — always requires approval`;
+                    rowTooltip = 'Fields like close date, amount, and forecast category always require human review regardless of automation settings.';
+                  } else if (isExecuted) {
+                    mainLabel = `${action.title} · executed automatically`;
+                  } else {
+                    // Default fallback: pending with optional category sub-label
+                    mainLabel = `${action.title} · awaiting approval`;
+                    subLabel = action.category ? `${action.category} actions require approval in your current settings` : null;
+                  }
+
                   return (
                     <div key={action.id}>
                       <div
-                        onClick={() => { if (state === 'pending') setExpandedActionId(isExpanded ? null : action.id); }}
+                        onClick={() => { if (isClickable) setExpandedActionId(isExpanded ? null : action.id); }}
+                        title={rowTooltip}
                         style={{
-                          display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0',
-                          cursor: state === 'pending' ? 'pointer' : 'default',
+                          display: 'flex', alignItems: 'flex-start', gap: 8, padding: '5px 0',
+                          cursor: isClickable ? 'pointer' : rowTooltip ? 'help' : 'default',
                           borderBottom: (i < arr.length - 1 || isExpanded) ? `0.5px solid ${S.border}` : 'none',
                         }}
                       >
-                        <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: dotColor, flexShrink: 0 }} />
-                        <span style={{ flex: 1, fontSize: 12, color: S.textSub }}>
-                          {action.title} · awaiting your approval
-                        </span>
+                        <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: dotColor, flexShrink: 0, marginTop: 4 }} />
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 12, color: S.textSub }}>{mainLabel}</div>
+                          {subLabel && (
+                            <div style={{ fontSize: 11, color: '#5a6578', marginTop: 1 }}>{subLabel}</div>
+                          )}
+                        </div>
                       </div>
                       {isExpanded && (
                         <div style={{ padding: '10px 14px', background: S.surface2, borderRadius: 8, marginBottom: 6, marginTop: 2 }}>
