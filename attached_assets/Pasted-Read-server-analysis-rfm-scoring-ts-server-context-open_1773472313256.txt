@@ -1,0 +1,99 @@
+Read server/analysis/rfm-scoring.ts, server/context/opening-brief.ts,
+and server/skills/library/deal-rfm-scoring.ts before writing any code.
+
+THREE TASKS ONLY. Do not build anything else.
+
+---
+
+TASK 1 — Run the deal-rfm-scoring skill
+
+Trigger the deal-rfm-scoring skill manually for workspace
+4160191d-73bc-414b-97dd-5a1853190378 (Frontera Health).
+
+After it runs, query and report the result:
+  SELECT result_data, created_at
+  FROM skill_runs
+  WHERE workspace_id = '4160191d-73bc-414b-97dd-5a1853190378'
+    AND skill_id = 'deal-rfm-scoring'
+  ORDER BY created_at DESC
+  LIMIT 1;
+
+Share the full result_data output before proceeding to Task 2.
+
+---
+
+TASK 2 — Add RFM urgency multiplier to finding scoring
+
+In server/context/opening-brief.ts, find where findings are
+ranked or scored before being passed to the synthesis prompt.
+
+Add an RFM urgency multiplier to the scoring logic:
+
+  const rfmUrgency = 
+    deal.rfm_grade === 'F' ? 1.5   // cold high-value deal
+    : deal.rfm_grade === 'D' ? 1.2  // losing momentum
+    : deal.rfm_grade === 'A' ? 0.7  // healthy, lower urgency
+    : 1.0;                          // neutral default
+
+To get the rfm_grade for a finding's deal, join findings to
+the deals table on deal_id and pull rfm_grade, rfm_label,
+and rfm_recency_days alongside the existing finding fields.
+
+If findings are not currently scored/ranked before synthesis,
+add a simple sort: order topFindings by
+  (severity_weight × rfm_urgency × deal_amount) DESC
+where severity_weight is: critical=3, warning=2, info=1.
+
+This ensures F-grade high-value deals surface at the top
+of the brief cards rather than being buried by lower-value
+findings.
+
+---
+
+TASK 3 — Add "Big Deal at Risk" to the brief context
+
+In assembleBriefData(), add a bigDealsAtRisk query that runs
+alongside the existing findings query:
+
+  SELECT
+    d.id, d.name, d.amount, d.stage_normalized,
+    d.rfm_grade, d.rfm_label, d.rfm_recency_days,
+    d.owner_email
+  FROM deals d
+  WHERE d.workspace_id = $1
+    AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
+    AND d.rfm_grade IN ('D', 'F')
+    AND d.amount >= 10000
+  ORDER BY d.amount DESC
+  LIMIT 5;
+
+Add the result to the OpeningBriefData interface as:
+  bigDealsAtRisk: Array<{
+    id: string;
+    name: string;
+    amount: number;
+    stage: string;
+    rfmGrade: string;
+    rfmLabel: string;
+    daysSinceActivity: number;
+    ownerEmail: string;
+  }>;
+
+Add a corresponding line to renderBriefContext():
+  BIG DEALS AT RISK (RFM grade D/F, >$10K):
+  [deal name] — $[amount] — [rfm_label] — [days] days no activity
+
+This gives the synthesis prompt the data it needs to generate
+"Big Deal at Risk" cards in the brief.
+
+---
+
+DO NOT TOUCH:
+  - server/chat/orchestrator.ts
+  - server/chat/pandora-agent.ts
+  - Any existing migrations
+  - The targets table
+  - briefing-math.ts (separate session)
+
+Report Task 1 output before proceeding to Task 2.
+Complete each task in order and report results.

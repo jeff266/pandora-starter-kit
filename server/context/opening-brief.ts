@@ -86,6 +86,16 @@ export interface OpeningBriefData {
     unlinkedCalls: number;
   } | null;
   movementAnchorLabel: string;
+  bigDealsAtRisk: Array<{
+    id: string;
+    name: string;
+    amount: number;
+    stage: string;
+    rfmGrade: string;
+    rfmLabel: string;
+    daysSinceActivity: number;
+    ownerEmail: string;
+  }>;
 }
 
 // ===== CACHE =====
@@ -435,17 +445,28 @@ export async function assembleOpeningBrief(
        WHERE workspace_id = $1 AND resolved_at IS NULL`,
       [workspaceId]
     ),
-    // Top 3 findings
-    query<{ severity: string; message: string; skill_id: string; entity_name: string | null; created_at: string }>(
-      `SELECT severity, message, skill_id, entity_name, created_at::text
-       FROM findings
-       WHERE workspace_id = $1
-         AND resolved_at IS NULL
-         AND severity IN ('act', 'notable')
+    // Top findings with RFM urgency data — fetch 10, sort by urgency score in JS, take top 3
+    query<{
+      severity: string;
+      message: string;
+      skill_id: string;
+      entity_name: string | null;
+      created_at: string;
+      rfm_grade: string | null;
+      rfm_label: string | null;
+      amount: string | null;
+    }>(
+      `SELECT f.severity, f.message, f.skill_id, f.entity_name, f.created_at::text,
+              d.rfm_grade, d.rfm_label, d.amount
+       FROM findings f
+       LEFT JOIN deals d ON d.id = f.deal_id AND d.workspace_id = f.workspace_id
+       WHERE f.workspace_id = $1
+         AND f.resolved_at IS NULL
+         AND f.severity IN ('act', 'notable')
        ORDER BY
-         CASE severity WHEN 'act' THEN 1 ELSE 2 END,
-         created_at DESC
-       LIMIT 3`,
+         CASE f.severity WHEN 'act' THEN 1 ELSE 2 END,
+         f.created_at DESC
+       LIMIT 10`,
       [workspaceId]
     ),
     // Last skill run
@@ -500,7 +521,23 @@ export async function assembleOpeningBrief(
   const newW = newThisWeek.status === 'fulfilled' ? newThisWeek.value.rows[0] : null;
   const attain = periodAttainment.status === 'fulfilled' ? periodAttainment.value.rows[0] : null;
   const fCounts = findingCounts.status === 'fulfilled' ? findingCounts.value.rows[0] : null;
-  const topF = topFindings.status === 'fulfilled' ? topFindings.value.rows : [];
+  const rawTopF = topFindings.status === 'fulfilled' ? topFindings.value.rows : [];
+
+  // RFM urgency multiplier: F-grade cold deal surfaces over low-value warnings
+  const severityWeight = (sev: string) => sev === 'act' ? 3 : sev === 'notable' ? 2 : 1;
+  const rfmUrgencyMultiplier = (grade: string | null) => {
+    if (grade === 'F') return 1.5;
+    if (grade === 'D') return 1.2;
+    if (grade === 'A') return 0.7;
+    return 1.0;
+  };
+  const topF = [...rawTopF]
+    .sort((a, b) => {
+      const scoreA = severityWeight(a.severity) * rfmUrgencyMultiplier(a.rfm_grade) * Math.max(Number(a.amount ?? 0), 1);
+      const scoreB = severityWeight(b.severity) * rfmUrgencyMultiplier(b.rfm_grade) * Math.max(Number(b.amount ?? 0), 1);
+      return scoreB - scoreA;
+    })
+    .slice(0, 3);
   const lastRun = lastSkillRun.status === 'fulfilled' ? lastSkillRun.value.rows[0]?.max_started ?? null : null;
   const mv = movementRow.status === 'fulfilled' ? movementRow.value.rows[0] : null;
   const ds = dealStatsRow.status === 'fulfilled' ? dealStatsRow.value.rows[0] : null;
@@ -522,6 +559,40 @@ export async function assembleOpeningBrief(
     `SELECT COUNT(*) as count FROM findings WHERE workspace_id = $1 AND created_at >= $2`,
     [workspaceId, movementAnchor]
   ).then(r => Number(r.rows[0]?.count ?? 0)).catch(() => 0);
+
+  // Big Deals at Risk — D/F grade open deals above $10K (Task 3)
+  const bigDealsAtRiskRows = await query<{
+    id: string;
+    name: string;
+    amount: string | null;
+    stage_normalized: string | null;
+    rfm_grade: string | null;
+    rfm_label: string | null;
+    rfm_recency_days: string | null;
+    owner_email: string | null;
+  }>(
+    `SELECT d.id, d.name, d.amount, d.stage_normalized,
+            d.rfm_grade, d.rfm_label, d.rfm_recency_days, d.owner_email
+     FROM deals d
+     WHERE d.workspace_id = $1
+       AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
+       AND d.rfm_grade IN ('D', 'F')
+       AND d.amount >= 10000
+     ORDER BY d.amount DESC
+     LIMIT 5`,
+    [workspaceId]
+  ).then(r => r.rows).catch(() => [] as { id: string; name: string; amount: string | null; stage_normalized: string | null; rfm_grade: string | null; rfm_label: string | null; rfm_recency_days: string | null; owner_email: string | null }[]);
+
+  const bigDealsAtRisk = bigDealsAtRiskRows.map(r => ({
+    id: r.id,
+    name: r.name,
+    amount: Number(r.amount ?? 0),
+    stage: r.stage_normalized ?? '',
+    rfmGrade: r.rfm_grade ?? '',
+    rfmLabel: r.rfm_label ?? '',
+    daysSinceActivity: Math.round(Number(r.rfm_recency_days ?? 0)),
+    ownerEmail: r.owner_email ?? '',
+  }));
 
   // Product line breakdown (inferred from deal name suffix)
   const plRows = await query<{ product_line: string; count: string; total_value: string }>(
@@ -617,6 +688,7 @@ export async function assembleOpeningBrief(
       unlinkedCalls: Number(conv.unlinked),
     } : null,
     movementAnchorLabel,
+    bigDealsAtRisk,
   };
 }
 
@@ -703,6 +775,14 @@ export function renderBriefContext(data: OpeningBriefData): string {
         return `${pl.toUpperCase()} [${tier}]: ${s.count} deals, ${fmt(s.totalValue)} total, avg ${fmt(s.avgAmount)}`;
       });
     lines.push(`- BY PRODUCT LINE: ${plSummary.join(' | ')}`);
+  }
+
+  // Big Deals at Risk
+  if (data.bigDealsAtRisk.length > 0) {
+    lines.push(``, `BIG DEALS AT RISK (RFM grade D/F, >$10K):`);
+    for (const d of data.bigDealsAtRisk) {
+      lines.push(`- ${d.name} — ${fmt(d.amount)} — Grade ${d.rfmGrade} | ${d.rfmLabel} — ${d.daysSinceActivity} days no activity — Owner: ${d.ownerEmail || 'unassigned'}`);
+    }
   }
 
   // Findings

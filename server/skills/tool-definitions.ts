@@ -8416,28 +8416,29 @@ const gatherScoredDealNarratives: ToolDefinition = {
     return safeExecute('gatherScoredDealNarratives', async () => {
       const result = await query(`
         SELECT
-          name as deal_name,
-          COALESCE(account_name, '') as account_name,
-          rfm_grade,
-          rfm_label,
-          rfm_recency_days,
-          rfm_recency_stage,
-          rfm_recency_stage_threshold,
-          rfm_frequency_count,
-          rfm_threading_factor,
-          ROUND(COALESCE(tte_conditional_prob, 0)::numeric * 100, 1) as tte_pct,
-          COALESCE(amount, 0)::numeric as amount,
-          COALESCE(owner_name, owner_email, 'Unassigned') as owner_name,
-          stage,
-          rfm_scored_at
-        FROM deals
-        WHERE workspace_id = $1
-          AND stage_normalized NOT IN ('closed_won', 'closed_lost')
-          AND rfm_scored_at IS NOT NULL
-          AND rfm_grade IS NOT NULL
+          d.name as deal_name,
+          COALESCE(a.name, '') as account_name,
+          d.rfm_grade,
+          d.rfm_label,
+          d.rfm_recency_days,
+          d.rfm_recency_stage,
+          d.rfm_recency_stage_threshold,
+          d.rfm_frequency_count,
+          d.rfm_threading_factor,
+          ROUND(COALESCE(d.tte_conditional_prob, 0)::numeric * 100, 1) as tte_pct,
+          COALESCE(d.amount, 0)::numeric as amount,
+          COALESCE(d.owner_name, d.owner_email, 'Unassigned') as owner_name,
+          d.stage,
+          d.rfm_scored_at
+        FROM deals d
+        LEFT JOIN accounts a ON a.id = d.account_id
+        WHERE d.workspace_id = $1
+          AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
+          AND d.rfm_scored_at IS NOT NULL
+          AND d.rfm_grade IS NOT NULL
         ORDER BY
-          CASE rfm_grade WHEN 'A' THEN 1 WHEN 'B' THEN 2 WHEN 'C' THEN 3 WHEN 'D' THEN 4 ELSE 5 END,
-          amount DESC
+          CASE d.rfm_grade WHEN 'A' THEN 1 WHEN 'B' THEN 2 WHEN 'C' THEN 3 WHEN 'D' THEN 4 ELSE 5 END,
+          d.amount DESC
       `, [context.workspaceId]);
 
       const all = result.rows;
