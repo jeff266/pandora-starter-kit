@@ -3,7 +3,7 @@ import type { SkillDefinition } from '../types.js';
 export const pipelineHygieneSkill: SkillDefinition = {
   id: 'pipeline-hygiene',
   name: 'Pipeline Hygiene Check',
-  description: 'Analyzes deal pipeline for data quality issues, stale deals, missing fields, and risk signals. Produces actionable recommendations with time-scoped analysis and dynamic report sizing.',
+  description: 'Pipeline Hygiene: Scans for stale deals, missing fields, and stage mismatches. Outputs: data_quality_score, hygiene_issues, cleanup_tasks. Use to: auto-close dead deals, bulk-fix missing data, or flag deals for review.',
   version: '2.2.0',
   category: 'pipeline',
   tier: 'mixed',

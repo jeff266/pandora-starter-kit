@@ -3,7 +3,7 @@ import type { SkillDefinition } from '../types.js';
 export const strategyInsightsSkill: SkillDefinition = {
   id: 'strategy-insights',
   name: 'Strategy & Insights',
-  description: 'Cross-skill pattern analysis: reads outputs from all other skills and agents to identify strategic patterns, contradictions, and leading indicators.',
+  description: 'Strategic Pipeline Review: Synthesizes all other skill outputs to identify org-wide patterns, contradictions, and strategic opportunities. Outputs: strategic_themes, risk_implications. Use to: brief leadership, identify systemic gaps, or trigger org-wide campaigns.',
   version: '1.1.0',
   category: 'intelligence',
   tier: 'mixed',

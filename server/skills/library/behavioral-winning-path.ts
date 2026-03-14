@@ -16,8 +16,7 @@ import type { SkillDefinition } from '../types.js';
 export const behavioralWinningPathSkill: SkillDefinition = {
   id: 'behavioral-winning-path',
   name: 'Behavioral Winning Path',
-  description:
-    'Discovers behavioral milestone sequences from closed won deal transcripts (Tier 1) or derives structural proxies from email/CRM data (Tiers 2–4). Identifies what separates won deals from lost deals in behavioral terms.',
+  description: 'Winning Deal Patterns: Extracts behavioral milestones from closed-won calls, identifies the sequence of events that preceded wins. Outputs: winning_milestones, deal_journey. Use to: coach reps, auto-advance deals matching win patterns, or flag deals missing critical signals.',
   version: '2.0.0',
   category: 'intelligence',
   tier: 'mixed',

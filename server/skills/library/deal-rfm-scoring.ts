@@ -55,7 +55,7 @@ import type { SkillDefinition } from '../types.js';
 export const dealRfmScoringSkill: SkillDefinition = {
   id: 'deal-rfm-scoring',
   name: 'Deal RFM + TTE Scoring',
-  description: 'Scores all deals with behavioral grades (A–F) using stage-relative Recency (enterprise procurement gaps aren\'t flagged as cold), threading-adjusted Frequency (multi-stakeholder deals outscore single-threaded ones), and Monetary signals. Also computes Time-to-Event close probabilities via a survival model. Synthesizes a narrative scorecard highlighting at-risk and healthy deals. Powers quality pipeline, findings badges, and action item prioritization.',
+  description: 'Behavioral Deal Health: Scores all deals A–F based on engagement (Recency, Frequency, threading) and deal size. Writes: rfm_grade, rfm_label, tte_probability. Use to: auto-advance high-potential deals, flag cold deals for outreach, or create segments for targeted actions.',
   version: '2.0.0',
   category: 'scoring',
   tier: 'mixed',

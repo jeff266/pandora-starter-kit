@@ -3,7 +3,7 @@ import type { SkillDefinition } from '../types.js';
 export const singleThreadAlertSkill: SkillDefinition = {
   id: 'single-thread-alert',
   name: 'Single-Thread Risk Alert',
-  description: 'Identifies deals with only one contact engaged and flags expansion opportunities to reduce deal risk.',
+  description: 'Single Contact Risk: Flags deals with only one contact and suggests who to engage next. Outputs: threading_score, recommended_contacts. Use to: auto-create outreach tasks or update deal risk scoring.',
   version: '1.0.0',
   category: 'deals',
   tier: 'mixed',

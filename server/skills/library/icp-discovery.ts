@@ -18,7 +18,7 @@ import type { SkillDefinition } from '../types.js';
 export const icpDiscoverySkill: SkillDefinition = {
   id: 'icp-discovery',
   name: 'ICP Discovery',
-  description: 'Discover ideal customer profile patterns from closed deal data (personas, buying committees, company sweet spots)',
+  description: 'Ideal Customer Profile Analysis: Analyzes all closed-won deals to find winning customer patterns — industries, company sizes, personas, buying committee makeup. Outputs: icp_profile, target_verticals, winning_personas. Use to: score new deals, filter pipeline, or guide targeting.',
   version: '1.0.0',
   category: 'intelligence',
   tier: 'claude',

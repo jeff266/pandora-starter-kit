@@ -17,7 +17,7 @@ import type { SkillDefinition } from '../types.js';
 export const dealRiskReviewSkill: SkillDefinition = {
   id: 'deal-risk-review',
   name: 'Deal Risk Assessment',
-  description: 'Reviews open deals for risk signals using activity data, call sentiment, stakeholder coverage, and velocity. Flags deals needing attention.',
+  description: 'Deal Risk Review: Scans all open deals for risk signals — stalled activity, sentiment shifts, missing stakeholders. Outputs: risk_score, risk_factors, recommended_actions. Use to: auto-alert reps on at-risk deals or trigger re-engagement campaigns.',
   version: '1.1.0',
   category: 'deals',
   tier: 'mixed',

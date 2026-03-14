@@ -4,7 +4,7 @@ export const coachingSkill: SkillDefinition = {
   id: 'coaching',
   name: 'Coaching Intelligence',
   category: 'intelligence',
-  description: 'Methodology adherence and conversation quality by rep — sourced from conversation_enrichments',
+  description: 'Rep Coaching Signals: Analyzes all rep conversations to score methodology adherence and conversation quality. Outputs: coaching_signals, rep_scores_by_dimension. Use to: auto-assign coaching tasks or flag reps needing support.',
   version: '0.1.0',
   tier: 'mixed',
   status: 'stub',
