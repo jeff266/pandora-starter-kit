@@ -1,0 +1,113 @@
+This CSV tells a story that changes the RFM analysis significantly. Let me read it carefully.
+
+---
+
+## What This Data Is Actually Showing
+
+This export contains 22 deals — all from Core Sales Pipeline — with amounts ranging from **$0 to $675**. These are the low-value outliers that were distorting the monetary quintiles.
+
+Several important observations:
+
+**1. The $0 deals are real records, not errors.**
+
+Deals like "Frontera Health New Mexico (FHNM) - FRONTERA BUSINESS - AB, RAB, DB, + DP" at $0 closed_won and "Albert Knapp & Associates (AKA Therapy) - AB" at $0 closed_won are intentional. These are **pilot engagements, proof-of-concepts, or free-tier contracts** — real business activity that was never assigned a dollar amount in the CRM. They're not data entry mistakes.
+
+**2. The deal names contain product line codes.**
+
+Every deal follows the pattern "Company Name - [Product Code]":
+- **AB** — appears most frequently, likely "Applied Behavior" or a specific service tier
+- **DB** — "Digital Behavior" or similar
+- **DP** — confirmed as "Digital Phenotyping" (Hopebridge - Digital Phenotyping = $500)
+- **RAB** — likely "Remote Applied Behavior"
+- **Pilot** — pilot/trial version of any product
+
+This means **Frontera sells multiple product lines within a single pipeline**, and the deal amounts vary dramatically by product type. A $0 AB pilot and an $84K fellowship deal are fundamentally different things being scored together in the same RFM computation.
+
+**3. This explains the single-thread alerts from Concierge.**
+
+The Concierge cards earlier showed "Fellowship Deal ($84K)" — but the pipeline data shows no "Fellowship Pipeline." "Fellowship Deal" is likely a deal name suffix or type, not a pipeline. Those $84K alerts are probably Core Sales Pipeline deals with "Fellowship" in the deal name, not a separate pipeline.
+
+---
+
+## What This Means for RFM and Concierge
+
+**The monetary quintile problem is structural, not a data quality bug.**
+
+Frontera's deal model mixes $0 pilots with $84K+ enterprise deals in the same pipeline. Any quintile-based monetary scoring across that range will produce distorted grades — the $0 pilots pull Q1 down to essentially $0, making even a $1,000 deal look "high monetary."
+
+The fix isn't filtering out low values arbitrarily. The fix is **segmenting by product line before scoring.**
+
+---
+
+## The Right Architecture for Frontera's Data
+
+```
+BEFORE (current — broken):
+  All 75 Core Sales deals → single RFM computation
+  Monetary Q1: ≤$1,620  ← distorted by $0 pilots
+  Result: 97% D/F grades  ← meaningless
+
+AFTER (correct):
+  Segment by product line suffix → separate RFM per segment
+  
+  AB deals:  scored against AB deal distribution
+  DP deals:  scored against DP deal distribution
+  Fellowship deals: scored against Fellowship distribution
+  $0 pilots: excluded from monetary scoring, flagged separately
+```
+
+Or more practically — **use a minimum amount threshold per product type**, derived from the actual distribution of each type rather than a single workspace-wide cutoff.
+
+---
+
+## Four Immediate Implications
+
+**For RFM re-run:**
+
+```
+In Claude Code — before re-running RFM:
+
+1. Query the deal name suffix distribution:
+   SELECT 
+     CASE 
+       WHEN name ILIKE '% - AB%' THEN 'AB'
+       WHEN name ILIKE '% - DP%' THEN 'DP'
+       WHEN name ILIKE '% - DB%' THEN 'DB'
+       WHEN name ILIKE '% - RAB%' THEN 'RAB'
+       WHEN name ILIKE '%Fellowship%' THEN 'Fellowship'
+       WHEN name ILIKE '%Pilot%' THEN 'Pilot'
+       ELSE 'Other'
+     END as product_line,
+     COUNT(*) as deal_count,
+     AVG(NULLIF(amount, 0)) as avg_nonzero_amount,
+     MIN(amount) as min_amount,
+     MAX(amount) as max_amount,
+     SUM(amount) as total_amount
+   FROM deals
+   WHERE workspace_id = '4160191d-73bc-414b-97dd-5a1853190378'
+     AND pipeline = 'Core Sales Pipeline'
+   GROUP BY 1
+   ORDER BY total_amount DESC;
+
+2. Report the results before modifying anything.
+   This tells us which product lines have meaningful 
+   amounts and which are consistently $0.
+```
+
+**For the Concierge target scoping:**
+
+The $350K Q1 target is for Core Sales Pipeline — but which product lines within that pipeline does it cover? If it's only Fellowship and AB deals above a certain size, the attainment calculation should filter to those deal types. Otherwise it's including $0 pilots in the pipeline coverage calculation.
+
+**For the single-thread alerts:**
+
+The Concierge cards showing "Fellowship Deal ($84K)" are almost certainly Core Sales Pipeline deals with "Fellowship" in the deal name. They're not from a separate Fellowship Pipeline. This means the findings scoping by pipeline is actually correct — they ARE Core Sales Pipeline deals. The confusion was in the naming.
+
+**For the brief narrative:**
+
+Once we understand the product line breakdown, the brief can be much more specific: "Your AB product line has 8 open deals averaging $45K. Your DP line has 12 deals averaging $8K. Fellowship deals are your highest-value open opportunities — here are the 3 most at-risk."
+
+That's a meaningfully more useful brief than a single 97% D/F attainment score.
+
+---
+
+Run the product line distribution query and share the results. That single query will tell us how to segment the RFM computation correctly and whether the $350K target is meant to cover all product lines or just the larger-value ones.
