@@ -902,8 +902,8 @@ export default function ConciergeView() {
 
             {/* 4-COLUMN METRIC ROW */}
             {(() => {
-              const estQ2 = brief.estimatedQ2Coverage ?? null;
-              const q2Color = estQ2 === null ? S.textMuted : estQ2 >= 3 ? S.teal : estQ2 >= 1.5 ? S.yellow : S.red;
+              const estQ2 = brief.estimatedQ2Coverage != null ? Number(brief.estimatedQ2Coverage) : null;
+              const q2Color = estQ2 === null || isNaN(estQ2) ? S.textMuted : estQ2 >= 3 ? S.teal : estQ2 >= 1.5 ? S.yellow : S.red;
               const attainColor = pct == null ? S.teal : pct >= 100 ? S.teal : pct >= 85 ? S.yellow : S.red;
               const periodLabel = (typeof brief.targets?.headline === 'object' && brief.targets?.headline?.label)
                 ? brief.targets.headline.label
@@ -1160,14 +1160,14 @@ export default function ConciergeView() {
               const priorityFrame = brief.priorityFrame ?? null;
               if (priorityFrame) {
                 const topics = priorityFrame.primaryTopics ?? [];
-                const estQ2 = brief.estimatedQ2Coverage ?? null;
+                const estQ2 = brief.estimatedQ2Coverage != null ? Number(brief.estimatedQ2Coverage) : null;
                 let frameSentence = '';
-                if (topics.includes('q2_setup') && (estQ2 === null || estQ2 < 3)) {
+                if (topics.includes('q2_setup') && (estQ2 === null || isNaN(estQ2) || estQ2 < 3)) {
                   const coldTotal = riskDeals.reduce((s, d) => s + d.amount, 0);
                   if (riskDeals.length > 0) {
                     frameSentence = `${riskDeals.length} cold deal${riskDeals.length !== 1 ? 's' : ''} worth ${fmtCurrency(coldTotal)} are your fastest path to 3× Q2 coverage.`;
                   } else {
-                    frameSentence = `Build Q2 pipeline now — current coverage estimate is ${estQ2 != null ? `~${estQ2.toFixed(1)}×` : 'below'} the 3× threshold.`;
+                    frameSentence = `Build Q2 pipeline now — current coverage estimate is ${estQ2 != null && !isNaN(estQ2) ? `~${estQ2.toFixed(1)}×` : 'below'} the 3× threshold.`;
                   }
                 } else if (topics.includes('rep_variance')) {
                   frameSentence = 'Rep performance varies — review coverage by rep before the quarter closes.';
