@@ -872,6 +872,34 @@ export default function ConciergeView() {
               const topFindings = brief.findings?.topFindings ?? [];
               const totalCount = (brief.findings?.critical ?? 0) + (brief.findings?.warning ?? 0);
               if (riskDeals.length === 0 && topFindings.length === 0) return null;
+              // Compute Q2 coverage from open pipeline / target (valid even when gap=0)
+              const _gap = typeof brief.targets?.gap === 'number' ? brief.targets.gap : null;
+              const _headlineAmt = typeof brief.targets?.headline === 'object' ? (brief.targets.headline?.amount ?? null) : null;
+              const _totalPipeline = brief.pipeline?.totalValue ?? 0;
+              const _pctAttained = brief.targets?.pctAttained ?? 0;
+              const q2Coverage = _headlineAmt && _headlineAmt > 0
+                ? Math.round((_totalPipeline / _headlineAmt) * 10) / 10
+                : (brief.pipeline?.coverageRatio ?? null);
+              const avgRiskAmt = riskDeals.length > 0
+                ? Math.round(riskDeals.reduce((s, d) => s + d.amount, 0) / riskDeals.length)
+                : 0;
+
+              // Context narrative for when Q1 is won but risk deals exist
+              let contextNarrative: string | null = null;
+              if (riskDeals.length > 0 && _pctAttained >= 100 && q2Coverage !== null) {
+                const covStr = `${q2Coverage.toFixed(1)}×`;
+                const dealWord = riskDeals.length === 1 ? 'deal' : 'deals';
+                if (q2Coverage < 1) {
+                  contextNarrative = `Q1 is won at ${Math.round(_pctAttained)}%. Q2 coverage is at ${covStr} — well below the 3× threshold. These ${riskDeals.length} cold ${dealWord} averaging ${fmtCurrency(avgRiskAmt)} aren't Q1 problems, they're Q2 opportunities. Re-engaging them this week adds pipeline buffer before the quarter turns.`;
+                } else if (q2Coverage < 2) {
+                  contextNarrative = `Q1 is won at ${Math.round(_pctAttained)}%. But Q2 coverage is at ${covStr} — significantly short of the 3× threshold. These ${riskDeals.length} cold ${dealWord} averaging ${fmtCurrency(avgRiskAmt)} aren't Q1 problems, they're Q2 opportunities. Re-engaging them this week adds pipeline buffer before the quarter turns.`;
+                } else if (q2Coverage < 3) {
+                  contextNarrative = `Q1 is won at ${Math.round(_pctAttained)}%. But Q2 coverage is at ${covStr} — just short of the 3× threshold. These ${riskDeals.length} cold ${dealWord} averaging ${fmtCurrency(avgRiskAmt)} aren't Q1 problems, they're Q2 opportunities. Re-engaging them this week adds pipeline buffer before the quarter turns.`;
+                } else {
+                  contextNarrative = `Q1 is won at ${Math.round(_pctAttained)}%. Q2 coverage is at ${covStr} — above threshold. These ${riskDeals.length} cold ${dealWord} averaging ${fmtCurrency(avgRiskAmt)} build additional buffer and reduce dependency on new pipeline generation.`;
+                }
+              }
+
               return (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   <div style={{ fontSize: 11, color: '#5a6578', marginBottom: 8 }}>
@@ -879,6 +907,20 @@ export default function ConciergeView() {
                       ? `${riskDeals.length} big deal${riskDeals.length > 1 ? 's' : ''} at risk · ${Math.min(topFindings.length, 5)} of ${totalCount} findings · sorted by severity`
                       : `Showing ${Math.min(topFindings.length, 5)} of ${totalCount} findings · sorted by severity`}
                   </div>
+
+                  {/* Q2 context narrative — shown when Q1 is won and cold deals exist */}
+                  {contextNarrative && (
+                    <div style={{
+                      fontSize: 13, color: S.textSub, lineHeight: 1.6,
+                      padding: '10px 14px',
+                      background: `${S.teal}08`,
+                      border: `0.5px solid ${S.teal}30`,
+                      borderRadius: 8,
+                      marginBottom: 4,
+                    }}>
+                      {contextNarrative}
+                    </div>
+                  )}
 
                   {/* Big Deals at Risk — always first */}
                   {riskDeals.map((deal, i) => {
@@ -892,18 +934,15 @@ export default function ConciergeView() {
                       ? `Last activity was ${fmtDormantAge(deal.daysSinceActivity)} — consider closing or a re-engagement campaign before Q2.`
                       : null;
 
-                    const gap = typeof brief.targets?.gap === 'number' ? brief.targets.gap : null;
-                    const headlineAmt = typeof brief.targets?.headline === 'object' ? brief.targets.headline?.amount : null;
-                    const coverageRatio = brief.pipeline?.coverageRatio ?? null;
                     let soWhat: string | null = null;
                     if (deal.amount != null && brief.targets != null) {
-                      if (gap != null && gap > 0) {
-                        const pctOfGap = Math.round(deal.amount / gap * 100);
-                        soWhat = `Losing this deal costs ${pctOfGap}% of the remaining ${fmtCurrency(gap)} gap.`;
-                      } else if ((gap === 0 || gap === null) && coverageRatio != null && coverageRatio < 3 && headlineAmt) {
-                        const pctOfQ2 = Math.round(deal.amount / (headlineAmt * 3) * 100);
+                      if (_gap != null && _gap > 0) {
+                        const pctOfGap = Math.round(deal.amount / _gap * 100);
+                        soWhat = `Losing this deal costs ${pctOfGap}% of the remaining ${fmtCurrency(_gap)} gap.`;
+                      } else if ((_gap === 0 || _gap === null) && q2Coverage !== null && q2Coverage < 3 && _headlineAmt) {
+                        const pctOfQ2 = Math.round(deal.amount / (_headlineAmt * 3) * 100);
                         soWhat = `At $0 gap this quarter, this deal feeds Q2. It represents ${pctOfQ2}% of 3× Q2 coverage.`;
-                      } else if ((gap === 0 || gap === null) && coverageRatio != null && coverageRatio >= 3) {
+                      } else if ((_gap === 0 || _gap === null) && q2Coverage !== null && q2Coverage >= 3) {
                         soWhat = `Q1 is won. Re-engaging this deal builds Q2 buffer above the 3× coverage threshold.`;
                       }
                     }
