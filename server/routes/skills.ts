@@ -1683,4 +1683,41 @@ router.get('/:workspaceId/skill-runs/:skillRunId/evidence', async (req, res) => 
   }
 });
 
+// POST /api/workspaces/:id/jobs/retro-accuracy-bootstrap
+// Runs the retroactive forecast accuracy bootstrap for a workspace.
+router.post('/:id/jobs/retro-accuracy-bootstrap', async (req: Request, res: Response): Promise<void> => {
+  const workspaceId = req.params.id;
+  if (!workspaceId) { res.status(400).json({ error: 'Missing workspaceId' }); return; }
+  try {
+    const { retroAccuracyBootstrap } = await import('../jobs/retro-accuracy-bootstrap.js');
+    // Fire-and-forget — return job started immediately, log completion
+    retroAccuracyBootstrap(workspaceId)
+      .then(result => console.log(`[RetroAccuracy] Bootstrap complete for ${workspaceId}:`, result))
+      .catch(err => console.error(`[RetroAccuracy] Bootstrap failed for ${workspaceId}:`, err?.message));
+    res.json({ status: 'started', workspaceId, message: 'Retro accuracy bootstrap running in background' });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message ?? 'Bootstrap failed' });
+  }
+});
+
+// POST /api/workspaces/:id/connectors/hubspot/backfill-field-history
+// Backfills forecastcategory, amount, closedate property history from HubSpot.
+router.post('/:id/connectors/hubspot/backfill-field-history', async (req: Request, res: Response): Promise<void> => {
+  const workspaceId = req.params.id;
+  if (!workspaceId) { res.status(400).json({ error: 'Missing workspaceId' }); return; }
+  try {
+    const { getConnectorCredentials } = await import('../lib/credential-store.js');
+    const creds = await getConnectorCredentials(workspaceId, 'hubspot');
+    if (!creds?.access_token) { res.status(400).json({ error: 'No HubSpot connection for this workspace' }); return; }
+    const { backfillFieldHistory } = await import('../connectors/hubspot/field-history-backfill.js');
+    const fullBackfill = req.body?.fullBackfill === true;
+    backfillFieldHistory(workspaceId, creds.access_token, { fullBackfill })
+      .then(result => console.log(`[FieldHistoryBackfill] Complete for ${workspaceId}:`, result))
+      .catch(err => console.error(`[FieldHistoryBackfill] Failed for ${workspaceId}:`, err?.message));
+    res.json({ status: 'started', workspaceId, message: 'Field history backfill running in background' });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message ?? 'Backfill failed' });
+  }
+});
+
 export default router;

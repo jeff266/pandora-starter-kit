@@ -20,6 +20,7 @@ export const forecastRollupSkill: SkillDefinition = {
     'calculateOutputBudget',
     'computeForecastAnnotations',
     'mergeAnnotationsWithUserState',
+    'computeTriangulationBearings',
   ],
 
   requiredContext: ['goals_and_targets'],
@@ -105,10 +106,20 @@ export const forecastRollupSkill: SkillDefinition = {
     },
 
     {
+      id: 'compute-triangulation-bearings',
+      name: 'Compute Forecast Triangulation Bearings',
+      tier: 'compute',
+      dependsOn: ['resolve-time-windows', 'check-quota-config'],
+      computeFn: 'computeTriangulationBearings',
+      computeArgs: {},
+      outputKey: 'triangulation_bearings',
+    },
+
+    {
       id: 'prepare-summary',
       name: 'Prepare Forecast Summary for AI',
       tier: 'compute',
-      dependsOn: ['gather-forecast-data', 'gather-wow-delta', 'check-quota-config', 'gather-deal-concentration-risk'],
+      dependsOn: ['gather-forecast-data', 'gather-wow-delta', 'check-quota-config', 'gather-deal-concentration-risk', 'compute-triangulation-bearings'],
       computeFn: 'prepareForecastSummary',
       computeArgs: {},
       outputKey: 'forecast_summary',

@@ -18,6 +18,8 @@ export const pipelineCoverageSkill: SkillDefinition = {
     'prepareAtRiskReps',
     'calculateOutputBudget',
     'summarizeForClaude',
+    'computeToGoCoverage',
+    'detectFakePipeline',
   ],
 
   requiredContext: ['business_model', 'goals_and_targets', 'definitions'],
@@ -92,10 +94,30 @@ export const pipelineCoverageSkill: SkillDefinition = {
     },
 
     {
+      id: 'compute-to-go-coverage',
+      name: 'Compute To-Go Coverage',
+      tier: 'compute',
+      dependsOn: ['gather-coverage-data', 'check-quota-config'],
+      computeFn: 'computeToGoCoverage',
+      computeArgs: {},
+      outputKey: 'to_go_coverage',
+    },
+
+    {
+      id: 'detect-fake-pipeline',
+      name: 'Detect Fake Pipeline',
+      tier: 'compute',
+      dependsOn: ['gather-coverage-data'],
+      computeFn: 'detectFakePipeline',
+      computeArgs: {},
+      outputKey: 'fake_pipeline',
+    },
+
+    {
       id: 'prepare-at-risk-reps',
       name: 'Prepare At-Risk Reps Data',
       tier: 'compute',
-      dependsOn: ['gather-coverage-data', 'gather-rep-pipeline-quality', 'gather-coverage-trend', 'gather-cwd-by-rep'],
+      dependsOn: ['gather-coverage-data', 'gather-rep-pipeline-quality', 'gather-coverage-trend', 'gather-cwd-by-rep', 'compute-to-go-coverage', 'detect-fake-pipeline'],
       computeFn: 'prepareAtRiskReps',
       computeArgs: {},
       outputKey: 'at_risk_reps',

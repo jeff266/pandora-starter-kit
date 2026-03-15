@@ -46,6 +46,9 @@ import { coachingSkill } from './library/coaching.js';
 import { meddicCoverageSkill } from './implementations/meddic-coverage/index.js';
 import { pipelineMovementSkill } from './library/pipeline-movement.js';
 import { voicePatternExtractionSkill } from './library/voice-pattern-extraction.js';
+import { pipelineConversionRateSkill } from './library/pipeline-conversion-rate.js';
+import { pipelineProgressionSkill } from './library/pipeline-progression.js';
+import { gtmHealthDiagnosticSkill } from './library/gtm-health-diagnostic.js';
 
 // Types
 export type {
@@ -194,6 +197,9 @@ export function registerBuiltInSkills(): void {
   registry.register(meddicCoverageSkill);
   registry.register(pipelineMovementSkill);
   registry.register(voicePatternExtractionSkill);
+  registry.register(pipelineConversionRateSkill);
+  registry.register(pipelineProgressionSkill);
+  registry.register(gtmHealthDiagnosticSkill);
 
   // Register evidence builders for "Show the Work" evidence assembly
   registerAllEvidenceBuilders();

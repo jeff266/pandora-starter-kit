@@ -5,6 +5,7 @@ export const bowtieReviewAgent: AgentDefinition = {
   name: 'Bowtie Funnel Review',
   description: 'Weekly full-funnel review combining bowtie analysis, pipeline goals, and deal risk into a unified ops briefing.',
   skills: [
+    { skillId: 'gtm-health-diagnostic', required: false, outputKey: 'gtm_health', timeout_seconds: 120 },
     { skillId: 'bowtie-analysis', required: true, outputKey: 'bowtie', timeout_seconds: 120 },
     { skillId: 'pipeline-goals', required: true, outputKey: 'goals', timeout_seconds: 120 },
     { skillId: 'deal-risk-review', required: false, outputKey: 'risks', timeout_seconds: 180 },

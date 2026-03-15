@@ -105,6 +105,10 @@ import { filterResolver } from '../tools/filter-resolver.js';
 import type { FilterResolutionMetadata } from '../types/workspace-config.js';
 import { computeForecastAnnotations } from '../analysis/forecast-annotations.js';
 import { mergeAnnotationsWithUserState } from '../analysis/annotation-merge.js';
+import { computeWinRates } from '../analysis/win-rate.js';
+import { computeConversionRateTrend, week3PipelineConversionRate } from '../analysis/pipeline-conversion.js';
+import { pipelineProgressionSnapshot, pipelineProgressionHistory } from '../analysis/pipeline-progression.js';
+import { repRampAnalysis } from '../analysis/rep-ramp.js';
 
 // ============================================================================
 // Helper: Safe Tool Execution
@@ -9115,6 +9119,506 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['computeNetPipelineDelta',         computeNetPipelineDeltaTool],
   ['extractVoiceCalls',              extractVoiceCallsTool],
   ['persistVoicePatterns',           persistVoicePatternsTool],
+
+  // ── Pipeline Conversion Rate skill tools ─────────────────────────────────
+  ['computeCompletedQuarterConversions', {
+    name: 'computeCompletedQuarterConversions',
+    description: 'Compute week-3 pipeline conversion rates for the last N completed quarters',
+    tier: 'compute',
+    parameters: { type: 'object', properties: { lookbackQuarters: { type: 'number' } }, required: [] },
+    execute: async (params, context) => safeExecute('computeCompletedQuarterConversions', async () => {
+      const result = await computeConversionRateTrend(context.workspaceId, params.lookbackQuarters ?? 6);
+      return result;
+    }, params),
+  } as ToolDefinition],
+
+  ['computeCurrentQuarterProjection', {
+    name: 'computeCurrentQuarterProjection',
+    description: 'Return the current quarter conversion projection already computed in completed_quarters step',
+    tier: 'compute',
+    parameters: { type: 'object', properties: {}, required: [] },
+    execute: async (params, context) => safeExecute('computeCurrentQuarterProjection', async () => {
+      const prev = (context.stepResults as any).completed_quarters;
+      return prev?.currentQuarterProjection ?? null;
+    }, params),
+  } as ToolDefinition],
+
+  ['computeWinRateAnalysis', {
+    name: 'computeWinRateAnalysis',
+    description: 'Compute narrow vs. broad win rates, derail rate trend, and primary competitive pressure',
+    tier: 'compute',
+    parameters: { type: 'object', properties: { lookbackQuarters: { type: 'number' } }, required: [] },
+    execute: async (params, context) => safeExecute('computeWinRateAnalysis', async () => {
+      return computeWinRates(context.workspaceId, params.lookbackQuarters ?? 6);
+    }, params),
+  } as ToolDefinition],
+
+  ['computeCoverageAdequacy', {
+    name: 'computeCoverageAdequacy',
+    description: 'Compare actual coverage ratio to conversion-implied coverage need; compute the $ gap',
+    tier: 'compute',
+    parameters: { type: 'object', properties: {}, required: [] },
+    execute: async (params, context) => safeExecute('computeCoverageAdequacy', async () => {
+      const convData = (context.stepResults as any).completed_quarters;
+      const quotaConfig = (context.stepResults as any).quota_config;
+      const impliedTarget = convData?.impliedCoverageTarget ?? 3.3;
+      const currentCoverageRun = await query<{ result_data: any }>(
+        `SELECT result_data FROM skill_runs WHERE workspace_id = $1 AND skill_id = 'pipeline-coverage' AND status = 'completed' ORDER BY started_at DESC LIMIT 1`,
+        [context.workspaceId]
+      );
+      const coverageRatio = currentCoverageRun.rows[0]?.result_data?.teamCoverage ?? 0;
+      const teamQuota = quotaConfig?.teamQuota ?? 0;
+      const actualCoverage = coverageRatio;
+      const gap = impliedTarget - actualCoverage;
+      const shortfallValue = gap > 0 ? gap * teamQuota : 0;
+      return {
+        impliedCoverageTarget: impliedTarget,
+        actualCoverage,
+        coverageGap: Math.round(gap * 100) / 100,
+        coverageAdequate: actualCoverage >= impliedTarget,
+        shortfallValue: Math.round(shortfallValue),
+        conversionRate: convData?.completedQuarters?.[convData.completedQuarters.length - 1]?.conversionRate ?? 0,
+      };
+    }, params),
+  } as ToolDefinition],
+
+  ['prepareConversionSummary', {
+    name: 'prepareConversionSummary',
+    description: 'Prepare condensed conversion rate summary for Claude synthesis',
+    tier: 'compute',
+    parameters: { type: 'object', properties: {}, required: [] },
+    execute: async (params, context) => safeExecute('prepareConversionSummary', async () => {
+      const steps = context.stepResults as any;
+      return {
+        completedQuarters: steps.completed_quarters?.completedQuarters ?? [],
+        currentProjection: steps.current_projection,
+        winRates: steps.win_rates,
+        coverageAdequacy: steps.coverage_adequacy,
+        classification: steps.classification,
+      };
+    }, params),
+  } as ToolDefinition],
+
+  // ── Pipeline Progression skill tools ─────────────────────────────────────
+  ['resolveQuarters', {
+    name: 'resolveQuarters',
+    description: 'Resolve Q0 (current), Q+1, and Q+2 quarter date bounds and team quota',
+    tier: 'compute',
+    parameters: { type: 'object', properties: {}, required: [] },
+    execute: async (params, context) => safeExecute('resolveQuarters', async () => {
+      const now = new Date();
+      const quarters = [0, 1, 2].map(offset => {
+        const q = Math.floor(now.getMonth() / 3);
+        const start = new Date(now.getFullYear(), (q + offset) * 3, 1);
+        const end = new Date(start.getFullYear(), start.getMonth() + 3, 0, 23, 59, 59);
+        const qNum = Math.floor(start.getMonth() / 3) + 1;
+        return { label: `Q${qNum} ${start.getFullYear()}`, start: start.toISOString(), end: end.toISOString() };
+      });
+      const quotaConfig = (context.stepResults as any).quota_config;
+      return { quarters, teamQuota: quotaConfig?.teamQuota ?? 0, coverageTarget: 3.0 };
+    }, params),
+  } as ToolDefinition],
+
+  ['snapshotCurrentPipeline', {
+    name: 'snapshotCurrentPipeline',
+    description: 'Snapshot current pipeline for Q0, Q+1, and Q+2 with coverage ratios and deal counts',
+    tier: 'compute',
+    parameters: { type: 'object', properties: {}, required: [] },
+    execute: async (params, context) => safeExecute('snapshotCurrentPipeline', async () => {
+      const snapshot = await pipelineProgressionSnapshot(context.workspaceId);
+      return { snapshot };
+    }, params),
+  } as ToolDefinition],
+
+  ['loadHistoricalSnapshots', {
+    name: 'loadHistoricalSnapshots',
+    description: 'Load 12 weeks of historical pipeline progression snapshots and compute trend lines',
+    tier: 'compute',
+    parameters: { type: 'object', properties: { weeksBack: { type: 'number' } }, required: [] },
+    execute: async (params, context) => safeExecute('loadHistoricalSnapshots', async () => {
+      const history = await pipelineProgressionHistory(context.workspaceId, params.weeksBack ?? 12);
+      return history;
+    }, params),
+  } as ToolDefinition],
+
+  ['detectEarlyWarnings', {
+    name: 'detectEarlyWarnings',
+    description: 'Detect early warnings for Q+1 and Q+2 based on trend projections',
+    tier: 'compute',
+    parameters: { type: 'object', properties: {}, required: [] },
+    execute: async (params, context) => safeExecute('detectEarlyWarnings', async () => {
+      const history = (context.stepResults as any).history;
+      return { earlyWarnings: history?.earlyWarnings ?? [] };
+    }, params),
+  } as ToolDefinition],
+
+  ['prepareProgressionSummary', {
+    name: 'prepareProgressionSummary',
+    description: 'Prepare condensed pipeline progression summary for Claude synthesis',
+    tier: 'compute',
+    parameters: { type: 'object', properties: {}, required: [] },
+    execute: async (params, context) => safeExecute('prepareProgressionSummary', async () => {
+      const steps = context.stepResults as any;
+      return {
+        snapshot: steps.snapshot?.snapshot,
+        trendLines: steps.history?.trendLines,
+        earlyWarnings: steps.early_warnings?.earlyWarnings ?? [],
+        classification: steps.classification,
+      };
+    }, params),
+  } as ToolDefinition],
+
+  // ── GTM Health Diagnostic skill tools ────────────────────────────────────
+  ['loadSkillOutputs', {
+    name: 'loadSkillOutputs',
+    description: 'Load latest completed skill_run outputs for specified skill IDs',
+    tier: 'compute',
+    parameters: {
+      type: 'object',
+      properties: {
+        skillIds: { type: 'array', items: { type: 'string' } },
+        maxAgeDays: { type: 'number' },
+      },
+      required: ['skillIds'],
+    },
+    execute: async (params, context) => safeExecute('loadSkillOutputs', async () => {
+      const skillIds: string[] = params.skillIds ?? [];
+      const maxAge = params.maxAgeDays ?? 7;
+      const outputs: Record<string, any> = {};
+      for (const skillId of skillIds) {
+        const result = await query<{ result_data: any; started_at: string }>(
+          `SELECT result_data, started_at FROM skill_runs
+           WHERE workspace_id = $1
+             AND skill_id = $2
+             AND status = 'completed'
+             AND started_at >= NOW() - INTERVAL '${maxAge} days'
+           ORDER BY started_at DESC LIMIT 1`,
+          [context.workspaceId, skillId]
+        );
+        outputs[skillId] = result.rows[0]?.result_data ?? null;
+      }
+      return outputs;
+    }, params),
+  } as ToolDefinition],
+
+  ['computeGtmCoverageAdequacy', {
+    name: 'computeGtmCoverageAdequacy',
+    description: 'Compare actual coverage to conversion-implied coverage target and compute the adjusted gap',
+    tier: 'compute',
+    parameters: { type: 'object', properties: {}, required: [] },
+    execute: async (params, context) => safeExecute('computeGtmCoverageAdequacy', async () => {
+      const skillOutputs = (context.stepResults as any).skill_outputs ?? {};
+      const coverage = skillOutputs['pipeline-coverage'];
+      const conversion = skillOutputs['pipeline-conversion-rate'];
+      const forecast = skillOutputs['forecast-rollup'];
+
+      const coverageRatio = coverage?.teamCoverage ?? 0;
+      const conversionRate = conversion?.completedQuarters?.[0]?.conversionRate ?? 0;
+      const impliedTarget = conversionRate > 0 ? 1 / conversionRate : 3.0;
+      const gap = impliedTarget - coverageRatio;
+
+      return {
+        coverage: {
+          ratio: coverageRatio,
+          target: 3.0,
+          adequacy: coverageRatio >= 3.0 ? 'adequate' : 'inadequate',
+          toGoBurnAlert: coverage?.burnAlert ?? null,
+        },
+        conversion: {
+          rate: conversionRate,
+          impliedCoverageNeeded: Math.round(impliedTarget * 100) / 100,
+          trend: conversion?.trend ?? 'unknown',
+          narrowWinRate: conversion?.winRates?.narrow?.rate ?? 0,
+          broadWinRate: conversion?.winRates?.broad?.rate ?? 0,
+          derailRate: conversion?.winRates?.derailRate ?? 0,
+        },
+        forecast: {
+          attainmentPct: forecast?.attainmentPct ?? 0,
+          divergenceAlert: forecast?.divergenceAlert ?? false,
+        },
+        coverageAdequate: coverageRatio >= 3.0,
+        conversionAdequate: conversionRate >= 0.28,
+        adjustedGap: Math.round(gap * 100) / 100,
+      };
+    }, params),
+  } as ToolDefinition],
+
+  ['computeGtmHistoricalContext', {
+    name: 'computeGtmHistoricalContext',
+    description: 'Load last 6 quarters of coverage and conversion from skill_run history; detect floating bar',
+    tier: 'compute',
+    parameters: { type: 'object', properties: { lookbackQuarters: { type: 'number' } }, required: [] },
+    execute: async (params, context) => safeExecute('computeGtmHistoricalContext', async () => {
+      const lq = params.lookbackQuarters ?? 6;
+      const conversionHistory = await query<{ result_data: any; started_at: string }>(
+        `SELECT result_data, started_at
+         FROM skill_runs
+         WHERE workspace_id = $1
+           AND skill_id = 'pipeline-conversion-rate'
+           AND status = 'completed'
+           AND started_at >= NOW() - INTERVAL '${lq * 13} weeks'
+         ORDER BY started_at ASC`,
+        [context.workspaceId]
+      );
+      const coverageHistory = await query<{ result_data: any; started_at: string }>(
+        `SELECT result_data, started_at
+         FROM skill_runs
+         WHERE workspace_id = $1
+           AND skill_id = 'pipeline-coverage'
+           AND status = 'completed'
+           AND started_at >= NOW() - INTERVAL '${lq * 13} weeks'
+         ORDER BY started_at ASC`,
+        [context.workspaceId]
+      );
+
+      const conversions = conversionHistory.rows.map(r => r.result_data?.completedQuarters?.[0]?.conversionRate ?? 0).filter(Boolean);
+      const coverages = coverageHistory.rows.map(r => r.result_data?.teamCoverage ?? 0).filter(Boolean);
+
+      const convTrend = conversions.length >= 2 ? (conversions[conversions.length - 1] - conversions[0]) : 0;
+      const covTrend = coverages.length >= 2 ? (coverages[coverages.length - 1] - coverages[0]) : 0;
+      const floatingBarDetected = covTrend >= 0 && convTrend < -0.03;
+
+      return {
+        historicalCoverage: coverages,
+        historicalConversion: conversions,
+        floatingBarDetected,
+        conversionTrend: convTrend > 0.02 ? 'improving' : convTrend < -0.02 ? 'declining' : 'stable',
+        coverageTrend: covTrend > 0.1 ? 'improving' : covTrend < -0.1 ? 'declining' : 'stable',
+        quartersOfData: Math.min(conversions.length, coverages.length),
+      };
+    }, params),
+  } as ToolDefinition],
+
+  ['prepareGtmSummary', {
+    name: 'prepareGtmSummary',
+    description: 'Prepare condensed GTM health summary for Claude synthesis',
+    tier: 'compute',
+    parameters: { type: 'object', properties: {}, required: [] },
+    execute: async (params, context) => safeExecute('prepareGtmSummary', async () => {
+      const steps = context.stepResults as any;
+      return {
+        skillOutputs: steps.skill_outputs,
+        coverageAdequacy: steps.coverage_adequacy,
+        historicalContext: steps.historical_context,
+        classification: steps.classification,
+      };
+    }, params),
+  } as ToolDefinition],
+
+  // ── Rep Ramp (rep-scorecard enhancement) ─────────────────────────────────
+  ['computeRepRamp', {
+    name: 'computeRepRamp',
+    description: 'Compute rep ramp curve, tenure-relative productivity cohorts, and new rep risk',
+    tier: 'compute',
+    parameters: { type: 'object', properties: {}, required: [] },
+    execute: async (params, context) => safeExecute('computeRepRamp', async () => {
+      return repRampAnalysis(context.workspaceId);
+    }, params),
+  } as ToolDefinition],
+
+  // ── Triangulation (forecast-rollup enhancement) ───────────────────────────
+  ['computeTriangulationBearings', {
+    name: 'computeTriangulationBearings',
+    description: 'Compute all 5 forecast triangulation bearings (rep rollup, stage EV, category EV, capacity model) and divergence analysis',
+    tier: 'compute',
+    parameters: { type: 'object', properties: {}, required: [] },
+    execute: async (params, context) => safeExecute('computeTriangulationBearings', async () => {
+      const timeWindows = (context.stepResults as any).time_windows;
+      const quotaConfig = (context.stepResults as any).quota_config;
+      const qStart = timeWindows?.analysisRange?.start ? new Date(timeWindows.analysisRange.start) : new Date();
+      const qEnd = timeWindows?.analysisRange?.end ? new Date(timeWindows.analysisRange.end) : new Date();
+      const quota = quotaConfig?.teamQuota ?? 0;
+
+      const stageEV = await query<{ stage_normalized: string; pipeline: number }>(
+        `SELECT stage_normalized, COALESCE(SUM(amount), 0) AS pipeline
+         FROM deals
+         WHERE workspace_id = $1
+           AND close_date >= $2 AND close_date <= $3
+           AND stage_normalized NOT IN ('closed_won','closed_lost')
+         GROUP BY stage_normalized`,
+        [context.workspaceId, qStart.toISOString().split('T')[0], qEnd.toISOString().split('T')[0]]
+      );
+
+      const stageWeights: Record<string, number> = {
+        prospecting: 0.05, qualification: 0.10, needs_analysis: 0.20,
+        value_proposition: 0.30, proposal: 0.60, negotiation: 0.75, commit: 0.85,
+      };
+
+      let stageWeightedTotal = 0;
+      const byStage: any[] = [];
+      for (const row of stageEV.rows) {
+        const w = stageWeights[row.stage_normalized] ?? 0.25;
+        const ev = Number(row.pipeline) * w;
+        stageWeightedTotal += ev;
+        byStage.push({ stage: row.stage_normalized, pipeline: Number(row.pipeline), probability: w, ev });
+      }
+
+      const catEV = await query<{ forecast_category: string; pipeline: number }>(
+        `SELECT LOWER(forecast_category) AS forecast_category, COALESCE(SUM(amount), 0) AS pipeline
+         FROM deals
+         WHERE workspace_id = $1
+           AND close_date >= $2 AND close_date <= $3
+           AND stage_normalized NOT IN ('closed_won','closed_lost')
+           AND forecast_category IS NOT NULL
+         GROUP BY LOWER(forecast_category)`,
+        [context.workspaceId, qStart.toISOString().split('T')[0], qEnd.toISOString().split('T')[0]]
+      );
+
+      const catWeights: Record<string, number> = { commit: 0.90, forecast: 0.60, best_case: 0.30, pipeline: 0.10 };
+      let catWeightedTotal = 0;
+      let commitValue = 0; let forecastValue = 0; let bestCaseValue = 0;
+      for (const row of catEV.rows) {
+        const w = catWeights[row.forecast_category] ?? 0.10;
+        catWeightedTotal += Number(row.pipeline) * w;
+        if (row.forecast_category === 'commit') commitValue = Number(row.pipeline);
+        else if (row.forecast_category === 'forecast') forecastValue = Number(row.pipeline);
+        else if (row.forecast_category === 'best_case' || row.forecast_category === 'best case') bestCaseValue = Number(row.pipeline);
+      }
+
+      const repRollupResult = await query<{ owner_email: string; forecast_amount: number; quota: number }>(
+        `SELECT d.owner_email,
+                COALESCE(SUM(d.amount), 0) AS forecast_amount,
+                COALESCE(MAX(rq.period_quota), 0) AS quota
+         FROM deals d
+         LEFT JOIN rep_quotas rq ON rq.rep_email = d.owner_email AND rq.workspace_id = d.workspace_id
+           AND rq.period_start <= $2 AND rq.period_end >= $3
+         WHERE d.workspace_id = $1
+           AND d.close_date >= $3 AND d.close_date <= $2
+           AND d.forecast_category IN ('commit','Commit','forecast','Forecast')
+         GROUP BY d.owner_email`,
+        [context.workspaceId, qEnd.toISOString().split('T')[0], qStart.toISOString().split('T')[0]]
+      );
+
+      const repRollupTotal = repRollupResult.rows.reduce((s, r) => s + Number(r.forecast_amount), 0);
+      const byRep = repRollupResult.rows.map(r => ({ name: r.owner_email, forecast: Number(r.forecast_amount), quota: Number(r.quota) }));
+
+      const bearings = [
+        { name: 'rep_rollup', value: repRollupTotal },
+        { name: 'stage_weighted_ev', value: stageWeightedTotal },
+        { name: 'category_weighted_ev', value: catWeightedTotal },
+      ];
+      const maxB = bearings.reduce((a, b) => b.value > a.value ? b : a, bearings[0]);
+      const minB = bearings.reduce((a, b) => b.value < a.value ? b : a, bearings[0]);
+      const range = maxB.value - minB.value;
+      const rangePct = quota > 0 ? range / quota : 0;
+
+      return {
+        repRollup: { total: repRollupTotal, byRep, vsQuota: quota > 0 ? repRollupTotal / quota : 0 },
+        stageWeightedEV: { total: stageWeightedTotal, byStage, stageWeights },
+        categoryWeightedEV: { total: catWeightedTotal, commit: commitValue, forecast: forecastValue, bestCase: bestCaseValue, commitProbability: 0.90, forecastProbability: 0.60, bestCaseProbability: 0.30 },
+        capacityModel: { rampedReps: 0, historicalProductivityPerRRE: 0, projectedARR: 0, dataConfidence: 'low' as const },
+        divergence: {
+          range,
+          rangePct: Math.round(rangePct * 100) / 100,
+          highestBearing: maxB,
+          lowestBearing: minB,
+          alert: rangePct > 0.20,
+          alertMessage: rangePct > 0.20 ? `Bearings are $${Math.round(range / 1000)}K apart (${Math.round(rangePct * 100)}% of quota). ${maxB.name} is the highest, ${minB.name} is the lowest.` : '',
+        },
+      };
+    }, params),
+  } as ToolDefinition],
+
+  // ── To-Go Coverage (pipeline-coverage enhancement) ───────────────────────
+  ['computeToGoCoverage', {
+    name: 'computeToGoCoverage',
+    description: 'Compute intra-quarter to-go coverage: weekly pipeline snapshots, burn rate, and fake pipeline risk',
+    tier: 'compute',
+    parameters: { type: 'object', properties: {}, required: [] },
+    execute: async (params, context) => safeExecute('computeToGoCoverage', async () => {
+      const timeWindows = (context.stepResults as any).time_windows;
+      const quotaConfig = (context.stepResults as any).quota_config;
+      const qStart = timeWindows?.analysisRange?.start ? new Date(timeWindows.analysisRange.start) : new Date();
+      const quota = quotaConfig?.teamQuota ?? 0;
+
+      const now = new Date();
+      const weekNumber = Math.min(13, Math.ceil((now.getTime() - qStart.getTime()) / (7 * 24 * 60 * 60 * 1000)));
+
+      const openPipeline = await query<{ pipeline: number; deal_count: number }>(
+        `SELECT COALESCE(SUM(amount), 0) AS pipeline, COUNT(*) AS deal_count
+         FROM deals
+         WHERE workspace_id = $1
+           AND stage_normalized NOT IN ('closed_won','closed_lost')
+           AND close_date >= $2`,
+        [context.workspaceId, qStart.toISOString().split('T')[0]]
+      );
+
+      const closedWon = await query<{ won: number }>(
+        `SELECT COALESCE(SUM(amount), 0) AS won
+         FROM deals
+         WHERE workspace_id = $1
+           AND stage_normalized = 'closed_won'
+           AND close_date >= $2`,
+        [context.workspaceId, qStart.toISOString().split('T')[0]]
+      );
+
+      const pipelineValue = Number(openPipeline.rows[0]?.pipeline ?? 0);
+      const closedWonValue = Number(closedWon.rows[0]?.won ?? 0);
+      const remainingQuota = Math.max(0, quota - closedWonValue);
+      const toGoCoverage = remainingQuota > 0 ? pipelineValue / remainingQuota : 0;
+      const weeksRemaining = Math.max(0, 13 - weekNumber);
+
+      return {
+        currentWeek: weekNumber,
+        weeksRemaining,
+        openPipelineValue: pipelineValue,
+        closedWonValue,
+        remainingQuota,
+        toGoCoverage: Math.round(toGoCoverage * 100) / 100,
+        burnAlert: {
+          triggered: toGoCoverage < 1.5 && weeksRemaining < 6,
+          fakePipelineRisk: toGoCoverage < 1.0 ? 'high' : toGoCoverage < 1.5 ? 'medium' : 'low',
+        },
+      };
+    }, params),
+  } as ToolDefinition],
+
+  ['detectFakePipeline', {
+    name: 'detectFakePipeline',
+    description: 'Identify deals that were in the quarter at week 3 but have since been removed (fake pipeline)',
+    tier: 'compute',
+    parameters: { type: 'object', properties: {}, required: [] },
+    execute: async (params, context) => safeExecute('detectFakePipeline', async () => {
+      const timeWindows = (context.stepResults as any).time_windows;
+      const qStart = timeWindows?.analysisRange?.start ? new Date(timeWindows.analysisRange.start) : new Date();
+      const week3Date = new Date(qStart);
+      week3Date.setDate(week3Date.getDate() + 20);
+
+      const week3Pipeline = await query<{ amount: number }>(
+        `SELECT COALESCE(SUM(amount), 0) AS amount
+         FROM deals
+         WHERE workspace_id = $1
+           AND created_at <= $2
+           AND close_date >= $3
+           AND stage_normalized NOT IN ('closed_won','closed_lost')`,
+        [context.workspaceId, week3Date.toISOString(), qStart.toISOString().split('T')[0]]
+      );
+
+      const removed = await query<{ count: number; amount: number }>(
+        `SELECT COUNT(*) AS count, COALESCE(SUM(amount), 0) AS amount
+         FROM deals
+         WHERE workspace_id = $1
+           AND created_at <= $2
+           AND close_date >= $3
+           AND stage_normalized = 'closed_lost'
+           AND (close_reason IS NULL OR close_reason NOT ILIKE '%won%')`,
+        [context.workspaceId, week3Date.toISOString(), qStart.toISOString().split('T')[0]]
+      );
+
+      const week3Total = Number(week3Pipeline.rows[0]?.amount ?? 0);
+      const removedValue = Number(removed.rows[0]?.amount ?? 0);
+      const removedCount = Number(removed.rows[0]?.count ?? 0);
+      const fakePct = week3Total > 0 ? removedValue / week3Total : 0;
+
+      return {
+        week3PipelineValue: week3Total,
+        removedDealCount: removedCount,
+        removedDealValue: removedValue,
+        fakePipelinePct: Math.round(fakePct * 100) / 100,
+        fakePipelineRisk: fakePct > 0.20 ? 'high' : fakePct > 0.10 ? 'medium' : 'low',
+      };
+    }, params),
+  } as ToolDefinition],
 ]);
 
 // ============================================================================

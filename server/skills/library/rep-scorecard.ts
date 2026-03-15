@@ -20,6 +20,7 @@ export const repScorecardSkill: SkillDefinition = {
     'loadVelocityBenchmarks',
     'repScorecardCompute',
     'prepareRepScorecardSummary',
+    'computeRepRamp',
   ],
 
   requiredContext: ['goals_and_targets'],
@@ -38,6 +39,17 @@ export const repScorecardSkill: SkillDefinition = {
       computeFn: 'resolveTimeWindows',
       computeArgs: {},
       outputKey: 'time_windows',
+    },
+
+    // Step 1b: Compute rep ramp curve
+    {
+      id: 'compute-rep-ramp',
+      name: 'Compute Rep Ramp Curve',
+      tier: 'compute',
+      dependsOn: ['resolve-time-windows'],
+      computeFn: 'computeRepRamp',
+      computeArgs: {},
+      outputKey: 'rep_ramp',
     },
 
     // Step 2: Check data availability
@@ -66,7 +78,7 @@ export const repScorecardSkill: SkillDefinition = {
       id: 'compute-scorecard',
       name: 'Compute Rep Scorecard',
       tier: 'compute',
-      dependsOn: ['resolve-time-windows', 'check-data-availability', 'load-velocity-benchmarks'],
+      dependsOn: ['resolve-time-windows', 'check-data-availability', 'load-velocity-benchmarks', 'compute-rep-ramp'],
       computeFn: 'repScorecardCompute',
       computeArgs: {},
       outputKey: 'scorecard',
