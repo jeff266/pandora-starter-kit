@@ -86,6 +86,22 @@ interface SprintData {
   backlog_count: number;
 }
 
+// ── Metric formatting ────────────────────────────────────────────────────────
+
+function formatMetricValue(value: number, metric: string): string {
+  const m = metric.toLowerCase();
+  if (m.includes('ratio')) return `${value.toFixed(1)}x`;
+  if (m.includes('rate') || m.includes('pct') || m.includes('win')) return `${Math.round(value)}%`;
+  if (m.includes('days') || m.includes('cycle')) return `${Math.round(value)} days`;
+  if (m.includes('count') || m.includes('closes')) return value.toFixed(1);
+  return formatCurrency(value);
+}
+
+function formatMetricLabel(metric: string, direction: string | undefined, threshold: number): string {
+  const arrow = direction === 'below' ? '≥' : '≤';
+  return `target ${arrow} ${formatMetricValue(threshold, metric)}`;
+}
+
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const sevColors: Record<string, string> = {
@@ -672,10 +688,10 @@ function HypothesisSection({
               fontSize: 24, fontWeight: 700, fontFamily: fonts.mono,
               color: isAlert ? '#ef4444' : colors.green,
             }}>
-              {cur.toFixed(1)}
+              {formatMetricValue(cur, hyp.metric)}
             </div>
             <div style={{ fontSize: 11, color: colors.textMuted }}>
-              target: {hyp.alert_direction === 'below' ? '≥' : '≤'}{threshold.toFixed(1)}
+              {formatMetricLabel(hyp.metric, hyp.alert_direction, threshold)}
             </div>
           </div>
         )}
@@ -920,10 +936,10 @@ function HypothesesView({
                     fontSize: 28, fontWeight: 700, fontFamily: fonts.mono,
                     color: breached ? '#ef4444' : colors.green,
                   }}>
-                    {cur.toFixed(1)}
+                    {formatMetricValue(cur, hyp.metric)}
                   </div>
                   <div style={{ fontSize: 11, color: colors.textMuted }}>
-                    target {hyp.alert_direction === 'below' ? '≥' : '≤'} {threshold.toFixed(1)}
+                    {formatMetricLabel(hyp.metric, hyp.alert_direction, threshold)}
                   </div>
                 </div>
               )}

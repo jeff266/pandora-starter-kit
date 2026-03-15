@@ -8119,9 +8119,29 @@ const mcWritePortfolioCompositionHypothesis: ToolDefinition = {
       const quota: number | null = forecastWindow.quota ?? null;
       const baseP50: number = allElseEqual.baseP50 ?? 0;
 
-      const swingSegment = composition.requiredClosesForQuota?.[0] ?? null;
-      const currentValue = swingSegment?.currentExpected ?? baseP50;
-      const alertThreshold = swingSegment?.requiredForQuota ?? (quota ? quota * 0.85 : null);
+      let currentValue: number;
+      let alertThreshold: number | null;
+
+      if (composition.swingVariable === 'conversion_rate') {
+        // For conversion_rate hypothesis, write the actual win rate % rather
+        // than the P50 dollar value so the display shows "31%" not "$1.0M".
+        const winRateResult = await query(
+          `SELECT
+             COUNT(*) FILTER (WHERE stage_normalized = 'closed_won') AS won,
+             COUNT(*) FILTER (WHERE stage_normalized IN ('closed_won','closed_lost')) AS total
+           FROM deals
+           WHERE workspace_id = $1 AND close_date >= NOW() - INTERVAL '365 days'`,
+          [context.workspaceId]
+        ).catch(() => ({ rows: [{ won: '0', total: '0' }] }));
+        const won = parseFloat(winRateResult.rows[0]?.won ?? '0');
+        const total = parseFloat(winRateResult.rows[0]?.total ?? '0');
+        currentValue = total > 0 ? Math.round((won / total) * 1000) / 10 : 0;
+        alertThreshold = currentValue > 0 ? Math.round((currentValue + 5) * 10) / 10 : 35;
+      } else {
+        const swingSegment = composition.requiredClosesForQuota?.[0] ?? null;
+        currentValue = swingSegment?.currentExpected ?? baseP50;
+        alertThreshold = swingSegment?.requiredForQuota ?? (quota ? quota * 0.85 : null);
+      }
 
       if (!alertThreshold) {
         return { hypothesisWritten: false, hypothesisId: null };

@@ -1,0 +1,49 @@
+Three things to fix before Wednesday.
+
+**1. Trigger the sprint assembly job manually now** — it runs Monday at 8:30 AM automatically but that's 2 days away and you want to see it populated before the demo. The sprint is empty because it hasn't run since the job was created today.
+
+```bash
+POST /api/workspaces/<FRONTERA_ID>/jobs/assemble-weekly-sprint
+```
+
+That should populate the 7 sprint actions from the Monte Carlo all-else-equal output and link them to the conversion rate hypothesis.
+
+**2. The current value display is broken** — "1045968.2" with "target: ≥1445000.0" is rendering raw numbers without formatting. Those should display as currency or a ratio depending on the metric type. For `conversion_rate` the current value should be something like "31%" not "1045968.2". Check what value the Monte Carlo job wrote to `standing_hypotheses.current_value` for this hypothesis — it may have written a dollar amount instead of a rate, or the display layer isn't formatting by metric type.
+
+**3. "No sprint actions linked to this hypothesis"** — this resolves once the sprint assembly job runs. But verify that `findParentHypothesis()` correctly maps `conversion_rate` metric to the relevant action types (`improve_lever`, `generate_pipeline`). If the mapping is missing for `conversion_rate`, sprint actions will assemble but won't link to the hypothesis.
+
+Send to Replit:
+
+> Three fixes needed before Wednesday demo.
+>
+> 1. Trigger sprint assembly manually for Frontera now:
+> `POST /api/workspaces/<FRONTERA_ID>/jobs/assemble-weekly-sprint`
+> Report how many sprint actions were created and which hypothesis_ids they linked to.
+>
+> 2. Fix the hypothesis current_value display formatting.
+> In the Actions page hypothesis card, format the `current_value` and `alert_threshold` based on the metric type:
+> - If metric contains `rate` or `ratio` or `pct`: format as percentage (e.g. "31%")
+> - If metric contains `days`: format as "X days"
+> - If metric contains `count` or `closes`: format as decimal (e.g. "2.8")
+> - Otherwise: format as currency
+>
+> The `conversion_rate` hypothesis showing "1045968.2" is a currency-formatted dollar amount — check what value was written to `current_value` in `standing_hypotheses` for this row. It may be the P50 dollar value rather than the conversion rate percentage. Fix the value that gets written by the pre-mortem or Monte Carlo job for this metric.
+>
+> 3. Add `conversion_rate` to the hypothesis metric mapping in `findParentHypothesis()`:
+> ```typescript
+> const matchMap: Record<string, string[]> = {
+>   're_engage_deal': ['large_deal_win_rate', 'large_deal_cohort'],
+>   'close_deal': ['large_deal_win_rate', 'conversion_rate'],
+>   'generate_pipeline': ['pipeline_coverage_ratio', 'conversion_rate'],
+>   'improve_lever': ['conversion_rate', 'smb_sales_cycle_days'],
+> }
+> ```
+>
+> After all three fixes, the Actions page should show:
+> - 7 sprint actions populated under the conversion_rate hypothesis
+> - Current value displaying as a percentage or ratio, not a raw dollar amount
+> - Hypothesis alert showing the gap clearly: "31% current → need 35%" or similar
+>
+> Demo is Wednesday. Server must be clean.
+
+Once sprint actions populate, the page will look like the wireframe. The structure is right — it just needs data flowing through it.
