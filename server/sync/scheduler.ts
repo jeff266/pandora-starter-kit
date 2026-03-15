@@ -12,16 +12,17 @@ import { syncGoogleCalendar } from '../connectors/google-calendar/adapter.js';
 
 const INTERNAL_CONNECTORS = ['enrichment_config', 'csv_import'];
 
-// CRM connectors (hubspot, salesforce) are handled by a 15-min dynamic heartbeat
-// that checks each connector's sync_interval_minutes against last_sync_at.
-// Non-CRM connectors remain on fixed schedules below.
+// Fixed-schedule connectors — only used for initial syncs or connectors that
+// don't use per-workspace sync_interval_minutes (monday, google-drive).
+// gong/fireflies initial syncs also fire here as fallback (dynamic heartbeat
+// handles subsequent incremental syncs respecting sync_interval_minutes).
 const SYNC_SCHEDULES: Array<{
   label: string;
   cron: string;
   connectorTypes: string[];
 }> = [
   {
-    label: 'Call Intelligence (every 12 hours)',
+    label: 'Call Intelligence initial-sync fallback (every 12 hours)',
     cron: '0 */12 * * *',
     connectorTypes: ['gong', 'fireflies'],
   },
@@ -32,8 +33,9 @@ const SYNC_SCHEDULES: Array<{
   },
 ];
 
-// CRM connectors eligible for dynamic interval scheduling
-const CRM_CONNECTOR_TYPES = ['hubspot', 'salesforce'];
+// Connectors eligible for the 15-min dynamic heartbeat that respects per-workspace
+// sync_interval_minutes. CRM + call intelligence connectors all live here.
+const DYNAMIC_SYNC_CONNECTORS = ['hubspot', 'salesforce', 'gong', 'fireflies'];
 
 export class SyncScheduler {
   private tasks: cron.ScheduledTask[] = [];
@@ -125,7 +127,7 @@ export class SyncScheduler {
     this.tasks.push(qualityRecalcTask);
 
     const scheduleDescriptions = SYNC_SCHEDULES.map(s => s.label).join(', ');
-    console.log(`[Scheduler] Sync schedules registered: ${scheduleDescriptions}, CRM (dynamic 15-min heartbeat), Consultant (every 6 hours), Agent cleanup (daily at 3 AM), Refresh token cleanup (daily at 3 AM), Webhook delivery cleanup (daily at 3 AM), Market signals (weekly on Monday at 6 AM)`);
+    console.log(`[Scheduler] Sync schedules registered: ${scheduleDescriptions}, Dynamic heartbeat (${DYNAMIC_SYNC_CONNECTORS.join('/')} — respects sync_interval_minutes), Consultant (every 6 hours), Agent cleanup (daily at 3 AM), Refresh token cleanup (daily at 3 AM), Webhook delivery cleanup (daily at 3 AM), Market signals (weekly on Monday at 6 AM)`);
   }
 
   stop(): void {
@@ -171,7 +173,9 @@ export class SyncScheduler {
         try {
           const runningResult = await query<{ id: string }>(
             `SELECT id FROM sync_log
-             WHERE workspace_id = $1 AND connector_type = $2 AND status IN ('pending', 'running')
+             WHERE workspace_id = $1 AND connector_type = $2
+               AND status IN ('pending', 'running')
+               AND started_at > NOW() - INTERVAL '30 minutes'
              LIMIT 1`,
             [wsId, connectorType]
           );
@@ -235,7 +239,7 @@ export class SyncScheduler {
              AND sl.status IN ('pending', 'running')
              AND sl.started_at > NOW() - INTERVAL '30 minutes'
          )`,
-      [CRM_CONNECTOR_TYPES]
+      [DYNAMIC_SYNC_CONNECTORS]
     ).catch(err => {
       console.error('[Scheduler] Eligibility check query failed:', err instanceof Error ? err.message : err);
       return { rows: [] as any[] };

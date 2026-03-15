@@ -238,6 +238,7 @@ RULES:
 - Use specific numbers and names throughout
 - If quota data is missing, focus on relative performance vs team average
 - If activity data is missing, note briefly and base scorecard on results and pipeline
+- Some deals may be owned by external partners or channel resellers (reps whose email domain differs from the company domain). These reps will have zero Gong/conversation data — this is expected and should NOT be flagged as a coaching issue or activity gap. Treat their pipeline at face value; omit them from behavioral coaching recommendations.
 - Word budget: 700 words
 
 {{voiceBlock}}

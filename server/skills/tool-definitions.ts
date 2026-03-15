@@ -635,6 +635,120 @@ const getCallInsights: ToolDefinition = {
   },
 };
 
+const queryStageHistoryTool: ToolDefinition = {
+  name: 'queryStageHistory',
+  description: 'Query deal stage transition history. Returns stage changes with direction (advance/regress/lateral/initial), time in previous stage, deal amount, and owner.',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {
+      deal_id: { type: 'string', description: 'Filter to a single deal ID' },
+      account_id: { type: 'string', description: 'Filter to all deals belonging to an account ID' },
+      since: { type: 'string', description: 'ISO date — return transitions on or after this date' },
+      until: { type: 'string', description: 'ISO date — return transitions on or before this date' },
+      direction: {
+        type: 'string',
+        enum: ['advance', 'regress', 'lateral', 'initial', 'all'],
+        description: 'Filter by transition direction (default: all)',
+      },
+      limit: { type: 'number', description: 'Max rows to return (default 50, max 200)' },
+    },
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('queryStageHistory', async () => {
+      const limit = Math.min(params.limit || 50, 200);
+      const values: any[] = [context.workspaceId];
+
+      const dealFilter = params.deal_id
+        ? `AND dsh.deal_id = $${values.push(params.deal_id)}`
+        : params.account_id
+          ? `AND d.account_id = $${values.push(params.account_id)}`
+          : '';
+
+      const sinceFilter = params.since ? `AND dsh.entered_at >= $${values.push(params.since)}` : '';
+      const untilFilter = params.until ? `AND dsh.entered_at <= $${values.push(params.until)}` : '';
+
+      const sql = `
+        WITH ordered AS (
+          SELECT
+            dsh.deal_id,
+            dsh.stage            AS to_stage,
+            dsh.stage_normalized AS to_stage_normalized,
+            dsh.entered_at       AS changed_at,
+            LAG(dsh.stage)            OVER (PARTITION BY dsh.deal_id ORDER BY dsh.entered_at) AS from_stage,
+            LAG(dsh.stage_normalized) OVER (PARTITION BY dsh.deal_id ORDER BY dsh.entered_at) AS from_stage_normalized,
+            LAG(dsh.entered_at)       OVER (PARTITION BY dsh.deal_id ORDER BY dsh.entered_at) AS prev_entered_at,
+            d.name   AS deal_name,
+            d.amount AS deal_amount,
+            d.owner  AS owner_name,
+            sm_to.display_order AS to_order
+          FROM deal_stage_history dsh
+          JOIN deals d ON d.id = dsh.deal_id AND d.workspace_id = dsh.workspace_id
+          LEFT JOIN stage_mappings sm_to
+            ON sm_to.workspace_id = dsh.workspace_id AND sm_to.normalized_stage = dsh.stage_normalized
+          WHERE dsh.workspace_id = $1
+            ${dealFilter}
+            ${sinceFilter}
+            ${untilFilter}
+        )
+        SELECT
+          o.deal_id, o.deal_name, o.deal_amount,
+          o.from_stage, o.from_stage_normalized,
+          o.to_stage, o.to_stage_normalized,
+          o.changed_at,
+          CASE
+            WHEN o.prev_entered_at IS NOT NULL
+            THEN ROUND(EXTRACT(EPOCH FROM (o.changed_at - o.prev_entered_at)) / 86400.0, 1)
+          END AS days_in_previous_stage,
+          sm_from.display_order AS from_order,
+          o.to_order,
+          o.owner_name
+        FROM ordered o
+        LEFT JOIN stage_mappings sm_from
+          ON sm_from.workspace_id = $1 AND sm_from.normalized_stage = o.from_stage_normalized
+        ORDER BY o.changed_at DESC
+        LIMIT $${values.push(limit)}
+      `;
+
+      const result = await query<any>(sql, values);
+
+      const transitions = result.rows.map((r: any) => {
+        let direction: 'advance' | 'regress' | 'lateral' | 'initial' = 'initial';
+        if (r.from_stage === null) {
+          direction = 'initial';
+        } else if (r.from_order != null && r.to_order != null) {
+          if (r.to_order > r.from_order) direction = 'advance';
+          else if (r.to_order < r.from_order) direction = 'regress';
+          else direction = 'lateral';
+        }
+        return {
+          deal_id: r.deal_id,
+          deal_name: r.deal_name,
+          deal_amount: parseFloat(r.deal_amount) || 0,
+          from_stage: r.from_stage || null,
+          to_stage: r.to_stage,
+          from_stage_normalized: r.from_stage_normalized || null,
+          to_stage_normalized: r.to_stage_normalized,
+          changed_at: r.changed_at,
+          days_in_previous_stage: r.days_in_previous_stage != null ? parseFloat(r.days_in_previous_stage) : null,
+          direction,
+          owner_name: r.owner_name,
+        };
+      });
+
+      const filtered = params.direction && params.direction !== 'all'
+        ? transitions.filter((t: any) => t.direction === params.direction)
+        : transitions;
+
+      return {
+        total: filtered.length,
+        transitions: filtered,
+      };
+    }, params);
+  },
+};
+
 // ============================================================================
 // Task Tools
 // ============================================================================
@@ -9174,6 +9288,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['getActivityTimeline', getActivityTimeline],
   ['getActivitySummary', getActivitySummary],
   ['queryConversations', queryConversations],
+  ['queryStageHistory', queryStageHistoryTool],
   ['getConversation', getConversation],
   ['getRecentCallsForDeal', getRecentCallsForDeal],
   ['getCallInsights', getCallInsights],

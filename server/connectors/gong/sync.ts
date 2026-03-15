@@ -141,6 +141,18 @@ async function syncForTrackedUsers(
   try {
     allCalls = await client.getCallsExtensive(fromDate);
   } catch (err: any) {
+    // Gong returns 404 with "No calls found" when the date window has zero results.
+    // This is not a real error — treat it as an empty sync.
+    const isEmptyResult =
+      err.message?.includes('404') && err.message?.includes('No calls found');
+    if (isEmptyResult) {
+      console.log(`[Gong Sync] No new calls in window (Gong 404 empty-result) — 0 fetched`);
+      return {
+        totalFetched: 0,
+        totalStored: 0,
+        byUser: trackedUsers.map(u => ({ name: u.name, calls: 0 })),
+      };
+    }
     console.error(`[Gong Sync] Failed to fetch calls: ${err.message}`);
     errors.push(`Fetch error: ${err.message}`);
     return {
