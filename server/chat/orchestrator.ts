@@ -436,10 +436,12 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
       (state.context as any).prevIntentClassification = (state.context as any).lastIntentClassification;
 
       // Handle advisory_with_data_option: ask gating question
+      // Skip when a specific entity is scoped — data retrieval should happen automatically.
       if (
         intentClassification.category === 'advisory_with_data_option' &&
         intentClassification.confidence >= 0.75 &&
-        !isGatingResponse(message, conversationHistory)
+        !isGatingResponse(message, conversationHistory) &&
+        !entityId
       ) {
         const gatingAnswer = intentClassification.gating_question!;
 
@@ -479,9 +481,12 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
       }
 
       // Handle advisory_stateless: skip tools, use Claude for advisory answer
+      // Never short-circuit when a specific entity (deal/account/rep) is scoped —
+      // those queries must go through the agentic loop so real data is fetched.
       if (
         intentClassification.category === 'advisory_stateless' &&
-        intentClassification.confidence >= 0.75
+        intentClassification.confidence >= 0.75 &&
+        !entityId
       ) {
         const conversationHistory = buildConversationHistory(state.messages || [] as any);
         return await handleAdvisoryResponse(
@@ -1126,9 +1131,12 @@ function prefersBestPractice(message: string): boolean {
 }
 
 function buildAdvisorySystemPrompt(workspaceContext: WorkspaceContext | null): string {
+  const today = new Date().toISOString().split('T')[0];
   const base = `You are Pandora, an AI RevOps advisor for B2B SaaS companies.
 You have deep expertise in pipeline management, forecasting, ICP development,
 sales process design, and RevOps tooling.
+
+Today's date is ${today}. Any deal close date before today is past-due. Do not describe past-due close dates as future targets.
 
 Answer the user's question with specific, practical guidance.
 Avoid generic advice — be opinionated and direct.

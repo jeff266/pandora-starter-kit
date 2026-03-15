@@ -1,0 +1,32 @@
+Progress on Bug 2 — the deal scope is working now. "About: ABS Kids - AB + RAB" in the header confirms it's scoped to the specific deal, and the $150K amount and single deal structure are correct.
+
+But three problems remain:
+
+**Bug 1 still not fixed.** "AB = Accepted by Business, RAB = Reviewed and Approved by Business" is a fourth invented interpretation. The message-level expansion is either not firing for this query or isn't reaching the synthesis step. The log line should tell you whether expansion fired — check it.
+
+**Wrong owner.** Sarah Chen doesn't exist at Frontera. The known reps are Nate Phillips and Sara Bollman. This is either a data quality issue in HubSpot (the deal was assigned to someone who doesn't exist) or the rep roster guard from Bug 2's fix isn't applying to deal-scoped queries.
+
+**Stale date reasoning.** The response says "5.5 months from now" for a June 30, 2025 close date. Today is March 15, 2026 — that close date is 8.5 months in the past. Claude is reasoning about this deal as if it's still open and future-dated, when it's either already closed or badly past due. The date context in the system prompt needs today's actual date injected so Claude knows whether a close date is past or future.
+
+Send to Replit:
+
+> Three issues still present in Ask Pandora deal analysis.
+>
+> **Issue 1 — AB/RAB expansion still not working**
+> Check the console log — did the abbreviation expansion log line fire when this query came in? If not, the message preprocessing isn't running for deal-scoped queries, only workspace-scoped ones. The expansion needs to run on every incoming message regardless of scope type.
+>
+> **Issue 2 — Today's date not in system prompt**
+> Claude said a June 2025 close date is "5.5 months from now." Today is March 15, 2026 — that date is 8.5 months ago. Add `today: new Date().toISOString().split('T')[0]` to the system prompt context so Claude can correctly classify close dates as past-due, current quarter, or future. Every skill already does this — Ask Pandora should too.
+>
+> Add to the Ask Pandora system prompt:
+> "Today's date is {{today}}. Any deal with a close date before today is past-due. Do not describe past-due close dates as future targets."
+>
+> **Issue 3 — Sarah Chen not in Frontera rep roster**
+> The deal owner field contains "Sarah Chen" which doesn't match any known Frontera rep. Two things to check:
+> 1. Is this a HubSpot data quality issue? Query `SELECT DISTINCT owner_email, owner_name FROM deals WHERE workspace_id = '<FRONTERA_ID>'` — if Sarah Chen appears, the deal was assigned incorrectly in HubSpot and needs to be fixed at source.
+> 2. The rep roster guard should flag this — confirm it's applying to deal-scoped queries, not just workspace queries. If Sarah Chen appears, Claude should note "⚠️ Owner not in current rep roster — verify assignment" rather than treating her as active.
+>
+> After all three fixes, test again on the ABS Kids deal. The response must:
+> - Reference Assessment Builder and Reassessment Builder, not any invented expansion
+> - Note the June 2025 close date is past-due, not a future target
+> - Flag Sarah Chen as not in the current rep roster if she's still showing as owner
