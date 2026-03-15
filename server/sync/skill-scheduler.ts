@@ -891,6 +891,33 @@ export function startSkillScheduler(): void {
   scheduledSkills.push({ skillId: 'investigation-digest-weekly', cronExpression: '0 9 * * 1', job: digestJob });
   console.log('[InvestigationDigest] Registered weekly digest on cron 0 9 * * 1 (Monday 9am UTC)');
 
+  // Weekly sprint assembly: Monday 8:30am UTC — after all Monday skill runs finish
+  const sprintAssemblyJob = cron.schedule(
+    '30 8 * * 1',
+    async () => {
+      console.log('[SprintAssembly] Monday 8:30am UTC — assembling sprint for all workspaces');
+      const { assembleWeeklySprint } = await import('../jobs/assemble-weekly-sprint.js');
+
+      const workspacesResult = await query<{ id: string }>(
+        `SELECT DISTINCT w.id FROM workspaces w
+         INNER JOIN connections c ON c.workspace_id = w.id
+         WHERE c.status IN ('connected', 'synced', 'error') AND w.status = 'active'`
+      );
+
+      for (const workspace of workspacesResult.rows) {
+        try {
+          const result = await assembleWeeklySprint(workspace.id);
+          console.log(`[SprintAssembly] workspace=${workspace.id} inserted=${result.inserted} updated=${result.updated}`);
+        } catch (err) {
+          console.error(`[SprintAssembly] Failed for workspace=${workspace.id}:`, err);
+        }
+      }
+    },
+    { timezone: 'UTC' }
+  );
+  scheduledSkills.push({ skillId: 'sprint-assembly-weekly', cronExpression: '30 8 * * 1', job: sprintAssemblyJob });
+  console.log('[SprintAssembly] Registered weekly sprint assembly on cron 30 8 * * 1 (Monday 8:30am UTC)');
+
   // Register scheduled investigations
   const jobQueue = getJobQueue();
 

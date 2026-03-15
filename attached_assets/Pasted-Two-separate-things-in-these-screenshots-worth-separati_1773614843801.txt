@@ -1,0 +1,246 @@
+Two separate things in these screenshots worth separating.
+
+**The Concierge is actually running and looks strong.** "Week 11 of Q1 — late quarter, 16 days to close" with the quarter timeline bar is exactly the right framing. 137% attained, $481K closed, the "Won — build Q2 this week — 5 cold deals worth $669K are your fastest path to 3x Q2 coverage" headline is goal-first messaging. The deal cards with "Assign to rep" and "Ask →" are the right affordances. This is working. The wireframe I drew was the proposed Actions page redesign, not a description of what Concierge should look like — Concierge is already closer to that vision than the Actions page is.
+
+One thing to fix on Concierge: "ABS Kids - AB + RAB" and "BlueSprig Autism - AB + RAB" are still showing raw abbreviations. The message-level expansion fix only covers Ask Pandora queries — it needs to also run when deal names are rendered in Concierge cards.
+
+**The Actions page is the thing that needs the full redesign.** The backlog feeling impossible is the right diagnosis — 313 actions with Snooze/Reject is an inbox, not a decision tool.
+
+Here's the spec. Send to Replit:
+
+---
+
+> **Build: Modernized Actions Page — Goal-First Sprint View**
+>
+> Read these files first:
+> 1. The current Actions page component — find it in the frontend routes
+> 2. `standing_hypotheses` table schema — migration 179
+> 3. `server/analysis/monte-carlo-all-else-equal.ts` — the action menu output
+> 4. `server/concierge/crumb-trail-detector.ts` — for the "In Progress" state
+> 5. The existing actions table schema — understand current action fields
+>
+> This redesigns the Actions page from detection-first (everything wrong) to goal-first (what moves the number this week). Three views: Sprint, Hypotheses, Backlog.
+>
+> ---
+>
+> **Part 1 — Database: tag actions to hypotheses**
+>
+> Add to the actions table:
+> ```sql
+> ALTER TABLE actions
+>   ADD COLUMN IF NOT EXISTS hypothesis_id UUID REFERENCES standing_hypotheses(id),
+>   ADD COLUMN IF NOT EXISTS sprint_week DATE,  -- which week's sprint this belongs to
+>   ADD COLUMN IF NOT EXISTS expected_value_delta NUMERIC,  -- $ impact on P50
+>   ADD COLUMN IF NOT EXISTS effort TEXT CHECK (effort IN ('immediate', 'this_week', 'this_month')),
+>   ADD COLUMN IF NOT EXISTS state TEXT NOT NULL DEFAULT 'pending'
+>     CHECK (state IN ('pending', 'in_progress', 'executed', 'deferred', 'not_applicable', 'escalated'));
+> ```
+>
+> Replace the existing `status` field logic with the new `state` values:
+> - `pending` → needs a decision
+> - `in_progress` → user said "working on it" — crumb trail fires
+> - `executed` → done, written to CRM
+> - `deferred` → right action, move to next week's sprint
+> - `not_applicable` → wrong context, feeds training data
+> - `escalated` → needs leadership, routes to Slack
+>
+> Add a weekly sprint assembly job — runs Monday at 8:30 AM after all skills complete:
+>
+> ```typescript
+> // server/jobs/assemble-weekly-sprint.ts
+>
+> export async function assembleWeeklySprint(workspaceId: string): Promise<void> {
+>   const thisWeek = startOfWeek(new Date())
+>
+>   // 1. Load all-else-equal action menu from latest monte-carlo run
+>   const monteCarloRun = await getLatestSkillRun(workspaceId, 'monte-carlo-forecast')
+>   const actionMenu = monteCarloRun?.result_data?.allElseEqual?.actionMenu ?? []
+>
+>   // 2. Load active standing hypotheses
+>   const hypotheses = await query(`
+>     SELECT * FROM standing_hypotheses
+>     WHERE workspace_id = $1 AND status = 'active'
+>     ORDER BY
+>       CASE WHEN current_value < alert_threshold THEN 0 ELSE 1 END,
+>       created_at ASC
+>   `, [workspaceId])
+>
+>   // 3. For each action in the menu, find its parent hypothesis
+>   //    Match by metric name or action type
+>   for (const action of actionMenu.slice(0, 7)) {
+>     const parentHypothesis = findParentHypothesis(action, hypotheses.rows)
+>
+>     // Upsert into actions table with sprint_week and hypothesis_id
+>     await query(`
+>       INSERT INTO actions (
+>         workspace_id, title, action_type, severity,
+>         expected_value_delta, effort, sprint_week,
+>         hypothesis_id, state, source
+>       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', 'monte_carlo')
+>       ON CONFLICT (workspace_id, title, sprint_week)
+>       DO UPDATE SET
+>         expected_value_delta = EXCLUDED.expected_value_delta,
+>         hypothesis_id = EXCLUDED.hypothesis_id
+>     `, [
+>       workspaceId,
+>       action.label,
+>       action.actionType,
+>       action.rank <= 2 ? 'critical' : action.rank <= 5 ? 'warning' : 'notable',
+>       action.expectedValueIfDone,
+>       action.effort,
+>       thisWeek,
+>       parentHypothesis?.id ?? null,
+>     ])
+>   }
+>
+>   // 4. Also promote any standing hypothesis threshold breaches
+>   //    as sprint actions if not already present
+>   for (const hyp of hypotheses.rows) {
+>     if (isThresholdBreached(hyp)) {
+>       await upsertHypothesisAlert(workspaceId, hyp, thisWeek)
+>     }
+>   }
+> }
+>
+> function findParentHypothesis(action: ActionMenuItem, hypotheses: any[]): any | null {
+>   // Match action type to hypothesis metric
+>   const matchMap: Record<string, string[]> = {
+>     're_engage_deal': ['large_deal_win_rate', 'large_deal_cohort'],
+>     'close_deal': ['large_deal_win_rate', 'conversion_rate'],
+>     'generate_pipeline': ['pipeline_coverage_ratio'],
+>     'improve_lever': ['conversion_rate', 'smb_sales_cycle_days'],
+>   }
+>   const metrics = matchMap[action.actionType] ?? []
+>   return hypotheses.find(h => metrics.includes(h.metric)) ?? null
+> }
+> ```
+>
+> ---
+>
+> **Part 2 — API: sprint and hypothesis endpoints**
+>
+> Add to the actions routes:
+>
+> ```
+> GET /api/workspaces/:id/actions/sprint
+>   Returns: { week, actions: (top 7 tagged to hypotheses), hypotheses, summary }
+>
+> GET /api/workspaces/:id/actions/backlog
+>   Returns: { actions: (all non-sprint actions, paginated), total }
+>
+> PATCH /api/workspaces/:id/actions/:actionId/state
+>   Body: { state: 'in_progress' | 'executed' | 'deferred' | 'not_applicable' | 'escalated' }
+>   Side effects:
+>     - 'in_progress': fires recordCrumbTrail() with signal = 'working_on_it'
+>     - 'executed': creates CRM task if action has a dealId
+>     - 'deferred': sets sprint_week = next Monday
+>     - 'escalated': sends Slack DM to workspace admin
+> ```
+>
+> ---
+>
+> **Part 3 — Frontend: three-view Actions page**
+>
+> Replace the current Actions page with three tabs: Sprint (default), Hypotheses, Backlog.
+>
+> **Sprint tab (default view):**
+>
+> ```
+> ┌─────────────────────────────────────────────┐
+> │ THIS WEEK · W11 · March 15–21              │
+> │ 7 actions · $2.1M expected value           │
+> │ Q1 status: 76% attained → 85% if executed  │
+> └─────────────────────────────────────────────┘
+>
+> [Hypothesis group: render one card per active hypothesis]
+>
+> ┌─────────────────────────────────────────────┐
+> │ 🔴 Large deal conversion                   │
+> │ 2.8-of-5 expected closes — need 3.0        │
+> │                                             │
+> │ #1 Re-engage Butterfly Effects   $277K P0  │
+> │ #2 Advance ABS Kids              $200K P1  │
+> │ #3 Economic buyer: Action Beh    $180K P2  │
+> └─────────────────────────────────────────────┘
+>
+> ┌─────────────────────────────────────────────┐
+> │ ✅ Pipeline coverage                        │
+> │ 2.9x — above 2.5x threshold                │
+> │                                             │
+> │ #4 Pipeline gen (3 reps behind)  $1.2M P1  │
+> └─────────────────────────────────────────────┘
+>
+> ┌─────────────────────────────────────────────┐
+> │ DATA HYGIENE                                │
+> │ #5 4 deals missing close dates        P2   │
+> │ #6 2 deals past close date            P2   │
+> └─────────────────────────────────────────────┘
+>
+> + 306 in backlog →
+> ```
+>
+> **Action card component** — replace Snooze/Reject with the new state buttons:
+>
+> ```tsx
+> // Each action card shows:
+> // - Title, deal name (linked), owner, expected value
+> // - Hypothesis it serves (subtle tag)
+> // - Four buttons: Execute | In Progress | Defer | Not Applicable
+> // - Escalate (shown only for P0 actions)
+>
+> const ACTION_STATES = [
+>   { state: 'executed',        label: '✓ Execute',      color: 'green',  primary: true },
+>   { state: 'in_progress',     label: '→ In Progress',  color: 'blue',   primary: false },
+>   { state: 'deferred',        label: '↷ Next Week',    color: 'gray',   primary: false },
+>   { state: 'not_applicable',  label: '✗ Not Relevant', color: 'gray',   primary: false },
+> ]
+>
+> // When 'In Progress' is clicked:
+> // - State updates immediately (optimistic)
+> // - Toast: "Got it — I'll check back in 2 weeks"
+> // - crumb trail fires in background
+>
+> // When 'Execute' is clicked on a deal action:
+> // - If action has dealId: show CRM task creation dialog
+> // - On confirm: POST to CRM, mark executed
+> ```
+>
+> **Hypotheses tab:**
+> Shows all active standing hypotheses with their weekly_values sparkline.
+> Each hypothesis shows its child actions (sprint + backlog).
+> This is the monitoring view — not action-taking.
+>
+> **Backlog tab:**
+> Full list, all 313 (or however many). Sortable by severity, impact, age.
+> No hypothesis grouping — this is the raw queue.
+> Users can promote any backlog action to this week's sprint manually.
+> Search and filter by rep, skill, deal.
+>
+> ---
+>
+> **Part 4 — Fix deal name expansion in Concierge cards**
+>
+> The message-level AB/RAB expansion only covers Ask Pandora.
+> Apply the same expansion to deal names wherever they render in Concierge:
+>
+> ```typescript
+> // In the Concierge card renderer, wrap deal names:
+> import { expandDealName } from '../concierge/abbreviation-expander'
+>
+> // expandDealName reads workspace_config.products and replaces known abbreviations
+> // "ABS Kids - AB + RAB" → "ABS Kids - Assessment Builder + Reassessment Builder"
+> ```
+>
+> ---
+>
+> **Verification:**
+>
+> 1. Trigger `assembleWeeklySprint` for Frontera
+> 2. Check sprint endpoint returns exactly 7 actions with hypothesis_id populated on at least 3
+> 3. Open Actions page — default view shows sprint grouped by hypothesis, not 313-item list
+> 4. Click "In Progress" on one action — confirm crumb trail fires and toast appears
+> 5. Click "Defer" — action disappears from sprint, appears next week
+> 6. Check Concierge cards — "AB + RAB" should render as "Assessment Builder + Reassessment Builder"
+> 7. Backlog tab shows remaining actions with filters working
+>
+> Server must start clean. No new TS errors in files we own.

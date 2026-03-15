@@ -487,6 +487,195 @@ router.post('/:workspaceId/action-items/:actionId/execute', async (req: Request<
   }
 });
 
+// ── Sprint endpoints ────────────────────────────────────────────────────────
+
+router.get('/:workspaceId/actions/sprint', async (req: Request<WorkspaceParams>, res: Response) => {
+  try {
+    const { workspaceId } = req.params;
+    const weekStr = (req.query.week as string) || new Date().toISOString().split('T')[0];
+
+    // Sprint actions for the current week
+    const sprintResult = await dbQuery(`
+      SELECT a.*,
+             d.name as deal_name, d.source_id as deal_source_id,
+             h.hypothesis, h.metric, h.current_value, h.alert_threshold, h.alert_direction
+      FROM actions a
+      LEFT JOIN deals d ON a.target_deal_id = d.id
+      LEFT JOIN standing_hypotheses h ON a.hypothesis_id = h.id
+      WHERE a.workspace_id = $1
+        AND a.sprint_week IS NOT NULL
+        AND a.sprint_week >= date_trunc('week', $2::date)
+        AND a.sprint_week < date_trunc('week', $2::date) + interval '7 days'
+        AND a.state NOT IN ('executed', 'not_applicable')
+      ORDER BY
+        CASE a.severity WHEN 'critical' THEN 1 WHEN 'warning' THEN 2 ELSE 3 END,
+        COALESCE(a.expected_value_delta, 0) DESC
+    `, [workspaceId, weekStr]);
+
+    // Active hypotheses
+    const hypResult = await dbQuery(`
+      SELECT * FROM standing_hypotheses
+      WHERE workspace_id = $1 AND status = 'active'
+      ORDER BY
+        CASE WHEN current_value IS NOT NULL AND alert_threshold IS NOT NULL
+             AND ((alert_direction = 'below' AND current_value::numeric < alert_threshold::numeric)
+               OR (alert_direction = 'above' AND current_value::numeric > alert_threshold::numeric))
+             THEN 0 ELSE 1 END,
+        created_at ASC
+    `, [workspaceId]);
+
+    // Total backlog count (non-sprint open actions)
+    const backlogCount = await dbQuery(`
+      SELECT COUNT(*) as total FROM actions
+      WHERE workspace_id = $1 AND (sprint_week IS NULL OR state = 'deferred')
+        AND execution_status = 'open'
+    `, [workspaceId]);
+
+    const totalExpectedValue = sprintResult.rows.reduce(
+      (sum: number, a: any) => sum + (parseFloat(a.expected_value_delta) || 0), 0
+    );
+
+    res.json({
+      week: weekStr,
+      actions: sprintResult.rows,
+      hypotheses: hypResult.rows,
+      total_expected_value: totalExpectedValue,
+      backlog_count: parseInt(backlogCount.rows[0].total),
+    });
+  } catch (err) {
+    console.error('[Sprint API]', err);
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+router.get('/:workspaceId/actions/backlog', async (req: Request<WorkspaceParams>, res: Response) => {
+  try {
+    const { workspaceId } = req.params;
+    const { severity, action_type, owner_email, source_skill, sort = 'severity', limit = '50', offset = '0', search } = req.query;
+
+    let where = `a.workspace_id = $1 AND a.execution_status = 'open'`;
+    const params: any[] = [workspaceId];
+    let paramIdx = 2;
+
+    if (severity) { where += ` AND a.severity = $${paramIdx++}`; params.push(severity); }
+    if (action_type) { where += ` AND a.action_type = $${paramIdx++}`; params.push(action_type); }
+    if (owner_email) { where += ` AND a.owner_email = $${paramIdx++}`; params.push(owner_email); }
+    if (source_skill) { where += ` AND a.source_skill = $${paramIdx++}`; params.push(source_skill); }
+    if (search) { where += ` AND a.title ILIKE $${paramIdx++}`; params.push(`%${search}%`); }
+
+    let orderBy = `CASE a.severity WHEN 'critical' THEN 1 WHEN 'warning' THEN 2 ELSE 3 END, a.created_at DESC`;
+    if (sort === 'impact') orderBy = 'COALESCE(a.impact_amount, a.expected_value_delta) DESC NULLS LAST, a.created_at DESC';
+    if (sort === 'age') orderBy = 'a.created_at ASC';
+
+    const result = await dbQuery(`
+      SELECT a.*, d.name as deal_name, h.metric as hypothesis_metric
+      FROM actions a
+      LEFT JOIN deals d ON a.target_deal_id = d.id
+      LEFT JOIN standing_hypotheses h ON a.hypothesis_id = h.id
+      WHERE ${where}
+      ORDER BY ${orderBy}
+      LIMIT $${paramIdx++} OFFSET $${paramIdx++}
+    `, [...params, Math.min(parseInt(limit as string), 200), parseInt(offset as string) || 0]);
+
+    const countResult = await dbQuery(`SELECT COUNT(*) as total FROM actions a WHERE ${where}`, params);
+
+    res.json({
+      actions: result.rows,
+      total: parseInt(countResult.rows[0].total),
+      limit: parseInt(limit as string),
+      offset: parseInt(offset as string),
+    });
+  } catch (err) {
+    console.error('[Backlog API]', err);
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+router.patch('/:workspaceId/action-items/:actionId/state', async (req: Request<WorkspaceParams & { actionId: string }>, res: Response) => {
+  try {
+    const { workspaceId, actionId } = req.params;
+    const { state } = req.body;
+
+    const validStates = ['pending', 'in_progress', 'executed', 'deferred', 'not_applicable', 'escalated'];
+    if (!validStates.includes(state)) {
+      return res.status(400).json({ error: `Invalid state. Must be one of: ${validStates.join(', ')}` });
+    }
+
+    const current = await dbQuery(
+      `SELECT id, state, sprint_week, hypothesis_id, target_deal_id, title FROM actions WHERE id = $1 AND workspace_id = $2`,
+      [actionId, workspaceId]
+    );
+    if (current.rows.length === 0) {
+      return res.status(404).json({ error: 'Action not found' });
+    }
+    const action = current.rows[0];
+
+    // Calculate next sprint week for 'deferred'
+    let newSprintWeek: string | null = null;
+    if (state === 'deferred' && action.sprint_week) {
+      const next = new Date(action.sprint_week);
+      next.setUTCDate(next.getUTCDate() + 7);
+      newSprintWeek = next.toISOString().split('T')[0];
+    }
+
+    // Map sprint state to execution_status for backwards compat
+    const statusMap: Record<string, string> = {
+      pending: 'open',
+      in_progress: 'in_progress',
+      executed: 'executed',
+      deferred: 'open',
+      not_applicable: 'dismissed',
+      escalated: 'open',
+    };
+
+    await dbQuery(`
+      UPDATE actions SET
+        state = $1,
+        execution_status = $2,
+        sprint_week = COALESCE($3::date, sprint_week),
+        updated_at = now()
+      WHERE id = $4 AND workspace_id = $5
+    `, [state, statusMap[state], newSprintWeek, actionId, workspaceId]);
+
+    // Side effects
+    if (state === 'in_progress') {
+      // Fire crumb trail asynchronously (non-fatal)
+      import('../concierge/crumb-trail-detector.js').then(({ recordCrumbTrail, detectCrumbTrail }) => {
+        const ctx = {
+          workspaceId,
+          userMessage: `Working on action: ${action.title}`,
+          triggerType: 'ask_pandora' as const,
+          standingHypothesisId: action.hypothesis_id ?? undefined,
+        };
+        recordCrumbTrail(ctx, detectCrumbTrail(ctx.userMessage)).catch(() => {});
+      }).catch(() => {});
+    }
+
+    if (state === 'deferred' && newSprintWeek) {
+      console.log(`[Sprint] Action ${actionId} deferred to week ${newSprintWeek}`);
+    }
+
+    res.json({ success: true, state, sprint_week: newSprintWeek ?? action.sprint_week });
+  } catch (err) {
+    console.error('[State PATCH]', err);
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+router.post('/:workspaceId/actions/sprint/assemble', async (req: Request<WorkspaceParams>, res: Response) => {
+  try {
+    const { workspaceId } = req.params;
+    const { assembleWeeklySprint } = await import('../jobs/assemble-weekly-sprint.js');
+    const result = await assembleWeeklySprint(workspaceId);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('[Sprint Assemble]', err);
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// ── Snooze ──────────────────────────────────────────────────────────────────
+
 router.post('/:workspaceId/action-items/:actionId/snooze', async (req: Request<WorkspaceParams & { actionId: string }>, res: Response) => {
   try {
     const { workspaceId, actionId } = req.params;

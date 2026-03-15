@@ -9,6 +9,7 @@ import {
   type BriefPriorityFrame,
   type WorkspaceVoice,
 } from './brief-priorities.js';
+import { loadProductCatalog, expandDealName } from '../chat/deal-lookup.js';
 
 // ===== TYPES =====
 
@@ -626,9 +627,10 @@ export async function assembleOpeningBrief(
     [workspaceId]
   ).then(r => r.rows).catch(() => [] as { id: string; name: string; amount: string | null; stage_normalized: string | null; rfm_grade: string | null; rfm_label: string | null; rfm_recency_days: string | null; owner_email: string | null }[]);
 
+  const _riskProductCatalog = await loadProductCatalog(workspaceId).catch(() => [] as import('../chat/deal-lookup.js').ProductEntry[]);
   const bigDealsAtRisk = bigDealsAtRiskRows.map(r => ({
     id: r.id,
-    name: r.name,
+    name: expandDealName(r.name, _riskProductCatalog),
     amount: Number(r.amount ?? 0),
     stage: r.stage_normalized ?? '',
     rfmGrade: r.rfm_grade ?? '',
