@@ -20,6 +20,8 @@ export const pipelineCoverageSkill: SkillDefinition = {
     'summarizeForClaude',
     'computeToGoCoverage',
     'detectFakePipeline',
+    'computeMethodologyDivergence',
+    'extractMethodologyComparison',
   ],
 
   requiredContext: ['business_model', 'goals_and_targets', 'definitions'],
@@ -214,6 +216,16 @@ Each classification should be:
     },
 
     {
+      id: 'compute-methodology-divergence',
+      name: 'Compute Win Rate Methodology Divergence (Narrow vs Broad)',
+      tier: 'compute',
+      dependsOn: ['gather-coverage-data', 'compute-to-go-coverage'],
+      computeFn: 'computeMethodologyDivergence',
+      computeArgs: {},
+      outputKey: 'methodology_divergence',
+    },
+
+    {
       id: 'synthesize-coverage-report',
       name: 'Synthesize Coverage Report',
       tier: 'claude',
@@ -227,6 +239,7 @@ Each classification should be:
         'classify-rep-risk',
         'calculate-output-budget',
         'summarize-for-claude',
+        'compute-methodology-divergence',
       ],
       claudePrompt: `You are a senior RevOps analyst delivering pipeline coverage analysis for {{business_model.company_name}}.
 
@@ -294,8 +307,41 @@ After your report, emit an <actions> block containing a JSON array of specific, 
 Focus on the top 5-10 most impactful coverage gaps or acceleration opportunities. Example:
 <actions>
 [{"action_type":"flag_coverage_gap","severity":"critical","title":"Coverage ratio below 2x for Q1","summary":"Current pipeline covers only 1.4x of quota. Need $500K in new pipeline to reach 3x target.","recommended_steps":["Schedule pipeline generation sprint","Revisit dormant opportunities","Increase outbound activity"],"owner_email":"manager@company.com","impact_amount":500000,"urgency_label":"this_week"}]
-</actions>`,
+</actions>
+
+{{#if methodology_divergence.comparisonReady}}{{#unless (eq methodology_divergence.severity "info")}}
+---
+WIN RATE METHODOLOGY FOOTNOTE — append at the very end as a <methodology_json> block:
+
+Narrow win rate (won/closed): {{methodology_divergence.narrowWinRate}} → implies {{methodology_divergence.primaryValue}}x required coverage
+Broad win rate (won/created, including derails): {{methodology_divergence.broadWinRate}} → implies {{methodology_divergence.secondaryValue}}x required coverage
+Gap: {{methodology_divergence.divergencePct}}% (severity: {{methodology_divergence.severity}})
+
+In 1–2 sentences: what does the gap between narrow and broad win rate reveal about this team?
+- A large gap means many deals are derailing (lost before a formal close decision). These are invisible losses — they inflate the apparent win rate.
+- A small gap means derails are minimal — the funnel is clean and the narrow win rate is trustworthy.
+Identify which scenario applies and what it means for how much pipeline this team actually needs.
+
+Append this exact JSON block at the very end (after <actions>):
+<methodology_json>
+{
+  "gapExplanation": "1-2 sentences on what the narrow vs broad win rate gap reveals",
+  "recommendedMethod": "narrow_win_rate or broad_win_rate",
+  "recommendedRationale": "one sentence why"
+}
+</methodology_json>
+{{/unless}}{{/if}}`,
       outputKey: 'coverage_report',
+    },
+
+    {
+      id: 'extract-methodology-comparison',
+      name: 'Extract Win Rate Methodology Comparison from Report',
+      tier: 'compute',
+      dependsOn: ['synthesize-coverage-report'],
+      computeFn: 'extractMethodologyComparison',
+      computeArgs: { synthesisKey: 'coverage_report', metric: 'required_coverage' },
+      outputKey: 'methodology_output',
     },
   ],
 

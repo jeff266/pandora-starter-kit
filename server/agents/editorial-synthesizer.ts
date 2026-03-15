@@ -196,6 +196,7 @@ function buildSystemPrompt(input: EditorialInput): string {
   parts.push('3. Adjust depth and vocabulary for the audience.');
   parts.push(`4. Write an opening narrative (2-3 sentences) that frames the briefing for a ${input.audience.role}.`);
   parts.push('5. Output your editorial decisions and section content as structured JSON.');
+  parts.push('6. METHODOLOGY COMPARISON RULE (Slack): If any skill evidence includes a methodologyComparisons array with severity "alert" (gap >30%), prepend a single-line callout before the main content: "⟳ Coverage note: [1-sentence gap explanation]". Suppress "info" severity entirely. For "notable" severity (15-30%), include as a footnote at the end. Never surface both alert and notable for the same metric — alert takes priority.');
   parts.push('');
 
   return parts.join('\n');

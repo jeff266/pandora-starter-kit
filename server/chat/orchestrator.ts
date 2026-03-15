@@ -34,6 +34,7 @@ import { synthesizeDocuments, formatDocumentResponse } from './document-synthesi
 import { formatCurrency } from '../utils/format-currency.js';
 import { runRetroPipeline } from '../retro/pipeline.js';
 import { createSessionContext, type SessionContext } from '../agents/session-context.js';
+import { extractSkillContext, formatMethodologyComparisons } from './context-assembler.js';
 
 export interface ConversationTurnInput {
   surface: 'slack_thread' | 'slack_dm' | 'in_app';
@@ -704,9 +705,15 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
         agentMessage = `[Context: viewing ${scopeType} id=${entityId}] ${message}`;
       } else if (anchor?.result) {
         // Anchor context: user clicked a skill result and is asking a follow-up
-        const skillContext = anchor.result.narrative || anchor.result.summary || '';
-        if (skillContext) {
-          agentMessage = `[Skill run context: ${String(skillContext).slice(0, 600)}]\n\n${message}`;
+        const { narrative, methodologyComparisons } = extractSkillContext(anchor.result);
+        const skillContext = narrative.slice(0, 600);
+        const methodologyNote = formatMethodologyComparisons(methodologyComparisons, 'ask_pandora');
+        const contextParts = [
+          skillContext ? `[Skill run context: ${skillContext}]` : '',
+          methodologyNote ? `[Methodology notes:\n${methodologyNote}]` : '',
+        ].filter(Boolean).join('\n');
+        if (contextParts) {
+          agentMessage = `${contextParts}\n\n${message}`;
         }
       }
 
@@ -1190,7 +1197,18 @@ When recommending frameworks or structures, explain the reasoning behind each ch
     ? `\n\nData coverage notes:\n${caveats.map(c => `- ${c}`).join('\n')}`
     : '';
 
-  return `${base}${contextSection}${caveatSection}
+  const methodologyRule = `
+
+METHODOLOGY COMPARISON RULE:
+When a user's question involves coverage targets, pipeline requirements, or forecast accuracy, Pandora may surface a methodology divergence note. If you receive a [Methodology notes:] block in context, use these rules:
+- severity "info" (gap < 15%): suppress — do not mention it
+- severity "notable" (gap 15–30%): append as a footnote after your main answer
+  Format: ⟳ [1-sentence explanation of what the gap reveals]
+- severity "alert" (gap > 30%): lead your answer with a one-line callout before the main answer
+  Format: ⚠️ [1-sentence callout] — then continue with main answer
+Never pick a methodology as definitively correct. Explain the mechanism. The footnote should help the user understand *why* the methods disagree, not which to blindly trust.`;
+
+  return `${base}${contextSection}${caveatSection}${methodologyRule}
 
 Tailor your recommendations to this company's specific profile.
 For example, objection handling for a $150K ACV enterprise product looks very different

@@ -16,6 +16,7 @@ import { callLLM } from '../utils/llm-router.js';
 import { query } from '../db.js';
 import { AgentDefinition, LoopIteration, LoopRunResult } from './types.js';
 import { createLogger } from '../utils/logger.js';
+import { extractSkillContext, buildSkillContextBlock } from '../chat/context-assembler.js';
 
 const logger = createLogger('loop-executor');
 
@@ -197,6 +198,18 @@ Voice: direct, peer-level, no hedging. Show your math.`,
   };
 }
 
+// Resolve skill output from DB row — prefers structured `output` JSONB column,
+// falls back to legacy `output_text` / `result` columns.
+function resolveSkillOutput(row: { output_text?: string | null; result?: string | null; output?: unknown }): unknown {
+  if (row.output && typeof row.output === 'object' && !Array.isArray(row.output)) {
+    const structured = row.output as Record<string, unknown>;
+    if ('narrative' in structured) {
+      return structured;
+    }
+  }
+  return row.output_text || row.result || null;
+}
+
 // Execute a skill and return its output for the loop
 async function executeSkillForLoop(
   workspaceId: string,
@@ -206,7 +219,7 @@ async function executeSkillForLoop(
   try {
     // First check for recent cached output (within 60 minutes)
     const cached = await query(
-      `SELECT output_text, result FROM skill_runs
+      `SELECT output_text, result, output FROM skill_runs
        WHERE workspace_id = $1 AND skill_id = $2 AND status = 'completed'
          AND started_at >= NOW() - INTERVAL '60 minutes'
        ORDER BY started_at DESC LIMIT 1`,
@@ -215,12 +228,12 @@ async function executeSkillForLoop(
 
     if (cached.rows.length > 0) {
       logger.info({ skillId }, 'Using cached skill output');
-      return cached.rows[0].output_text || cached.rows[0].result;
+      return resolveSkillOutput(cached.rows[0]);
     }
 
     // If no cache, check for any recent output (within 24 hours)
     const recent = await query(
-      `SELECT output_text, result, started_at FROM skill_runs
+      `SELECT output_text, result, output, started_at FROM skill_runs
        WHERE workspace_id = $1 AND skill_id = $2 AND status = 'completed'
        ORDER BY started_at DESC LIMIT 1`,
       [workspaceId, skillId]
@@ -228,7 +241,7 @@ async function executeSkillForLoop(
 
     if (recent.rows.length > 0) {
       logger.info({ skillId, age: recent.rows[0].started_at }, 'Using recent (>60min) skill output');
-      return recent.rows[0].output_text || recent.rows[0].result;
+      return resolveSkillOutput(recent.rows[0]);
     }
 
     // No cached output — log and return null (loop will note unavailability)
@@ -284,12 +297,7 @@ function buildPlanningInput(params: {
   availableSkills: string[];
   previousIterations: LoopIteration[];
 }): string {
-  const evidenceSummary = Object.entries(params.accumulatedEvidence)
-    .map(([skill, output]) => {
-      const text = typeof output === 'string' ? output : JSON.stringify(output);
-      return `### ${skill}\n${text.slice(0, 2000)}${text.length > 2000 ? '...[truncated]' : ''}`;
-    })
-    .join('\n\n');
+  const { text: evidenceSummary } = buildSkillContextBlock(params.accumulatedEvidence, 500, 6000);
 
   const previousSummary = params.previousIterations
     .map(it => `Step ${it.iteration}: ${it.observation} → ${it.plan} → ${it.evaluation}`)
@@ -316,12 +324,7 @@ function buildSynthesisPrompt(
   iterations: LoopIteration[],
   evidence: Record<string, any>
 ): string {
-  const evidenceBlock = Object.entries(evidence)
-    .map(([skill, output]) => {
-      const text = typeof output === 'string' ? output : JSON.stringify(output);
-      return `### ${skill}\n${text.slice(0, 3000)}`;
-    })
-    .join('\n\n');
+  const { text: evidenceBlock } = buildSkillContextBlock(evidence, 750, 9000);
 
   const reasoningChain = iterations
     .map(it => `Step ${it.iteration}: ${it.observation} → ${it.plan} → ${it.evaluation}`)

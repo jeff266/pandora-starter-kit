@@ -560,3 +560,50 @@ export interface ClaudeResponse {
     output_tokens: number;
   };
 }
+
+// ============================================================================
+// Methodology Comparison
+// Emitted by skills that compute dual forecasting methods (pipeline-conversion-rate,
+// forecast-rollup, pipeline-coverage). Stored in skill_runs.output JSONB as
+// result_data.methodologyComparisons[]. Only entries with severity 'notable' or
+// 'alert' are surfaced in Ask Pandora and Slack.
+// ============================================================================
+
+export interface MethodologyComparisonMethod {
+  /** Stable key: 'week3_conversion_rate' | 'win_rate_inverted' | 'stage_weighted_ev' | 'category_weighted_ev' */
+  name: string;
+  /** Human label: 'Week-3 Conversion Rate (trailing 4Q)' */
+  label: string;
+  value: number;
+  /** 'multiplier' | 'percentage' | 'currency' */
+  unit: string;
+}
+
+export interface MethodologyComparison {
+  /** Stable identifier used by downstream consumers: 'required_coverage' | 'forecast_landing' | 'win_rate' */
+  metric: string;
+  primaryMethod: MethodologyComparisonMethod;
+  secondaryMethod: MethodologyComparisonMethod;
+  /** Math.abs(primary.value - secondary.value) */
+  divergence: number;
+  /** divergence / Math.min(primary.value, secondary.value) * 100 */
+  divergencePct: number;
+  /** info < 15% | notable 15–30% | alert > 30% */
+  severity: 'info' | 'notable' | 'alert';
+  /** 1–2 sentences from Claude. Never picks a winner. Explains the mechanism behind the gap. */
+  gapExplanation: string;
+  /** Name of the method Claude judges more reliable for this workspace */
+  recommendedMethod: string;
+  /** One sentence: why */
+  recommendedRationale: string;
+}
+
+/**
+ * Structured output returned by the extract-methodology-comparison compute step.
+ * When the last skill step returns this shape, the runtime stores narrative as
+ * result_data.narrative and methodologyComparisons as result_data.methodologyComparisons.
+ */
+export interface StructuredSkillOutput {
+  narrative: string;
+  methodologyComparisons: MethodologyComparison[];
+}

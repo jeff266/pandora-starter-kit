@@ -9619,6 +9619,219 @@ export const toolRegistry = new Map<string, ToolDefinition>([
       };
     }, params),
   } as ToolDefinition],
+
+  // ── Methodology Divergence — pipeline-conversion-rate ─────────────────────
+  ['computeMethodologyDivergence', {
+    name: 'computeMethodologyDivergence',
+    description: 'Compute divergence between week-3 conversion rate implied coverage and win-rate implied coverage. Pure arithmetic — no AI tokens.',
+    tier: 'compute',
+    parameters: { type: 'object', properties: {}, required: [] },
+    execute: async (params, context) => safeExecute('computeMethodologyDivergence', async () => {
+      const completedQ = (context.stepResults as any).completed_quarters ?? {};
+      const winRates = (context.stepResults as any).win_rates ?? {};
+
+      // Trailing conversion rate (e.g. 0.31) → implied coverage = 1 / 0.31 = 3.23x
+      const conversionRate = completedQ.trailingConversionRate ?? completedQ.conversionRate ?? 0;
+      const narrowWinRate = winRates.narrowWinRate ?? winRates.narrow ?? 0;
+
+      if (!conversionRate || !narrowWinRate || conversionRate <= 0 || narrowWinRate <= 0) {
+        return { comparisonReady: false, reason: 'Insufficient data for divergence computation' };
+      }
+
+      const primaryValue = Math.round((1 / conversionRate) * 100) / 100;    // conversion-rate implied coverage
+      const secondaryValue = Math.round((1 / narrowWinRate) * 100) / 100;   // win-rate implied coverage
+
+      const divergence = Math.abs(primaryValue - secondaryValue);
+      const minVal = Math.min(primaryValue, secondaryValue);
+      const divergencePct = minVal > 0 ? Math.round((divergence / minVal) * 100) : 0;
+      const severity: 'info' | 'notable' | 'alert' =
+        divergencePct < 15 ? 'info' : divergencePct < 30 ? 'notable' : 'alert';
+
+      return {
+        comparisonReady: true,
+        metric: 'required_coverage',
+        primaryValue,
+        secondaryValue,
+        divergence: Math.round(divergence * 100) / 100,
+        divergencePct,
+        severity,
+        conversionRate,
+        narrowWinRate,
+        derailRate: winRates.derailRate ?? 0,
+      };
+    }, params),
+  } as ToolDefinition],
+
+  // ── Methodology Divergence — forecast-rollup ──────────────────────────────
+  ['computeForecastMethodologyDivergence', {
+    name: 'computeForecastMethodologyDivergence',
+    description: 'Compute divergence between category-weighted EV and stage-weighted EV for the current quarter forecast. Pure arithmetic.',
+    tier: 'compute',
+    parameters: { type: 'object', properties: {}, required: [] },
+    execute: async (params, context) => safeExecute('computeForecastMethodologyDivergence', async () => {
+      const forecastData = (context.stepResults as any).forecast_data ?? {};
+      const timeWindows = (context.stepResults as any).time_windows ?? {};
+
+      // Category-weighted EV — read from forecastData if available
+      const categoryEV: number = forecastData.categoryWeightedEV
+        ?? forecastData.weighted_ev
+        ?? forecastData.weightedEV
+        ?? 0;
+
+      // Stage-weighted EV — compute from open deals this quarter
+      const qStart = timeWindows?.analysisRange?.start
+        ? new Date(timeWindows.analysisRange.start).toISOString().split('T')[0]
+        : new Date().toISOString().split('T')[0];
+      const qEnd = timeWindows?.analysisRange?.end
+        ? new Date(timeWindows.analysisRange.end).toISOString().split('T')[0]
+        : new Date().toISOString().split('T')[0];
+
+      const stageWeights: Record<string, number> = {
+        prospecting: 0.05, qualification: 0.10, needs_analysis: 0.20,
+        value_proposition: 0.30, proposal: 0.60, negotiation: 0.75,
+        commit: 0.85, verbal_commit: 0.90,
+      };
+
+      const dealsResult = await query<{ stage_normalized: string; amount: string }>(
+        `SELECT stage_normalized, amount
+         FROM deals
+         WHERE workspace_id = $1
+           AND close_date >= $2 AND close_date <= $3
+           AND stage_normalized NOT IN ('closed_won','closed_lost')
+           AND amount IS NOT NULL`,
+        [context.workspaceId, qStart, qEnd]
+      );
+
+      let stageEV = 0;
+      for (const row of dealsResult.rows) {
+        const w = stageWeights[row.stage_normalized] ?? 0.25;
+        stageEV += Number(row.amount) * w;
+      }
+      stageEV = Math.round(stageEV);
+
+      if (!categoryEV || !stageEV) {
+        return { comparisonReady: false, reason: 'Insufficient EV data for divergence computation' };
+      }
+
+      const divergence = Math.abs(categoryEV - stageEV);
+      const minVal = Math.min(categoryEV, stageEV);
+      const divergencePct = minVal > 0 ? Math.round((divergence / minVal) * 100) : 0;
+      const severity: 'info' | 'notable' | 'alert' =
+        divergencePct < 15 ? 'info' : divergencePct < 30 ? 'notable' : 'alert';
+
+      // Determine direction for prompt context
+      const direction = categoryEV > stageEV ? 'over_confident' : 'under_categorized';
+
+      return {
+        comparisonReady: true,
+        metric: 'forecast_landing',
+        categoryWeightedEV: categoryEV,
+        stageWeightedEV: stageEV,
+        divergence,
+        divergencePct,
+        severity,
+        direction,
+      };
+    }, params),
+  } as ToolDefinition],
+
+  // ── Extract Methodology Comparison JSON from Synthesis Output ─────────────
+  ['extractMethodologyComparison', {
+    name: 'extractMethodologyComparison',
+    description: 'Parses the <methodology_json> block from a Claude synthesis step output, assembles MethodologyComparison[], and returns StructuredSkillOutput { narrative, methodologyComparisons }.',
+    tier: 'compute',
+    parameters: {
+      type: 'object',
+      properties: {
+        synthesisKey: { type: 'string', description: 'stepResults key holding the synthesis text (default: synthesis)' },
+        metric: { type: 'string', description: 'Comparison metric identifier: required_coverage | forecast_landing | win_rate' },
+      },
+      required: [],
+    },
+    execute: async (params, context) => safeExecute('extractMethodologyComparison', async () => {
+      const synthesisKey = (params as any).synthesisKey ?? 'synthesis';
+      const metric = (params as any).metric ?? 'required_coverage';
+      const rawText: string = String((context.stepResults as any)[synthesisKey] ?? '');
+
+      // Extract <methodology_json>...</methodology_json> block
+      const jsonMatch = rawText.match(/<methodology_json>\s*([\s\S]*?)\s*<\/methodology_json>/);
+      const cleanNarrative = rawText.replace(/<methodology_json>[\s\S]*?<\/methodology_json>/g, '').trim();
+
+      if (!jsonMatch) {
+        // No JSON block — no comparison to emit
+        return { narrative: cleanNarrative || rawText, methodologyComparisons: [] };
+      }
+
+      let parsed: any = null;
+      try {
+        parsed = JSON.parse(jsonMatch[1]);
+      } catch {
+        // Malformed JSON — return clean narrative with empty comparisons
+        return { narrative: cleanNarrative || rawText, methodologyComparisons: [] };
+      }
+
+      if (!parsed?.gapExplanation) {
+        return { narrative: cleanNarrative || rawText, methodologyComparisons: [] };
+      }
+
+      // Assemble the MethodologyComparison from the stored divergence compute step
+      const divergenceKey = metric === 'forecast_landing'
+        ? 'forecast_methodology_divergence'
+        : 'methodology_divergence';
+      const divergenceData = (context.stepResults as any)[divergenceKey] ?? {};
+
+      if (!divergenceData.comparisonReady) {
+        return { narrative: cleanNarrative || rawText, methodologyComparisons: [] };
+      }
+
+      const comparison = metric === 'required_coverage' ? {
+        metric,
+        primaryMethod: {
+          name: 'week3_conversion_rate',
+          label: 'Week-3 Conversion Rate (trailing 4Q)',
+          value: divergenceData.primaryValue,
+          unit: 'multiplier',
+        },
+        secondaryMethod: {
+          name: 'win_rate_inverted',
+          label: 'Win Rate Implied Coverage (narrow, trailing 4Q)',
+          value: divergenceData.secondaryValue,
+          unit: 'multiplier',
+        },
+        divergence: divergenceData.divergence,
+        divergencePct: divergenceData.divergencePct,
+        severity: divergenceData.severity,
+        gapExplanation: parsed.gapExplanation,
+        recommendedMethod: parsed.recommendedMethod ?? 'week3_conversion_rate',
+        recommendedRationale: parsed.recommendedRationale ?? '',
+      } : {
+        metric,
+        primaryMethod: {
+          name: 'category_weighted_ev',
+          label: 'Category-Weighted Expected Value',
+          value: divergenceData.categoryWeightedEV,
+          unit: 'currency',
+        },
+        secondaryMethod: {
+          name: 'stage_weighted_ev',
+          label: 'Stage-Weighted Expected Value',
+          value: divergenceData.stageWeightedEV,
+          unit: 'currency',
+        },
+        divergence: divergenceData.divergence,
+        divergencePct: divergenceData.divergencePct,
+        severity: divergenceData.severity,
+        gapExplanation: parsed.gapExplanation,
+        recommendedMethod: parsed.recommendedMethod ?? 'category_weighted_ev',
+        recommendedRationale: parsed.recommendedRationale ?? '',
+      };
+
+      return {
+        narrative: cleanNarrative || rawText,
+        methodologyComparisons: [comparison],
+      };
+    }, params),
+  } as ToolDefinition],
 ]);
 
 // ============================================================================

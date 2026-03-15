@@ -21,6 +21,8 @@ export const forecastRollupSkill: SkillDefinition = {
     'computeForecastAnnotations',
     'mergeAnnotationsWithUserState',
     'computeTriangulationBearings',
+    'computeForecastMethodologyDivergence',
+    'extractMethodologyComparison',
   ],
 
   requiredContext: ['goals_and_targets'],
@@ -116,6 +118,16 @@ export const forecastRollupSkill: SkillDefinition = {
     },
 
     {
+      id: 'compute-forecast-methodology-divergence',
+      name: 'Compute Forecast Methodology Divergence (Category EV vs Stage EV)',
+      tier: 'compute',
+      dependsOn: ['gather-forecast-data', 'resolve-time-windows'],
+      computeFn: 'computeForecastMethodologyDivergence',
+      computeArgs: {},
+      outputKey: 'forecast_methodology_divergence',
+    },
+
+    {
       id: 'prepare-summary',
       name: 'Prepare Forecast Summary for AI',
       tier: 'compute',
@@ -208,6 +220,7 @@ Return ONLY the JSON array, no other text.`,
         'classify-forecast-risks',
         'calculate-output-budget',
         'merge-and-store-annotations',
+        'compute-forecast-methodology-divergence',
       ],
       claudePrompt: `You are a senior RevOps analyst delivering the Monday morning forecast briefing for {{business_model.company_name}}.
 
@@ -343,7 +356,30 @@ After your report (including AI alerts if present), emit an <actions> block cont
 Focus on the top 5-10 most impactful forecast risks or opportunities. Example:
 <actions>
 [{"action_type":"validate_commit","severity":"warning","title":"Validate $150K commit from Sara","summary":"3 committed deals totaling $150K have no activity in 14+ days.","recommended_steps":["Review deal status with Sara in 1:1","Downgrade to best case if no update by Friday"],"owner_email":"sara@company.com","impact_amount":150000,"urgency_label":"this_week"}]
-</actions>`,
+</actions>
+
+{{#if forecast_methodology_divergence.comparisonReady}}{{#unless (eq forecast_methodology_divergence.severity "info")}}
+---
+METHODOLOGY DIVERGENCE FOOTNOTE — append at the very end of your response as a <methodology_json> block:
+
+Category-weighted EV: \${{forecast_methodology_divergence.categoryWeightedEV}} | Stage-weighted EV: \${{forecast_methodology_divergence.stageWeightedEV}}
+Gap: \${{forecast_methodology_divergence.divergence}} ({{forecast_methodology_divergence.divergencePct}}%, severity: {{forecast_methodology_divergence.severity}})
+Direction: {{forecast_methodology_divergence.direction}}
+
+In 1–2 sentences: what does this gap reveal about how reps are categorizing their deals?
+- If category EV is above stage EV: reps are over-confident in their forecast categories (more aggressive categorization than their stage behavior justifies).
+- If stage EV is above category EV: reps are under-categorizing (their deal activity and stage progression outpaces their category claims).
+Identify which scenario applies and what it means for forecast reliability. Identify which method to trust more for this workspace.
+
+Append this exact JSON block at the very end (after <actions>):
+<methodology_json>
+{
+  "gapExplanation": "1-2 sentences explaining the categorization dynamic",
+  "recommendedMethod": "category_weighted_ev or stage_weighted_ev",
+  "recommendedRationale": "one sentence why"
+}
+</methodology_json>
+{{/unless}}{{/if}}`,
       outputKey: 'narrative',
     },
 
@@ -472,6 +508,16 @@ Return ONLY a JSON array with no other text.`,
       computeFn: 'mergeAnnotationsWithUserState',
       computeArgs: {},
       outputKey: 'final_annotations',
+    },
+
+    {
+      id: 'extract-methodology-comparison',
+      name: 'Extract Methodology Comparison from Forecast Narrative',
+      tier: 'compute',
+      dependsOn: ['synthesize-narrative', 'merge-and-store-annotations'],
+      computeFn: 'extractMethodologyComparison',
+      computeArgs: { synthesisKey: 'narrative', metric: 'forecast_landing' },
+      outputKey: 'methodology_output',
     },
   ],
 

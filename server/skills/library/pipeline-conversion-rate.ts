@@ -18,6 +18,8 @@ export const pipelineConversionRateSkill: SkillDefinition = {
     'prepareConversionSummary',
     'calculateOutputBudget',
     'summarizeForClaude',
+    'computeMethodologyDivergence',
+    'extractMethodologyComparison',
   ],
 
   requiredContext: ['goals_and_targets', 'business_model'],
@@ -87,6 +89,16 @@ export const pipelineConversionRateSkill: SkillDefinition = {
       outputKey: 'coverage_adequacy',
     },
     {
+      id: 'compute-methodology-divergence',
+      name: 'Compute Methodology Divergence (Conversion vs Win Rate)',
+      tier: 'compute',
+      dependsOn: ['compute-coverage-adequacy', 'compute-win-rates'],
+      computeFn: 'computeMethodologyDivergence',
+      computeArgs: {},
+      outputKey: 'methodology_divergence',
+    },
+
+    {
       id: 'classify-conversion-health',
       name: 'Classify Conversion Health',
       tier: 'deepseek',
@@ -144,7 +156,7 @@ Respond with JSON only:
       id: 'synthesize-conversion-report',
       name: 'Synthesize Conversion Report',
       tier: 'claude',
-      dependsOn: ['summarize-for-claude', 'classify-conversion-health'],
+      dependsOn: ['summarize-for-claude', 'classify-conversion-health', 'compute-methodology-divergence'],
       systemPrompt: `You are a RevOps analyst delivering pipeline conversion analysis.
 Lead with the single most important number. Be direct — no hedging.`,
       prompt: `Write a conversion rate analysis using this data:
@@ -161,11 +173,38 @@ Structure:
 4. **Coverage Gap** — if conversion rate implies a different coverage need than current, call it out with $ amount
 5. **Recommended Action** — one clear action (coverage, conversion, or derail reduction)
 
-If a Methodology Footnote is warranted (implied target diverges >15% from 3x): add it as:
-> ⟳ Coverage required: {{implied}}x (conversion rate method) vs. {{standard}}x (standard) — [1-sentence explanation]
+Under 350 words.
 
-Under 350 words.`,
+{{#if methodology_divergence.comparisonReady}}{{#unless (eq methodology_divergence.severity "info")}}
+---
+METHODOLOGY DIVERGENCE FOOTNOTE — append after your main analysis as a <methodology_json> block:
+
+The week-3 conversion rate ({{methodology_divergence.conversionRate}}) implies {{methodology_divergence.primaryValue}}x required coverage.
+The win rate method (narrow win rate: {{methodology_divergence.narrowWinRate}}, derail rate: {{methodology_divergence.derailRate}}) implies {{methodology_divergence.secondaryValue}}x required coverage.
+Gap: {{methodology_divergence.divergencePct}}% (severity: {{methodology_divergence.severity}}).
+
+In exactly 1–2 sentences: explain what this gap reveals about how this team sells. What does it mean when the conversion-based method and the win-rate method disagree by this much? Consider: do they qualify out aggressively early? Are there many no-decisions? Do NOT pick a method as correct. DO explain the mechanism behind the gap. End with one sentence identifying which method is more reliable for this workspace and why.
+
+Append this exact JSON block at the very end of your response (after all narrative):
+<methodology_json>
+{
+  "gapExplanation": "1-2 sentences explaining the mechanism",
+  "recommendedMethod": "week3_conversion_rate or win_rate_inverted",
+  "recommendedRationale": "one sentence why"
+}
+</methodology_json>
+{{/unless}}{{/if}}`,
       outputKey: 'synthesis',
+    },
+
+    {
+      id: 'extract-methodology-comparison',
+      name: 'Extract Methodology Comparison from Synthesis',
+      tier: 'compute',
+      dependsOn: ['synthesize-conversion-report'],
+      computeFn: 'extractMethodologyComparison',
+      computeArgs: { synthesisKey: 'synthesis', metric: 'required_coverage' },
+      outputKey: 'methodology_output',
     },
   ],
 };

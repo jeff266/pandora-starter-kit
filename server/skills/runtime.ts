@@ -1249,12 +1249,22 @@ Important:
         } : undefined;
 
         // Build result_data with both narrative output and evidence
+        // If the last step returned a StructuredSkillOutput ({ narrative, methodologyComparisons }),
+        // unwrap it so narrative stays as the main text and comparisons go into their own field.
+        const isStructuredOutput =
+          output && typeof output === 'object' && !Array.isArray(output) && 'narrative' in output;
+        const narrativeText = isStructuredOutput ? (output as any).narrative : output;
+        const methodologyComparisons: any[] | undefined = isStructuredOutput
+          ? (output as any).methodologyComparisons
+          : undefined;
+
         // Save evidence even if output is null (e.g., when synthesis step fails)
-        const resultData = (output || evidence || annotations) ? {
-          ...(output ? { narrative: output } : {}),
+        const resultData = (narrativeText || evidence || annotations) ? {
+          ...(narrativeText !== undefined && narrativeText !== null ? { narrative: narrativeText } : {}),
           ...(evidence ? { evidence } : {}),
           ...(annotations ? { annotations } : {}),
           ...(annotationsMetadata ? { annotations_metadata: annotationsMetadata } : {}),
+          ...(methodologyComparisons?.length ? { methodologyComparisons } : {}),
         } : null;
 
         await query(
