@@ -9710,6 +9710,52 @@ export const toolRegistry = new Map<string, ToolDefinition>([
     }, params),
   } as ToolDefinition],
 
+  // ── Behavioral-Adjusted EV (forecast-rollup bearing 6) ────────────────────
+  ['computeBehavioralAdjustedEV', {
+    name: 'computeBehavioralAdjustedEV',
+    description: 'Compute the 6th triangulation bearing: apply behavioral stage corrections from stage-mismatch-detector to open-deal EVs',
+    tier: 'compute',
+    parameters: { type: 'object', properties: {}, required: [] },
+    execute: async (params, context) => safeExecute('computeBehavioralAdjustedEV', async () => {
+      const { computeBehavioralAdjustedEV: computeFn } = await import('../analysis/behavioral-stage-correction.js');
+      const timeWindows = (context.stepResults as any).time_windows ?? {};
+      const qStart = timeWindows?.analysisRange?.start
+        ? new Date(timeWindows.analysisRange.start).toISOString().split('T')[0]
+        : new Date().toISOString().split('T')[0];
+      const qEnd = timeWindows?.analysisRange?.end
+        ? new Date(timeWindows.analysisRange.end).toISOString().split('T')[0]
+        : new Date().toISOString().split('T')[0];
+
+      const dealsResult = await query<{ id: string; name: string; amount: string; stage_normalized: string; owner_email: string }>(
+        `SELECT id, COALESCE(name, 'Unnamed') AS name, COALESCE(amount, 0) AS amount,
+                COALESCE(stage_normalized, 'unknown') AS stage_normalized,
+                COALESCE(owner_email, '') AS owner_email
+         FROM deals
+         WHERE workspace_id = $1
+           AND close_date >= $2 AND close_date <= $3
+           AND stage_normalized NOT IN ('closed_won','closed_lost')
+           AND amount IS NOT NULL AND amount > 0`,
+        [context.workspaceId, qStart, qEnd]
+      );
+
+      const openDeals = dealsResult.rows.map(r => ({
+        id: r.id,
+        name: r.name,
+        amount: Number(r.amount),
+        stageNormalized: r.stage_normalized,
+        ownerEmail: r.owner_email,
+      }));
+
+      const stageCloseProbabilities: Record<string, number> = {
+        prospecting: 0.05, qualification: 0.10, needs_analysis: 0.20,
+        value_proposition: 0.30, proposal: 0.60, negotiation: 0.75,
+        commit: 0.85, verbal_commit: 0.90,
+      };
+
+      return computeFn(context.workspaceId, openDeals, stageCloseProbabilities);
+    }, params),
+  } as ToolDefinition],
+
   // ── To-Go Coverage (pipeline-coverage enhancement) ───────────────────────
   ['computeToGoCoverage', {
     name: 'computeToGoCoverage',
@@ -10021,9 +10067,48 @@ export const toolRegistry = new Map<string, ToolDefinition>([
         recommendedRationale: parsed.recommendedRationale ?? '',
       };
 
+      const methodologyComparisons: any[] = [comparison];
+
+      // Append behavioral vs stage EV comparison if bearing 6 ran
+      const behavioralEV = (context.stepResults as any).behavioral_adjusted_ev;
+      if (
+        behavioralEV?.correctedDealCount > 0 &&
+        divergenceData.stageWeightedEV > 0
+      ) {
+        const bvsDivergence = Math.abs(behavioralEV.bearingValue - divergenceData.stageWeightedEV);
+        const bvsMinVal = Math.min(behavioralEV.bearingValue, divergenceData.stageWeightedEV);
+        const bvsDivergencePct = bvsMinVal > 0 ? Math.round((bvsDivergence / bvsMinVal) * 100) : 0;
+        const bvsSeverity: 'info' | 'notable' | 'alert' =
+          bvsDivergencePct < 15 ? 'info' : bvsDivergencePct < 30 ? 'notable' : 'alert';
+
+        methodologyComparisons.push({
+          metric: 'forecast_landing',
+          primaryMethod: {
+            name: 'behavioral_adjusted_ev',
+            label: `Behavioral-Adjusted EV (${behavioralEV.correctedDealCount} deals corrected)`,
+            value: behavioralEV.bearingValue,
+            unit: 'currency',
+          },
+          secondaryMethod: {
+            name: 'stage_weighted_ev',
+            label: 'Stage-Weighted EV (CRM stages as-is)',
+            value: divergenceData.stageWeightedEV,
+            unit: 'currency',
+          },
+          divergence: bvsDivergence,
+          divergencePct: bvsDivergencePct,
+          severity: bvsSeverity,
+          gapExplanation: behavioralEV.understatedDeals > behavioralEV.overstatedDeals
+            ? 'CRM stages are behind behavioral reality — forecast is likely understated.'
+            : 'Some deals are ahead of their behavioral signals — watch for slippage.',
+          recommendedMethod: 'behavioral_adjusted_ev',
+          recommendedRationale: 'Behavioral signals reflect actual deal state; CRM stages reflect last update.',
+        });
+      }
+
       return {
         narrative: cleanNarrative || rawText,
-        methodologyComparisons: [comparison],
+        methodologyComparisons,
       };
     }, params),
   } as ToolDefinition],

@@ -25,12 +25,14 @@ async function findCompletedQuarters(workspaceId: string): Promise<CompletedQuar
   );
 
   return result.rows.map(r => {
-    const start = new Date(r.quarter_start);
-    const qNum = Math.floor(start.getMonth() / 3) + 1;
+    // pg may return Date objects or strings for date columns
+    const startRaw = r.quarter_start instanceof Date ? r.quarter_start : new Date(String(r.quarter_start) + 'T00:00:00Z');
+    const endRaw = r.quarter_end instanceof Date ? r.quarter_end : new Date(String(r.quarter_end) + 'T00:00:00Z');
+    const qNum = Math.floor(startRaw.getUTCMonth() / 3) + 1;
     return {
-      label: `Q${qNum} ${start.getFullYear()}`,
-      start,
-      end: new Date(r.quarter_end + 'T23:59:59'),
+      label: `Q${qNum} ${startRaw.getUTCFullYear()}`,
+      start: startRaw,
+      end: new Date(endRaw.getTime() + 86399999), // end of day UTC
     };
   });
 }

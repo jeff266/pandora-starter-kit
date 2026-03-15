@@ -21,6 +21,7 @@ export const forecastRollupSkill: SkillDefinition = {
     'computeForecastAnnotations',
     'mergeAnnotationsWithUserState',
     'computeTriangulationBearings',
+    'computeBehavioralAdjustedEV',
     'computeForecastMethodologyDivergence',
     'extractMethodologyComparison',
   ],
@@ -118,10 +119,20 @@ export const forecastRollupSkill: SkillDefinition = {
     },
 
     {
+      id: 'compute-behavioral-adjusted-ev',
+      name: 'Compute Behavioral-Adjusted EV (Bearing 6)',
+      tier: 'compute',
+      dependsOn: ['compute-triangulation-bearings', 'resolve-time-windows'],
+      computeFn: 'computeBehavioralAdjustedEV',
+      computeArgs: {},
+      outputKey: 'behavioral_adjusted_ev',
+    },
+
+    {
       id: 'compute-forecast-methodology-divergence',
       name: 'Compute Forecast Methodology Divergence (Category EV vs Stage EV)',
       tier: 'compute',
-      dependsOn: ['gather-forecast-data', 'resolve-time-windows'],
+      dependsOn: ['gather-forecast-data', 'resolve-time-windows', 'compute-behavioral-adjusted-ev'],
       computeFn: 'computeForecastMethodologyDivergence',
       computeArgs: {},
       outputKey: 'forecast_methodology_divergence',
@@ -220,6 +231,7 @@ Return ONLY the JSON array, no other text.`,
         'classify-forecast-risks',
         'calculate-output-budget',
         'merge-and-store-annotations',
+        'compute-behavioral-adjusted-ev',
         'compute-forecast-methodology-divergence',
       ],
       claudePrompt: `You are a senior RevOps analyst delivering the Monday morning forecast briefing for {{business_model.company_name}}.
@@ -301,6 +313,21 @@ Grade-Adjusted Expected Value:
 {{/each}}
 - Adjusted commit: \${{forecast_data.icpForecast.grade_adjusted_commit}}
 - Adjusted best case: \${{forecast_data.icpForecast.grade_adjusted_best_case}}
+{{/if}}
+{{/if}}
+
+{{#if behavioral_adjusted_ev}}
+BEHAVIORAL-ADJUSTED EV (Bearing 6 — stage mismatch correction):
+- Bearing value: \${{behavioral_adjusted_ev.bearingValue}}
+- Net adjustment vs CRM stage EV: {{#if behavioral_adjusted_ev.totalEvDelta}}{{#if (gt behavioral_adjusted_ev.totalEvDelta 0)}}+{{/if}}\${{behavioral_adjusted_ev.totalEvDelta}}{{else}}\$0{{/if}}
+- Deals corrected: {{behavioral_adjusted_ev.correctedDealCount}} ({{behavioral_adjusted_ev.understatedDeals}} understated, {{behavioral_adjusted_ev.overstatedDeals}} overstated)
+- Uncorrected (no behavioral signal): {{behavioral_adjusted_ev.uncorrectedDealCount}}
+{{#if behavioral_adjusted_ev.isStale}}⚠️ Stage divergence data is >48 hours old — treat with caution{{/if}}
+{{#if behavioral_adjusted_ev.topCorrections.length}}
+Largest corrections:
+{{#each behavioral_adjusted_ev.topCorrections}}
+- {{dealName}} (\${{dealAmount}}): CRM says {{crmStage}} ({{crmCloseProb}} close prob), behavioral signals say {{behavioralStage}} ({{behavioralCloseProb}} close prob). EV delta: {{#if (gt evDelta 0)}}+{{/if}}\${{evDelta}}
+{{/each}}
 {{/if}}
 {{/if}}
 

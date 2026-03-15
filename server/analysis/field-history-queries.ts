@@ -45,14 +45,14 @@ export async function reconstructDealStateAtDate(
     deal_id: string;
     stage: string | null;
     stage_normalized: string | null;
-    changed_at: string;
+    entered_at: string;
   }>(
-    `SELECT deal_id, stage, stage_normalized, changed_at
+    `SELECT deal_id, stage, stage_normalized, entered_at
      FROM deal_stage_history
      WHERE workspace_id = $1
        AND deal_id = ANY($2)
-       AND changed_at <= $3
-     ORDER BY changed_at DESC`,
+       AND entered_at <= $3
+     ORDER BY entered_at DESC`,
     [workspaceId, dealIds, snap]
   );
 

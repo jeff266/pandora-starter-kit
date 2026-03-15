@@ -168,7 +168,7 @@ export async function reconstructQuarterSnapshot(
   const hasFH = (hasFieldHistory.rows[0]?.c ?? 0) > 0;
 
   const hasStageHist = await query<{ c: number }>(
-    `SELECT COUNT(*)::int AS c FROM deal_stage_history WHERE workspace_id = $1 AND changed_at <= $2 LIMIT 1`,
+    `SELECT COUNT(*)::int AS c FROM deal_stage_history WHERE workspace_id = $1 AND entered_at <= $2 LIMIT 1`,
     [workspaceId, week3Date.toISOString()]
   );
   const hasStageHistory = (hasStageHist.rows[0]?.c ?? 0) > 0;

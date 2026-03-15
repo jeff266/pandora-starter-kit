@@ -1,0 +1,447 @@
+Here are both prompts. Run them in parallel — the bootstrap is a Replit data job, the behavioral correction is a Claude Code build. They don't depend on each other.
+
+---
+
+## Prompt 1 — Retro Accuracy Bootstrap (Replit)
+
+Run these SQL checks first, then trigger the bootstrap job.
+
+**Prerequisite checks:**
+
+```sql
+-- 1. Confirm deal_field_history was populated by the extended backfill
+SELECT
+  field_name,
+  COUNT(*) as transitions,
+  MIN(changed_at) as oldest,
+  MAX(changed_at) as newest
+FROM deal_field_history
+WHERE workspace_id = '<FRONTERA_ID>'
+GROUP BY field_name
+ORDER BY field_name;
+
+-- 2. Check how many completed quarters Frontera has
+SELECT
+  DATE_TRUNC('quarter', close_date)::date as quarter_start,
+  COUNT(*) as total_deals,
+  COUNT(*) FILTER (WHERE stage_normalized = 'closed_won') as won,
+  COUNT(*) FILTER (WHERE stage_normalized = 'closed_lost') as lost,
+  SUM(CASE WHEN stage_normalized = 'closed_won' THEN amount ELSE 0 END) as won_arr
+FROM deals
+WHERE workspace_id = '<FRONTERA_ID>'
+  AND close_date < DATE_TRUNC('quarter', CURRENT_DATE)
+  AND close_date IS NOT NULL
+GROUP BY 1
+ORDER BY 1 DESC
+LIMIT 8;
+
+-- 3. Check forecast_accuracy_log is empty (pre-bootstrap)
+SELECT COUNT(*) FROM forecast_accuracy_log
+WHERE workspace_id = '<FRONTERA_ID>';
+```
+
+If `deal_field_history` has entries for `forecastcategory`, `amount`, and `closedate` — proceed. If it only has `dealstage`, the stage-weighted EV bearing will compute but category-weighted EV won't. Note which fields are available before triggering.
+
+**Trigger the bootstrap:**
+
+```bash
+POST /api/workspaces/<FRONTERA_ID>/jobs/retro-accuracy-bootstrap
+```
+
+Wait for completion, then report:
+
+```sql
+-- Full accuracy results
+SELECT
+  quarter_label,
+  quarter_start,
+  method,
+  predicted_arr,
+  actual_arr,
+  error_abs,
+  ROUND(error_pct, 1) as error_pct,
+  error_direction,
+  source
+FROM forecast_accuracy_log
+WHERE workspace_id = '<FRONTERA_ID>'
+ORDER BY quarter_start DESC, error_pct ASC;
+
+-- Summary: which method is most accurate?
+SELECT
+  method,
+  COUNT(*) as quarters_measured,
+  ROUND(AVG(error_pct), 1) as avg_error_pct,
+  ROUND(MIN(error_pct), 1) as best_quarter,
+  ROUND(MAX(error_pct), 1) as worst_quarter,
+  COUNT(*) FILTER (WHERE error_direction = 'over') as over_count,
+  COUNT(*) FILTER (WHERE error_direction = 'under') as under_count
+FROM forecast_accuracy_log
+WHERE workspace_id = '<FRONTERA_ID>'
+GROUP BY method
+ORDER BY avg_error_pct ASC;
+```
+
+Report:
+1. How many completed quarters were bootstrapped?
+2. Which method has the lowest average error for Frontera?
+3. Is there a consistent bias — does any method consistently over or under-predict?
+4. Was `category_weighted_ev` computable, or did it fall back due to missing `forecastcategory` history?
+5. Paste the full summary table
+
+---
+
+## Prompt 2 — Behavioral Stage Correction (Claude Code)
+
+Read these files first:
+1. `server/skills/library/forecast-rollup.ts` — find the triangulation bearings section, specifically where the 5 existing bearings are computed
+2. `server/skills/library/stage-divergence.ts` (or wherever stage divergence lives) — understand the output shape: which deals are flagged, what the divergent stage is, how confident the divergence is
+3. `server/analysis/win-rate.ts` — find the stage close probability defaults or config lookup
+4. `server/skills/types.ts` — find the `MethodologyComparison` interface
+5. `server/analysis/monte-carlo-distributions.ts` — find `fitStageWinRates()` — you'll reuse its stage probability lookup
+
+This prompt adds the 6th triangulation bearing to `forecast-rollup`: **behavioral-adjusted EV**. When stage divergence has detected that a deal is behaviorally ahead of its CRM stage, apply the divergent stage's close probability instead of the CRM stage's close probability when computing expected value.
+
+---
+
+### New compute function
+
+Create `server/analysis/behavioral-stage-correction.ts`:
+
+```typescript
+import { query } from '../db'
+
+export interface BehavioralCorrection {
+  dealId: string
+  dealName: string
+  dealAmount: number
+  ownerEmail: string
+
+  // CRM state
+  crmStage: string
+  crmStageNormalized: string
+  crmCloseProb: number
+  crmExpectedValue: number       // amount × crmCloseProb
+
+  // Behavioral state (from stage-divergence skill output)
+  behavioralStage: string
+  behavioralStageNormalized: string
+  behavioralCloseProb: number
+  behavioralExpectedValue: number  // amount × behavioralCloseProb
+
+  // The correction
+  evDelta: number                // behavioral EV - CRM EV
+  direction: 'understated' | 'overstated'  // is CRM understating or overstating?
+  divergenceSignals: string[]    // what drove the divergence
+  divergenceConfidence: number   // 0–1 from stage-divergence output
+}
+
+export interface BehavioralAdjustedEV {
+  // The 6th bearing
+  bearingValue: number           // sum of behavioral EVs for all corrected deals
+                                 // + CRM stage EVs for uncorrected deals
+
+  // What changed vs CRM-stage EV
+  totalEvDelta: number           // net adjustment (can be positive or negative)
+  corrections: BehavioralCorrection[]
+
+  // Summary counts
+  understatedDeals: number       // CRM is behind behavioral reality
+  overstatedDeals: number        // CRM is ahead of behavioral reality
+  correctedDealCount: number
+  uncorrectedDealCount: number   // deals with no divergence signal
+
+  // Data quality
+  divergenceSkillAge: number     // how many hours since stage-divergence last ran
+  isStale: boolean               // true if > 48 hours since last divergence run
+}
+
+export async function computeBehavioralAdjustedEV(
+  workspaceId: string,
+  openDeals: { id: string; name: string; amount: number; stageNormalized: string; ownerEmail: string }[],
+  stageCloseProbabilities: Record<string, number>
+): Promise<BehavioralAdjustedEV> {
+
+  // Step 1: Load most recent stage-divergence skill run
+  const divergenceRun = await query(`
+    SELECT result_data, started_at
+    FROM skill_runs
+    WHERE workspace_id = $1
+      AND skill_id = 'stage-divergence'
+      AND status = 'completed'
+    ORDER BY started_at DESC
+    LIMIT 1
+  `, [workspaceId])
+
+  if (divergenceRun.rows.length === 0) {
+    // No divergence data — return CRM-stage EV as fallback
+    const crmStageEV = openDeals.reduce((sum, deal) => {
+      const prob = stageCloseProbabilities[deal.stageNormalized] ?? 0.25
+      return sum + deal.amount * prob
+    }, 0)
+
+    return {
+      bearingValue: crmStageEV,
+      totalEvDelta: 0,
+      corrections: [],
+      understatedDeals: 0,
+      overstatedDeals: 0,
+      correctedDealCount: 0,
+      uncorrectedDealCount: openDeals.length,
+      divergenceSkillAge: Infinity,
+      isStale: true,
+    }
+  }
+
+  const divergenceResult = divergenceRun.rows[0].result_data
+  const runAgeHours = (Date.now() - new Date(divergenceRun.rows[0].started_at).getTime()) / 3600000
+
+  // Step 2: Extract divergent deals from skill output
+  // Stage-divergence skill should output a list of deals with divergence signals
+  // Find the correct path in the result_data — likely result_data.divergentDeals or similar
+  const divergentDeals: {
+    dealId: string
+    dealName: string
+    crmStage: string
+    behavioralStage: string
+    signals: string[]
+    confidence: number
+  }[] = divergenceResult?.divergentDeals
+    ?? divergenceResult?.findings?.filter((f: any) => f.type === 'stage_divergence')
+       .map((f: any) => ({
+         dealId: f.dealId,
+         dealName: f.dealName,
+         crmStage: f.crmStage,
+         behavioralStage: f.behavioralStage,
+         signals: f.signals ?? [],
+         confidence: f.confidence ?? 0.7,
+       }))
+    ?? []
+
+  // Build a lookup map for fast access
+  const divergenceMap = new Map(divergentDeals.map(d => [d.dealId, d]))
+
+  // Step 3: Compute corrected EV for each deal
+  const corrections: BehavioralCorrection[] = []
+  let bearingValue = 0
+  let totalEvDelta = 0
+
+  for (const deal of openDeals) {
+    const crmProb = stageCloseProbabilities[deal.stageNormalized] ?? 0.25
+    const crmEV = deal.amount * crmProb
+
+    const divergence = divergenceMap.get(deal.id)
+
+    if (divergence && divergence.confidence >= 0.6) {
+      // Use behavioral stage probability
+      const behavioralStageNorm = normalizeStage(divergence.behavioralStage)
+      const behavioralProb = stageCloseProbabilities[behavioralStageNorm] ?? crmProb
+      const behavioralEV = deal.amount * behavioralProb
+      const evDelta = behavioralEV - crmEV
+
+      corrections.push({
+        dealId: deal.id,
+        dealName: deal.name,
+        dealAmount: deal.amount,
+        ownerEmail: deal.ownerEmail,
+        crmStage: divergence.crmStage,
+        crmStageNormalized: deal.stageNormalized,
+        crmCloseProb: crmProb,
+        crmExpectedValue: crmEV,
+        behavioralStage: divergence.behavioralStage,
+        behavioralStageNormalized: behavioralStageNorm,
+        behavioralCloseProb: behavioralProb,
+        behavioralExpectedValue: behavioralEV,
+        evDelta,
+        direction: evDelta > 0 ? 'understated' : 'overstated',
+        divergenceSignals: divergence.signals,
+        divergenceConfidence: divergence.confidence,
+      })
+
+      bearingValue += behavioralEV
+      totalEvDelta += evDelta
+    } else {
+      // No divergence — use CRM stage as-is
+      bearingValue += crmEV
+    }
+  }
+
+  const correctedIds = new Set(corrections.map(c => c.dealId))
+
+  return {
+    bearingValue,
+    totalEvDelta,
+    corrections,
+    understatedDeals: corrections.filter(c => c.direction === 'understated').length,
+    overstatedDeals: corrections.filter(c => c.direction === 'overstated').length,
+    correctedDealCount: corrections.length,
+    uncorrectedDealCount: openDeals.filter(d => !correctedIds.has(d.id)).length,
+    divergenceSkillAge: runAgeHours,
+    isStale: runAgeHours > 48,
+  }
+}
+
+// Normalize a stage string to match the stageCloseProbabilities keys
+// Reuse the existing normalization function from the codebase
+function normalizeStage(stage: string): string {
+  // Find the existing normalizeStage function in the codebase and call it
+  // It's likely in server/connectors/hubspot/transforms.ts or similar
+  // For now, basic normalization:
+  return stage.toLowerCase().replace(/[^a-z0-9]/g, '_')
+}
+```
+
+---
+
+### Wire into `forecast-rollup`
+
+In `server/skills/library/forecast-rollup.ts`, find the step where triangulation bearings are computed — the step that builds `stageWeightedEV` and `categoryWeightedEV`. Add after it:
+
+```
+Step 2c: compute-behavioral-adjusted-ev (COMPUTE)
+  - Load open deals for this quarter (already loaded in Step 2 or 3)
+  - Load stage close probabilities from workspace config or defaults
+  - Call computeBehavioralAdjustedEV(workspaceId, openDeals, stageProbs)
+  - Output: BehavioralAdjustedEV object
+  - If isStale = true: include in output but flag as stale
+  - Token cost: 0 (SQL read + arithmetic)
+```
+
+Then extend the triangulation bearings object in the forecast synthesis context:
+
+```typescript
+// In the step that assembles triangulation data for Claude:
+triangulationBearings: {
+  repRollup: { ... },          // bearing 1
+  managerRollup: { ... },      // bearing 2
+  stageWeightedEV: { ... },    // bearing 3
+  categoryWeightedEV: { ... }, // bearing 4
+  capacityModel: { ... },      // bearing 5
+  behavioralAdjustedEV: {      // bearing 6 — NEW
+    value: behavioralEV.bearingValue,
+    totalEvDelta: behavioralEV.totalEvDelta,
+    correctedDealCount: behavioralEV.correctedDealCount,
+    understatedDeals: behavioralEV.understatedDeals,
+    overstatedDeals: behavioralEV.overstatedDeals,
+    isStale: behavioralEV.isStale,
+    topCorrections: behavioralEV.corrections
+      .sort((a, b) => Math.abs(b.evDelta) - Math.abs(a.evDelta))
+      .slice(0, 3),            // top 3 corrections by EV delta for synthesis
+  },
+}
+```
+
+---
+
+### Update synthesis prompt
+
+In the Claude synthesis prompt for `forecast-rollup`, extend the triangulation section:
+
+```
+BEARING 6 — Behavioral-Adjusted EV: ${{behavioralAdjustedEV.value}}
+  Net adjustment vs CRM stage EV: {{evDeltaSign}}${{abs(totalEvDelta)}}
+  Deals corrected: {{correctedDealCount}} ({{understatedDeals}} understated, {{overstatedDeals}} overstated)
+  {{#if isStale}}⚠️ Stage divergence data is >48 hours old — treat with caution{{/if}}
+  
+  {{#if topCorrections.length}}
+  Largest corrections:
+  {{#each topCorrections}}
+  - {{dealName}} (${{dealAmount}}): CRM says {{crmStage}} ({{crmCloseProb}}% close prob),
+    behavioral signals say {{behavioralStage}} ({{behavioralCloseProb}}% close prob)
+    EV delta: {{evDeltaSign}}${{abs(evDelta)}}
+  {{/each}}
+  {{/if}}
+```
+
+And add a rule to the triangulation divergence logic:
+
+```
+When behavioral-adjusted EV diverges from stage-weighted EV by >15%:
+  - This means CRM stage hygiene is materially affecting the forecast
+  - Note specifically which deals are driving the divergence
+  - If understatedDeals > overstatedDeals: "CRM stages are behind behavioral reality — 
+    forecast is likely understated by $X"
+  - If overstatedDeals > understatedDeals: "Some deals are ahead of their behavioral signals — 
+    watch for slippage"
+```
+
+---
+
+### Add to `MethodologyComparison` output
+
+The behavioral correction is a natural methodology comparison candidate. Add to the `forecast-rollup` output:
+
+```typescript
+// In the compute-methodology-divergence step for forecast-rollup,
+// add a second comparison alongside category vs stage EV:
+
+if (behavioralEV.correctedDealCount > 0) {
+  const behavioralVsStage = {
+    metric: 'forecast_landing',
+    primaryMethod: {
+      name: 'behavioral_adjusted_ev',
+      label: `Behavioral-Adjusted EV (${behavioralEV.correctedDealCount} deals corrected)`,
+      value: behavioralEV.bearingValue,
+      unit: 'currency',
+    },
+    secondaryMethod: {
+      name: 'stage_weighted_ev',
+      label: 'Stage-Weighted EV (CRM stages as-is)',
+      value: stageWeightedEV,
+      unit: 'currency',
+    },
+    divergence: Math.abs(behavioralEV.bearingValue - stageWeightedEV),
+    divergencePct: Math.abs(behavioralEV.bearingValue - stageWeightedEV)
+      / Math.min(behavioralEV.bearingValue, stageWeightedEV) * 100,
+    severity: // standard threshold logic
+    gapExplanation: '', // populated by Claude synthesis
+    recommendedMethod: 'behavioral_adjusted_ev',
+    recommendedRationale: 'Behavioral signals reflect actual deal state; CRM stages reflect last update.',
+  }
+  methodologyComparisons.push(behavioralVsStage)
+}
+```
+
+---
+
+### Verification
+
+After building, test against Frontera. The prerequisite is that `stage-divergence` has a recent run — check first:
+
+```sql
+SELECT started_at, status, token_count
+FROM skill_runs
+WHERE workspace_id = '<FRONTERA_ID>'
+  AND skill_id = 'stage-divergence'
+ORDER BY started_at DESC
+LIMIT 3;
+```
+
+If no recent run, trigger one first:
+
+```bash
+POST /api/workspaces/<FRONTERA_ID>/skills/stage-divergence/run
+```
+
+Then trigger forecast-rollup and verify:
+
+```sql
+SELECT
+  result_data->'triangulationBearings'->'behavioralAdjustedEV' as behavioral_bearing,
+  result_data->'methodologyComparisons' as comparisons,
+  token_count
+FROM skill_runs
+WHERE workspace_id = '<FRONTERA_ID>'
+  AND skill_id = 'forecast-rollup'
+ORDER BY started_at DESC
+LIMIT 1;
+```
+
+Report:
+1. Was `behavioralAdjustedEV` populated in `triangulationBearings`?
+2. How many deals were corrected? Which direction — understated or overstated?
+3. Does the ACES deal appear in `topCorrections` if stage-divergence flagged it?
+4. Was a `methodology_comparison` emitted for behavioral vs stage EV? What severity?
+5. Does `output_text` mention the behavioral correction with specific deal names and dollar amounts?
+6. Token count — expect < 500 additional tokens vs previous forecast-rollup runs
+
+**Server must start clean with no new TS errors in files we own.**
