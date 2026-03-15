@@ -277,24 +277,6 @@ async function buildDealScopeFilter(
   return { sql: '', params: [] };
 }
 
-// Build a parameterized SQL fragment for a query that already has $1=workspaceId,
-// $2...$K = dealScope params, and needs an additional param starting at $K+1.
-function scopedQuery(
-  baseSQL: string,
-  dealScope: DealScopeFilter,
-  extraParams: any[]
-): { sql: string; params: any[] } {
-  const nextIdx = 2 + dealScope.params.length;
-  // Replace placeholders like {$2} (extra param slots) with computed indices
-  let sql = baseSQL.replace('{dealScope}', dealScope.sql);
-  extraParams.forEach((_, i) => {
-    sql = sql.replace(`{$${i + 1}}`, `$${nextIdx + i}`);
-  });
-  return {
-    sql,
-    params: ['{workspaceId}' as any, ...dealScope.params, ...extraParams],
-  };
-}
 
 // ===== MOVEMENT ANCHOR =====
 

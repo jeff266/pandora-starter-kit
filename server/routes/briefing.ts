@@ -680,8 +680,11 @@ router.post(
       return;
     }
 
-    // Retrieve server-side context snapshot (populated at brief generation time)
-    const snapshot = briefSessionStore.get(sessionId);
+    // Retrieve server-side context snapshot (populated at brief generation time).
+    // Verify the snapshot belongs to this workspace — prevents a user from one
+    // workspace poisoning interaction logs with another workspace's session context.
+    const rawSnapshot = briefSessionStore.get(sessionId);
+    const snapshot = rawSnapshot?.workspaceId === workspaceId ? rawSnapshot : undefined;
 
     // Infer brief relevance: user acted on something the brief surfaced
     const briefWasRelevant = Array.isArray(cardsDrilledInto) && cardsDrilledInto.length > 0

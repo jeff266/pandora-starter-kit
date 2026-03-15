@@ -703,8 +703,8 @@ export async function computeAndStoreRFMScores(workspaceId: string): Promise<{
   const dealIds = Array.from(rawValues.keys());
   if (dealIds.length > 0) {
     const namesResult = await query<{ id: string; name: string }>(
-      `SELECT id, name FROM deals WHERE id = ANY($1)`,
-      [dealIds]
+      `SELECT id, name FROM deals WHERE workspace_id = $1 AND id = ANY($2)`,
+      [workspaceId, dealIds]
     );
     for (const row of namesResult.rows) {
       dealNameMap.set(row.id, row.name);
