@@ -26,8 +26,8 @@ async function findCompletedQuarters(workspaceId: string): Promise<CompletedQuar
 
   return result.rows.map(r => {
     // pg may return Date objects or strings for date columns
-    const startRaw = r.quarter_start instanceof Date ? r.quarter_start : new Date(String(r.quarter_start) + 'T00:00:00Z');
-    const endRaw = r.quarter_end instanceof Date ? r.quarter_end : new Date(String(r.quarter_end) + 'T00:00:00Z');
+    const startRaw = (r.quarter_start as any) instanceof Date ? (r.quarter_start as Date) : new Date(String(r.quarter_start) + 'T00:00:00Z');
+    const endRaw = (r.quarter_end as any) instanceof Date ? (r.quarter_end as Date) : new Date(String(r.quarter_end) + 'T00:00:00Z');
     const qNum = Math.floor(startRaw.getUTCMonth() / 3) + 1;
     return {
       label: `Q${qNum} ${startRaw.getUTCFullYear()}`,

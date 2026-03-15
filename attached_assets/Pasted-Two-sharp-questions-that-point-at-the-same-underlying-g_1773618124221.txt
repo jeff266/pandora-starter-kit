@@ -1,0 +1,120 @@
+Two sharp questions that point at the same underlying gap — the sprint view needs to go one level deeper on both.
+
+The 11 deals — drill-through is missing
+
+"11 late-stage deals need attention" is actionable at the category level but stops short. A RevOps leader reading this immediately asks "which 11?" The answer is in the database — the improve_lever builder already queried them, it just didn't surface them.
+
+The fix is a drill-through interaction: clicking the action row expands to show the deal list inline, or opens the Ask Pandora panel pre-scoped to that query. The data is already there.
+
+"No sprint actions linked to this hypothesis" — the empty state problem
+
+This is actually the more important question. Pipeline Coverage Ratio, Large Deal Win Rate, and SMB Sales Cycle Days all show active hypotheses but no sprint actions. That's not because there's nothing to do — it's because the sprint assembler only pulls from deal-level data and those hypotheses require different types of actions.
+
+What a VP RevOps would actually recommend for each:
+
+Pipeline Coverage Ratio — 2.9x, target ≥ 2.5x (currently healthy but close) The right action isn't a deal — it's a process check. "Review Q2 pipeline generation pace — you're 0.4x above threshold with 16 days left in Q1. Confirm Q2 outbound motion is in place before coverage drops below target at quarter turn." This is a planning action, not a deal action.
+
+Large Deal Win Rate — 32%, target ≥ 28% (currently healthy) The hypothesis is monitoring for decline. The right action when it's healthy is a leading indicator check: "Win rate is above threshold — verify the 11 late-stage deals in the conversion rate hypothesis include your large deal cohort. If any large deal (>$50K) goes stale this week, this hypothesis trips next."
+
+SMB Sales Cycle Days — 45 days, target ≤ 50 days (healthy) "Cycle length is within threshold. No action required this week — monitor." That's a valid sprint entry. "No action needed" is information, not silence.
+
+The spec for both fixes:
+
+Send to Replit:
+
+Two improvements needed for the sprint view before Wednesday.
+
+Fix 1 — Deal drill-through on "11 late-stage deals" action
+
+The improve_lever action row already queries late-stage deals. Store the deal list in the action's metadata JSONB field when the sprint assembler creates it:
+
+typescript
+// In the improve_lever builder:
+metadata: {
+  deals: lateStageDeals.map(d => ({
+    id: d.id,
+    name: d.name,           // expanded
+    amount: d.amount,
+    stage: d.stage_normalized,
+    ownerName: d.owner_name,
+    daysUntilClose: d.days_until_close,
+  }))
+}
+In the action card component, when metadata.deals exists, add a "▶ Show 11 deals" expand toggle below the action title. Expanding shows a compact deal list inline:
+
+Win rate 32% vs 35% target — 11 late-stage deals need attention
+▶ Show 11 deals
+  ↳ Action Behavior Centers - AB       $300K  decision  15d  Nate
+  ↳ Butterfly Effects Inc - AB+RAB     $273K  evaluation 12d  Nate
+  ↳ Easterseals Northern California    $112K  evaluation 30d  Nate
+  ... 8 more
+Each deal row in the expanded list should have an "Ask →" button
+that opens Ask Pandora scoped to that specific deal.
+
+Fix 2 — Intelligent empty states for hypotheses with no sprint actions
+
+When a hypothesis has no linked sprint actions, replace
+"No sprint actions linked to this hypothesis this week"
+with a recommendation generated from the hypothesis state.
+
+Add a generateHypothesisRecommendation() function:
+
+typescript
+function generateHypothesisRecommendation(hypothesis: StandingHypothesis): string {
+  const isBreached = hypothesis.alert_direction === 'below'
+    ? hypothesis.current_value < hypothesis.alert_threshold
+    : hypothesis.current_value > hypothesis.alert_threshold
+
+  const gap = Math.abs(hypothesis.current_value - hypothesis.alert_threshold)
+  const gapPct = (gap / hypothesis.alert_threshold * 100).toFixed(0)
+
+  if (isBreached) {
+    // Should have sprint actions — this is a fallback
+    return `Threshold breached. Run sprint assembly to generate specific actions.`
+  }
+
+  // Healthy — generate a monitoring recommendation
+  const recommendations: Record<string, (h: StandingHypothesis) => string> = {
+    pipeline_coverage_ratio: (h) =>
+      `Coverage is ${gapPct}% above threshold. Confirm Q2 pipeline generation is in motion before quarter turn — coverage typically drops 0.3–0.5x in the first two weeks of a new quarter.`,
+
+    large_deal_win_rate: (h) =>
+      `Win rate is above threshold. Monitor: if any large deal (>$50K) goes stale this week, this hypothesis may trip. Check the conversion rate sprint actions — they overlap with this cohort.`,
+
+    smb_sales_cycle_days: (h) =>
+      `Cycle length is within threshold — no action required this week. Alert fires if average exceeds ${h.alert_threshold} days.`,
+
+    // Default for unknown metrics
+    default: (h) =>
+      `${formatMetricValue(h.current_value, h.metric)} is within threshold (target: ${h.alert_direction === 'below' ? '≥' : '≤'} ${formatMetricValue(h.alert_threshold, h.metric)}). No action required this week.`,
+  }
+
+  const fn = recommendations[hypothesis.metric] ?? recommendations.default
+  return fn(hypothesis)
+}
+Render this string in the empty state instead of the generic message.
+Style it as a muted italic note, not a warning — it's informational.
+
+The result should look like:
+
+PIPELINE COVERAGE RATIO  active               2.9x
+Insufficient pipeline coverage ratio...  target ≥ 2.5x
+
+  Coverage is 16% above threshold. Confirm Q2 pipeline
+  generation is in motion before quarter turn — coverage
+  typically drops 0.3–0.5x in the first two weeks of a
+  new quarter.
+vs the current blank "No sprint actions linked" message.
+
+After both fixes, every hypothesis card tells the user
+something specific — either a ranked action list or a
+monitoring note. Nothing is blank.
+
+Server must be clean. Demo is Wednesday.
+
+
+
+
+
+
+

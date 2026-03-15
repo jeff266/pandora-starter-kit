@@ -54,6 +54,7 @@ interface SprintAction {
   hypothesisId: string | null;
   targetDealId: string | null;
   expectedValueDelta: number | null;
+  metadata?: Record<string, any> | null;
 }
 
 /**
