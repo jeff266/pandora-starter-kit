@@ -65,6 +65,7 @@ import DataDictionary from './pages/DataDictionary';
 import ForecastPage from './pages/ForecastPage';
 import PipelinePage from './pages/PipelinePage';
 import PipelineMechanicsPage from './pages/PipelineMechanicsPage';
+import GTMPage from './pages/GTMPage';
 import InvestigationHistoryPage from './pages/InvestigationHistoryPage';
 import { colors, fonts } from './styles/theme';
 import { useIsMobile } from './hooks/useIsMobile';
@@ -77,6 +78,11 @@ const pageTitles: Record<string, string> = {
   '/deals': 'Open Deals',
   '/accounts': 'Accounts',
   '/conversations': 'Conversations',
+  '/gtm/pipeline': 'Pipeline',
+  '/gtm/deals': 'Deals',
+  '/gtm/accounts': 'Accounts',
+  '/gtm/conversations': 'Conversations',
+  '/gtm/prospects': 'Prospects',
   '/targets': 'Targets',
   '/agents': 'Agents',
   '/governance': 'Governance',
@@ -121,6 +127,7 @@ function getPageTitle(pathname: string): string {
   if (pathname.match(/^\/workspace\/[^/]+\/reports\//)) return 'Report';
   if (pathname === '/reports/new') return 'New Report';
   if (pathname.match(/^\/reports\/[^/]+\/edit/)) return 'Edit Report';
+  if (pathname.startsWith('/gtm/')) return pageTitles[pathname] ?? 'GTM';
   return pageTitles[pathname] || 'Pandora';
 }
 
@@ -355,12 +362,12 @@ export default function App() {
           <Routes>
             <Route path="/" element={activeView === 'assistant' ? <AssistantView /> : <CommandCenter />} />
             <Route path="/portfolio" element={<ConsultantDashboard />} />
-            <Route path="/deals" element={<DealList />} />
+            <Route path="/deals" element={<Navigate to="/gtm/deals" replace />} />
             <Route path="/deals/:dealId" element={<DealDetail />} />
             <Route path="/conversations/:conversationId" element={<ConversationDetail />} />
-            <Route path="/accounts" element={<AccountList />} />
+            <Route path="/accounts" element={<Navigate to="/gtm/accounts" replace />} />
             <Route path="/accounts/:accountId" element={<AccountDetail />} />
-            <Route path="/conversations" element={<ConversationsPage />} />
+            <Route path="/conversations" element={<Navigate to="/gtm/conversations" replace />} />
             <Route path="/targets" element={<Targets />} />
             <Route path="/skills" element={<SkillsPage />} />
             <Route path="/skills/new" element={<SkillBuilder />} />
@@ -379,13 +386,15 @@ export default function App() {
             <Route path="/playbooks" element={<Playbooks />} />
             <Route path="/push" element={<PushPage />} />
             <Route path="/actions" element={<Actions />} />
-            <Route path="/connectors/health" element={<ConnectorHealth />} />
+            <Route path="/connectors/health" element={<Navigate to="/settings/connectors-health" replace />} />
             <Route path="/filters" element={<FiltersPage />} />
             <Route path="/dictionary" element={<DataDictionary />} />
             <Route path="/data" element={<DataDictionary />} />
             <Route path="/sql-workspace" element={<SQLWorkspace />} />
             <Route path="/forecast" element={<ForecastPage />} />
-            <Route path="/pipeline" element={<PipelinePage />} />
+            <Route path="/pipeline" element={<Navigate to="/gtm/pipeline" replace />} />
+            <Route path="/gtm" element={<Navigate to="/gtm/pipeline" replace />} />
+            <Route path="/gtm/:tab" element={<GTMPage />} />
             <Route path="/marketplace" element={<MarketplacePage />} />
             <Route path="/onboarding" element={<OnboardingFlow />} />
             <Route path="/settings" element={<SettingsPage />} />
@@ -396,7 +405,8 @@ export default function App() {
             <Route path="/stage-velocity" element={<Navigate to="/pipeline-mechanics" replace />} />
             <Route path="/competition" element={<CompetitiveIntelligencePage />} />
             <Route path="/winning-path" element={<BehavioralWinningPathPage />} />
-            <Route path="/prospects" element={<ProspectsPage />} />
+            <Route path="/prospects" element={<Navigate to="/gtm/prospects" replace />} />
+            <Route path="/connectors" element={<Navigate to="/settings/connectors" replace />} />
             <Route path="/admin/scopes" element={<AdminScopesPage />} />
             <Route path="/admin/token-usage" element={<TokenUsagePage />} />
             <Route path="/admin/fine-tuning" element={<FineTuning />} />

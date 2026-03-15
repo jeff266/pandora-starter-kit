@@ -28,15 +28,13 @@ interface NavDef {
 
 const NAV_ITEMS: NavDef[] = [
   { path: '/concierge', label: 'Concierge', icon: '◈', roles: 'all' },
-  { path: '/pipeline',  label: 'Pipeline',  icon: '◯', roles: ['admin', 'manager', 'cro', 'revops', null] },
+  { path: '/gtm',       label: 'GTM',       icon: '◯', roles: ['admin', 'manager', 'cro', 'revops', null] },
   { path: '/targets',   label: 'Targets',   icon: '◎', roles: ['admin', 'manager', 'cro', 'revops', null] },
   { path: '/actions',   label: 'Actions',   icon: '⚡', roles: 'all' },
   { path: '/agents',    label: 'Agents',    icon: '◎', roles: ['admin', 'cro', 'revops', null] },
   { path: '/skills',    label: 'Skills',    icon: '⊞', roles: ['admin', 'revops', null] },
-  { path: '/data',           label: 'Data',             icon: '⬡', roles: ['admin', 'revops', null] },
-  { path: '/connectors',    label: 'Connectors',       icon: '⇄', roles: ['admin', 'revops', null] },
-  { path: '/connectors/health', label: 'Conn. Health', icon: '♥', roles: ['admin', 'revops', null] },
-  { path: '/settings',      label: 'Settings',         icon: '⚙', roles: ['admin', 'manager', 'cro', 'revops', null] },
+  { path: '/data',      label: 'Data',      icon: '⬡', roles: ['admin', 'revops', null] },
+  { path: '/settings',  label: 'Settings',  icon: '⚙', roles: ['admin', 'manager', 'cro', 'revops', null] },
 ];
 
 function isNavVisible(item: NavDef, role: PandoraRole): boolean {
@@ -100,7 +98,7 @@ export default function Sidebar({
 
   const isActive = useCallback((path: string) => {
     if (path === '/concierge') return location.pathname === '/concierge' || location.pathname === '/';
-    if (path === '/connectors') return location.pathname === '/connectors';
+    if (path === '/gtm') return location.pathname === '/gtm' || location.pathname.startsWith('/gtm/');
     return location.pathname.startsWith(path);
   }, [location.pathname]);
 

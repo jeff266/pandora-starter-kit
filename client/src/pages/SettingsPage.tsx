@@ -23,10 +23,12 @@ import DealFieldsTab from '../components/settings/DealFieldsTab';
 import AutomationsSettings from '../components/settings/AutomationsSettings';
 import MethodologySettings from '../components/settings/MethodologySettings';
 import AgenticActionsTab from '../components/settings/AgenticActionsTab';
+import ConnectorsPage from './ConnectorsPage';
+import ConnectorHealth from './ConnectorHealth';
 
-type SettingsTab = 'profile' | 'security' | 'preferences' | 'workspaces' | 'setup' | 'members' | 'sales-roster' | 'roles' | 'notifications' | 'features' | 'crm-sync' | 'deal-fields' | 'methodology' | 'automations' | 'agentic-actions' | 'webhooks' | 'billing' | 'dimensions' | 'token-usage' | 'ai-keys';
+type SettingsTab = 'profile' | 'security' | 'preferences' | 'workspaces' | 'setup' | 'members' | 'sales-roster' | 'roles' | 'notifications' | 'features' | 'crm-sync' | 'deal-fields' | 'methodology' | 'automations' | 'agentic-actions' | 'webhooks' | 'billing' | 'dimensions' | 'token-usage' | 'ai-keys' | 'connectors' | 'connectors-health';
 
-const adminTabs: SettingsTab[] = ['setup', 'members', 'sales-roster', 'roles', 'notifications', 'features', 'crm-sync', 'deal-fields', 'methodology', 'automations', 'agentic-actions', 'webhooks', 'billing', 'dimensions', 'token-usage', 'ai-keys'];
+const adminTabs: SettingsTab[] = ['setup', 'members', 'sales-roster', 'roles', 'notifications', 'features', 'crm-sync', 'deal-fields', 'methodology', 'automations', 'agentic-actions', 'webhooks', 'billing', 'dimensions', 'token-usage', 'ai-keys', 'connectors', 'connectors-health'];
 
 export default function SettingsPage() {
   const { tab } = useParams<{ tab?: string }>();
@@ -53,7 +55,7 @@ export default function SettingsPage() {
   }, [tab, navigate]);
 
   const isValidTab = (tabKey: string): boolean => {
-    const validTabs: SettingsTab[] = ['profile', 'security', 'preferences', 'workspaces', 'setup', 'members', 'sales-roster', 'roles', 'notifications', 'features', 'crm-sync', 'deal-fields', 'methodology', 'automations', 'agentic-actions', 'webhooks', 'billing', 'dimensions', 'token-usage', 'ai-keys'];
+    const validTabs: SettingsTab[] = ['profile', 'security', 'preferences', 'workspaces', 'setup', 'members', 'sales-roster', 'roles', 'notifications', 'features', 'crm-sync', 'deal-fields', 'methodology', 'automations', 'agentic-actions', 'webhooks', 'billing', 'dimensions', 'token-usage', 'ai-keys', 'connectors', 'connectors-health'];
     return validTabs.includes(tabKey as SettingsTab);
   };
 
@@ -108,6 +110,10 @@ export default function SettingsPage() {
         return isAdmin ? <TokenUsagePage /> : null;
       case 'ai-keys':
         return isAdmin ? <AIKeysTab /> : null;
+      case 'connectors':
+        return isAdmin ? <ConnectorsPage /> : null;
+      case 'connectors-health':
+        return isAdmin ? <ConnectorHealth /> : null;
       default:
         return <ProfileTab />;
     }
