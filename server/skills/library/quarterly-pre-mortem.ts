@@ -65,6 +65,36 @@ export const quarterlyPreMortemSkill: SkillDefinition = {
       name: 'Identify Failure Modes',
       tier: 'deepseek',
       dependsOn: ['compute-quarter-context'],
+      deepseekSchema: {
+        type: 'object',
+        properties: {
+          quarterLabel: { type: 'string' },
+          headline: { type: 'string' },
+          composition: { type: 'string' },
+          upsideScenario: { type: 'string' },
+          failureModes: {
+            type: 'array',
+            items: {
+              type: 'object',
+              required: ['rank', 'name', 'hypothesis', 'probability', 'metric', 'currentValue', 'alertThreshold', 'alertDirection'],
+              properties: {
+                rank: { type: 'number' },
+                name: { type: 'string' },
+                hypothesis: { type: 'string' },
+                probability: { type: 'number' },
+                metric: { type: 'string' },
+                currentValue: { type: 'number' },
+                alertThreshold: { type: 'number' },
+                alertDirection: { type: 'string' },
+                leadingIndicator: { type: 'string' },
+                action: { type: 'string' },
+                reviewWeeks: { type: 'number' },
+              },
+            },
+          },
+        },
+        required: ['failureModes'],
+      },
       deepseekPrompt: `You are running a pre-mortem analysis for a B2B SaaS sales team at the start of a new quarter.
 A pre-mortem asks: "If we miss our number this quarter, what will have caused it?"
 Your job is to identify the 2–4 most likely failure modes given the data below.

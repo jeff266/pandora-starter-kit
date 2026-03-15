@@ -9934,7 +9934,17 @@ export const toolRegistry = new Map<string, ToolDefinition>([
     execute: async (_params, context) => safeExecute('writeStandingHypotheses', async () => {
       const workspaceId = context.workspaceId;
       const stepResults = (context.stepResults as any);
-      const failureModes = stepResults.failure_modes ?? {};
+      let failureModes = stepResults.failure_modes ?? {};
+
+      // Deepseek steps without a schema return raw JSON strings — parse defensively
+      if (typeof failureModes === 'string') {
+        try {
+          failureModes = JSON.parse(failureModes);
+        } catch {
+          console.warn('[writeStandingHypotheses] failure_modes is a string but not valid JSON — skipping write');
+          failureModes = {};
+        }
+      }
 
       const modes: any[] = failureModes.failureModes ?? [];
       if (modes.length === 0) {
@@ -9992,8 +10002,13 @@ export const toolRegistry = new Map<string, ToolDefinition>([
       const stepResults = (context.stepResults as any);
       const quarterContext = stepResults.quarter_context ?? {};
       const skillOutputs = stepResults.skill_outputs ?? {};
-      const failureModes = stepResults.failure_modes ?? {};
       const hypothesisResult = stepResults.hypothesis_write_result ?? {};
+
+      // Deepseek steps without a schema return raw JSON strings — parse defensively
+      let failureModes = stepResults.failure_modes ?? {};
+      if (typeof failureModes === 'string') {
+        try { failureModes = JSON.parse(failureModes); } catch { failureModes = {}; }
+      }
 
       const mc = skillOutputs['monte-carlo-forecast'];
       const gtmHealth = skillOutputs['gtm-health-diagnostic'];
