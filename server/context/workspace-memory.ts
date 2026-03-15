@@ -336,6 +336,21 @@ export async function buildWorkspaceContextBlock(workspaceId: string, userId?: s
   const saoStage = def.sao_stage?.value;
   if (saoStage) lines.push(`SAO STAGE: ${saoStage}`);
 
+  // Product catalog — injected when workspace has defined products + abbreviations
+  const products: any[] = def.products ?? [];
+  if (products.length > 0) {
+    lines.push('');
+    lines.push('PRODUCT CATALOG (workspace-specific — do NOT infer product names from abbreviations):');
+    for (const p of products) {
+      const abbr = p.abbreviation ? ` (abbrev: ${p.abbreviation})` : '';
+      lines.push(`  - ${p.name}${abbr}`);
+    }
+    const abbrs = products.filter((p: any) => p.abbreviation).map((p: any) => p.abbreviation);
+    if (abbrs.length > 0) {
+      lines.push(`  Known abbreviations: ${abbrs.join(', ')} — these are product names, not buyer signals or deal qualifiers.`);
+    }
+  }
+
   // Stage config summary
   if (stages.length > 0) {
     const activeStages = stages.filter((s: any) => s.is_active !== false).map((s: any) => s.stage_name);

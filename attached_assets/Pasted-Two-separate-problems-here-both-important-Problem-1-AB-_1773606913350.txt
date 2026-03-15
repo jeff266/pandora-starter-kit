@@ -1,0 +1,43 @@
+Two separate problems here, both important.
+
+**Problem 1 — AB + RAB are product names, not buyer signals**
+
+"ABS Kids - AB + RAB" is a deal name convention meaning ABS Kids is being sold Assessment Builder + Reassessment Builder. Pandora read those abbreviations, didn't recognize them as product names, and hallucinated a "Active Buyer / Re-Activated Buyer" marketing signal interpretation that sounds plausible but is completely fabricated. The response then built an entire re-engagement strategy on top of that false premise.
+
+This is a workspace knowledge gap, not a bug. Pandora doesn't know Frontera's product names, so it pattern-matched AB/RAB against the nearest thing it knew — buyer intent signals.
+
+The fix is two-pronged:
+
+First, Frontera's products need to be in the workspace config so Pandora knows what it's selling. This belongs in onboarding — one of the questions should be "what are your products and how are they abbreviated?" That feeds into the context layer and gets injected into every synthesis prompt.
+
+Second, Ask Pandora should be more conservative when it encounters abbreviations it doesn't recognize. Instead of inferring meaning, it should surface a data gap: "I see AB + RAB in this deal name but I don't have Frontera's product catalog — can you tell me what these refer to?" The current behavior — confidently inventing an interpretation — is worse than admitting uncertainty.
+
+**Problem 2 — Who is Abby Benson?**
+
+Abby Benson appears as the deal owner in the CRM data but isn't in the known Frontera sales team. A few possibilities: she could be a former rep whose deals weren't reassigned, a contractor, or a data entry artifact. Worth checking with the Frontera team — if she's no longer active, her deals should be reassigned to Nate or Sara so they don't fall through the cracks in coverage and scorecard analysis.
+
+**The immediate fix to send to Replit:**
+
+> Two issues found in Ask Pandora's ABS Kids response.
+>
+> Issue 1 — Add Frontera product catalog to workspace config:
+> In the context layer for Frontera's workspace, add a `products` object:
+> ```json
+> {
+>   "products": [
+>     { "name": "Assessment Builder", "abbreviation": "AB" },
+>     { "name": "Reassessment Builder", "abbreviation": "RAB" }
+>   ]
+> }
+> ```
+> Then inject product definitions into the Ask Pandora system prompt for this workspace: "When you see AB or RAB in deal names for this workspace, these refer to Assessment Builder and Reassessment Builder — Frontera's products. Do not interpret them as buyer signals."
+>
+> Issue 2 — Add a guard in Ask Pandora's synthesis:
+> When the response references a person by name who doesn't appear in the workspace's known rep list (from the quotas table or deal owner list), flag them with a data gap note rather than presenting them as if they're a known team member. "Owner: Abby Benson ⚠️ Not in current rep roster — verify ownership" is better than presenting her as active.
+>
+> Issue 3 — Add unknown abbreviation detection:
+> When deal names contain short uppercase abbreviations that don't match any known product name in workspace config, Ask Pandora should surface a clarifying note rather than infer meaning. Add to the system prompt: "If you encounter abbreviations in deal names that don't match known product names for this workspace, state that you don't recognize the abbreviation rather than inferring its meaning."
+
+**The broader lesson for onboarding:**
+
+Frontera's onboarding questions should include product names and abbreviations as a required field. This is the kind of workspace-specific vocabulary that, if missing, causes Pandora to hallucinate confident-sounding nonsense. The inference engine can get a lot right from CRM data alone — but product names are not inferable from deal data.
