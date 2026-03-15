@@ -203,6 +203,7 @@ export default function App() {
     setChatWbrContributions(location.state?.wbrContributions ?? null);
     setChatInitialSession(null);
     setChatForceNewThread(!!location.state?.conciergeContext);
+    if (location.state?.chatScope) setChatScope(location.state.chatScope);
     setChatOpen(true);
     navigate(location.pathname, { replace: true, state: {} });
   }, [location.state?.openChatWithMessage]);

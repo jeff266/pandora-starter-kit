@@ -26,7 +26,7 @@ import { getDictionaryContext } from '../dictionary/dictionary-context.js';
 import { getPandoraToolsContext } from '../skills/tool-context.js';
 import { validateChartSpec } from '../renderers/types.js';
 import type { ChartSpec } from '../renderers/types.js';
-import { lookupLiveDeal, detectDealMentions, buildLiveDealFactsBlock, detectContradiction } from './deal-lookup.js';
+import { lookupLiveDeal, detectDealMentions, buildLiveDealFactsBlock, detectContradiction, loadProductCatalog, expandDealName } from './deal-lookup.js';
 import { 
   buildVoiceSystemPromptSection, 
   applyPostTransforms, 
@@ -1565,6 +1565,21 @@ export async function runPandoraAgent(
         }
       }
     }
+  }
+
+  // ── Product abbreviation expansion — expand known abbreviations in the message ──
+  // This runs BEFORE Claude sees the message so it can never pattern-match raw abbreviations
+  try {
+    const productCatalog = await loadProductCatalog(workspaceId);
+    if (productCatalog.length > 0) {
+      const expanded = expandDealName(processedMessage, productCatalog);
+      if (expanded !== processedMessage) {
+        console.log(`[PandoraAgent] Expanded message abbreviations: "${processedMessage}" → "${expanded}"`);
+        processedMessage = expanded;
+      }
+    }
+  } catch {
+    // non-fatal
   }
 
   // Inject forecast accuracy memory if relevant

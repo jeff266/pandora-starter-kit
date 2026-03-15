@@ -575,12 +575,13 @@ export default function ConciergeView() {
     };
   }, [brief]);
 
-  const navigateToChat = useCallback((message: string, ctx: ConciergeContext | null, wbrContributions?: any[]) => {
+  const navigateToChat = useCallback((message: string, ctx: ConciergeContext | null, wbrContributions?: any[], dealScope?: { type: string; entity_id: string; entity_name: string }) => {
     navigate(window.location.pathname, {
       state: {
         openChatWithMessage: message,
         conciergeContext: ctx,
         wbrContributions: wbrContributions || undefined,
+        chatScope: dealScope ?? undefined,
       },
     });
   }, [navigate]);
@@ -670,7 +671,12 @@ export default function ConciergeView() {
 
   const openAskPandora = useCallback((deal: { id: string; name: string }) => {
     const ctx = buildConciergeContext();
-    navigateToChat(`Tell me about ${deal.name}`, ctx);
+    navigateToChat(
+      `Tell me about ${deal.name}`,
+      ctx,
+      undefined,
+      { type: 'deal', entity_id: deal.id, entity_name: deal.name },
+    );
   }, [buildConciergeContext, navigateToChat]);
 
   const handleChipClick = useCallback((chipId: ChipId) => {

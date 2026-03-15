@@ -1,0 +1,30 @@
+Two separate bugs now visible simultaneously.
+
+**Bug 1 — Product catalog still not fixed.** Third wrong interpretation in a row: Annual Budget + Recent Activity Buyer. The injection is clearly not reaching Claude at all. This isn't a prompt quality issue — the fix simply isn't working.
+
+**Bug 2 — Deal context scope is broken.** This is actually the more serious problem for the demo. The user clicked "Ask about this deal" from a specific deal card, which should scope the entire conversation to that one deal. Instead Ask Pandora responded as if the question was about a pipeline segment of 1,418 accounts. The deal context isn't being passed to the orchestrator — it launched a generic Ask Pandora session instead of a deal-scoped one.
+
+Send to Replit:
+
+> Two bugs to fix, both blocking demo.
+>
+> **Bug 1 — Product catalog still not reaching Claude**
+> Add a temporary debug line to Ask Pandora's system prompt assembly. Before the Claude call, log the full system prompt to console. Confirm whether the string "Assessment Builder" appears anywhere in it. If it doesn't, the context layer read for `products` is failing silently.
+>
+> Check the exact path: when Ask Pandora handles a deal analysis query, what is the sequence that builds the system prompt? Specifically — is workspace config read fresh on each query, or is it cached from startup? If cached, the products update may have been written after the cache was populated.
+>
+> Once confirmed where the gap is, fix it so "AB" and "RAB" in deal names are expanded inline to "Assessment Builder" and "Reassessment Builder" before Claude ever sees the text. This expansion should happen in the deal data loading step, not in synthesis.
+>
+> **Bug 2 — "Ask about this deal" not passing deal context**
+> The user launched Ask Pandora from a deal card's "Ask about this deal" button. The response addressed 1,418 accounts instead of the specific deal — meaning the deal ID and context weren't passed to the orchestrator.
+>
+> Find where "Ask about this deal" invokes the Ask Pandora UI. It should be calling `openAskPandora` with a deal scope object — something like `{ scopeType: 'deal', dealId: '...', dealName: 'ABS Kids - AB + RAB' }`. Check if that scope is:
+> 1. Being passed correctly from the deal card button
+> 2. Received by the Ask Pandora orchestrator
+> 3. Injected into the system prompt as a constraint: "This conversation is scoped to deal: [name]. Answer questions about this specific deal only."
+>
+> The `openAskPandora` universal context utility was wired across 9 surfaces previously — verify the deal card is one of them and that the scope payload is non-null when it arrives at the orchestrator.
+>
+> After fixing both: test by clicking "Ask about this deal" on the ABS Kids deal card and asking "tell me about this deal." The response should reference Assessment Builder and Reassessment Builder by name and contain zero references to 1,418 accounts, pipeline segments, or coverage ratios.
+
+The 1,418 accounts number is particularly telling — that's almost certainly the total account count for the workspace, meaning Ask Pandora defaulted to a workspace-wide analysis instead of a deal analysis. The scope object is either null or being ignored entirely.
