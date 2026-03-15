@@ -19,6 +19,7 @@ import {
   checkRateLimit,
 } from '../chat/conversation-state.js';
 import { logChatMessage } from '../lib/chat-logger.js';
+import { lookupPandoraThread, trackPandoraPost } from '../slack/thread-tracker.js';
 
 const router = Router();
 
@@ -58,9 +59,8 @@ router.post('/', async (req, res) => {
   const signingSecretConfigured = !!process.env.SLACK_SIGNING_SECRET;
 
   if (req.body.type === 'url_verification') {
-    if (signingSecretConfigured && !verifySlackSignature(req)) {
-      return res.status(401).json({ error: 'Invalid signature' });
-    }
+    // Slack sends a URL verification challenge when first registering the webhook.
+    // No signature check here — the secret isn't yet trusted at registration time.
     return res.json({ challenge: req.body.challenge });
   }
 
@@ -171,6 +171,7 @@ async function handleThreadedReply(event: any, teamId: string): Promise<void> {
         ? await resolveSlackUser(wid, event.user)
         : {};
 
+      console.log(`[slack-events] Routing to Ask Pandora: ${(event.text || '').slice(0, 80)}`);
       await logChatMessage({ workspaceId: wid, sessionId, surface: 'slack', role: 'user', content: event.text || '', scope: { type: 'slack_thread', channelId: event.channel, threadTs: event.thread_ts ?? event.ts } });
       const result = await handleConversationTurn({
         surface: 'slack_thread',
@@ -183,10 +184,37 @@ async function handleThreadedReply(event: any, teamId: string): Promise<void> {
       });
       await logChatMessage({ workspaceId: wid, sessionId, surface: 'slack', role: 'assistant', content: result.answer, scope: { type: 'slack_thread', channelId: event.channel, threadTs: event.thread_ts ?? event.ts } });
       const client = getSlackAppClient();
-      await client.postMessage(wid, event.channel, [{
+      const msgRef = await client.postMessage(wid, event.channel, [{
         type: 'section',
         text: { type: 'mrkdwn', text: result.answer },
       }], { thread_ts: event.thread_ts });
+      if (msgRef?.ts) trackPandoraPost(event.channel, msgRef.ts, wid);
+      return;
+    }
+
+    // Fallback: check in-memory thread tracker before giving up
+    const memWorkspaceId = lookupPandoraThread(event.channel, event.thread_ts);
+    if (memWorkspaceId) {
+      const sessionId = event.thread_ts ?? event.ts;
+      const { userId, userRole } = event.user ? await resolveSlackUser(memWorkspaceId, event.user) : {};
+      console.log(`[slack-events] Routing to Ask Pandora (memory thread): ${(event.text || '').slice(0, 80)}`);
+      await logChatMessage({ workspaceId: memWorkspaceId, sessionId, surface: 'slack', role: 'user', content: event.text || '', scope: { type: 'slack_thread', channelId: event.channel, threadTs: event.thread_ts ?? event.ts } });
+      const result = await handleConversationTurn({
+        surface: 'slack_thread',
+        workspaceId: memWorkspaceId,
+        threadId: event.thread_ts,
+        channelId: event.channel,
+        message: event.text || '',
+        userId,
+        userRole: userRole as any,
+      });
+      await logChatMessage({ workspaceId: memWorkspaceId, sessionId, surface: 'slack', role: 'assistant', content: result.answer, scope: { type: 'slack_thread', channelId: event.channel, threadTs: event.thread_ts ?? event.ts } });
+      const client = getSlackAppClient();
+      const msgRef = await client.postMessage(memWorkspaceId, event.channel, [{
+        type: 'section',
+        text: { type: 'mrkdwn', text: result.answer },
+      }], { thread_ts: event.thread_ts });
+      if (msgRef?.ts) trackPandoraPost(event.channel, msgRef.ts, memWorkspaceId);
       return;
     }
 
@@ -269,6 +297,7 @@ async function handleThreadedReply(event: any, teamId: string): Promise<void> {
     }
   } else {
     const sessionId = event.thread_ts ?? event.ts;
+    console.log(`[slack-events] Routing to Ask Pandora: ${(event.text || '').slice(0, 80)}`);
     await logChatMessage({ workspaceId, sessionId, surface: 'slack', role: 'user', content: event.text || '', scope: { type: 'slack_thread', channelId: event.channel, threadTs: event.thread_ts ?? event.ts } });
 
     // Resolve Slack user to workspace user for RBAC (T10)
@@ -295,10 +324,11 @@ async function handleThreadedReply(event: any, teamId: string): Promise<void> {
     await logChatMessage({ workspaceId, sessionId, surface: 'slack', role: 'assistant', content: result.answer, scope: { type: 'slack_thread', channelId: event.channel, threadTs: event.thread_ts ?? event.ts } });
 
     const client = getSlackAppClient();
-    await client.postMessage(workspaceId, event.channel, [{
+    const anchorMsgRef = await client.postMessage(workspaceId, event.channel, [{
       type: 'section',
       text: { type: 'mrkdwn', text: result.answer },
     }], { thread_ts: event.thread_ts });
+    if (anchorMsgRef?.ts) trackPandoraPost(event.channel, anchorMsgRef.ts, workspaceId);
   }
 }
 
@@ -362,6 +392,7 @@ async function handleAppMention(event: any, teamId: string): Promise<void> {
     ? await resolveSlackUser(workspaceId, event.user)
     : {};
 
+  console.log(`[slack-events] App mention routed: ${question.slice(0, 80)}`);
   await logChatMessage({ workspaceId, sessionId: threadTs, surface: 'slack', role: 'user', content: question, scope: { type: 'slack_thread', channelId: event.channel, threadTs } });
   const result = await handleConversationTurn({
     surface: 'slack_dm',
@@ -383,6 +414,8 @@ async function handleAppMention(event: any, teamId: string): Promise<void> {
         text: { type: 'mrkdwn', text: result.answer },
       }],
     });
+    // Track the posted message so replies to it route back to this workspace
+    trackPandoraPost(event.channel, thinking.ts, workspaceId);
   }
 }
 

@@ -34,8 +34,12 @@ export function verifySlackSignature(req: Request): boolean {
   hmac.update(sigBaseString);
   const computedSignature = `${SLACK_SIGNATURE_VERSION}=${hmac.digest('hex')}`;
 
-  return crypto.timingSafeEqual(
-    Buffer.from(computedSignature),
-    Buffer.from(signature)
-  );
+  try {
+    return crypto.timingSafeEqual(
+      Buffer.from(computedSignature),
+      Buffer.from(signature)
+    );
+  } catch {
+    return false;
+  }
 }

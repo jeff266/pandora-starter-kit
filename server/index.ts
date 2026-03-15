@@ -272,6 +272,7 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 app.use("/api/slack/events", slackEventsRouter);
+app.use("/api/webhooks/slack/events", slackEventsRouter);
 app.use("/api/slack/interactions", slackInteractionsRouter);
 app.use("/api/slack/commands", slackCommandsRouter);
 app.use("/api/webhooks/slack/slash", slackSlashRouter);

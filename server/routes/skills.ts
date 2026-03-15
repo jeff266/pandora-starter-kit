@@ -19,6 +19,7 @@ import type { SkillResult } from '../skills/types.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { logChatMessage } from '../lib/chat-logger.js';
+import { trackPandoraPost } from '../slack/thread-tracker.js';
 import { buildConversationHistory } from '../lib/conversation-history.js';
 import type { HistoryTurn } from '../lib/conversation-history.js';
 import { randomUUID } from 'crypto';
@@ -843,6 +844,7 @@ async function postSkillToSlack(workspaceId: string, skillId: string, result: Sk
            ON CONFLICT (channel_id, message_ts) DO NOTHING`,
           [workspaceId, msgRef.channel, msgRef.ts, result.runId, skillId]
         ).catch(err => console.error('[skills] Failed to store thread_anchor:', err));
+        trackPandoraPost(msgRef.channel, msgRef.ts, workspaceId);
         console.log(`[skills] Posted ${skillId} to Slack via bot API (ts: ${msgRef.ts})`);
       } else {
         console.error(`[skills] Slack bot post failed for ${skillId}:`, msgRef.error);
