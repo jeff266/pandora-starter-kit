@@ -2,7 +2,13 @@ import { query } from '../db.js';
 import { configLoader } from '../config/workspace-config-loader.js';
 import { getPandoraRole, getHeadlineTarget, type PandolaRole } from './pandora-role.js';
 import { resolveDefaultPipeline } from '../chat/pipeline-resolver.js';
-import { calibrateBriefPriorities, type BriefPriorityFrame } from './brief-priorities.js';
+import {
+  calibrateBriefPriorities,
+  loadWorkspaceVoice,
+  renderVoiceContext,
+  type BriefPriorityFrame,
+  type WorkspaceVoice,
+} from './brief-priorities.js';
 
 // ===== TYPES =====
 
@@ -116,6 +122,7 @@ export interface OpeningBriefData {
     note: string;
   } | null;
   priorityFrame: BriefPriorityFrame | null;
+  workspaceVoice: WorkspaceVoice;
 }
 
 // ===== CACHE =====
@@ -309,7 +316,7 @@ export async function assembleOpeningBrief(
   workspaceId: string,
   userId: string
 ): Promise<OpeningBriefData> {
-  const [temporal, roleInfo, quotaPeriod] = await Promise.all([
+  const [temporal, roleInfo, quotaPeriod, workspaceVoice] = await Promise.all([
     computeTemporalContext(workspaceId),
     getPandoraRole(workspaceId, userId).catch(() => ({
       pandoraRole: null as PandolaRole,
@@ -317,6 +324,22 @@ export async function assembleOpeningBrief(
       userEmail: null as string | null,
     })),
     configLoader.getQuotaPeriod(workspaceId).catch(() => null),
+    // Voice loading must never break brief generation — catch all errors
+    loadWorkspaceVoice(workspaceId).catch(() => ({
+      tone: 'direct' as const,
+      detailLevel: 'operational' as const,
+      framingStyle: 'number_first' as const,
+      salesMotion: 'mixed' as const,
+      coverageTarget: 3.0,
+      riskPhrases: [] as string[],
+      urgencyPhrases: [] as string[],
+      winPhrases: [] as string[],
+      pipelineVocabulary: [] as string[],
+      commonShorthand: {} as Record<string, string>,
+      hasLearnedPatterns: false,
+      callsAnalyzed: 0,
+      lastExtractedAt: null,
+    })),
   ]);
 
   const { pandoraRole, workspaceRole, userEmail } = roleInfo;
@@ -804,6 +827,7 @@ export async function assembleOpeningBrief(
     pipelineMovement,
     estimatedQ2Coverage,
     priorityFrame,
+    workspaceVoice,
   };
 }
 
@@ -962,6 +986,11 @@ export function renderBriefContext(data: OpeningBriefData): string {
     lines.push(`- Note: ${q2.note}`);
   }
 
+  // Workspace voice profile — injected before PRIORITY FRAME so it informs framing
+  if (data.workspaceVoice) {
+    lines.push(``, renderVoiceContext(data.workspaceVoice));
+  }
+
   // Priority Frame
   if (data.priorityFrame) {
     const pf = data.priorityFrame;
@@ -998,6 +1027,16 @@ export function getBriefRoleEmphasis(pandoraRole: string): string {
 // ===== BRIEF SYSTEM PROMPT =====
 
 export const BRIEF_SYSTEM_PROMPT = `You are Pandora, a RevOps intelligence assistant. Give the user a quick read on where things stand, like a VP of RevOps who knows the numbers cold and has the CRO's trust. Direct, factual, no performance. You are reporting, not editorializing.
+
+VOICE: Follow the WORKSPACE VOICE PROFILE in the context. The coverage target, tone, and any learned language patterns override these defaults when present.
+
+Non-negotiable voice rules regardless of profile:
+- No fear language
+- Show your math — every number must be traceable
+- Name specific deals and amounts, never generics
+- No unfilled template variables
+
+The voice profile is additive — it extends and personalizes the non-negotiable rules, never overrides them.
 
 STRUCTURE (three parts, every response):
 1. State of play: what is working right now. Coverage ratio, deals advancing, attainment pace, team momentum. One or two sentences. If nothing is genuinely positive, say so briefly and move on.

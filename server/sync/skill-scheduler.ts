@@ -637,6 +637,35 @@ export function startSkillScheduler(): void {
   scheduledSkills.push({ skillId: 'brief-daily', cronExpression: '0 7 * * *', job: briefJob });
   console.log('[BriefScheduler] Registered daily brief assembly on cron 0 7 * * * (7am UTC)');
 
+  // Voice Pattern Extraction: monthly on 1st at 6 AM UTC
+  const voiceExtractionJob = cron.schedule(
+    '0 6 1 * *',
+    async () => {
+      console.log('[VoicePatterns] Monthly extraction triggered (1st of month, 6am UTC)');
+      const { runSkill } = await import('../skills/runtime.js');
+
+      const workspacesResult = await query<{ id: string; name: string }>(
+        `SELECT w.id, w.name
+         FROM workspaces w
+         WHERE w.status = 'active'
+         ORDER BY w.name`
+      );
+
+      for (const workspace of workspacesResult.rows) {
+        try {
+          await runSkill('voice-pattern-extraction', workspace.id, undefined, { triggeredBy: 'cron' });
+        } catch (err: any) {
+          console.error(`[VoicePatterns] Failed for ${workspace.name}:`, err?.message ?? err);
+        }
+      }
+
+      console.log(`[VoicePatterns] Monthly extraction complete — ${workspacesResult.rows.length} workspace(s) processed`);
+    },
+    { timezone: 'UTC' }
+  );
+  scheduledSkills.push({ skillId: 'voice-pattern-extraction', cronExpression: '0 6 1 * *', job: voiceExtractionJob });
+  console.log('[VoicePatterns] Cron registered — 6:00 AM UTC on 1st of each month');
+
   // Concierge Slack push: daily 8:15 AM UTC
   // Offset 15 min from pipeline-hygiene (8:00 AM) to avoid queue pressure.
   const conciergePushJob = cron.schedule(

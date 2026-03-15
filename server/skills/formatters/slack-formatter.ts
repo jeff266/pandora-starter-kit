@@ -6,6 +6,7 @@
  */
 
 import type { SkillResult, SkillDefinition, SkillEvidence, EvidenceClaim, EvaluatedRecord } from '../types.js';
+import type { WorkspaceVoice } from '../../context/brief-priorities.js';
 import { formatCurrency } from '../../utils/format-currency.js';
 
 interface SlackBlock {
@@ -1899,6 +1900,7 @@ export interface SkillBriefInput {
   totalFindings: number;
   pendingActionCount: number;
   conciergeUrl: string;
+  voice?: WorkspaceVoice;
 }
 
 /**
@@ -1940,8 +1942,11 @@ export function formatSkillBrief(input: SkillBriefInput): SlackBlock[] {
   // Block 4 — Divider
   blocks.push({ type: 'divider' });
 
-  // Blocks 5–7 — Top findings (max 3)
-  const findings = input.topFindings.slice(0, 3);
+  // Blocks 5–N — Top findings (count adjusted by voice detail level)
+  const maxFindings = input.voice?.detailLevel === 'executive' ? 2
+    : input.voice?.detailLevel === 'detailed' ? 5
+    : 3;
+  const findings = input.topFindings.slice(0, maxFindings);
   for (const finding of findings) {
     const emoji = finding.severity === 'critical' ? '🔴'
       : finding.severity === 'warning' ? '🟡' : '🔵';
@@ -2050,6 +2055,7 @@ export interface ConciergeDailyInput {
   overnightSkillCount: number;
   pendingActionCount: number;
   conciergeUrl: string;
+  voice?: WorkspaceVoice;
 }
 
 /**
@@ -2070,10 +2076,12 @@ export function formatConciergeDaily(input: ConciergeDailyInput): SlackBlock[] {
     elements: [{ type: 'mrkdwn', text: input.temporalContext }],
   });
 
-  // Block 2 — Attainment
+  // Block 2 — Attainment (with workspace-specific coverage target when voice is provided)
+  const coverageTarget = input.voice?.coverageTarget ?? 3;
+  const attainmentText = `${input.attainmentPct}% · ${input.targetLabel} · target: ${coverageTarget}×`;
   blocks.push({
     type: 'context',
-    elements: [{ type: 'mrkdwn', text: `${input.attainmentPct}% · ${input.targetLabel}` }],
+    elements: [{ type: 'mrkdwn', text: attainmentText }],
   });
 
   // Block 3 — Priority frame + situation (situation capped at 25 words)

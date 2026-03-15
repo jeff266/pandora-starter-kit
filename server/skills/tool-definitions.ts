@@ -8859,6 +8859,109 @@ const computeNetPipelineDeltaTool: ToolDefinition = {
 };
 
 // ============================================================================
+// Voice Pattern Extraction Compute Tools
+// ============================================================================
+
+import {
+  extractInternalCallLanguage as _extractInternalCallLanguage,
+  classifyVoicePatterns as _classifyVoicePatterns,
+  updateWorkspaceVoicePatterns as _updateWorkspaceVoicePatterns,
+} from '../analysis/voice-patterns.js';
+
+const extractVoiceCallsTool: ToolDefinition = {
+  name: 'extractVoiceCalls',
+  description: 'Extracts internal call transcripts (is_internal = true) and returns a pre-aggregated excerpt blob for DeepSeek classification, plus metadata.',
+  tier: 'compute',
+  parameters: { type: 'object', properties: {}, required: [] },
+  execute: async (_params, context) => {
+    return safeExecute('extractVoiceCalls', async () => {
+      const result = await _extractInternalCallLanguage(context.workspaceId);
+
+      if (result.insufficient) {
+        return {
+          status: 'insufficient_data',
+          callsFound: result.callsFound,
+          excerptBlob: '',
+          message: `Fewer than 5 internal calls found in the last 90 days. Connect Gong or Fireflies and ensure internal_filter is configured.`,
+        };
+      }
+
+      // Pre-aggregate to a single text blob for DeepSeek (avoids array-items limit)
+      const excerptBlob = result.transcripts
+        .slice(0, 20)
+        .map(t => `[${t.title}]\n${t.text.slice(0, 500)}`)
+        .join('\n---\n')
+        .slice(0, 32_000);
+
+      return {
+        status: 'ok',
+        callsFound: result.callsFound,
+        excerptBlob,
+      };
+    }, _params);
+  },
+};
+
+const persistVoicePatternsTool: ToolDefinition = {
+  name: 'persistVoicePatterns',
+  description: 'Persists the DeepSeek-classified voice patterns into workspace_voice_patterns and returns a summary.',
+  tier: 'compute',
+  parameters: { type: 'object', properties: {}, required: [] },
+  execute: async (_params, context) => {
+    return safeExecute('persistVoicePatterns', async () => {
+      const extractResult = context.stepResults?.['extract_result'];
+      const classifyResult = context.stepResults?.['classify_result'];
+
+      if (!extractResult || extractResult.status === 'insufficient_data') {
+        // Mark as insufficient in DB
+        const { query: dbQuery } = await import('../db.js');
+        await dbQuery(
+          `INSERT INTO workspace_voice_patterns (workspace_id, extraction_status, updated_at)
+           VALUES ($1, 'insufficient_data', NOW())
+           ON CONFLICT (workspace_id) DO UPDATE SET
+             extraction_status = 'insufficient_data',
+             updated_at = NOW()`,
+          [context.workspaceId]
+        );
+        return {
+          status: 'insufficient_data',
+          message: extractResult?.message ?? 'Insufficient data',
+          callsAnalyzed: extractResult?.callsFound ?? 0,
+        };
+      }
+
+      const patterns = classifyResult && typeof classifyResult === 'object' ? {
+        risk_phrases: Array.isArray(classifyResult.risk_phrases) ? classifyResult.risk_phrases : [],
+        urgency_phrases: Array.isArray(classifyResult.urgency_phrases) ? classifyResult.urgency_phrases : [],
+        win_phrases: Array.isArray(classifyResult.win_phrases) ? classifyResult.win_phrases : [],
+        pipeline_vocabulary: Array.isArray(classifyResult.pipeline_vocabulary) ? classifyResult.pipeline_vocabulary : [],
+        common_shorthand: (classifyResult.common_shorthand && typeof classifyResult.common_shorthand === 'object') ? classifyResult.common_shorthand : {},
+        confidence: typeof classifyResult.confidence === 'number' ? classifyResult.confidence : 0,
+      } : {
+        risk_phrases: [], urgency_phrases: [], win_phrases: [],
+        pipeline_vocabulary: [], common_shorthand: {}, confidence: 0,
+      };
+
+      await _updateWorkspaceVoicePatterns(context.workspaceId, patterns, extractResult.callsFound);
+
+      const nextRunAt = new Date(Date.now() + 30 * 86400000);
+      return {
+        callsAnalyzed: extractResult.callsFound,
+        patternsExtracted: {
+          riskPhrases: patterns.risk_phrases.length,
+          urgencyPhrases: patterns.urgency_phrases.length,
+          winPhrases: patterns.win_phrases.length,
+          vocabulary: patterns.pipeline_vocabulary.length,
+          shorthand: Object.keys(patterns.common_shorthand).length,
+        },
+        confidence: patterns.confidence,
+        nextRunAt,
+      };
+    }, _params);
+  },
+};
+
+// ============================================================================
 
 export const toolRegistry = new Map<string, ToolDefinition>([
   ['queryDeals', queryDeals],
@@ -9010,6 +9113,8 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['computeStageVelocityDeltas',      computeStageVelocityDeltasTool],
   ['getTrendFromPipelineRuns',        getTrendFromPipelineRunsTool],
   ['computeNetPipelineDelta',         computeNetPipelineDeltaTool],
+  ['extractVoiceCalls',              extractVoiceCallsTool],
+  ['persistVoicePatterns',           persistVoicePatternsTool],
 ]);
 
 // ============================================================================
