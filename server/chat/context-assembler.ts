@@ -108,8 +108,10 @@ export function formatMethodologyComparisons(
   return relevant
     .map(c => {
       const prefix = c.severity === 'alert' ? '⚠️' : '⟳';
-      const coverageLine = c.primaryValue !== undefined && c.secondaryValue !== undefined
-        ? ` ${c.primaryValue}x (${c.primaryMethod}) vs ${c.secondaryValue}x (${c.secondaryMethod}).`
+      const p = c.primaryMethod;
+      const s = c.secondaryMethod;
+      const coverageLine = p && s
+        ? ` ${p.value}${p.unit === 'multiplier' ? 'x' : ''} (${p.label}) vs ${s.value}${s.unit === 'multiplier' ? 'x' : ''} (${s.label}).`
         : '';
       return `${prefix} **Methodology note (${c.metric})**:${coverageLine} ${c.gapExplanation}`;
     })

@@ -93,9 +93,9 @@ async function fetchAllFieldHistory(
   const endpoint = `/crm/v3/objects/deals/${sourceId}?propertiesWithHistory=${propertiesParam}`;
 
   try {
-    const response = await (client as any).request<{
+    const response = (await (client as any).request(endpoint)) as {
       propertiesWithHistory?: Record<string, PropertyHistoryEntry[]>;
-    }>(endpoint);
+    };
 
     const result: Record<TrackedProperty, PropertyHistoryEntry[]> = {
       forecastcategory: [],

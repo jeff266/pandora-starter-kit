@@ -456,14 +456,14 @@ export async function getTrendFromSkillRuns(
   limit = 4
 ): Promise<PipelineTrend> {
   const result = await query<{
-    result_data: any;
+    output: any;
     created_at: string;
   }>(`
-    SELECT result_data, created_at
+    SELECT output, created_at
     FROM skill_runs
     WHERE workspace_id = $1
       AND skill_id = 'pipeline-movement'
-      AND status = 'success'
+      AND status = 'completed'
     ORDER BY created_at DESC
     LIMIT $2
   `, [workspaceId, limit]);
@@ -481,13 +481,13 @@ export async function getTrendFromSkillRuns(
   }
 
   const runs: TrendRun[] = result.rows.map(r => {
-    const summary = r.result_data?.summary?.net_delta || r.result_data?.net_delta || null;
+    const summary = r.output?.summary?.net_delta || r.output?.net_delta || null;
     return {
       createdAt:      r.created_at,
-      totalOpenValue: summary?.totalOpenValue     ?? r.result_data?.snapshot?.totalValue     ?? null,
-      coverageRatio:  summary?.coverageRatioNow   ?? r.result_data?.snapshot?.coverageRatio  ?? null,
-      closedWonValue: r.result_data?.movements?.closed_won?.totalValue ?? null,
-      newEntryValue:  r.result_data?.movements?.new_entry?.totalValue  ?? null,
+      totalOpenValue: summary?.totalOpenValue     ?? r.output?.snapshot?.totalValue     ?? null,
+      coverageRatio:  summary?.coverageRatioNow   ?? r.output?.snapshot?.coverageRatio  ?? null,
+      closedWonValue: r.output?.movements?.closed_won?.totalValue ?? null,
+      newEntryValue:  r.output?.movements?.new_entry?.totalValue  ?? null,
     };
   });
 

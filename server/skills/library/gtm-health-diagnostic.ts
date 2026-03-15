@@ -18,6 +18,8 @@ export const gtmHealthDiagnosticSkill: SkillDefinition = {
   ],
 
   requiredContext: ['goals_and_targets', 'business_model'],
+  outputFormat: 'slack',
+  estimatedDuration: '60s',
 
   schedule: {
     cron: '0 9 * * 1',
@@ -65,7 +67,7 @@ export const gtmHealthDiagnosticSkill: SkillDefinition = {
       name: 'Classify GTM Problem',
       tier: 'deepseek',
       dependsOn: ['compute-coverage-adequacy', 'compute-historical-context'],
-      prompt: `You are diagnosing a go-to-market health problem for a B2B SaaS company.
+      deepseekPrompt: `You are diagnosing a go-to-market health problem for a B2B SaaS company.
 Every plan miss comes down to exactly two root causes: insufficient coverage or insufficient conversion.
 Conflating them leads to the wrong fix.
 
@@ -120,10 +122,11 @@ Respond with JSON only:
       name: 'Synthesize GTM Health Report',
       tier: 'claude',
       dependsOn: ['summarize-for-claude', 'classify-gtm-problem'],
-      systemPrompt: `You are diagnosing a go-to-market health problem for a B2B SaaS company.
+      claudePrompt: `You are diagnosing a go-to-market health problem for a B2B SaaS company.
 Your job: render a verdict, show the math, and give a clear recommended path.
-Do not hedge. RevOps teams need a clear diagnosis, not a list of possibilities.`,
-      prompt: `Write a GTM health diagnostic using this data:
+Do not hedge. RevOps teams need a clear diagnosis, not a list of possibilities.
+
+Write a GTM health diagnostic using this data:
 
 {{claude_input}}
 

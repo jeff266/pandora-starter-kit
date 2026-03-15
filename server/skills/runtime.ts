@@ -495,7 +495,10 @@ export class SkillRuntime {
 
         // Extract actions from <actions> block in Claude output
         if (finalOutput) {
-          const extractedActions = parseActionsFromOutput(finalOutput);
+          const actionSearchText = typeof finalOutput === 'string'
+            ? finalOutput
+            : (finalOutput?.narrative ?? finalOutput?.output_text ?? '');
+          const extractedActions = parseActionsFromOutput(actionSearchText);
           if (extractedActions.length > 0) {
             const insertedCount = await insertExtractedActions(
               pool, workspaceId, skill.id, runId, null, extractedActions

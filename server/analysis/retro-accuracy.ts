@@ -70,7 +70,7 @@ const DEFAULT_CATEGORY_WEIGHTS: Record<string, number> = {
   commit: 0.90,
   forecast: 0.60,
   best_case: 0.30,
-  best case: 0.30,
+  'best case': 0.30,
   pipeline: 0.10,
   omitted: 0.05,
 };
@@ -128,12 +128,24 @@ export async function reconstructQuarterSnapshot(
     `SELECT stage_normalized,
             COUNT(*)::int AS count,
             COALESCE(SUM(amount), 0) AS value,
-            close_reason
+            COALESCE(
+              source_data->'properties'->>'closed_lost_reason',
+              source_data->'properties'->>'closed_won_reason',
+              custom_fields->>'close_reason',
+              custom_fields->>'closed_lost_reason',
+              ''
+            ) AS close_reason
      FROM deals
      WHERE workspace_id = $1
        AND close_date >= $2
        AND close_date <= $3
-     GROUP BY stage_normalized, close_reason`,
+     GROUP BY stage_normalized, COALESCE(
+              source_data->'properties'->>'closed_lost_reason',
+              source_data->'properties'->>'closed_won_reason',
+              custom_fields->>'close_reason',
+              custom_fields->>'closed_lost_reason',
+              ''
+            )`,
     [workspaceId, quarterStart.toISOString().split('T')[0], quarterEnd.toISOString().split('T')[0]]
   );
 

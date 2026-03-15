@@ -21,6 +21,8 @@ export const pipelineProgressionSkill: SkillDefinition = {
   ],
 
   requiredContext: ['goals_and_targets', 'business_model'],
+  outputFormat: 'slack',
+  estimatedDuration: '60s',
 
   schedule: {
     cron: '0 8 * * 1',
@@ -91,7 +93,7 @@ export const pipelineProgressionSkill: SkillDefinition = {
       name: 'Classify Quarter Health',
       tier: 'deepseek',
       dependsOn: ['snapshot-current-pipeline', 'load-historical-snapshots', 'detect-early-warnings'],
-      prompt: `You are classifying pipeline health for Q+1 and Q+2 for a B2B SaaS company.
+      deepseekPrompt: `You are classifying pipeline health for Q+1 and Q+2 for a B2B SaaS company.
 
 CURRENT SNAPSHOT:
 {{snapshot}}
@@ -150,10 +152,11 @@ Respond with JSON only:
       name: 'Synthesize Pipeline Progression Report',
       tier: 'claude',
       dependsOn: ['summarize-for-claude', 'classify-quarter-health'],
-      systemPrompt: `You are a RevOps analyst presenting a pipeline progression briefing.
+      claudePrompt: `You are a RevOps analyst presenting a pipeline progression briefing.
 Your job: give the revenue team an early warning if pipeline is building toward a coverage shortfall.
-Be specific with quarter labels, dollar amounts, and coverage ratios. No hedging.`,
-      prompt: `Write a pipeline progression report using this data:
+Be specific with quarter labels, dollar amounts, and coverage ratios. No hedging.
+
+Write a pipeline progression report using this data:
 
 {{claude_input}}
 

@@ -146,8 +146,8 @@ export async function pipelineProgressionHistory(
   workspaceId: string,
   weeksBack: number = 12
 ): Promise<PipelineProgressionHistory> {
-  const historyResult = await query<{ result_data: any; started_at: string }>(
-    `SELECT result_data, started_at
+  const historyResult = await query<{ output: any; started_at: string }>(
+    `SELECT output, started_at
      FROM skill_runs
      WHERE workspace_id = $1
        AND skill_id = 'pipeline-progression'
@@ -158,7 +158,7 @@ export async function pipelineProgressionHistory(
   );
 
   const snapshots: PipelineProgressionSnapshot[] = historyResult.rows
-    .map(r => r.result_data?.snapshot as PipelineProgressionSnapshot | undefined)
+    .map(r => r.output?.snapshot as PipelineProgressionSnapshot | undefined)
     .filter((s): s is PipelineProgressionSnapshot => !!s);
 
   const trendLines = {

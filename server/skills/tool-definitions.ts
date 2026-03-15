@@ -6471,19 +6471,19 @@ const fatGatherHistoricalRollups: ToolDefinition = {
     return safeExecute('fatGatherHistoricalRollups', async () => {
       // Pull last 4 completed skill runs for weekly-forecast-rollup
       const runsResult = await query<any>(
-        `SELECT sr.id, sr.completed_at, sr.result_data
+        `SELECT sr.id, sr.completed_at, sr.output
          FROM skill_runs sr
          WHERE sr.workspace_id = $1
            AND sr.skill_id = 'weekly-forecast-rollup'
            AND sr.status = 'completed'
-           AND sr.result_data IS NOT NULL
+           AND sr.output IS NOT NULL
          ORDER BY sr.completed_at DESC
          LIMIT 4`,
         [context.workspaceId]
       ).catch(() => ({ rows: [] as any[] }));
 
       const weeklyRollups = runsResult.rows.map((r: any) => {
-        const data = r.result_data || {};
+        const data = r.output || {};
         return {
           run_id: r.id,
           week: r.completed_at ? new Date(r.completed_at).toISOString().split('T')[0] : null,
@@ -9162,11 +9162,11 @@ export const toolRegistry = new Map<string, ToolDefinition>([
       const convData = (context.stepResults as any).completed_quarters;
       const quotaConfig = (context.stepResults as any).quota_config;
       const impliedTarget = convData?.impliedCoverageTarget ?? 3.3;
-      const currentCoverageRun = await query<{ result_data: any }>(
-        `SELECT result_data FROM skill_runs WHERE workspace_id = $1 AND skill_id = 'pipeline-coverage' AND status = 'completed' ORDER BY started_at DESC LIMIT 1`,
+      const currentCoverageRun = await query<{ output: any }>(
+        `SELECT output FROM skill_runs WHERE workspace_id = $1 AND skill_id = 'pipeline-coverage' AND status = 'completed' ORDER BY started_at DESC LIMIT 1`,
         [context.workspaceId]
       );
-      const coverageRatio = currentCoverageRun.rows[0]?.result_data?.teamCoverage ?? 0;
+      const coverageRatio = currentCoverageRun.rows[0]?.output?.teamCoverage ?? 0;
       const teamQuota = quotaConfig?.teamQuota ?? 0;
       const actualCoverage = coverageRatio;
       const gap = impliedTarget - actualCoverage;
@@ -9286,8 +9286,8 @@ export const toolRegistry = new Map<string, ToolDefinition>([
       const maxAge = params.maxAgeDays ?? 7;
       const outputs: Record<string, any> = {};
       for (const skillId of skillIds) {
-        const result = await query<{ result_data: any; started_at: string }>(
-          `SELECT result_data, started_at FROM skill_runs
+        const result = await query<{ output: any; started_at: string }>(
+          `SELECT output, started_at FROM skill_runs
            WHERE workspace_id = $1
              AND skill_id = $2
              AND status = 'completed'
@@ -9295,7 +9295,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
            ORDER BY started_at DESC LIMIT 1`,
           [context.workspaceId, skillId]
         );
-        outputs[skillId] = result.rows[0]?.result_data ?? null;
+        outputs[skillId] = result.rows[0]?.output ?? null;
       }
       return outputs;
     }, params),
@@ -9350,8 +9350,8 @@ export const toolRegistry = new Map<string, ToolDefinition>([
     parameters: { type: 'object', properties: { lookbackQuarters: { type: 'number' } }, required: [] },
     execute: async (params, context) => safeExecute('computeGtmHistoricalContext', async () => {
       const lq = params.lookbackQuarters ?? 6;
-      const conversionHistory = await query<{ result_data: any; started_at: string }>(
-        `SELECT result_data, started_at
+      const conversionHistory = await query<{ output: any; started_at: string }>(
+        `SELECT output, started_at
          FROM skill_runs
          WHERE workspace_id = $1
            AND skill_id = 'pipeline-conversion-rate'
@@ -9360,8 +9360,8 @@ export const toolRegistry = new Map<string, ToolDefinition>([
          ORDER BY started_at ASC`,
         [context.workspaceId]
       );
-      const coverageHistory = await query<{ result_data: any; started_at: string }>(
-        `SELECT result_data, started_at
+      const coverageHistory = await query<{ output: any; started_at: string }>(
+        `SELECT output, started_at
          FROM skill_runs
          WHERE workspace_id = $1
            AND skill_id = 'pipeline-coverage'
@@ -9371,8 +9371,8 @@ export const toolRegistry = new Map<string, ToolDefinition>([
         [context.workspaceId]
       );
 
-      const conversions = conversionHistory.rows.map(r => r.result_data?.completedQuarters?.[0]?.conversionRate ?? 0).filter(Boolean);
-      const coverages = coverageHistory.rows.map(r => r.result_data?.teamCoverage ?? 0).filter(Boolean);
+      const conversions = conversionHistory.rows.map(r => r.output?.completedQuarters?.[0]?.conversionRate ?? 0).filter(Boolean);
+      const coverages = coverageHistory.rows.map(r => r.output?.teamCoverage ?? 0).filter(Boolean);
 
       const convTrend = conversions.length >= 2 ? (conversions[conversions.length - 1] - conversions[0]) : 0;
       const covTrend = coverages.length >= 2 ? (coverages[coverages.length - 1] - coverages[0]) : 0;
@@ -9601,7 +9601,11 @@ export const toolRegistry = new Map<string, ToolDefinition>([
            AND created_at <= $2
            AND close_date >= $3
            AND stage_normalized = 'closed_lost'
-           AND (close_reason IS NULL OR close_reason NOT ILIKE '%won%')`,
+           AND COALESCE(
+             source_data->'properties'->>'closed_won_reason',
+             custom_fields->>'close_reason',
+             ''
+           ) NOT ILIKE '%won%'`,
         [context.workspaceId, week3Date.toISOString(), qStart.toISOString().split('T')[0]]
       );
 

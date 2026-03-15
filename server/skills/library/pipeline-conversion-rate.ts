@@ -23,6 +23,8 @@ export const pipelineConversionRateSkill: SkillDefinition = {
   ],
 
   requiredContext: ['goals_and_targets', 'business_model'],
+  outputFormat: 'slack',
+  estimatedDuration: '60s',
 
   schedule: {
     cron: '0 8 * * 1',
@@ -103,7 +105,7 @@ export const pipelineConversionRateSkill: SkillDefinition = {
       name: 'Classify Conversion Health',
       tier: 'deepseek',
       dependsOn: ['resolve-completed-quarters', 'compute-win-rates', 'compute-coverage-adequacy'],
-      prompt: `You are analyzing pipeline conversion health for a B2B SaaS company.
+      deepseekPrompt: `You are analyzing pipeline conversion health for a B2B SaaS company.
 
 CONVERSION DATA:
 {{completed_quarters}}
@@ -157,9 +159,10 @@ Respond with JSON only:
       name: 'Synthesize Conversion Report',
       tier: 'claude',
       dependsOn: ['summarize-for-claude', 'classify-conversion-health', 'compute-methodology-divergence'],
-      systemPrompt: `You are a RevOps analyst delivering pipeline conversion analysis.
-Lead with the single most important number. Be direct — no hedging.`,
-      prompt: `Write a conversion rate analysis using this data:
+      claudePrompt: `You are a RevOps analyst delivering pipeline conversion analysis.
+Lead with the single most important number. Be direct — no hedging.
+
+Write a conversion rate analysis using this data:
 
 {{claude_input}}
 

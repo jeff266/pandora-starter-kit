@@ -62,7 +62,6 @@ export async function week3PipelineConversionRate(
      WHERE workspace_id = $1
        AND close_date >= $2
        AND close_date <= $3
-       AND stage_normalized NOT IN ('closed_won', 'closed_lost')
        AND created_at <= $4`,
     [
       workspaceId,
@@ -80,15 +79,28 @@ export async function week3PipelineConversionRate(
   }>(
     `SELECT
        stage_normalized,
-       close_reason,
+       COALESCE(
+         source_data->'properties'->>'closed_lost_reason',
+         source_data->'properties'->>'closed_won_reason',
+         custom_fields->>'close_reason',
+         custom_fields->>'closed_lost_reason',
+         ''
+       ) AS close_reason,
        COUNT(*)::int AS count,
        COALESCE(SUM(amount), 0) AS total
      FROM deals
      WHERE workspace_id = $1
        AND close_date >= $2
        AND close_date <= $3
-     GROUP BY stage_normalized, close_reason`,
-    [workspaceId, quarterStart.toISOString().split('T')[0], quarterEnd.toISOString().split('T')[0]]
+       AND created_at <= $4
+     GROUP BY stage_normalized, COALESCE(
+         source_data->'properties'->>'closed_lost_reason',
+         source_data->'properties'->>'closed_won_reason',
+         custom_fields->>'close_reason',
+         custom_fields->>'closed_lost_reason',
+         ''
+       )`,
+    [workspaceId, quarterStart.toISOString().split('T')[0], quarterEnd.toISOString().split('T')[0], week3Date.toISOString()]
   );
 
   let closedWon = 0; let closedWonCount = 0;

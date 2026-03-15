@@ -671,20 +671,20 @@ export async function assembleOpeningBrief(
 
   // Pipeline Movement — most recent skill run (feeds brief PIPELINE MOVEMENT section)
   const pipelineMovementRow = await query<{
-    result_data: any;
+    output: any;
     created_at: string;
   }>(`
-    SELECT result_data, created_at
+    SELECT output, created_at
     FROM skill_runs
     WHERE workspace_id = $1
       AND skill_id = 'pipeline-movement'
-      AND status = 'success'
+      AND status = 'completed'
     ORDER BY created_at DESC
     LIMIT 1
   `, [workspaceId]).then(r => r.rows[0] ?? null).catch(() => null);
 
-  const pmSummary    = pipelineMovementRow?.result_data?.summary ?? null;
-  const pmNetDelta   = pipelineMovementRow?.result_data?.net_delta ?? null;
+  const pmSummary    = pipelineMovementRow?.output?.summary ?? null;
+  const pmNetDelta   = pipelineMovementRow?.output?.net_delta ?? null;
   const pipelineMovement: OpeningBriefData['pipelineMovement'] = pipelineMovementRow ? {
     headline:      pmSummary?.headline   ?? null,
     netDelta:      pmNetDelta?.pipelineValueDelta ?? null,

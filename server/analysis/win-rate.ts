@@ -58,7 +58,13 @@ export async function computeWinRates(
   }>(
     `SELECT
        d.stage_normalized,
-       d.close_reason,
+       COALESCE(
+         d.source_data->'properties'->>'closed_lost_reason',
+         d.source_data->'properties'->>'closed_won_reason',
+         d.custom_fields->>'close_reason',
+         d.custom_fields->>'closed_lost_reason',
+         ''
+       ) AS close_reason,
        d.close_date,
        COALESCE(d.amount, 0) AS amount,
        TO_CHAR(DATE_TRUNC('quarter', d.close_date), 'Q YYYY') AS quarter_label

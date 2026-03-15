@@ -4569,12 +4569,12 @@ async function runMeddicCoverageSkill(workspaceId: string, params: Record<string
 // ============================================================================
 
 async function getPipelineMovement(workspaceId: string, _params: Record<string, any>): Promise<any> {
-  const result = await query<{ result_data: any; created_at: string }>(
-    `SELECT result_data, created_at
+  const result = await query<{ output: any; created_at: string }>(
+    `SELECT output, created_at
      FROM skill_runs
      WHERE workspace_id = $1
        AND skill_id = 'pipeline-movement'
-       AND status IN ('completed', 'success')
+       AND status = 'completed'
      ORDER BY created_at DESC
      LIMIT 1`,
     [workspaceId]
@@ -4589,7 +4589,7 @@ async function getPipelineMovement(workspaceId: string, _params: Record<string, 
   }
 
   const row = result.rows[0];
-  const resultData = row.result_data ?? {};
+  const resultData = row.output ?? {};
   const summary = resultData.summary ?? null;
 
   return {
@@ -4668,13 +4668,13 @@ async function getSkillRun(workspaceId: string, params: Record<string, any>): Pr
   if (!skillId) throw new Error('skill_id is required');
 
   const result = await query<{
-    result_data: any;
+    output: any;
     created_at: string;
     status: string;
     duration_ms: number | null;
-    tokens_used: number | null;
+    token_usage: any;
   }>(
-    `SELECT result_data, created_at, status, duration_ms, tokens_used
+    `SELECT output, created_at, status, duration_ms, token_usage
      FROM skill_runs
      WHERE workspace_id = $1
        AND skill_id = $2
@@ -4699,8 +4699,8 @@ async function getSkillRun(workspaceId: string, params: Record<string, any>): Pr
     run_at: row.created_at,
     data_age_hours: Math.round((Date.now() - new Date(row.created_at).getTime()) / 3600000),
     duration_ms: row.duration_ms,
-    tokens_used: row.tokens_used,
-    result_data: row.result_data,
+    token_usage: row.token_usage,
+    output: row.output,
     query_description: `Retrieved latest run of ${skillId} from ${row.created_at} (status: ${row.status})`,
   };
 }
