@@ -29,7 +29,6 @@ const S = {
 
 type QuarterPhase = 'early' | 'mid' | 'late' | 'final_week';
 type QuarterTab = 'early' | 'mid' | 'late' | 'end';
-type SubTab = 'strategic' | 'tactical' | 'deals' | 'pipeline';
 
 interface TemporalContext {
   quarterPhase: QuarterPhase;
@@ -168,11 +167,6 @@ function phaseToTab(phase?: QuarterPhase): QuarterTab {
 
 function tabPhaseOrder(tab: QuarterTab): number {
   return { early: 0, mid: 1, late: 2, end: 3 }[tab] ?? 0;
-}
-
-function getSubTabs(role: PandoraRole): SubTab[] {
-  if (role === 'ae') return ['deals', 'pipeline'];
-  return ['strategic', 'tactical'];
 }
 
 function healthColor(pct?: number): string {
@@ -455,7 +449,6 @@ export default function ConciergeView() {
   const [error, setError] = useState<string | null>(null);
   const [activeMathKey, setActiveMathKey] = useState<string | null>(null);
   const [activeQuarterTab, setActiveQuarterTab] = useState<QuarterTab>('early');
-  const [activeSubTab, setActiveSubTab] = useState<SubTab>('strategic');
   const [isProjection, setIsProjection] = useState(false);
   const [pendingActions, setPendingActions] = useState<PendingAction[]>([]);
   const [expandedActionId, setExpandedActionId] = useState<string | null>(null);
@@ -529,8 +522,6 @@ export default function ConciergeView() {
       const tab = phaseToTab(data?.temporal?.quarterPhase);
       setActiveQuarterTab(tab);
 
-      const subTabs = getSubTabs(role);
-      setActiveSubTab(subTabs[0]);
     } catch (e: unknown) {
       if (!silent) setError('Could not load your brief. Please refresh.');
     } finally {
@@ -711,7 +702,6 @@ export default function ConciergeView() {
     setIsProjection(newOrder > currentPhaseOrder);
   };
 
-  const subTabs = getSubTabs(pandoraRole);
   const hasTarget = brief?.targets?.hasTarget !== false;
   const pct = brief?.targets?.pctAttained;
   const wsName = brief?.workspace?.name || currentWorkspace?.name || 'Pandora';
@@ -849,29 +839,6 @@ export default function ConciergeView() {
           })}
         </div>
 
-        {/* SUB-TABS */}
-        <div style={{ display: 'flex', borderBottom: `0.5px solid ${S.border}`, marginBottom: 20 }}>
-          {subTabs.map(tab => {
-            const isVP = tab === 'strategic' || tab === 'tactical';
-            const isActive = activeSubTab === tab;
-            const activeColor = isVP ? S.blue : S.teal;
-            return (
-              <button
-                key={tab}
-                onClick={() => setActiveSubTab(tab)}
-                style={{
-                  padding: '8px 16px', background: 'none', border: 'none', cursor: 'pointer',
-                  fontSize: 11, fontWeight: isActive ? 600 : 400,
-                  color: isActive ? S.text : S.textMuted,
-                  borderBottom: isActive ? `2px solid ${activeColor}` : '2px solid transparent',
-                  fontFamily: S.font, textTransform: 'capitalize', transition: 'color 0.1s',
-                }}
-              >
-                {tab.charAt(0).toUpperCase() + tab.slice(1)}
-              </button>
-            );
-          })}
-        </div>
 
         {/* MAIN CONTENT */}
         {loading ? (
@@ -887,23 +854,22 @@ export default function ConciergeView() {
           <>
             {/* GREETING + SITUATION */}
             {brief.user?.name && (
-              <div style={{ fontSize: 20, fontWeight: 500, color: S.text, marginBottom: 6 }}>
+              <div style={{ fontSize: 20, fontWeight: 500, color: S.text, marginBottom: 14 }}>
                 {brief.user.name}.
               </div>
             )}
-            {(() => {
-              const line = brief.situationLine || deriveSituationLine(brief);
-              return line ? (
-                <div style={{ fontSize: 13, color: S.textSub, maxWidth: 600, marginBottom: 18, lineHeight: 1.6 }}>
-                  {line}
-                </div>
-              ) : null;
-            })()}
 
             {/* 4-COLUMN METRIC ROW */}
             {(() => {
-              const estQ2 = brief.estimatedQ2Coverage != null ? Number(brief.estimatedQ2Coverage) : null;
-              const q2Color = estQ2 === null || isNaN(estQ2) ? S.textMuted : estQ2 >= 3 ? S.teal : estQ2 >= 1.5 ? S.yellow : S.red;
+              const estQ2Raw = brief.estimatedQ2Coverage != null ? Number(brief.estimatedQ2Coverage) : null;
+              const estQ2Valid = estQ2Raw !== null && !isNaN(estQ2Raw) && isFinite(estQ2Raw);
+              const fallbackCoverage = brief.pipeline?.coverageRatio != null ? Number(brief.pipeline.coverageRatio) : null;
+              const q2Display = estQ2Valid
+                ? `~${estQ2Raw!.toFixed(1)}×`
+                : fallbackCoverage != null ? `${fallbackCoverage.toFixed(1)}×` : '—';
+              const q2Label = estQ2Valid ? 'Est. Q2 coverage' : 'Pipeline coverage';
+              const q2Value = estQ2Valid ? estQ2Raw! : fallbackCoverage;
+              const q2Color = q2Value === null || isNaN(q2Value!) ? S.textMuted : q2Value >= 3 ? S.teal : q2Value >= 1.5 ? S.yellow : S.red;
               const attainColor = pct == null ? S.teal : pct >= 100 ? S.teal : pct >= 85 ? S.yellow : S.red;
               const periodLabel = (typeof brief.targets?.headline === 'object' && brief.targets?.headline?.label)
                 ? brief.targets.headline.label
@@ -963,16 +929,16 @@ export default function ConciergeView() {
                     <span style={{ fontSize: 10, color: S.textSub, fontWeight: 600 }}>Open</span>
                     <span style={{ fontSize: 10, color: S.textDim }}>pipeline</span>
                   </div>
-                  {/* Col 4: Est. Q2 coverage */}
+                  {/* Col 4: Est. Q2 / Pipeline coverage */}
                   <div
                     onClick={() => openMathModal('coverage')}
-                    title="Includes stage-weighted open pipeline and expected Q1 rollover deals"
+                    title={estQ2Valid ? 'Includes stage-weighted open pipeline and expected Q1 rollover deals' : 'Open pipeline ÷ quota target'}
                     style={metricCellStyle}
                   >
                     <span style={{ fontSize: 22, fontWeight: 500, color: q2Color, lineHeight: 1.2 }}>
-                      {estQ2 != null ? `~${estQ2.toFixed(1)}×` : '—'}
+                      {q2Display}
                     </span>
-                    <span style={{ fontSize: 10, color: S.textSub, fontWeight: 600 }}>Est. Q2 coverage</span>
+                    <span style={{ fontSize: 10, color: S.textSub, fontWeight: 600 }}>{q2Label}</span>
                     <span style={{ fontSize: 10, color: S.textDim }}>target: 3×</span>
                   </div>
                 </div>
@@ -983,8 +949,8 @@ export default function ConciergeView() {
               <span style={{ fontSize: 10, color: '#3a4252' }}>∑ Show math</span>
             </div>
 
-            {/* ACTIVITY LOG — strategic sub-tab (collapsible overnight) */}
-            {activeSubTab === 'strategic' && (brief.findings?.skillRuns?.length ?? 0) > 0 && (
+            {/* ACTIVITY LOG — collapsible overnight (non-AE roles) */}
+            {pandoraRole !== 'ae' && (brief.findings?.skillRuns?.length ?? 0) > 0 && (
               <div style={{ marginBottom: 20 }}>
                 {/* HEADER ROW — always visible */}
                 <div
@@ -1119,23 +1085,6 @@ export default function ConciergeView() {
               </div>
             )}
 
-            {/* ACTIVITY LOG — tactical sub-tab for non-ae roles */}
-            {(pandoraRole !== 'ae') && activeSubTab === 'tactical' && brief.findings?.skillRuns && brief.findings.skillRuns.length > 0 && (
-              <div style={{ marginBottom: 20 }}>
-                <div style={{ fontSize: 10, fontWeight: 700, color: S.textDim, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>
-                  Pandora overnight
-                </div>
-                {brief.findings.skillRuns.map((run, i) => (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0', borderBottom: i < brief.findings.skillRuns!.length - 1 ? `0.5px solid ${S.border}` : 'none' }}>
-                    <StatusDot status={run.status} />
-                    <span style={{ flex: 1, fontSize: 12, color: S.textSub }}>
-                      {run.skillName}{run.findingCount !== undefined ? ` · ${run.findingCount} finding${run.findingCount === 1 ? '' : 's'}` : ''}
-                    </span>
-                    <span style={{ fontSize: 10, color: S.textDim }}>{fmtTs(run.ranAt)}</span>
-                  </div>
-                ))}
-              </div>
-            )}
 
             {/* BRIEF ITEMS */}
             {(() => {
@@ -1313,17 +1262,18 @@ export default function ConciergeView() {
                     const body = fullMsg;
 
                     const isWatched = watchedFindingIds.has(finding.id ?? '') || (finding.is_watched && !unwatchedFindingIds.has(finding.id ?? ''));
-                    const dealForFinding = finding.dealName
-                      ? { id: finding.id ?? String(i), name: finding.dealName }
-                      : null;
+                    const findingDealRef = {
+                      id: finding.id ?? String(i),
+                      name: finding.dealName || (finding.message?.slice(0, 60) ?? 'this finding'),
+                    };
 
                     const findingActions = [
-                      ...(dealForFinding ? [{
+                      {
                         label: assignedDealIds.has(finding.id ?? '') ? '✓ Assigned' : 'Assign to rep',
                         variant: 'primary' as const,
                         disabled: assignedDealIds.has(finding.id ?? ''),
-                        onClick: (_e: React.MouseEvent) => assignToRep({ id: dealForFinding.id, name: dealForFinding.name, daysSinceActivity: 0 }),
-                      }] : []),
+                        onClick: (_e: React.MouseEvent) => assignToRep({ id: findingDealRef.id, name: findingDealRef.name, daysSinceActivity: 0 }),
+                      },
                       ...(finding.id ? (isWatched
                         ? [{
                             label: 'Unwatch',
@@ -1341,11 +1291,11 @@ export default function ConciergeView() {
                         variant: 'secondary' as const,
                         onClick: (_e: React.MouseEvent) => dismissFinding(finding),
                       }] : []),
-                      ...(dealForFinding ? [{
+                      {
                         label: 'Ask →',
                         variant: 'secondary' as const,
-                        onClick: (_e: React.MouseEvent) => openAskPandora(dealForFinding),
-                      }] : []),
+                        onClick: (_e: React.MouseEvent) => openAskPandora(findingDealRef),
+                      },
                     ];
 
                     return (
@@ -1403,7 +1353,7 @@ export default function ConciergeView() {
             )}
 
             {/* PANDORA OVERNIGHT — strategic sub-tab, below findings */}
-            {(pandoraRole !== 'ae') && activeSubTab === 'strategic' && overnight && (overnight.skillsRun > 0 || overnight.findingsSurfaced > 0 || overnight.autonomousActionsCompleted > 0 || overnight.pendingApprovalCount > 0) && (
+            {pandoraRole !== 'ae' && overnight && (overnight.skillsRun > 0 || overnight.findingsSurfaced > 0 || overnight.autonomousActionsCompleted > 0 || overnight.pendingApprovalCount > 0) && (
               <div style={{
                 border: `0.5px solid ${S.border}`,
                 borderRadius: 10,
