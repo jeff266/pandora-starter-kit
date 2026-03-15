@@ -49,6 +49,7 @@ import { voicePatternExtractionSkill } from './library/voice-pattern-extraction.
 import { pipelineConversionRateSkill } from './library/pipeline-conversion-rate.js';
 import { pipelineProgressionSkill } from './library/pipeline-progression.js';
 import { gtmHealthDiagnosticSkill } from './library/gtm-health-diagnostic.js';
+import { quarterlyPreMortemSkill } from './library/quarterly-pre-mortem.js';
 
 // Types
 export type {
@@ -200,6 +201,7 @@ export function registerBuiltInSkills(): void {
   registry.register(pipelineConversionRateSkill);
   registry.register(pipelineProgressionSkill);
   registry.register(gtmHealthDiagnosticSkill);
+  registry.register(quarterlyPreMortemSkill);
 
   // Register evidence builders for "Show the Work" evidence assembly
   registerAllEvidenceBuilders();

@@ -666,6 +666,40 @@ export function startSkillScheduler(): void {
   scheduledSkills.push({ skillId: 'voice-pattern-extraction', cronExpression: '0 6 1 * *', job: voiceExtractionJob });
   console.log('[VoicePatterns] Cron registered — 6:00 AM UTC on 1st of each month');
 
+  // Quarterly Pre-Mortem: first day of each quarter at 8:00 AM UTC (Jan 1, Apr 1, Jul 1, Oct 1)
+  // Reads prior Monday skill outputs, identifies failure modes, and writes standing hypotheses.
+  // Also triggerable on-demand via the skill runner.
+  const quarterlyPreMortemJob = cron.schedule(
+    '0 8 1 1,4,7,10 *',
+    async () => {
+      console.log('[QuarterlyPreMortem] Quarter-start pre-mortem triggered');
+      const { runSkill } = await import('../skills/runtime.js');
+
+      const workspacesResult = await query<{ id: string; name: string }>(
+        `SELECT DISTINCT w.id, w.name
+         FROM workspaces w
+         INNER JOIN connections c ON c.workspace_id = w.id
+         WHERE c.status IN ('connected', 'synced', 'error')
+           AND w.status = 'active'
+         ORDER BY w.name`
+      );
+
+      for (const workspace of workspacesResult.rows) {
+        try {
+          await runSkill('quarterly-pre-mortem', workspace.id, { trigger: 'cron' });
+          console.log(`[QuarterlyPreMortem] ✓ ${workspace.name} (${workspace.id})`);
+        } catch (err: any) {
+          console.error(`[QuarterlyPreMortem] ✗ ${workspace.name}:`, err.message);
+        }
+      }
+
+      console.log(`[QuarterlyPreMortem] Complete — ${workspacesResult.rows.length} workspace(s) processed`);
+    },
+    { timezone: 'UTC' }
+  );
+  scheduledSkills.push({ skillId: 'quarterly-pre-mortem', cronExpression: '0 8 1 1,4,7,10 *', job: quarterlyPreMortemJob });
+  console.log('[QuarterlyPreMortem] Cron registered — 8:00 AM UTC on first day of each quarter');
+
   // Concierge Slack push: daily 8:15 AM UTC
   // Offset 15 min from pipeline-hygiene (8:00 AM) to avoid queue pressure.
   const conciergePushJob = cron.schedule(

@@ -19,6 +19,133 @@ import { getSlackAppClient } from '../connectors/slack/slack-app-client.js';
 import { trackPandoraPost } from './thread-tracker.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
+// PART 0 — Standing Hypothesis Monitor
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface TrippedHypothesis {
+  id: string;
+  hypothesis: string;
+  metric: string;
+  currentValue: number | null;
+  alertThreshold: number;
+  alertDirection: 'below' | 'above';
+  reviewDate: string | null;
+}
+
+/**
+ * Queries active standing hypotheses and returns any whose current_value
+ * has crossed the alert_threshold. Also stamps the weekly_values JSONB
+ * array with today's value so the trend accumulates over time.
+ *
+ * Non-fatal — always resolves. Returns [] on any DB error.
+ */
+async function checkStandingHypotheses(workspaceId: string): Promise<TrippedHypothesis[]> {
+  try {
+    const result = await query<{
+      id: string;
+      hypothesis: string;
+      metric: string;
+      current_value: string | null;
+      alert_threshold: string;
+      alert_direction: string;
+      review_date: string | null;
+    }>(
+      `SELECT id, hypothesis, metric, current_value, alert_threshold, alert_direction, review_date
+       FROM standing_hypotheses
+       WHERE workspace_id = $1
+         AND status = 'active'
+       ORDER BY created_at DESC`,
+      [workspaceId]
+    );
+
+    if (result.rows.length === 0) return [];
+
+    const today = new Date().toISOString().split('T')[0];
+    const tripped: TrippedHypothesis[] = [];
+
+    for (const row of result.rows) {
+      const currentValue = row.current_value != null ? parseFloat(row.current_value) : null;
+      const threshold = parseFloat(row.alert_threshold);
+      const direction = row.alert_direction as 'below' | 'above';
+
+      // Stamp weekly value if current_value is known
+      if (currentValue != null) {
+        await query(
+          `UPDATE standing_hypotheses
+           SET weekly_values = weekly_values || $1::jsonb,
+               updated_at = now()
+           WHERE id = $2`,
+          [JSON.stringify({ weekOf: today, value: currentValue }), row.id]
+        ).catch(err => console.warn('[hypothesis-monitor] weekly_values update failed:', err.message));
+      }
+
+      // Threshold check
+      const crossed =
+        currentValue != null &&
+        ((direction === 'below' && currentValue < threshold) ||
+         (direction === 'above' && currentValue > threshold));
+
+      if (crossed) {
+        tripped.push({
+          id: row.id,
+          hypothesis: row.hypothesis,
+          metric: row.metric,
+          currentValue,
+          alertThreshold: threshold,
+          alertDirection: direction,
+          reviewDate: row.review_date,
+        });
+      }
+    }
+
+    if (tripped.length > 0) {
+      console.log(`[hypothesis-monitor] ${tripped.length} threshold(s) crossed for workspace ${workspaceId}`);
+    }
+
+    return tripped;
+  } catch (err: any) {
+    console.warn(`[hypothesis-monitor] check failed for workspace ${workspaceId} (non-fatal):`, err.message);
+    return [];
+  }
+}
+
+/**
+ * Formats tripped hypotheses into Slack Block Kit blocks to prepend
+ * to the Concierge brief. Returns [] if no hypotheses are tripped.
+ */
+function formatHypothesisAlertBlocks(alerts: TrippedHypothesis[]): Array<Record<string, any>> {
+  if (alerts.length === 0) return [];
+
+  const blocks: Array<Record<string, any>> = [
+    {
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `⚠️ *Standing Hypothesis Alert${alerts.length > 1 ? 's' : ''}* — ${alerts.length} threshold${alerts.length > 1 ? 's' : ''} crossed`,
+      },
+    },
+  ];
+
+  for (const alert of alerts) {
+    const dirLabel = alert.alertDirection === 'below' ? 'fell below' : 'rose above';
+    const valueStr = alert.currentValue != null ? String(Math.round(alert.currentValue * 100) / 100) : 'unknown';
+    const thresholdStr = String(Math.round(alert.alertThreshold * 100) / 100);
+
+    blocks.push({
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `*${alert.hypothesis}*\n_${alert.metric}_ ${dirLabel} ${thresholdStr} (current: ${valueStr})`,
+      },
+    });
+  }
+
+  blocks.push({ type: 'divider' });
+
+  return blocks;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // PART 1 — assembleConciergeSlackMessage
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -128,6 +255,7 @@ export async function assembleConciergeSlackMessage(
 
 /**
  * Sends the morning Concierge brief to the workspace's default Slack channel.
+ * Checks standing hypothesis thresholds and prepends any alerts to the brief.
  * Silently skips if Slack is not configured for the workspace.
  */
 export async function sendConciergeSlackBrief(workspaceId: string): Promise<void> {
@@ -183,12 +311,21 @@ export async function sendConciergeSlackBrief(workspaceId: string): Promise<void
 
   const userId = adminResult.rows[0].user_id;
 
+  // ── Check standing hypothesis thresholds ──────────────────────────────────
+  const trippedHypotheses = await checkStandingHypotheses(workspaceId);
+  const alertBlocks = formatHypothesisAlertBlocks(trippedHypotheses);
+
   // ── Assemble brief ────────────────────────────────────────────────────────
-  const blocks = await assembleConciergeSlackMessage(workspaceId, userId);
-  if (!blocks) {
+  const briefBlocks = await assembleConciergeSlackMessage(workspaceId, userId);
+  if (!briefBlocks) {
     console.log(`[concierge-push] Brief assembly returned null for workspace ${workspaceId} — skipping`);
     return;
   }
+
+  // Prepend hypothesis alerts before the brief (if any thresholds tripped)
+  const blocks = alertBlocks.length > 0
+    ? [...alertBlocks, ...briefBlocks]
+    : briefBlocks;
 
   // ── Post to Slack ─────────────────────────────────────────────────────────
   const { slackPost } = await import('./thread-tracker.js');
@@ -207,7 +344,7 @@ export async function sendConciergeSlackBrief(workspaceId: string): Promise<void
 
   if (result.ok && result.ts) {
     trackPandoraPost(channelId, result.ts, workspaceId);
-    console.log(`[concierge-push] Concierge brief sent to ${workspaceName} (channel: ${channelId}, ts: ${result.ts})`);
+    console.log(`[concierge-push] Concierge brief sent to ${workspaceName} (channel: ${channelId}, ts: ${result.ts})${trippedHypotheses.length > 0 ? ` — ${trippedHypotheses.length} hypothesis alert(s) prepended` : ''}`);
   } else {
     console.error(`[concierge-push] Failed to post to ${workspaceName}: ${result.error ?? 'unknown error'}`);
   }

@@ -9836,6 +9836,193 @@ export const toolRegistry = new Map<string, ToolDefinition>([
       };
     }, params),
   } as ToolDefinition],
+
+  // ── Pre-Mortem Compute Functions ──────────────────────────────────────────
+
+  ['computeQuarterContext', {
+    name: 'computeQuarterContext',
+    description: 'Derives quarter label, days remaining, P10/P50/P90, quota attainment, composition swing variable, and large deal list from cached skill outputs.',
+    tier: 'compute',
+    parameters: { type: 'object', properties: {}, required: [] },
+    execute: async (_params, context) => safeExecute('computeQuarterContext', async () => {
+      const skillOutputs = (context.stepResults as any).skill_outputs ?? {};
+      const mc = skillOutputs['monte-carlo-forecast'];
+      const coverage = skillOutputs['pipeline-coverage'];
+      const conversion = skillOutputs['pipeline-conversion-rate'];
+      const progression = skillOutputs['pipeline-progression'];
+      const gtmHealth = skillOutputs['gtm-health-diagnostic'];
+
+      // Quarter label
+      const now = new Date();
+      const month = now.getMonth();
+      const year = now.getFullYear();
+      const quarterNum = Math.floor(month / 3) + 1;
+      const quarterLabel = `Q${quarterNum} ${year}`;
+      const quarterStart = new Date(year, Math.floor(month / 3) * 3, 1);
+      const quarterEnd = new Date(year, Math.floor(month / 3) * 3 + 3, 0);
+      const daysRemaining = Math.ceil((quarterEnd.getTime() - now.getTime()) / 86400000);
+      const daysTotal = Math.ceil((quarterEnd.getTime() - quarterStart.getTime()) / 86400000);
+      const weekOfQuarter = Math.floor((now.getTime() - quarterStart.getTime()) / (7 * 86400000)) + 1;
+
+      // Monte Carlo outputs
+      const p10 = mc?.p10 ?? mc?.simulation?.p10 ?? null;
+      const p50 = mc?.p50 ?? mc?.simulation?.p50 ?? null;
+      const p90 = mc?.p90 ?? mc?.simulation?.p90 ?? null;
+      const quota = mc?.quota ?? mc?.simulation?.quota ?? coverage?.quota ?? null;
+      const attainmentPct = quota && p50 ? Math.round((p50 / quota) * 100) : null;
+
+      // Coverage
+      const coverageRatio = coverage?.teamCoverage ?? coverage?.coverageRatio ?? null;
+      const toGoCoverage = coverage?.toGoCoverage ?? null;
+      const burnAlert = coverage?.burnAlert ?? false;
+
+      // Conversion
+      const conversionRate = conversion?.completedQuarters?.[0]?.conversionRate ?? conversion?.weekThreeConversionRate ?? null;
+      const narrowWinRate = conversion?.winRates?.narrow?.rate ?? null;
+      const broadWinRate = conversion?.winRates?.broad?.rate ?? null;
+
+      // Progression (Q0/Q+1/Q+2 coverage trend)
+      const progressionTrend = progression?.trend ?? progression?.summary ?? null;
+
+      // GTM health verdict
+      const gtmVerdict = gtmHealth?.primaryProblem ?? gtmHealth?.classification?.primaryProblem ?? null;
+
+      // Implied coverage target
+      const impliedCoverageTarget = conversionRate && conversionRate > 0
+        ? Math.round((1 / conversionRate) * 100) / 100
+        : 3.0;
+
+      return {
+        quarterLabel,
+        weekOfQuarter,
+        daysRemaining,
+        daysTotal,
+        quarterStart: quarterStart.toISOString().split('T')[0],
+        quarterEnd: quarterEnd.toISOString().split('T')[0],
+        monteCarlo: { p10, p50, p90, quota, attainmentPct },
+        coverage: {
+          ratio: coverageRatio,
+          toGo: toGoCoverage,
+          burnAlert,
+          impliedTarget: impliedCoverageTarget,
+          adequate: coverageRatio != null ? coverageRatio >= impliedCoverageTarget : null,
+        },
+        conversion: {
+          weekThreeRate: conversionRate,
+          narrowWinRate,
+          broadWinRate,
+          trend: conversion?.trend ?? 'unknown',
+        },
+        progressionTrend,
+        gtmVerdict,
+        dataAvailability: {
+          monteCarlo: mc != null,
+          coverage: coverage != null,
+          conversion: conversion != null,
+          progression: progression != null,
+          gtmHealth: gtmHealth != null,
+        },
+      };
+    }, _params),
+  } as ToolDefinition],
+
+  ['writeStandingHypotheses', {
+    name: 'writeStandingHypotheses',
+    description: 'Inserts failure-mode rows from the pre-mortem deepseek step into the standing_hypotheses table. Returns the count written and the list of IDs.',
+    tier: 'compute',
+    parameters: { type: 'object', properties: {}, required: [] },
+    execute: async (_params, context) => safeExecute('writeStandingHypotheses', async () => {
+      const workspaceId = context.workspaceId;
+      const stepResults = (context.stepResults as any);
+      const failureModes = stepResults.failure_modes ?? {};
+
+      const modes: any[] = failureModes.failureModes ?? [];
+      if (modes.length === 0) {
+        console.log('[writeStandingHypotheses] No failure modes found — skipping DB write');
+        return { written: 0, hypotheses: [], skipped: true };
+      }
+
+      const written: Array<{ id: string; hypothesis: string; metric: string }> = [];
+
+      for (const mode of modes) {
+        const reviewWeeks = typeof mode.reviewWeeks === 'number' ? mode.reviewWeeks : 8;
+        const reviewDate = new Date();
+        reviewDate.setDate(reviewDate.getDate() + reviewWeeks * 7);
+
+        try {
+          const result = await query<{ id: string }>(
+            `INSERT INTO standing_hypotheses
+               (workspace_id, source, hypothesis, metric, current_value, alert_threshold, alert_direction, review_date, status, weekly_values)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active', '[]')
+             RETURNING id`,
+            [
+              workspaceId,
+              'pre_mortem',
+              mode.hypothesis ?? mode.name ?? 'Unknown failure mode',
+              mode.metric ?? 'unknown_metric',
+              mode.currentValue ?? null,
+              mode.alertThreshold ?? 0,
+              mode.alertDirection ?? 'below',
+              reviewDate.toISOString().split('T')[0],
+            ]
+          );
+          if (result.rows.length > 0) {
+            written.push({
+              id: result.rows[0].id,
+              hypothesis: mode.hypothesis ?? mode.name,
+              metric: mode.metric,
+            });
+          }
+        } catch (err: any) {
+          console.error(`[writeStandingHypotheses] Failed to write mode "${mode.name}":`, err.message);
+        }
+      }
+
+      console.log(`[writeStandingHypotheses] Wrote ${written.length} standing hypotheses for workspace ${workspaceId}`);
+      return { written: written.length, hypotheses: written };
+    }, _params),
+  } as ToolDefinition],
+
+  ['preparePreMortemSummary', {
+    name: 'preparePreMortemSummary',
+    description: 'Packages all pre-mortem step outputs into a clean summary for Claude synthesis.',
+    tier: 'compute',
+    parameters: { type: 'object', properties: {}, required: [] },
+    execute: async (_params, context) => safeExecute('preparePreMortemSummary', async () => {
+      const stepResults = (context.stepResults as any);
+      const quarterContext = stepResults.quarter_context ?? {};
+      const skillOutputs = stepResults.skill_outputs ?? {};
+      const failureModes = stepResults.failure_modes ?? {};
+      const hypothesisResult = stepResults.hypothesis_write_result ?? {};
+
+      const mc = skillOutputs['monte-carlo-forecast'];
+      const gtmHealth = skillOutputs['gtm-health-diagnostic'];
+      const progression = skillOutputs['pipeline-progression'];
+
+      return {
+        quarter: quarterContext.quarterLabel ?? 'Unknown Quarter',
+        weekOfQuarter: quarterContext.weekOfQuarter ?? 1,
+        daysRemaining: quarterContext.daysRemaining ?? 0,
+        forecast: {
+          p10: quarterContext.monteCarlo?.p10,
+          p50: quarterContext.monteCarlo?.p50,
+          p90: quarterContext.monteCarlo?.p90,
+          quota: quarterContext.monteCarlo?.quota,
+          attainmentPct: quarterContext.monteCarlo?.attainmentPct,
+        },
+        coverage: quarterContext.coverage,
+        conversion: quarterContext.conversion,
+        gtmVerdict: quarterContext.gtmVerdict,
+        progressionTrend: quarterContext.progressionTrend,
+        varianceDrivers: mc?.varianceDrivers ?? mc?.keyDrivers ?? [],
+        historicalContext: gtmHealth?.historicalContext ?? null,
+        progressionHistory: progression?.quarterlySnapshots ?? progression?.history ?? [],
+        failureModeCount: (failureModes.failureModes ?? []).length,
+        hypothesesWritten: hypothesisResult.written ?? 0,
+        dataAvailability: quarterContext.dataAvailability ?? {},
+      };
+    }, _params),
+  } as ToolDefinition],
 ]);
 
 // ============================================================================
