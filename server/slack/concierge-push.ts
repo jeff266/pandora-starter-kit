@@ -17,6 +17,7 @@ import {
 } from '../skills/formatters/slack-formatter.js';
 import { getSlackAppClient } from '../connectors/slack/slack-app-client.js';
 import { trackPandoraPost } from './thread-tracker.js';
+import { sendCrumbTrailFollowUps } from '../concierge/crumb-trail-followup.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PART 0 — Standing Hypothesis Monitor
@@ -314,6 +315,12 @@ export async function sendConciergeSlackBrief(workspaceId: string): Promise<void
   // ── Check standing hypothesis thresholds ──────────────────────────────────
   const trippedHypotheses = await checkStandingHypotheses(workspaceId);
   const alertBlocks = formatHypothesisAlertBlocks(trippedHypotheses);
+
+  // ── Send crumb trail follow-ups (6-week check-ins) ────────────────────────
+  const followUpsSent = await sendCrumbTrailFollowUps(workspaceId);
+  if (followUpsSent > 0) {
+    console.log(`[concierge-push] Sent ${followUpsSent} crumb trail follow-up(s) for workspace ${workspaceId}`);
+  }
 
   // ── Assemble brief ────────────────────────────────────────────────────────
   const briefBlocks = await assembleConciergeSlackMessage(workspaceId, userId);

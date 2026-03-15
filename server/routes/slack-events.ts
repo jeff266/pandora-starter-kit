@@ -20,6 +20,11 @@ import {
 } from '../chat/conversation-state.js';
 import { logChatMessage } from '../lib/chat-logger.js';
 import { lookupPandoraThread, trackPandoraPost } from '../slack/thread-tracker.js';
+import {
+  detectCrumbTrail,
+  recordCrumbTrail,
+  findLinkedHypothesisFromThread,
+} from '../concierge/crumb-trail-detector.js';
 
 const router = Router();
 
@@ -157,6 +162,57 @@ async function lookupThreadAnchor(channelId: string, messageTs: string): Promise
   return null;
 }
 
+/**
+ * Fire-and-forget crumb trail detection for a Slack thread reply.
+ * Resolves the linked hypothesis, records the intervention, and
+ * optionally sends an acknowledgment in the thread. Never throws.
+ */
+async function runCrumbTrailSideEffect(
+  event: any,
+  workspaceId: string,
+  recommendationText?: string
+): Promise<void> {
+  try {
+    const detection = detectCrumbTrail(event.text ?? '');
+    if (detection.signal === 'neutral') return;
+
+    const hypothesisId = await findLinkedHypothesisFromThread(workspaceId, event.thread_ts);
+
+    await recordCrumbTrail(
+      {
+        workspaceId,
+        userId: event.user,
+        userMessage: event.text ?? '',
+        triggerType: 'slack_reply',
+        triggerMessageId: event.thread_ts,
+        standingHypothesisId: hypothesisId ?? undefined,
+        recommendationText,
+      },
+      detection
+    );
+
+    const client = getSlackAppClient();
+
+    if (detection.signal === 'context_added') {
+      await client.postMessage(
+        workspaceId,
+        event.channel,
+        [{ type: 'section', text: { type: 'mrkdwn', text: `Got it — I've noted that context. It'll inform how I interpret signals for this deal going forward.` } }] as any,
+        { thread_ts: event.thread_ts }
+      );
+    } else if (detection.signal === 'affirmed' || detection.signal === 'working_on_it') {
+      await client.postMessage(
+        workspaceId,
+        event.channel,
+        [{ type: 'section', text: { type: 'mrkdwn', text: `Good to know. I'll check back in 6 weeks to see if the metrics have moved.` } }] as any,
+        { thread_ts: event.thread_ts }
+      );
+    }
+  } catch (err: any) {
+    console.warn('[slack-events] crumb-trail side effect failed (non-fatal):', err.message);
+  }
+}
+
 async function handleThreadedReply(event: any, teamId: string): Promise<void> {
   const anchor = await lookupThreadAnchor(event.channel, event.thread_ts);
 
@@ -172,6 +228,8 @@ async function handleThreadedReply(event: any, teamId: string): Promise<void> {
         : {};
 
       console.log(`[slack-events] Routing to Ask Pandora: ${(event.text || '').slice(0, 80)}`);
+      // Crumb trail: detect affirmation in replies to existing Pandora conversation threads
+      runCrumbTrailSideEffect(event, wid).catch(() => {});
       await logChatMessage({ workspaceId: wid, sessionId, surface: 'slack', role: 'user', content: event.text || '', scope: { type: 'slack_thread', channelId: event.channel, threadTs: event.thread_ts ?? event.ts } });
       const result = await handleConversationTurn({
         surface: 'slack_thread',
@@ -198,6 +256,8 @@ async function handleThreadedReply(event: any, teamId: string): Promise<void> {
       const sessionId = event.thread_ts ?? event.ts;
       const { userId, userRole } = event.user ? await resolveSlackUser(memWorkspaceId, event.user) : {};
       console.log(`[slack-events] Routing to Ask Pandora (memory thread): ${(event.text || '').slice(0, 80)}`);
+      // Crumb trail: detect affirmation in replies to Concierge brief threads
+      runCrumbTrailSideEffect(event, memWorkspaceId).catch(() => {});
       await logChatMessage({ workspaceId: memWorkspaceId, sessionId, surface: 'slack', role: 'user', content: event.text || '', scope: { type: 'slack_thread', channelId: event.channel, threadTs: event.thread_ts ?? event.ts } });
       const result = await handleConversationTurn({
         surface: 'slack_thread',
@@ -257,6 +317,9 @@ async function handleThreadedReply(event: any, teamId: string): Promise<void> {
       timestamp: new Date().toISOString(),
     });
 
+    // Crumb trail: detect affirmation on skill report threads (pre-mortem alerts, etc.)
+    runCrumbTrailSideEffect(event, workspaceId).catch(() => {});
+
     const intent = await classifyThreadReply(workspaceId, event.text || '', skillRunResult.skill_id);
     console.log(`[slack-events] Intent: ${intent.type}`, JSON.stringify(intent));
 
@@ -298,6 +361,10 @@ async function handleThreadedReply(event: any, teamId: string): Promise<void> {
   } else {
     const sessionId = event.thread_ts ?? event.ts;
     console.log(`[slack-events] Routing to Ask Pandora: ${(event.text || '').slice(0, 80)}`);
+
+    // Crumb trail: this is the primary path for Concierge brief/hypothesis alert replies
+    runCrumbTrailSideEffect(event, workspaceId).catch(() => {});
+
     await logChatMessage({ workspaceId, sessionId, surface: 'slack', role: 'user', content: event.text || '', scope: { type: 'slack_thread', channelId: event.channel, threadTs: event.thread_ts ?? event.ts } });
 
     // Resolve Slack user to workspace user for RBAC (T10)

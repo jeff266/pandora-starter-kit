@@ -1,0 +1,450 @@
+Here's the prompt:
+
+---
+
+**Build: Crumb Trail Detection in Concierge**
+
+Read these files first before writing any code:
+1. `server/slack/concierge-push.ts` — how the Concierge briefing is sent and how Slack replies are handled
+2. `server/chat/orchestrator.ts` — how Ask Pandora processes user messages
+3. The `intervention_log` table schema — just migrated in migration 179
+4. The `standing_hypotheses` table schema — same migration
+5. Any existing Slack event handler or reply listener — find where incoming Slack messages are processed
+
+---
+
+### What this builds
+
+When a user responds to a Concierge recommendation or standing hypothesis alert with affirmation language, Pandora records a soft intervention timestamp in `intervention_log` and schedules a follow-up check 6 weeks later. The crumb trail starts at the user's response and ends with a data-backed attribution report.
+
+Three components:
+
+1. **Affirmation detector** — classifies user responses as affirmation, denial, or neutral
+2. **Intervention recorder** — writes to `intervention_log` when affirmation detected
+3. **Follow-up delivery** — 6 weeks later, sends a metric movement report via Concierge
+
+---
+
+### Component 1 — Affirmation Detector
+
+Create `server/concierge/crumb-trail-detector.ts`:
+
+```typescript
+export type CrumbTrailSignal =
+  | 'affirmed'        // "great idea", "we're on it", "doing this"
+  | 'working_on_it'   // "we're working on it", "in progress", "started"
+  | 'already_done'    // "we did this", "already implemented", "tried that"
+  | 'declined'        // "not a priority", "disagree", "won't work for us"
+  | 'context_added'   // "actually X is in legal review", "that deal is fine"
+  | 'neutral'         // no signal — don't record anything
+
+export interface CrumbTrailDetection {
+  signal: CrumbTrailSignal
+  confidence: number          // 0–1
+  extractedContext: string    // any factual correction or added context
+}
+
+export function detectCrumbTrail(
+  userMessage: string
+): CrumbTrailDetection {
+  const msg = userMessage.toLowerCase().trim()
+
+  // Affirmation patterns
+  const affirmedPatterns = [
+    /great (idea|call|point|catch)/,
+    /love (that|this|it)/,
+    /we('re| are) (going to|planning to|will) (do|try|implement|work on)/,
+    /good (idea|suggestion|point|catch)/,
+    /makes sense/,
+    /let's do (that|this)/,
+    /on it/,
+    /agreed/,
+    /absolutely/,
+    /yes[,.]?\s*(let's|we'll|i'll|we should)/,
+  ]
+
+  // Working on it patterns
+  const workingPatterns = [
+    /we('re| are) (already |currently |actively )?(working on|looking at|addressing|fixing)/,
+    /in progress/,
+    /already (started|kicked off|underway|in flight)/,
+    /we (started|kicked off|launched|rolled out)/,
+    /(enablement|training|process) (session|change|update) (is |was )?(scheduled|planned|done|complete)/,
+  ]
+
+  // Already done patterns
+  const donePat = [
+    /we (already|previously) (did|tried|implemented|rolled out|launched)/,
+    /already (done|complete|implemented|in place)/,
+    /we tried that/,
+    /that('s| is) already/,
+  ]
+
+  // Declined patterns
+  const declinedPatterns = [
+    /not a priority/,
+    /won't work/,
+    /disagree/,
+    /(don't|do not|doesn't|does not) (think|believe|agree)/,
+    /not (relevant|applicable|accurate)/,
+    /that's (wrong|off|not right|not the issue)/,
+  ]
+
+  // Context addition patterns — user is correcting Pandora's interpretation
+  const contextPatterns = [
+    /(actually|fyi|for context|heads up|to clarify)/,
+    /that deal is/,
+    /they('re| are) in (legal|procurement|security review)/,
+    /(champion|contact|rep) (just |recently )?(left|changed|is)/,
+    /we (just |recently )?(hired|promoted|restructured|reorganized)/,
+  ]
+
+  // Check patterns in priority order
+  for (const pattern of contextPatterns) {
+    if (pattern.test(msg)) {
+      return {
+        signal: 'context_added',
+        confidence: 0.75,
+        extractedContext: userMessage,  // preserve verbatim for the log
+      }
+    }
+  }
+  for (const pattern of donePat) {
+    if (pattern.test(msg)) {
+      return { signal: 'already_done', confidence: 0.80, extractedContext: '' }
+    }
+  }
+  for (const pattern of workingPatterns) {
+    if (pattern.test(msg)) {
+      return { signal: 'working_on_it', confidence: 0.85, extractedContext: '' }
+    }
+  }
+  for (const pattern of affirmedPatterns) {
+    if (pattern.test(msg)) {
+      return { signal: 'affirmed', confidence: 0.80, extractedContext: '' }
+    }
+  }
+  for (const pattern of declinedPatterns) {
+    if (pattern.test(msg)) {
+      return { signal: 'declined', confidence: 0.75, extractedContext: '' }
+    }
+  }
+
+  return { signal: 'neutral', confidence: 1.0, extractedContext: '' }
+}
+```
+
+---
+
+### Component 2 — Intervention Recorder
+
+Add to `server/concierge/crumb-trail-detector.ts`:
+
+```typescript
+import { query } from '../db'
+
+export interface CrumbTrailContext {
+  workspaceId: string
+  userId?: string                    // Slack user ID or Ask Pandora user email
+  userMessage: string
+  triggerType: 'slack_reply' | 'ask_pandora'
+  triggerMessageId?: string          // Slack message ts or Ask Pandora message ID
+  standingHypothesisId?: string      // which hypothesis they're responding to
+  recommendationText?: string        // the specific recommendation they responded to
+}
+
+export async function recordCrumbTrail(
+  ctx: CrumbTrailContext,
+  detection: CrumbTrailDetection
+): Promise<void> {
+  // Only record actionable signals — not neutral
+  if (detection.signal === 'neutral') return
+  if (detection.confidence < 0.70) return
+
+  const interventionType = {
+    affirmed: 'user_affirmed_recommendation',
+    working_on_it: 'user_working_on_recommendation',
+    already_done: 'user_already_implemented',
+    declined: 'user_declined_recommendation',
+    context_added: 'user_added_context',
+  }[detection.signal]
+
+  const followUpDate = new Date()
+  followUpDate.setDate(followUpDate.getDate() + 42)  // 6 weeks
+
+  await query(`
+    INSERT INTO intervention_log (
+      workspace_id,
+      intervention_type,
+      effective_date,
+      source,
+      description,
+      before_metrics,
+      follow_up_date,
+      follow_up_sent,
+      linked_hypothesis_id,
+      metadata
+    ) VALUES ($1, $2, NOW(), $3, $4, $5, $6, false, $7, $8)
+  `, [
+    ctx.workspaceId,
+    interventionType,
+    ctx.triggerType,
+    ctx.recommendationText
+      ? `User responded to: "${ctx.recommendationText.slice(0, 200)}"`
+      : 'User responded to Concierge briefing',
+    JSON.stringify({}),       // before_metrics: populated by follow-up job
+    followUpDate.toISOString(),
+    ctx.standingHypothesisId ?? null,
+    JSON.stringify({
+      userMessage: ctx.userMessage,
+      signal: detection.signal,
+      confidence: detection.confidence,
+      extractedContext: detection.extractedContext,
+      triggerMessageId: ctx.triggerMessageId,
+      userId: ctx.userId,
+    }),
+  ])
+
+  // If this is context_added and links to a standing hypothesis,
+  // add the extracted context to the hypothesis notes
+  if (detection.signal === 'context_added' && ctx.standingHypothesisId) {
+    await query(`
+      UPDATE standing_hypotheses
+      SET metadata = COALESCE(metadata, '{}'::jsonb) ||
+        jsonb_build_object('user_context', $1, 'context_added_at', NOW())
+      WHERE id = $2 AND workspace_id = $3
+    `, [detection.extractedContext, ctx.standingHypothesisId, ctx.workspaceId])
+  }
+}
+```
+
+---
+
+### Component 3 — Wire into Slack Reply Handler
+
+Find where incoming Slack messages/replies are processed in the bot. It will be an event handler for `message` or `app_mention` events. Add crumb trail detection there:
+
+```typescript
+// In the Slack event handler, after receiving a user message:
+
+import { detectCrumbTrail, recordCrumbTrail } from '../concierge/crumb-trail-detector'
+
+// When a user replies in a Concierge thread:
+async function handleSlackReply(event: SlackMessageEvent, workspaceId: string) {
+  const detection = detectCrumbTrail(event.text)
+
+  if (detection.signal !== 'neutral') {
+    // Find if this reply is in a thread that contains a standing hypothesis alert
+    // Check the thread's parent message metadata
+    const hypothesisId = await findLinkedHypothesisFromThread(
+      workspaceId,
+      event.thread_ts  // Slack thread timestamp = parent message ID
+    )
+
+    await recordCrumbTrail({
+      workspaceId,
+      userId: event.user,
+      userMessage: event.text,
+      triggerType: 'slack_reply',
+      triggerMessageId: event.thread_ts,
+      standingHypothesisId: hypothesisId ?? undefined,
+      recommendationText: await getThreadParentText(workspaceId, event.thread_ts),
+    }, detection)
+
+    // If context_added: acknowledge to the user
+    if (detection.signal === 'context_added') {
+      await slackClient.postMessage({
+        channel: event.channel,
+        thread_ts: event.thread_ts,
+        text: `Got it — I've noted that context. It'll inform how I interpret signals for this deal going forward.`,
+      })
+    }
+
+    // If affirmed or working_on_it: acknowledge and set expectation
+    if (['affirmed', 'working_on_it'].includes(detection.signal)) {
+      await slackClient.postMessage({
+        channel: event.channel,
+        thread_ts: event.thread_ts,
+        text: `Good to know. I'll check back in 6 weeks to see if the metrics have moved.`,
+      })
+    }
+  }
+}
+
+// Helper: find which standing hypothesis (if any) this thread is linked to
+// Slack message metadata or a lookup table maps thread_ts → hypothesis_id
+async function findLinkedHypothesisFromThread(
+  workspaceId: string,
+  threadTs: string
+): Promise<string | null> {
+  // Check intervention_log for a record where metadata->>'triggerMessageId' = threadTs
+  // Or check a slack_message_log table if one exists
+  // If nothing found, return null — still record the intervention, just unlinked
+  const result = await query(`
+    SELECT linked_hypothesis_id FROM intervention_log
+    WHERE workspace_id = $1
+      AND metadata->>'triggerMessageId' = $2
+    LIMIT 1
+  `, [workspaceId, threadTs])
+
+  return result.rows[0]?.linked_hypothesis_id ?? null
+}
+```
+
+---
+
+### Component 4 — Wire into Ask Pandora
+
+In `server/chat/orchestrator.ts`, after the user's message is processed and a response is sent, add:
+
+```typescript
+// After sending the Ask Pandora response, check if the user's message
+// is responding to a hypothesis or recommendation in the conversation history
+
+const lastAssistantMessage = conversationHistory
+  .filter(m => m.role === 'assistant')
+  .at(-1)
+
+if (lastAssistantMessage) {
+  const detection = detectCrumbTrail(userMessage)
+
+  if (detection.signal !== 'neutral') {
+    // Find if last assistant message contained a standing hypothesis reference
+    const hypothesisId = extractHypothesisIdFromMessage(lastAssistantMessage.content)
+
+    await recordCrumbTrail({
+      workspaceId,
+      userId: userEmail,
+      userMessage,
+      triggerType: 'ask_pandora',
+      triggerMessageId: conversationId,
+      standingHypothesisId: hypothesisId,
+      recommendationText: lastAssistantMessage.content.slice(0, 300),
+    }, detection)
+  }
+}
+```
+
+---
+
+### Component 5 — Follow-up Job
+
+Add to the Monday cron sequence, after `checkStandingHypotheses()`:
+
+```typescript
+// server/concierge/crumb-trail-followup.ts
+
+export async function sendCrumbTrailFollowUps(workspaceId: string): Promise<void> {
+  // Find intervention_log rows where:
+  // - follow_up_date <= today
+  // - follow_up_sent = false
+  // - signal was affirmed, working_on_it, or already_done
+  const due = await query(`
+    SELECT il.*, sh.hypothesis, sh.metric, sh.current_value,
+           sh.alert_threshold, sh.weekly_values
+    FROM intervention_log il
+    LEFT JOIN standing_hypotheses sh ON sh.id = il.linked_hypothesis_id
+    WHERE il.workspace_id = $1
+      AND il.follow_up_date <= NOW()
+      AND il.follow_up_sent = false
+      AND il.intervention_type IN (
+        'user_affirmed_recommendation',
+        'user_working_on_recommendation',
+        'user_already_implemented'
+      )
+    ORDER BY il.follow_up_date ASC
+  `, [workspaceId])
+
+  for (const row of due.rows) {
+    await sendFollowUpMessage(workspaceId, row)
+
+    await query(`
+      UPDATE intervention_log
+      SET follow_up_sent = true, follow_up_sent_at = NOW()
+      WHERE id = $1
+    `, [row.id])
+  }
+}
+
+async function sendFollowUpMessage(workspaceId: string, row: any): Promise<void> {
+  // Build a brief follow-up using Claude
+  // Input: what the user said they'd do, what metric it was linked to,
+  //        how the metric has moved since then (from weekly_values JSONB)
+
+  const weeklyValues = row.weekly_values ?? []
+  const recentValues = weeklyValues.slice(-6)  // last 6 weeks
+
+  const prompt = `
+6 weeks ago, a user responded to a recommendation with: "${row.metadata?.userMessage}"
+
+This was linked to the hypothesis: "${row.hypothesis}"
+Tracking metric: ${row.metric}
+Alert threshold: ${row.alert_threshold} (${row.alert_direction})
+
+Metric values over the past 6 weeks:
+${recentValues.map((v: any) => `  ${v.weekOf}: ${v.value}`).join('\n')}
+
+In 2-3 sentences: describe what happened to the metric since the user said they'd work on it.
+Did it move in the right direction? By how much? Is the hypothesis resolved, still active, or getting worse?
+Be specific and factual. Do not say "great job" or use praise language.
+`
+
+  const synthesis = await callLLM(workspaceId, 'synthesize', {
+    claudePrompt: prompt,
+    maxTokens: 200,
+  })
+
+  const message = `📊 *6-week check-in*\n\nYou mentioned working on: _"${row.metadata?.recommendationText?.slice(0, 100)}..."_\n\n${synthesis}\n\nStanding hypothesis status: *${row.alert_direction === 'below' && row.current_value > row.alert_threshold ? 'healthy' : 'still at risk'}*`
+
+  await sendConciergeMessage(workspaceId, message)
+}
+```
+
+Wire `sendCrumbTrailFollowUps()` into `server/slack/concierge-push.ts` after `checkStandingHypotheses()`:
+
+```typescript
+// In sendConciergeSlackBrief():
+await checkStandingHypotheses(workspaceId)
+await sendCrumbTrailFollowUps(workspaceId)   // ← add this line
+// ... rest of brief assembly
+```
+
+---
+
+### Verification
+
+After building, test with a manual simulation:
+
+```typescript
+// Test the detector directly
+import { detectCrumbTrail } from './server/concierge/crumb-trail-detector'
+
+const testCases = [
+  "Great idea, we're going to work on this",
+  "We're already working on exec sponsor mapping",
+  "We tried that last quarter, didn't work",
+  "Actually that deal is in legal review",
+  "Not a priority right now",
+  "Sounds good",
+  "Thanks",
+]
+
+for (const msg of testCases) {
+  console.log(msg, '→', detectCrumbTrail(msg))
+}
+```
+
+Expected output:
+```
+"Great idea, we're going to work on this" → { signal: 'affirmed', confidence: 0.80 }
+"We're already working on exec sponsor mapping" → { signal: 'working_on_it', confidence: 0.85 }
+"We tried that last quarter" → { signal: 'already_done', confidence: 0.80 }
+"Actually that deal is in legal review" → { signal: 'context_added', confidence: 0.75 }
+"Not a priority right now" → { signal: 'declined', confidence: 0.75 }
+"Sounds good" → { signal: 'neutral', confidence: 1.0 }
+"Thanks" → { signal: 'neutral', confidence: 1.0 }
+```
+
+Then manually insert a test intervention row with `follow_up_date = NOW()` and verify `sendCrumbTrailFollowUps()` picks it up and produces a coherent follow-up message.
+
+**Server must start clean with no new TS errors in files we own.**

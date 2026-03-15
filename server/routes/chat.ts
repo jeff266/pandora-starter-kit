@@ -16,6 +16,7 @@ import { query } from '../db.js';
 import { processFeedback, type AgentFeedback } from '../agents/feedback-processor.js';
 import { extractAgentFromConversation, loadChatMessages } from '../chat/conversation-extractor.js';
 import { callLLM } from '../utils/llm-router.js';
+import { detectCrumbTrail, recordCrumbTrail } from '../concierge/crumb-trail-detector.js';
 
 const router = Router();
 
@@ -74,6 +75,22 @@ router.post('/:workspaceId/chat', async (req: Request, res: Response): Promise<v
     if (result.turn_limit_reached) {
       res.status(429).json({ error: result.answer, thread_id: threadTs });
       return;
+    }
+
+    // Crumb trail: detect affirmation in Ask Pandora web conversations (fire-and-forget)
+    const _crumbDetection = detectCrumbTrail(message.trim());
+    if (_crumbDetection.signal !== 'neutral') {
+      recordCrumbTrail(
+        {
+          workspaceId,
+          userId,
+          userMessage: message.trim(),
+          triggerType: 'ask_pandora',
+          triggerMessageId: threadTs,
+          recommendationText: result.answer.slice(0, 300),
+        },
+        _crumbDetection
+      ).catch(() => {});
     }
 
     // Extract suggested actions first so they can be included in saved metadata
