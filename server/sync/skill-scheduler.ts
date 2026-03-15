@@ -637,6 +637,37 @@ export function startSkillScheduler(): void {
   scheduledSkills.push({ skillId: 'brief-daily', cronExpression: '0 7 * * *', job: briefJob });
   console.log('[BriefScheduler] Registered daily brief assembly on cron 0 7 * * * (7am UTC)');
 
+  // Concierge Slack push: daily 8:15 AM UTC
+  // Offset 15 min from pipeline-hygiene (8:00 AM) to avoid queue pressure.
+  const conciergePushJob = cron.schedule(
+    '15 8 * * *',
+    async () => {
+      console.log('[Concierge push] Starting daily brief send');
+      const { sendConciergeSlackBrief } = await import('../slack/concierge-push.js');
+
+      const workspacesResult = await query<{ id: string; name: string }>(
+        `SELECT w.id, w.name
+         FROM workspaces w
+         INNER JOIN slack_channel_config scc ON scc.workspace_id = w.id
+         WHERE w.status = 'active'
+         GROUP BY w.id, w.name`
+      );
+
+      for (const workspace of workspacesResult.rows) {
+        try {
+          await sendConciergeSlackBrief(workspace.id);
+        } catch (err: any) {
+          console.error(`[Concierge push] Failed for ${workspace.name}:`, err?.message ?? err);
+        }
+      }
+
+      console.log(`[Concierge push] Complete — ${workspacesResult.rows.length} workspace(s) processed`);
+    },
+    { timezone: 'UTC' }
+  );
+  scheduledSkills.push({ skillId: 'concierge-slack-push', cronExpression: '15 8 * * *', job: conciergePushJob });
+  console.log('[Concierge push] Cron registered — 8:15 AM UTC daily');
+
   // Weekly digest cron: Monday 9am UTC — investigation summary email/Slack
   const digestJob = cron.schedule(
     '0 9 * * 1',

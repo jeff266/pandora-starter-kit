@@ -791,4 +791,46 @@ router.delete(
   }
 );
 
+// ── POST /:workspaceId/briefing/send-slack ─────────────────────────────────
+// Manual trigger for the Concierge daily brief push. Admin-only.
+// Useful for testing before the 8:15 AM UTC cron fires.
+router.post(
+  '/:workspaceId/briefing/send-slack',
+  requireWorkspaceAccess,
+  async (req: Request, res: Response): Promise<void> => {
+    const workspaceId = req.params.workspaceId as string;
+    const userId = (req as any).user?.user_id as string;
+
+    if (!userId) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+
+    // Admin-only gate
+    const roleResult = await query<{ pandora_role: string }>(
+      `SELECT pandora_role FROM workspace_members
+       WHERE workspace_id = $1 AND user_id = $2 AND status = 'active'
+       LIMIT 1`,
+      [workspaceId, userId]
+    ).catch(() => ({ rows: [] as any[] }));
+
+    const role = roleResult.rows[0]?.pandora_role;
+    if (role !== 'admin') {
+      res.status(403).json({ error: 'Admin role required to trigger Slack brief' });
+      return;
+    }
+
+    try {
+      const { sendConciergeSlackBrief } = await import('../slack/concierge-push.js');
+      await sendConciergeSlackBrief(workspaceId);
+      res.json({ ok: true, message: 'Brief sent to Slack' });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[briefing] send-slack error:', msg);
+      res.status(500).json({ error: msg });
+    }
+  }
+);
+
 export default router;
+

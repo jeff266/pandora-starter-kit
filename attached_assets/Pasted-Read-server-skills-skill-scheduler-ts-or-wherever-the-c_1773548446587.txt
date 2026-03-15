@@ -1,0 +1,220 @@
+Read server/skills/skill-scheduler.ts (or wherever
+the cron jobs are configured), server/slack/thread-tracker.ts,
+server/skills/formatters/slack-formatter.ts, and
+server/context/opening-brief.ts before writing any code.
+
+ONE TASK: Wire the daily Concierge brief push to Slack.
+
+---
+
+CONTEXT
+
+formatConciergeDaily() exists in slack-formatter.ts and
+produces valid Block Kit JSON under 100 words.
+assembleOpeningBrief() exists in opening-brief.ts and
+returns the full OpeningBriefData object.
+
+Nothing calls these together on a schedule yet.
+This session wires that connection.
+
+---
+
+PART 1 — Create assembleConciergeSlackMessage()
+
+In server/context/opening-brief.ts (or a new file
+server/slack/concierge-push.ts if cleaner):
+
+  export async function assembleConciergeSlackMessage(
+    workspaceId: string,
+    userId: string        // use the workspace admin user
+  ): Promise<SlackBlocks | null>
+
+  Steps:
+  1. Call assembleOpeningBrief(workspaceId, userId)
+     to get the full OpeningBriefData
+
+  2. If brief assembly fails or returns null:
+     log the error and return null — never throw
+
+  3. Map OpeningBriefData to formatConciergeDaily() input:
+  
+     {
+       workspaceName: brief.workspace.name,
+       userName: brief.user.name,
+       temporalContext: brief.temporal.label,
+         // e.g. "Week 11 of Q1 · 17 days left"
+       attainmentPct: brief.targets.pctAttained ?? 0,
+       targetLabel: brief.targets.headline ?? 'No target',
+         // e.g. "Q1 FY2027 · $350K"
+       priorityFrameLabel: brief.priorityFrame?.frameLabel
+         ?? 'Pipeline update',
+       situationSentence: brief.synthesis?.prioritySentence
+         ?? brief.synthesis?.narrative?.split('.')[0] ?? '',
+       bigDealsAtRisk: (brief.bigDealsAtRisk ?? [])
+         .slice(0, 5)
+         .map(d => ({
+           name: d.name,
+           amount: d.amount,
+           daysSinceActivity: d.daysSinceActivity,
+           isDormant: d.daysSinceActivity > 120
+         })),
+       overnightSkillCount: brief.recentSkillRuns?.length ?? 0,
+       pendingActionCount: brief.pendingActions?.length ?? 0,
+       conciergeUrl: `${process.env.APP_URL}/workspaces/${workspaceId}/concierge`
+     }
+
+  4. Call formatConciergeDaily(input) → blocks
+
+  5. Run validateSlackOutput() on the blocks
+     If invalid: log errors and return null
+
+  6. Return the blocks
+
+---
+
+PART 2 — Create sendConciergeSlackBrief()
+
+  export async function sendConciergeSlackBrief(
+    workspaceId: string
+  ): Promise<void>
+
+  Steps:
+  1. Get workspace from DB:
+     SELECT id, name, slack_channel_id, slack_bot_token
+     FROM workspaces
+     WHERE id = $1
+     AND slack_channel_id IS NOT NULL
+     AND slack_bot_token IS NOT NULL
+
+     If no row or missing Slack config: log and return.
+     "Workspace [id] has no Slack channel configured — skipping"
+
+  2. Get workspace admin user:
+     SELECT id FROM workspace_members
+     WHERE workspace_id = $1
+       AND role = 'admin'
+     ORDER BY created_at ASC
+     LIMIT 1
+
+     If no admin user: log and return.
+
+  3. Call assembleConciergeSlackMessage(workspaceId, userId)
+     If null: log and return.
+
+  4. Post to Slack via slackPost():
+     POST https://slack.com/api/chat.postMessage
+     Body: {
+       channel: workspace.slack_channel_id,
+       blocks: blocks,
+       text: "Pandora morning brief"  // fallback for
+                                       // notifications
+     }
+     Token: workspace.slack_bot_token
+
+  5. If post succeeds (ok: true):
+     Call trackPandoraPost(
+       workspace.slack_channel_id,
+       result.ts,
+       workspaceId
+     )
+     Log: "Concierge brief sent to [workspace.name]"
+
+  6. If post fails:
+     Log the error. Never throw.
+
+---
+
+PART 3 — Add to skill scheduler
+
+Find where cron jobs are configured.
+Add a new daily job that runs at 8:00 AM
+in the workspace's local timezone.
+
+For now, since timezone per workspace may not be
+configured, run at 8:00 AM UTC:
+
+  cron.schedule('0 8 * * *', async () => {
+    console.log('[Concierge push] Starting daily brief send');
+    
+    // Get all workspaces with Slack configured
+    const workspaces = await db.query(`
+      SELECT id, name
+      FROM workspaces
+      WHERE slack_channel_id IS NOT NULL
+        AND slack_bot_token IS NOT NULL
+        AND status = 'active'
+    `);
+    
+    for (const workspace of workspaces.rows) {
+      try {
+        await sendConciergeSlackBrief(workspace.id);
+      } catch (err) {
+        // safeExecute pattern — never let one workspace
+        // failure stop the others
+        console.error(
+          `[Concierge push] Failed for ${workspace.name}:`,
+          err
+        );
+      }
+    }
+    
+    console.log(
+      `[Concierge push] Complete — ${workspaces.rows.length} workspaces`
+    );
+  });
+
+This runs independently of the skill cron jobs.
+Pipeline Movement runs at 7:00 AM, Pipeline Hygiene
+at 8:00 AM — the Concierge brief runs at 8:00 AM too.
+
+If there's a conflict with Pipeline Hygiene at 8:00 AM,
+offset the brief to 8:15 AM:
+  cron.schedule('15 8 * * *', ...)
+
+---
+
+PART 4 — Add manual trigger endpoint
+
+For testing without waiting for 8 AM:
+
+  POST /api/workspaces/:workspaceId/briefing/send-slack
+
+  Auth: requireWorkspaceAccess + admin role only
+  
+  Handler:
+    await sendConciergeSlackBrief(workspaceId);
+    return { ok: true, message: 'Brief sent to Slack' }
+
+  This lets you trigger the brief on demand to verify
+  it posts correctly before the cron fires.
+
+---
+
+DO NOT:
+  - Change assembleOpeningBrief() logic
+  - Change formatConciergeDaily()
+  - Change the skill cron jobs
+  - Add database migrations
+  - Change any existing routes
+
+VALIDATE:
+
+  1. POST /briefing/send-slack for Frontera workspace
+     → brief posts to the configured Slack channel
+     → thread tracker records the message ts
+     → word count under 200
+     → no validation errors logged
+
+  2. Reply to the posted brief in Slack
+     → reply routes to Ask Pandora agent loop
+     → response posted in thread
+     (this confirms thread tracker + events handler
+     are working end to end)
+
+  3. Check cron is registered:
+     Log on startup should show:
+     "[Concierge push] Cron registered — 8:00 AM UTC daily"
+
+Report: manual trigger endpoint path, cron schedule,
+which workspaces would receive the brief based on
+current DB state (slack_channel_id IS NOT NULL).
