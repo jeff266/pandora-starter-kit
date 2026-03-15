@@ -32,7 +32,6 @@ const NAV_ITEMS: NavDef[] = [
   { path: '/targets',   label: 'Targets',   icon: '◎', roles: ['admin', 'manager', 'cro', 'revops', null] },
   { path: '/actions',   label: 'Actions',   icon: '⚡', roles: 'all' },
   { path: '/agents',    label: 'Agents',    icon: '◎', roles: ['admin', 'cro', 'revops', null] },
-  { path: '/skills',    label: 'Skills',    icon: '⊞', roles: ['admin', 'revops', null] },
   { path: '/data',      label: 'Data',      icon: '⬡', roles: ['admin', 'revops', null] },
   { path: '/settings',  label: 'Settings',  icon: '⚙', roles: ['admin', 'manager', 'cro', 'revops', null] },
 ];
