@@ -1,5 +1,49 @@
 import { query } from '../db.js';
 
+// ─── Product catalog helpers ──────────────────────────────────────────────────
+
+export interface ProductEntry {
+  name: string;
+  abbreviation?: string;
+}
+
+const productCache = new Map<string, { products: ProductEntry[]; ts: number }>();
+const PRODUCT_CACHE_TTL = 5 * 60 * 1000;
+
+export async function loadProductCatalog(workspaceId: string): Promise<ProductEntry[]> {
+  const cached = productCache.get(workspaceId);
+  if (cached && Date.now() - cached.ts < PRODUCT_CACHE_TTL) return cached.products;
+  try {
+    const result = await query<{ products: any }>(
+      `SELECT definitions->'products' AS products
+       FROM context_layer WHERE workspace_id = $1 LIMIT 1`,
+      [workspaceId]
+    );
+    const raw = result.rows[0]?.products;
+    const products: ProductEntry[] = Array.isArray(raw) ? raw : [];
+    productCache.set(workspaceId, { products, ts: Date.now() });
+    return products;
+  } catch {
+    return [];
+  }
+}
+
+export function expandDealName(name: string, products: ProductEntry[]): string {
+  if (!name || products.length === 0) return name;
+  let expanded = name;
+  for (const p of products) {
+    if (!p.abbreviation) continue;
+    // Match abbreviation as whole word (word boundary or surrounded by non-alphanumeric)
+    const abbr = p.abbreviation.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`(?<![A-Za-z0-9])${abbr}(?![A-Za-z0-9])`, 'g');
+    expanded = expanded.replace(regex, p.name);
+  }
+  if (expanded !== name) {
+    console.log(`[DealLookup] Expanded deal name: "${name}" → "${expanded}"`);
+  }
+  return expanded;
+}
+
 export interface LiveDealFact {
   id: string;
   name: string;
@@ -45,9 +89,10 @@ export async function lookupLiveDeal(
 
     if (!result.rows[0]) return null;
     const row = result.rows[0];
+    const products = await loadProductCatalog(workspaceId);
     return {
       id: row.id,
-      name: row.name,
+      name: expandDealName(row.name, products),
       amount: parseFloat(row.amount) || 0,
       stage: row.stage || '',
       close_date: row.close_date || null,

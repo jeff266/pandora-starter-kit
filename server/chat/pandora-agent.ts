@@ -1586,6 +1586,10 @@ ${activeScope.label ? `Label: ${activeScope.label}` : ''}
 Continue using this scope unless the user explicitly changes it.`;
   }
 
+  // Debug: confirm product catalog injection
+  const productCatalogPresent = contextBlock.includes('PRODUCT CATALOG');
+  console.log(`[PandoraAgent] ws=${workspaceId} product_catalog_in_context=${productCatalogPresent}`);
+
   let effectiveSystemPrompt = contextBlock
     ? `${PANDORA_SYSTEM_PROMPT}\n\n${contextBlock}\n\n${memoryBlock}${dictionaryContext}${toolContext}${scopeContextBlock}`
     : `${PANDORA_SYSTEM_PROMPT}\n\n${memoryBlock}${dictionaryContext}${toolContext}${scopeContextBlock}`;

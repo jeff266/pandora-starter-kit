@@ -22,6 +22,7 @@ import { formatCurrency } from '../utils/format-currency.js';
 import { scoreIcpFit, scoreMultithreading, scoreConversationSentiment } from './scoring-tools.js';
 import { computeRepConversions, computeSourceConversion, detectProcessBlockers, detectBuyerSignals, checkStakeholderStatus, enrichMarketSignals } from './analysis-tools.js';
 import { queryDealOutcomes } from './query-deal-outcomes.js';
+import { loadProductCatalog, expandDealName } from './deal-lookup.js';
 import { executeActionApproval } from '../workflow/action-approver.js';
 import { reverseWrite } from '../crm-writeback/write-reverser.js';
 
@@ -620,6 +621,14 @@ async function queryDeals(workspaceId: string, params: Record<string, any>): Pro
      LIMIT ${addParam(limit)}`,
     values
   );
+
+  // Expand product abbreviations in deal names before Claude sees them
+  const productCatalog = await loadProductCatalog(workspaceId);
+  if (productCatalog.length > 0) {
+    for (const row of rows.rows) {
+      if (row.name) row.name = expandDealName(row.name, productCatalog);
+    }
+  }
 
   const description = descParts.length > 0
     ? `Deals matching: ${descParts.join(', ')}`
