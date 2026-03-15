@@ -507,6 +507,7 @@ router.get('/:workspaceId/actions/sprint', async (req: Request<WorkspaceParams>,
         AND a.sprint_week >= date_trunc('week', $2::date)
         AND a.sprint_week < date_trunc('week', $2::date) + interval '7 days'
         AND a.state NOT IN ('executed', 'not_applicable')
+        AND a.action_type != 'hypothesis_alert'
       ORDER BY
         CASE a.severity WHEN 'critical' THEN 1 WHEN 'warning' THEN 2 ELSE 3 END,
         COALESCE(a.expected_value_delta, 0) DESC

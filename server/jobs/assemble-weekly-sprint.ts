@@ -1,111 +1,33 @@
 /**
  * Weekly Sprint Assembly
- * Runs Monday at 8:30 AM UTC, after all Monday skills complete.
- * Loads the monte-carlo action menu (if persisted) or generates synthetic
- * actions from standing hypotheses + open pipeline. Upserts top-7 sprint
- * actions for the current week.
+ * Runs Monday at 8:30 AM UTC. Generates 5-7 specific, deal-aware sprint
+ * actions for the week. Each title names a deal, rep, or metric so a
+ * RevOps lead can act without a follow-up question.
  */
 
 import { query } from '../db.js';
 
 function startOfWeekMonday(d: Date): Date {
   const date = new Date(d);
-  const day = date.getUTCDay(); // 0=Sun, 1=Mon
+  const day = date.getUTCDay();
   const diff = day === 0 ? -6 : 1 - day;
   date.setUTCDate(date.getUTCDate() + diff);
   date.setUTCHours(0, 0, 0, 0);
   return date;
 }
 
-// Map action types to the hypothesis metric slugs they address
+function fmt$(n: number): string {
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `$${Math.round(n / 1_000)}k`;
+  return `$${Math.round(n)}`;
+}
+
+// Map action types → the hypothesis metrics they address
 const ACTION_HYPOTHESIS_MAP: Record<string, string[]> = {
   're_engage_deal':    ['large_deal_win_rate', 'large_deal_cohort', 'conversion_rate'],
   'close_deal':        ['large_deal_win_rate', 'conversion_rate'],
   'generate_pipeline': ['pipeline_coverage_ratio', 'pipeline_coverage', 'conversion_rate'],
   'improve_lever':     ['conversion_rate', 'smb_sales_cycle_days', 'cycle_length'],
-};
-
-// Map hypothesis metrics to the action types that address them (reverse map)
-const METRIC_ACTION_MAP: Record<string, Array<{ actionType: string; effort: string; label: (hyp: any, deals: any[]) => string }>> = {
-  'conversion_rate': [
-    {
-      actionType: 'improve_lever',
-      effort: 'this_week',
-      label: (hyp, deals) => `Improve qualification rate — win rate at ${parseFloat(hyp.current_value).toFixed(0)}%, target ${parseFloat(hyp.alert_threshold).toFixed(0)}%`,
-    },
-    {
-      actionType: 'close_deal',
-      effort: 'this_week',
-      label: (hyp, deals) => deals[0]
-        ? `Accelerate close on ${deals[0].deal_name ?? 'top open deal'} ($${Math.round((deals[0].amount ?? 0) / 1000)}k)`
-        : 'Accelerate close on top open deal this week',
-    },
-    {
-      actionType: 'generate_pipeline',
-      effort: 'this_week',
-      label: (_hyp, _deals) => 'Generate net-new pipeline to lift expected conversion volume',
-    },
-    {
-      actionType: 're_engage_deal',
-      effort: 'this_week',
-      label: (_hyp, deals) => deals[1]
-        ? `Re-engage ${deals[1].deal_name ?? 'stalled deal'} — at risk of slipping quarter`
-        : 'Re-engage stalled deals before quarter end',
-    },
-  ],
-  'large_deal_win_rate': [
-    {
-      actionType: 're_engage_deal',
-      effort: 'this_week',
-      label: (_hyp, deals) => deals[0]
-        ? `Re-engage ${deals[0].deal_name ?? 'at-risk enterprise deal'} to defend win rate`
-        : 'Re-engage at-risk enterprise deals',
-    },
-    {
-      actionType: 'close_deal',
-      effort: 'this_week',
-      label: (_hyp, deals) => deals[0]
-        ? `Push ${deals[0].deal_name ?? 'largest open deal'} to close before quarter end`
-        : 'Push largest open deal to close',
-    },
-  ],
-  'large_deal_cohort': [
-    {
-      actionType: 're_engage_deal',
-      effort: 'this_week',
-      label: (_hyp, deals) => deals[0]
-        ? `Re-engage ${deals[0].deal_name ?? 'stalled enterprise deal'} in large-deal cohort`
-        : 'Re-engage stalled large-deal cohort',
-    },
-  ],
-  'pipeline_coverage_ratio': [
-    {
-      actionType: 'generate_pipeline',
-      effort: 'this_week',
-      label: (hyp, _deals) => `Build net-new pipeline — coverage at ${parseFloat(hyp.current_value).toFixed(1)}x vs ${parseFloat(hyp.alert_threshold).toFixed(1)}x target`,
-    },
-  ],
-  'pipeline_coverage': [
-    {
-      actionType: 'generate_pipeline',
-      effort: 'this_week',
-      label: (_hyp, _deals) => 'Run outbound sequences to increase pipeline coverage this week',
-    },
-  ],
-  'smb_sales_cycle_days': [
-    {
-      actionType: 'improve_lever',
-      effort: 'this_week',
-      label: (hyp, _deals) => `Compress SMB sales cycle — currently ${Math.round(parseFloat(hyp.current_value))} days vs ${Math.round(parseFloat(hyp.alert_threshold))} day target`,
-    },
-  ],
-  'cycle_length': [
-    {
-      actionType: 'improve_lever',
-      effort: 'this_week',
-      label: (hyp, _deals) => 'Identify and remove blockers extending deal cycle length',
-    },
-  ],
 };
 
 function findParentHypothesis(actionType: string, hypotheses: any[]): any | null {
@@ -123,73 +45,206 @@ function isThresholdBreached(hyp: any): boolean {
   return false;
 }
 
-function breachSeverity(hyp: any): number {
-  if (!isThresholdBreached(hyp)) return 0;
-  const cur = parseFloat(hyp.current_value);
-  const threshold = parseFloat(hyp.alert_threshold);
-  return Math.abs((threshold - cur) / threshold);
-}
-
-interface SyntheticAction {
-  label: string;
+interface SprintAction {
+  title: string;
   actionType: string;
   effort: string;
   rank: number;
-  expectedValueIfDone: number | null;
-  hypothesisId: string | null;
   severity: string;
+  hypothesisId: string | null;
+  targetDealId: string | null;
+  expectedValueDelta: number | null;
 }
 
-async function generateSyntheticActionMenu(
+/**
+ * Build specific re-engage actions for deals that have gone silent.
+ * Targets high-value deals with no activity in >10 days.
+ */
+async function buildReEngageActions(
+  workspaceId: string,
+  hypotheses: any[],
+  maxCount: number
+): Promise<SprintAction[]> {
+  const hyp = findParentHypothesis('re_engage_deal', hypotheses);
+
+  const res = await query(
+    `SELECT id, name, amount, stage_normalized, owner, last_activity_date,
+            ROUND(EXTRACT(EPOCH FROM (NOW() - last_activity_date)) / 86400) AS days_silent
+     FROM deals
+     WHERE workspace_id = $1
+       AND stage_normalized NOT IN ('closed_won', 'closed_lost')
+       AND amount >= 5000
+       AND last_activity_date < NOW() - INTERVAL '10 days'
+     ORDER BY amount DESC
+     LIMIT $2`,
+    [workspaceId, maxCount]
+  ).catch(() => ({ rows: [] as any[] }));
+
+  return res.rows.map((d, i) => {
+    const daysSilent = parseInt(d.days_silent ?? '0', 10);
+    const ownerFirst = (d.owner ?? '').split(' ')[0] || d.owner;
+    return {
+      title: `Re-engage ${d.name} — ${fmt$(d.amount)}, ${daysSilent} days silent, ${ownerFirst}`,
+      actionType: 're_engage_deal',
+      effort: 'this_week',
+      rank: i + 1,
+      severity: i === 0 ? 'critical' : 'warning',
+      hypothesisId: hyp?.id ?? null,
+      targetDealId: d.id,
+      expectedValueDelta: Math.round(parseFloat(d.amount) * 0.25),
+    };
+  });
+}
+
+/**
+ * Build close-deal actions for high-value deals approaching their close date.
+ * Targets deals in evaluation/decision/negotiation stages.
+ */
+async function buildCloseActions(
+  workspaceId: string,
+  hypotheses: any[],
+  maxCount: number,
+  excludeIds: string[]
+): Promise<SprintAction[]> {
+  const hyp = findParentHypothesis('close_deal', hypotheses);
+
+  // Exclude IDs already used by re_engage actions
+  const excludeClause = excludeIds.length > 0
+    ? `AND id NOT IN (${excludeIds.map((_, i) => `$${i + 3}`).join(',')})`
+    : '';
+
+  const res = await query(
+    `SELECT id, name, amount, stage_normalized, owner, close_date,
+            ROUND(EXTRACT(EPOCH FROM (close_date::timestamp - NOW())) / 86400) AS days_to_close
+     FROM deals
+     WHERE workspace_id = $1
+       AND stage_normalized IN ('evaluation', 'proposal', 'negotiation', 'decision')
+       AND amount >= 5000
+       AND close_date BETWEEN NOW() AND NOW() + INTERVAL '60 days'
+       ${excludeClause}
+     ORDER BY amount DESC
+     LIMIT $2`,
+    [workspaceId, maxCount, ...excludeIds]
+  ).catch(() => ({ rows: [] as any[] }));
+
+  return res.rows.map((d, i) => {
+    const daysToClose = parseInt(d.days_to_close ?? '30', 10);
+    const stage = (d.stage_normalized ?? '').replace(/_/g, ' ');
+    const ownerFirst = (d.owner ?? '').split(' ')[0] || d.owner;
+    const urgency = daysToClose <= 7 ? 'critical' : 'warning';
+
+    return {
+      title: `Push ${d.name} to close — ${fmt$(d.amount)}, ${stage}, ${daysToClose}d, ${ownerFirst}`,
+      actionType: 'close_deal',
+      effort: 'this_week',
+      rank: i + 1,
+      severity: urgency,
+      hypothesisId: hyp?.id ?? null,
+      targetDealId: d.id,
+      expectedValueDelta: Math.round(parseFloat(d.amount) * 0.5),
+    };
+  });
+}
+
+/**
+ * Build a generate_pipeline action naming reps who are below their pipeline
+ * average or significantly below the team median.
+ */
+async function buildPipelineAction(
   workspaceId: string,
   hypotheses: any[]
-): Promise<SyntheticAction[]> {
-  // Load top open deals by amount for label generation
-  const dealsResult = await query(
-    `SELECT id, deal_name, amount, stage_normalized, owner_email
+): Promise<SprintAction[]> {
+  const hyp = findParentHypothesis('generate_pipeline', hypotheses);
+
+  const res = await query(
+    `SELECT owner,
+            COUNT(*) AS deal_count,
+            SUM(amount) AS pipeline_total
      FROM deals
      WHERE workspace_id = $1
        AND stage_normalized NOT IN ('closed_won', 'closed_lost')
        AND amount > 0
-     ORDER BY amount DESC
-     LIMIT 10`,
+     GROUP BY owner
+     ORDER BY pipeline_total ASC`,
     [workspaceId]
   ).catch(() => ({ rows: [] as any[] }));
-  const topDeals = dealsResult.rows;
 
-  const actions: SyntheticAction[] = [];
-  let rank = 1;
+  if (res.rows.length < 2) return [];
 
-  // Sort hypotheses: breached ones first, by breach severity
-  const sorted = [...hypotheses].sort((a, b) => breachSeverity(b) - breachSeverity(a));
+  const totals = res.rows.map(r => parseFloat(r.pipeline_total));
+  const teamMedian = totals[Math.floor(totals.length / 2)];
+  const lowReps = res.rows
+    .filter(r => parseFloat(r.pipeline_total) < teamMedian * 0.6 && r.owner)
+    .slice(0, 3);
 
-  for (const hyp of sorted) {
-    const templates = METRIC_ACTION_MAP[hyp.metric] ?? [];
-    if (templates.length === 0) continue;
+  if (lowReps.length === 0) return [];
 
-    for (const tmpl of templates) {
-      if (actions.length >= 7) break;
+  const names = lowReps
+    .map(r => `${r.owner.split(' ')[0]} (${fmt$(parseFloat(r.pipeline_total))})`)
+    .join(', ');
 
-      const label = tmpl.label(hyp, topDeals);
-      const alreadyAdded = actions.some(a => a.label === label);
-      if (alreadyAdded) continue;
+  return [{
+    title: `${lowReps.length} rep${lowReps.length > 1 ? 's' : ''} below pipeline target: ${names}`,
+    actionType: 'generate_pipeline',
+    effort: 'this_week',
+    rank: 1,
+    severity: 'warning',
+    hypothesisId: hyp?.id ?? null,
+    targetDealId: null,
+    expectedValueDelta: null,
+  }];
+}
 
-      const breached = isThresholdBreached(hyp);
-      actions.push({
-        label,
-        actionType: tmpl.actionType,
-        effort: tmpl.effort,
-        rank,
-        expectedValueIfDone: null,
-        hypothesisId: hyp.id,
-        severity: breached ? (rank <= 2 ? 'critical' : 'warning') : 'notable',
-      });
-      rank++;
-    }
-    if (actions.length >= 7) break;
+/**
+ * Build an improve_lever action from the conversion_rate hypothesis value
+ * and count of late-stage deals that need qualification attention.
+ */
+async function buildImproveAction(
+  workspaceId: string,
+  hypotheses: any[]
+): Promise<SprintAction[]> {
+  const hyp = hypotheses.find(h => h.metric === 'conversion_rate')
+    ?? findParentHypothesis('improve_lever', hypotheses);
+
+  // Count late-stage deals closing within 60 days that need attention
+  const res = await query(
+    `SELECT COUNT(*) as cnt,
+            STRING_AGG(DISTINCT owner, ', ' ORDER BY owner) as owners
+     FROM deals
+     WHERE workspace_id = $1
+       AND stage_normalized IN ('evaluation', 'proposal', 'negotiation', 'decision')
+       AND close_date BETWEEN NOW() AND NOW() + INTERVAL '60 days'
+       AND amount >= 5000`,
+    [workspaceId]
+  ).catch(() => ({ rows: [{ cnt: '0', owners: '' }] }));
+
+  const cnt = parseInt(res.rows[0]?.cnt ?? '0', 10);
+  const owners = (res.rows[0]?.owners ?? '').split(', ').slice(0, 2).join(', ');
+
+  const currentRate = hyp?.current_value ? Math.round(parseFloat(hyp.current_value)) : null;
+  const targetRate = hyp?.alert_threshold ? Math.round(parseFloat(hyp.alert_threshold)) : null;
+
+  let title: string;
+  if (currentRate !== null && targetRate !== null) {
+    title = cnt > 0
+      ? `Win rate ${currentRate}% vs ${targetRate}% target — ${cnt} late-stage deal${cnt !== 1 ? 's' : ''} need${cnt === 1 ? 's' : ''} attention (${owners})`
+      : `Win rate ${currentRate}% vs ${targetRate}% target — review pipeline conversion this week`;
+  } else {
+    title = cnt > 0
+      ? `${cnt} late-stage deals closing within 60 days need qualification review (${owners})`
+      : 'Review pipeline conversion rate this week';
   }
 
-  return actions;
+  return [{
+    title,
+    actionType: 'improve_lever',
+    effort: 'this_week',
+    rank: 1,
+    severity: hyp && isThresholdBreached(hyp) ? 'critical' : 'warning',
+    hypothesisId: hyp?.id ?? null,
+    targetDealId: null,
+    expectedValueDelta: null,
+  }];
 }
 
 export async function assembleWeeklySprint(workspaceId: string): Promise<{
@@ -217,111 +272,63 @@ export async function assembleWeeklySprint(workspaceId: string): Promise<{
   );
   const hypotheses = hypothesesResult.rows;
 
-  // 2. Try to load action menu from the latest monte-carlo skill run
-  //    The output column stores { narrative } from the synthesis step.
-  //    The allElseEqual action menu is not persisted there — fall through to synthetic.
-  const mcResult = await query(
-    `SELECT output FROM skill_runs
-     WHERE workspace_id = $1 AND skill_id = 'monte-carlo-forecast'
-       AND status = 'completed'
-     ORDER BY completed_at DESC
-     LIMIT 1`,
-    [workspaceId]
-  );
+  // 2. Build deal-specific sprint actions
+  const reEngageActions = await buildReEngageActions(workspaceId, hypotheses, 2);
+  const usedDealIds = reEngageActions.map(a => a.targetDealId).filter(Boolean) as string[];
 
-  let actionMenu: any[] = [];
-  let source = 'synthetic';
+  const closeActions = await buildCloseActions(workspaceId, hypotheses, 2, usedDealIds);
+  const pipelineActions = await buildPipelineAction(workspaceId, hypotheses);
+  const improveActions = await buildImproveAction(workspaceId, hypotheses);
 
-  if (mcResult.rows[0]?.output) {
-    const out = mcResult.rows[0].output;
-    const fromOutput = out?.allElseEqual?.actionMenu ?? out?.actionMenu ?? [];
-    if (fromOutput.length > 0) {
-      actionMenu = fromOutput;
-      source = 'monte_carlo';
-    }
-  }
+  // 3. Merge and rank (re-engage → close → improve_lever → generate_pipeline)
+  const allActions: SprintAction[] = [
+    ...reEngageActions,
+    ...closeActions,
+    ...improveActions,
+    ...pipelineActions,
+  ].slice(0, 7);
 
-  // 3. Fall back to hypothesis-driven synthetic actions if mc action menu missing
-  if (actionMenu.length === 0 && hypotheses.length > 0) {
-    const synth = await generateSyntheticActionMenu(workspaceId, hypotheses);
-    actionMenu = synth.map(s => ({
-      label: s.label,
-      actionType: s.actionType,
-      effort: s.effort,
-      rank: s.rank,
-      expectedValueIfDone: s.expectedValueIfDone,
-      _hypothesisId: s.hypothesisId,
-      _severity: s.severity,
-    }));
-  }
+  // 4. Re-rank
+  allActions.forEach((a, i) => { a.rank = i + 1; });
 
   let inserted = 0;
   let updated = 0;
   const linkedHypothesisIds = new Set<string>();
 
-  // 4. Upsert top-7 actions with sprint week + hypothesis link
-  for (const action of actionMenu.slice(0, 7)) {
-    const parentHypothesis = action._hypothesisId
-      ? hypotheses.find(h => h.id === action._hypothesisId) ?? null
-      : findParentHypothesis(action.actionType, hypotheses);
-
-    const rank = action.rank ?? 99;
-    const severity = action._severity ?? (rank <= 2 ? 'critical' : rank <= 5 ? 'warning' : 'notable');
-
+  for (const action of allActions) {
     const upsert = await query(
       `INSERT INTO actions (
          workspace_id, title, action_type, severity,
          expected_value_delta, effort, sprint_week,
-         hypothesis_id, state, source_skill, execution_status,
+         hypothesis_id, target_deal_id, state, source_skill, execution_status,
          created_at, updated_at
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7::date, $8, 'pending', 'monte-carlo-forecast', 'open', now(), now())
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7::date, $8, $9, 'pending', 'monte-carlo-forecast', 'open', now(), now())
        ON CONFLICT (workspace_id, title, sprint_week) WHERE sprint_week IS NOT NULL
        DO UPDATE SET
          expected_value_delta = EXCLUDED.expected_value_delta,
          hypothesis_id = EXCLUDED.hypothesis_id,
+         target_deal_id = EXCLUDED.target_deal_id,
          severity = EXCLUDED.severity,
          updated_at = now()
        RETURNING (xmax = 0) as was_inserted`,
       [
         workspaceId,
-        action.label,
+        action.title,
         action.actionType,
-        severity,
-        action.expectedValueIfDone ?? null,
-        action.effort ?? 'this_week',
+        action.severity,
+        action.expectedValueDelta,
+        action.effort,
         weekStr,
-        parentHypothesis?.id ?? null,
+        action.hypothesisId,
+        action.targetDealId,
       ]
     );
     if (upsert.rows[0]?.was_inserted) inserted++;
     else updated++;
 
-    if (parentHypothesis?.id) linkedHypothesisIds.add(parentHypothesis.id);
+    if (action.hypothesisId) linkedHypothesisIds.add(action.hypothesisId);
   }
 
-  // 5. Promote threshold-breached hypotheses as sprint alerts if not already present
-  for (const hyp of hypotheses) {
-    if (!isThresholdBreached(hyp)) continue;
-
-    const title = `Hypothesis alert: ${hyp.metric} ${hyp.alert_direction === 'below' ? 'below' : 'above'} threshold`;
-    const existing = await query(
-      `SELECT id FROM actions WHERE workspace_id = $1 AND title = $2 AND sprint_week = $3::date LIMIT 1`,
-      [workspaceId, title, weekStr]
-    );
-    if (existing.rows.length > 0) continue;
-
-    await query(
-      `INSERT INTO actions (
-         workspace_id, title, action_type, severity,
-         sprint_week, hypothesis_id, state, source_skill, execution_status,
-         created_at, updated_at
-       ) VALUES ($1, $2, 'hypothesis_alert', 'warning', $3::date, $4, 'pending', 'standing-hypotheses', 'open', now(), now())`,
-      [workspaceId, title, weekStr, hyp.id]
-    );
-    inserted++;
-    linkedHypothesisIds.add(hyp.id);
-  }
-
-  console.log(`[SprintAssembly] Done: source=${source}, ${inserted} inserted, ${updated} updated, hypotheses=${[...linkedHypothesisIds].join(',')}`);
-  return { inserted, updated, source, hypothesisIds: [...linkedHypothesisIds] };
+  console.log(`[SprintAssembly] Done: ${inserted} inserted, ${updated} updated, hypotheses=${[...linkedHypothesisIds].join(',')}`);
+  return { inserted, updated, source: 'deal_aware', hypothesisIds: [...linkedHypothesisIds] };
 }
