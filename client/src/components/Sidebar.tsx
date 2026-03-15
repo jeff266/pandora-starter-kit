@@ -64,7 +64,7 @@ export default function Sidebar({
   const isMobile = useIsMobile();
   const { currentWorkspace, user, logout } = useWorkspace();
   const { pandoraRole } = usePandoraRole();
-  const { anon } = useDemoMode();
+  const { isDemoMode, toggleDemoMode, anon } = useDemoMode();
 
   const [hovered, setHovered] = useState(false);
   const collapseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -298,6 +298,35 @@ export default function Sidebar({
             justifyContent: expanded ? 'flex-start' : 'center',
           }}>
             <PalettePicker />
+          </div>
+
+          {/* Demo mode toggle */}
+          <div
+            onClick={toggleDemoMode}
+            title={!expanded ? 'Demo Mode' : undefined}
+            style={{
+              display: 'flex', alignItems: 'center', gap: expanded ? 8 : 0, cursor: 'pointer',
+              padding: expanded ? '4px 14px' : '4px 0',
+              justifyContent: expanded ? 'flex-start' : 'center',
+            }}
+          >
+            <span style={{ fontSize: 14 }}>🎭</span>
+            {expanded && (
+              <>
+                <span style={{ fontSize: 12, color: S.iconRest, flex: 1, whiteSpace: 'nowrap' }}>Demo Mode</span>
+                <div style={{
+                  width: 32, height: 18, borderRadius: 9,
+                  background: isDemoMode ? S.teal : S.border,
+                  position: 'relative', transition: 'background 0.2s', flexShrink: 0,
+                }}>
+                  <div style={{
+                    width: 14, height: 14, borderRadius: '50%',
+                    background: '#fff', position: 'absolute', top: 2,
+                    left: isDemoMode ? 16 : 2, transition: 'left 0.2s',
+                  }} />
+                </div>
+              </>
+            )}
           </div>
 
           {/* User avatar row */}
