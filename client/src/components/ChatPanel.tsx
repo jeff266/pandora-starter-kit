@@ -1564,7 +1564,7 @@ function resolveLink(href: string): { url: string; external: boolean } {
   if (href.startsWith('hubspot://contacts/')) {
     const sourceId = href.replace('hubspot://contacts/', '');
     if (_hubspotPortalId) {
-      return { url: `https://app.hubspot.com/contacts/${_hubspotPortalId}/contact/${sourceId}`, external: true };
+      return { url: `https://app.hubspot.com/contacts/${_hubspotPortalId}/record/0-1/${sourceId}`, external: true };
     }
     return { url: href, external: true };
   }
