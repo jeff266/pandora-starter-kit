@@ -1,0 +1,32 @@
+Add hyperlinks to Ask Pandora responses. Two types needed:
+Type 1 — Markdown links in Claude's output
+Extend the synthesis prompt to instruct Claude to wrap entity references in markdown links when it has the ID:
+"When referencing a specific deal, contact, rep, or conversation in your response, format it as a markdown link: Entity Name, Contact Name, Rep Name, Call on Date. Only link entities whose IDs you retrieved from tool calls. Never fabricate an ID."
+The IDs are already in the tool call responses — Claude just needs to be instructed to use them.
+Type 2 — Link renderer in the chat UI
+In the Ask Pandora chat message renderer, intercept markdown links with pandora:// scheme and convert to in-app navigation. Intercept gong:// and hubspot:// schemes and convert to external links that open in a new tab.
+typescript// In the markdown renderer:
+function resolveLink(href: string): { url: string, external: boolean } {
+  if (href.startsWith('pandora://deals/')) {
+    return { url: `/workspace/deals/${href.split('/').pop()}`, external: false }
+  }
+  if (href.startsWith('pandora://contacts/')) {
+    return { url: `/workspace/contacts/${href.split('/').pop()}`, external: false }
+  }
+  if (href.startsWith('gong://calls/')) {
+    return { url: `https://app.gong.io/call?id=${href.split('/').pop()}`, external: true }
+  }
+  if (href.startsWith('hubspot://deals/')) {
+    const [portalId, dealId] = href.replace('hubspot://deals/', '').split('/')
+    return { url: `https://app.hubspot.com/contacts/${portalId}/deal/${dealId}`, external: true }
+  }
+  return { url: href, external: true }
+}
+Priority links to implement first:
+
+Prior deal reference ("closed-lost in March 2025") → HubSpot deal deep link
+Contact names in the multithreading section → HubSpot contact deep links
+Call dates ("January 29", "January 26") → Gong call deep links
+Multithreading score → internal scoring breakdown page
+
+Test against the ABS Kids deal. The response should render with clickable blue underlined links on: Nate Phillips, the prior deal, each contact name, and each call date. Clicking a contact name should navigate to their HubSpot record. Clicking a call date should open the Gong recording.

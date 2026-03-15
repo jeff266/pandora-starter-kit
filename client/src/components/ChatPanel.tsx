@@ -96,9 +96,13 @@ function getStoredWidth(): number {
   return CHAT_DEFAULT_WIDTH;
 }
 
+// Module-level navigate ref — populated by the component, used by the standalone formatInlineMarkdown function
+let _navigateFn: ((to: string) => void) | undefined;
+
 export default function ChatPanel({ isOpen, onClose, scope, initialSessionId, pendingMessage, onPendingMessageSent, conciergeContext, forceNewThread, onForceNewThreadConsumed, wbrContributions, onWbrContributionsConsumed }: ChatPanelProps) {
   const isMobile = useIsMobile();
   const navigate = useNavigate();
+  _navigateFn = navigate;
   const { anon } = useDemoMode();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatSuggestedActions, setChatSuggestedActions] = useState<SuggestedAction[]>([]);
@@ -1529,6 +1533,33 @@ function formatMarkdown(text: string): React.ReactElement[] {
   return elements;
 }
 
+function resolveLink(href: string): { url: string; external: boolean } {
+  if (href.startsWith('pandora://deals/')) {
+    return { url: `/deals/${href.replace('pandora://deals/', '')}`, external: false };
+  }
+  if (href.startsWith('pandora://accounts/')) {
+    return { url: `/accounts/${href.replace('pandora://accounts/', '')}`, external: false };
+  }
+  if (href.startsWith('pandora://contacts/')) {
+    return { url: `/contacts/${href.replace('pandora://contacts/', '')}`, external: false };
+  }
+  if (href.startsWith('pandora://conversations/')) {
+    return { url: `/conversations/${href.replace('pandora://conversations/', '')}`, external: false };
+  }
+  if (href.startsWith('gong://calls/')) {
+    return { url: `https://app.gong.io/call?id=${href.replace('gong://calls/', '')}`, external: true };
+  }
+  if (href.startsWith('hubspot://deals/')) {
+    const [portalId, dealId] = href.replace('hubspot://deals/', '').split('/');
+    return { url: `https://app.hubspot.com/contacts/${portalId}/deal/${dealId}`, external: true };
+  }
+  if (href.startsWith('hubspot://contacts/')) {
+    const [portalId, contactId] = href.replace('hubspot://contacts/', '').split('/');
+    return { url: `https://app.hubspot.com/contacts/${portalId}/contact/${contactId}`, external: true };
+  }
+  return { url: href, external: true };
+}
+
 function formatInlineMarkdown(text: string): (string | React.ReactElement)[] {
   const parts: (string | React.ReactElement)[] = [];
   const regex = /\*\*(.*?)\*\*|\[([^\]]+)\]\(([^)]+)\)/g;
@@ -1591,22 +1622,39 @@ function formatInlineMarkdown(text: string): (string | React.ReactElement)[] {
           </button>
         );
       } else {
-        parts.push(
-          <a
-            key={match.index}
-            href={match[3]}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{
-              color: '#6488ea',
-              textDecoration: 'none',
-              borderBottom: '1px solid rgba(100, 136, 234, 0.4)',
-              paddingBottom: 1,
-            }}
-          >
-            {match[2]}
-          </a>
-        );
+        const { url, external } = resolveLink(match[3]);
+        const linkStyle: React.CSSProperties = {
+          color: '#6488ea',
+          textDecoration: 'none',
+          borderBottom: '1px solid rgba(100, 136, 234, 0.4)',
+          paddingBottom: 1,
+          cursor: 'pointer',
+        };
+        if (!external && _navigateFn) {
+          const dest = url;
+          parts.push(
+            <a
+              key={match.index}
+              href={dest}
+              onClick={(e) => { e.preventDefault(); _navigateFn!(dest); }}
+              style={linkStyle}
+            >
+              {match[2]}
+            </a>
+          );
+        } else {
+          parts.push(
+            <a
+              key={match.index}
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={linkStyle}
+            >
+              {match[2]}
+            </a>
+          );
+        }
       }
     }
     last = match.index + match[0].length;
