@@ -892,3 +892,26 @@ Fetches evidence rows for a skill run. Returns `{ evidenceRows, loading }`. No-o
 ### Slack deeplink (feature-flagged)
 - **Client**: `App.tsx` reads `?pandoraContext=<base64 JSON>` on route load and fires `openAskPandora`. Gated on `VITE_FEATURE_SLACK_DEEPLINK_CONTEXT`.
 - **Server**: `server/routes/slack.ts` — `appendPandoraContext(url, ctx)` utility appends the encoded param. Gated on `FEATURE_SLACK_DEEPLINK_CONTEXT=true`. Import this in any Slack route that builds action button URLs.
+
+## Forecast Bearing Calibration (March 2026 — Phase 4)
+
+Weights forecast triangulation bearings by workspace-specific historical accuracy before injecting them into the `forecast-rollup` synthesis prompt. Claude leads its narrative with whichever method has the lowest average prediction error for that workspace.
+
+### New files
+- **`server/analysis/forecast-bearing-calibration.ts`**: `computeBearingCalibration(workspaceId)` — queries `forecast_accuracy_log` (excluding quarters where actual_arr < $50K startup noise), classifies each of 7 methods (`week3_conversion_rate`, `stage_weighted_ev`, `category_weighted_ev`, `win_rate_inverted`, `behavioral_adjusted_ev`, `manager_rollup`, `capacity_model`) into `primary` (≥4 quarters, ≤15% avg error), `secondary` (≤30%), `reference` (<4 quarters or >30%), or `unavailable` (no data). Detects systematic over/under-predict bias. Returns `WorkspaceBearingCalibration` with `primaryBearing`, `narrativeGuidance`, and per-method `caveat` strings. Exports `ForecastMethod`, `BearingWeight`, `BearingCalibration`, `WorkspaceBearingCalibration` types.
+- **`server/jobs/refresh-bearing-calibration.ts`**: `refreshBearingCalibration(workspaceId)` — runs `computeBearingCalibration` and stores result in `context_layer.definitions->'bearing_calibration'` via `jsonb_set`. `refreshBearingCalibrationAllWorkspaces()` — queries distinct workspace_ids from `forecast_accuracy_log` and refreshes each.
+
+### Modified files
+- **`server/skills/tool-definitions.ts`**: Added `loadBearingCalibration` tool (reads `context_layer.definitions->'bearing_calibration'`, returns `{calibration, hasCalibration}`). Updated `extractMethodologyComparison` to append a `bearing_reliability` `MethodologyComparison` when calibration is available and the accuracy gap between best/worst reference method exceeds 20 percentage points.
+- **`server/skills/library/forecast-rollup.ts`**: Added `loadBearingCalibration` to `requiredTools`. New `load-bearing-calibration` compute step (runs after `resolve-time-windows`, `outputKey: 'bearing_calibration_data'`). `synthesize-narrative` and `extract-methodology-comparison` now depend on it. Calibration block injected into synthesis `claudePrompt` (before OUTPUT GUIDANCE): renders `narrativeGuidance` instruction + per-method accuracy table; tells Claude to weight bearing narrative language by historical reliability.
+- **`server/sync/scheduler.ts`**: Added import + Monday 6:05 AM UTC cron (`5 6 * * 1`) for `refreshBearingCalibrationAllWorkspaces`. Runs after monte-carlo (6:00), before forecast-rollup (8:00).
+- **`server/routes/skills.ts`**: Added `POST /api/workspaces/:id/jobs/refresh-bearing-calibration` endpoint for manual trigger.
+
+### Storage
+Calibration stored at `context_layer.definitions->'bearing_calibration'` (JSONB). Schema: `{workspaceId, computedAt, minQuartersForReliability, calibrations[], primaryBearing, narrativeGuidance}`.
+
+### Frontera Health baseline (Frontera, March 2026)
+- All 3 available methods (week3_conversion_rate, win_rate_inverted, stage_weighted_ev) have 3 quarters of data — below the 4-quarter reliability threshold → all classified as `reference`, `primaryBearing=null`.
+- All 3 methods systematically under-predict by 88–91% (Frontera is in early ramp with ARR below model baselines).
+- `narrativeGuidance`: "No bearing has sufficient history — present all available bearings with equal weight."
+- 4 methods unavailable: category_weighted_ev, behavioral_adjusted_ev, manager_rollup, capacity_model.

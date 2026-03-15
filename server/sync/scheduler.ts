@@ -9,6 +9,7 @@ import { hardDeleteExpiredAgents } from '../jobs/cleanup-agents.js';
 import { cleanupExpiredRefreshTokens } from '../auth/cleanup.js';
 import { recalculateAllWorkspacesQuality } from '../jobs/recalculate-training-quality.js';
 import { syncGoogleCalendar } from '../connectors/google-calendar/adapter.js';
+import { refreshBearingCalibrationAllWorkspaces } from '../jobs/refresh-bearing-calibration.js';
 
 const INTERNAL_CONNECTORS = ['enrichment_config', 'csv_import'];
 
@@ -103,6 +104,16 @@ export class SyncScheduler {
     }, { timezone: 'UTC' });
     this.tasks.push(marketSignalsTask);
 
+    // Forecast bearing calibration refresh (weekly on Monday at 6:05 AM UTC)
+    // Runs after monte-carlo (6:00), before forecast-rollup (8:00).
+    // Weights forecast triangulation bearings by workspace-specific historical accuracy.
+    const bearingCalibrationTask = cron.schedule('5 6 * * 1', () => {
+      refreshBearingCalibrationAllWorkspaces().catch((err) => {
+        console.error('[Scheduler] Unhandled error in bearing calibration refresh:', err);
+      });
+    }, { timezone: 'UTC' });
+    this.tasks.push(bearingCalibrationTask);
+
     // Webhook delivery log retention (daily at 3:00 AM UTC)
     // Removes rows older than 30 days from webhook_endpoint_deliveries.
     // At ~600 rows/scoring run daily, 30-day retention keeps the table under ~18k rows.
@@ -127,7 +138,7 @@ export class SyncScheduler {
     this.tasks.push(qualityRecalcTask);
 
     const scheduleDescriptions = SYNC_SCHEDULES.map(s => s.label).join(', ');
-    console.log(`[Scheduler] Sync schedules registered: ${scheduleDescriptions}, Dynamic heartbeat (${DYNAMIC_SYNC_CONNECTORS.join('/')} — respects sync_interval_minutes), Consultant (every 6 hours), Agent cleanup (daily at 3 AM), Refresh token cleanup (daily at 3 AM), Webhook delivery cleanup (daily at 3 AM), Market signals (weekly on Monday at 6 AM)`);
+    console.log(`[Scheduler] Sync schedules registered: ${scheduleDescriptions}, Dynamic heartbeat (${DYNAMIC_SYNC_CONNECTORS.join('/')} — respects sync_interval_minutes), Consultant (every 6 hours), Agent cleanup (daily at 3 AM), Refresh token cleanup (daily at 3 AM), Webhook delivery cleanup (daily at 3 AM), Market signals (weekly on Monday at 6 AM), Bearing calibration refresh (weekly on Monday at 6:05 AM)`);
   }
 
   stop(): void {

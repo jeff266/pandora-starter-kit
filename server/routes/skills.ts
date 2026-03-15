@@ -1700,6 +1700,22 @@ router.post('/:id/jobs/retro-accuracy-bootstrap', async (req: Request, res: Resp
   }
 });
 
+// POST /api/workspaces/:id/jobs/refresh-bearing-calibration
+// Recomputes forecast bearing calibration from forecast_accuracy_log and stores in context_layer.
+router.post('/:id/jobs/refresh-bearing-calibration', async (req: Request, res: Response): Promise<void> => {
+  const workspaceId = req.params.id;
+  if (!workspaceId) { res.status(400).json({ error: 'Missing workspaceId' }); return; }
+  try {
+    const { refreshBearingCalibration } = await import('../jobs/refresh-bearing-calibration.js');
+    refreshBearingCalibration(workspaceId)
+      .then(() => console.log(`[BearingCalibration] Manual refresh complete for ${workspaceId}`))
+      .catch(err => console.error(`[BearingCalibration] Manual refresh failed for ${workspaceId}:`, err?.message));
+    res.json({ status: 'started', workspaceId, message: 'Bearing calibration refresh running in background' });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message ?? 'Bearing calibration refresh failed' });
+  }
+});
+
 // POST /api/workspaces/:id/connectors/hubspot/backfill-field-history
 // Backfills forecastcategory, amount, closedate property history from HubSpot.
 router.post('/:id/connectors/hubspot/backfill-field-history', async (req: Request, res: Response): Promise<void> => {

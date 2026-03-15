@@ -24,6 +24,7 @@ export const forecastRollupSkill: SkillDefinition = {
     'computeBehavioralAdjustedEV',
     'computeForecastMethodologyDivergence',
     'extractMethodologyComparison',
+    'loadBearingCalibration',
   ],
 
   requiredContext: ['goals_and_targets'],
@@ -106,6 +107,16 @@ export const forecastRollupSkill: SkillDefinition = {
       computeFn: 'gatherDealConcentrationRisk',
       computeArgs: {},
       outputKey: 'concentration_risk',
+    },
+
+    {
+      id: 'load-bearing-calibration',
+      name: 'Load Workspace Bearing Calibration',
+      tier: 'compute',
+      dependsOn: ['resolve-time-windows'],
+      computeFn: 'loadBearingCalibration',
+      computeArgs: {},
+      outputKey: 'bearing_calibration_data',
     },
 
     {
@@ -233,6 +244,7 @@ Return ONLY the JSON array, no other text.`,
         'merge-and-store-annotations',
         'compute-behavioral-adjusted-ev',
         'compute-forecast-methodology-divergence',
+        'load-bearing-calibration',
       ],
       claudePrompt: `You are a senior RevOps analyst delivering the Monday morning forecast briefing for {{business_model.company_name}}.
 
@@ -329,6 +341,20 @@ Largest corrections:
 - {{dealName}} (\${{dealAmount}}): CRM says {{crmStage}} ({{crmCloseProb}} close prob), behavioral signals say {{behavioralStage}} ({{behavioralCloseProb}} close prob). EV delta: {{#if (gt evDelta 0)}}+{{/if}}\${{evDelta}}
 {{/each}}
 {{/if}}
+{{/if}}
+
+{{#if bearing_calibration_data.hasCalibration}}
+FORECAST BEARING CALIBRATION (workspace-specific historical accuracy):
+{{bearing_calibration_data.calibration.narrativeGuidance}}
+
+Bearing reliability ranked by historical error for this workspace:
+{{#each bearing_calibration_data.calibration.calibrations}}
+{{#unless (eq weight "unavailable")}}
+- {{method}}: avg error {{avgErrorPct}}% across {{quartersOfData}} quarter(s) [{{weight}}]{{#if caveat}} — {{caveat}}{{/if}}
+{{/unless}}
+{{/each}}
+
+When presenting triangulation bearings: weight your narrative language to reflect which bearings are historically reliable for this workspace. Do not give equal narrative emphasis to all bearings — lead with the weight designation above.
 {{/if}}
 
 OUTPUT GUIDANCE:
@@ -541,7 +567,7 @@ Return ONLY a JSON array with no other text.`,
       id: 'extract-methodology-comparison',
       name: 'Extract Methodology Comparison from Forecast Narrative',
       tier: 'compute',
-      dependsOn: ['synthesize-narrative', 'merge-and-store-annotations'],
+      dependsOn: ['synthesize-narrative', 'merge-and-store-annotations', 'load-bearing-calibration'],
       computeFn: 'extractMethodologyComparison',
       computeArgs: { synthesisKey: 'narrative', metric: 'forecast_landing' },
       outputKey: 'methodology_output',

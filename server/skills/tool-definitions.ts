@@ -10018,6 +10018,39 @@ export const toolRegistry = new Map<string, ToolDefinition>([
     }, params),
   } as ToolDefinition],
 
+  // ── Load Bearing Calibration — forecast-rollup ────────────────────────────
+  ['loadBearingCalibration', {
+    name: 'loadBearingCalibration',
+    description: 'Load workspace-specific forecast bearing calibration from context_layer.definitions. Returns null calibration if not yet computed.',
+    tier: 'compute',
+    parameters: { type: 'object', properties: {}, required: [] },
+    execute: async (_params, context) => safeExecute('loadBearingCalibration', async () => {
+      const result = await query<{ bearing_calibration: any }>(
+        `SELECT definitions->'bearing_calibration' AS bearing_calibration
+         FROM context_layer
+         WHERE workspace_id = $1`,
+        [context.workspaceId]
+      );
+
+      const calibration = result.rows[0]?.bearing_calibration ?? null;
+
+      if (!calibration) {
+        console.log(`[LoadBearingCalibration] No calibration data yet for workspace ${context.workspaceId}`);
+        return { calibration: null, hasCalibration: false };
+      }
+
+      const methodsWithData = (calibration.calibrations ?? []).filter(
+        (c: any) => c.weight !== 'unavailable'
+      ).length;
+      console.log(
+        `[LoadBearingCalibration] Loaded calibration for ${context.workspaceId}: ` +
+        `primaryBearing=${calibration.primaryBearing ?? 'none'}, ${methodsWithData}/7 methods with data`
+      );
+
+      return { calibration, hasCalibration: true };
+    }, _params),
+  } as ToolDefinition],
+
   // ── Methodology Divergence — forecast-rollup ──────────────────────────────
   ['computeForecastMethodologyDivergence', {
     name: 'computeForecastMethodologyDivergence',
@@ -10219,6 +10252,48 @@ export const toolRegistry = new Map<string, ToolDefinition>([
           recommendedMethod: 'behavioral_adjusted_ev',
           recommendedRationale: 'Behavioral signals reflect actual deal state; CRM stages reflect last update.',
         });
+      }
+
+      // Append bearing reliability comparison if calibration is available
+      // and the accuracy gap between the best and worst available method exceeds 20 ppts
+      const calibrationResult = (context.stepResults as any).bearing_calibration_data;
+      const bearingCalibration = calibrationResult?.calibration;
+      if (bearingCalibration) {
+        const primaryCalib = bearingCalibration.calibrations?.find(
+          (c: any) => c.weight === 'primary'
+        );
+        const worstCalib = (bearingCalibration.calibrations ?? [])
+          .filter((c: any) => c.weight === 'reference' && c.avgErrorPct !== null)
+          .sort((a: any, b: any) => (b.avgErrorPct ?? 0) - (a.avgErrorPct ?? 0))[0];
+
+        if (primaryCalib && worstCalib && worstCalib.avgErrorPct != null) {
+          const accuracyGap = worstCalib.avgErrorPct - (primaryCalib.avgErrorPct ?? 0);
+          if (accuracyGap > 20) {
+            methodologyComparisons.push({
+              metric: 'bearing_reliability',
+              primaryMethod: {
+                name: primaryCalib.method,
+                label: `${primaryCalib.method} (most accurate for this workspace)`,
+                value: primaryCalib.avgErrorPct ?? 0,
+                unit: 'error_pct',
+              },
+              secondaryMethod: {
+                name: worstCalib.method,
+                label: `${worstCalib.method} (least accurate for this workspace)`,
+                value: worstCalib.avgErrorPct,
+                unit: 'error_pct',
+              },
+              divergence: accuracyGap,
+              divergencePct: accuracyGap,
+              severity: accuracyGap > 40 ? 'alert' : 'notable',
+              gapExplanation: '',
+              recommendedMethod: primaryCalib.method,
+              recommendedRationale:
+                `${primaryCalib.method} has ${accuracyGap.toFixed(0)}% lower average error ` +
+                `for this workspace across ${primaryCalib.quartersOfData} quarters.`,
+            });
+          }
+        }
       }
 
       return {
