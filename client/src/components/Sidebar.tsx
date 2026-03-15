@@ -61,12 +61,31 @@ export default function Sidebar({
   const location = useLocation();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
-  const { currentWorkspace, user, logout } = useWorkspace();
+  const { currentWorkspace, workspaces, selectWorkspace, user, logout } = useWorkspace();
   const { pandoraRole } = usePandoraRole();
   const { isDemoMode, toggleDemoMode, anon } = useDemoMode();
 
   const [hovered, setHovered] = useState(false);
   const collapseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const [wsSwitcherOpen, setWsSwitcherOpen] = useState(false);
+  const [wsSwitcherPos, setWsSwitcherPos] = useState<{ bottom: number; left: number } | null>(null);
+  const wsRowRef = useRef<HTMLDivElement>(null);
+  const wsPanelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!wsSwitcherOpen) return;
+    function handleClick(e: MouseEvent) {
+      if (
+        wsPanelRef.current && !wsPanelRef.current.contains(e.target as Node) &&
+        wsRowRef.current && !wsRowRef.current.contains(e.target as Node)
+      ) {
+        setWsSwitcherOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [wsSwitcherOpen]);
 
   const pinned = !collapsed;
   const expanded = pinned || hovered;
@@ -256,8 +275,16 @@ export default function Sidebar({
 
         {/* BOTTOM: workspace info + user */}
         <div style={{ borderTop: `0.5px solid ${S.border}`, padding: '10px 0', flexShrink: 0 }}>
-          {/* Workspace name row */}
+          {/* Workspace name row — clickable switcher when multiple workspaces exist */}
           <div
+            ref={wsRowRef}
+            onClick={() => {
+              if (workspaces.length < 2) return;
+              if (!wsRowRef.current) return;
+              const rect = wsRowRef.current.getBoundingClientRect();
+              setWsSwitcherPos({ bottom: window.innerHeight - rect.top + 6, left: rect.left + 4 });
+              setWsSwitcherOpen(v => !v);
+            }}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -265,8 +292,13 @@ export default function Sidebar({
               height: 32,
               padding: expanded ? '0 14px' : '0',
               justifyContent: expanded ? 'flex-start' : 'center',
+              cursor: workspaces.length >= 2 ? 'pointer' : 'default',
+              borderRadius: 6,
+              transition: 'background 0.15s',
             }}
             title={!expanded ? wsName : undefined}
+            onMouseEnter={e => { if (workspaces.length >= 2) (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.04)'; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
           >
             <div style={{
               width: 8,
@@ -276,19 +308,84 @@ export default function Sidebar({
               flexShrink: 0,
             }} />
             {expanded && (
-              <span style={{
-                fontSize: 11,
-                color: S.iconRest,
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                maxWidth: 140,
-                userSelect: 'none',
-              }}>
-                {wsName}
-              </span>
+              <>
+                <span style={{
+                  fontSize: 11,
+                  color: S.iconRest,
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  maxWidth: 120,
+                  userSelect: 'none',
+                  flex: 1,
+                }}>
+                  {wsName}
+                </span>
+                {workspaces.length >= 2 && (
+                  <span style={{ fontSize: 9, color: S.iconRest, flexShrink: 0 }}>⇅</span>
+                )}
+              </>
             )}
           </div>
+
+          {/* Workspace switcher popup */}
+          {wsSwitcherOpen && wsSwitcherPos && (
+            <div
+              ref={wsPanelRef}
+              style={{
+                position: 'fixed',
+                bottom: wsSwitcherPos.bottom,
+                left: wsSwitcherPos.left,
+                background: '#0f1219',
+                border: '1px solid #1a1f2b',
+                borderRadius: 10,
+                padding: '10px 0',
+                boxShadow: '0 8px 32px rgba(0,0,0,0.55)',
+                zIndex: 9999,
+                minWidth: 200,
+              }}
+            >
+              <div style={{ fontSize: 10, fontWeight: 600, color: S.iconRest, letterSpacing: '0.06em', textTransform: 'uppercase', padding: '0 14px 8px' }}>
+                Switch Workspace
+              </div>
+              {workspaces.map(ws => {
+                const isActive = ws.id === currentWorkspace?.id;
+                const wsHasConnector = (ws.connector_count ?? 0) > 0;
+                return (
+                  <div
+                    key={ws.id}
+                    onClick={() => { selectWorkspace(ws); setWsSwitcherOpen(false); }}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      padding: '7px 14px',
+                      cursor: 'pointer',
+                      background: isActive ? 'rgba(29,158,117,0.1)' : 'transparent',
+                      transition: 'background 0.12s',
+                    }}
+                    onMouseEnter={e => { if (!isActive) (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.04)'; }}
+                    onMouseLeave={e => { if (!isActive) (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
+                  >
+                    <div style={{
+                      width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+                      background: wsHasConnector ? '#1D9E75' : '#3a4252',
+                    }} />
+                    <span style={{
+                      fontSize: 13,
+                      color: isActive ? '#1D9E75' : '#94a3b8',
+                      fontWeight: isActive ? 600 : 400,
+                      flex: 1,
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}>
+                      {anon.workspace(ws.name)}
+                    </span>
+                    {isActive && <span style={{ fontSize: 11, color: '#1D9E75' }}>✓</span>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
 
           {/* Palette picker */}
           <div style={{
