@@ -46,6 +46,7 @@ export function expandDealName(name: string, products: ProductEntry[]): string {
 
 export interface LiveDealFact {
   id: string;
+  source_id: string | null;
   name: string;
   amount: number;
   stage: string;
@@ -66,6 +67,7 @@ export async function lookupLiveDeal(
     const result = await query<any>(
       `SELECT
         d.id,
+        d.source_id,
         d.name,
         COALESCE(d.amount, 0) as amount,
         d.stage,
@@ -81,7 +83,7 @@ export async function lookupLiveDeal(
       LEFT JOIN activities a ON a.deal_id = d.id AND a.workspace_id = d.workspace_id
       WHERE d.workspace_id = $1
         AND LOWER(d.name) LIKE LOWER($2)
-      GROUP BY d.id, d.name, d.amount, d.stage, d.close_date,
+      GROUP BY d.id, d.source_id, d.name, d.amount, d.stage, d.close_date,
                d.owner, d.pipeline, d.forecast_category, d.updated_at
       LIMIT 1`,
       [workspaceId, `%${nameFragment}%`]
@@ -92,6 +94,7 @@ export async function lookupLiveDeal(
     const products = await loadProductCatalog(workspaceId);
     return {
       id: row.id,
+      source_id: row.source_id || null,
       name: expandDealName(row.name, products),
       amount: parseFloat(row.amount) || 0,
       stage: row.stage || '',
@@ -139,6 +142,8 @@ export function buildLiveDealFactsBlock(facts: LiveDealFact[]): string {
   const dealLines = facts.map(f => {
     const lines = [
       `Deal: ${f.name}`,
+      `ID: ${f.id}`,
+      f.source_id ? `HubSpot source_id: ${f.source_id}` : null,
       `Amount: ${formatAmt(f.amount)}`,
       `Stage: ${f.stage}`,
       f.pipeline ? `Pipeline: ${f.pipeline}` : null,

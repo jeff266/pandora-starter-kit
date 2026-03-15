@@ -141,6 +141,8 @@ export interface QueryAccountsResult {
 
 export interface ConversationRecord {
   id: string;
+  source_id: string | null;
+  gong_url: string | null;
   title: string;
   date: string | null;
   duration_minutes: number | null;
@@ -606,7 +608,7 @@ async function queryDeals(workspaceId: string, params: Record<string, any>): Pro
   const totalAmount = parseFloat(countResult.rows[0]?.total_amt || '0');
 
   const rows = await query<any>(
-    `SELECT d.id, d.name, d.amount, COALESCE(d.stage, d.stage_normalized) as stage, d.stage_normalized,
+    `SELECT d.id, d.source_id, d.name, d.amount, COALESCE(d.stage, d.stage_normalized) as stage, d.stage_normalized,
             d.close_date, d.owner as owner_name, d.owner as owner_email,
             a.name as account_name, d.account_id,
             d.probability, d.forecast_category,
@@ -823,9 +825,10 @@ async function queryConversations(workspaceId: string, params: Record<string, an
   const transcriptCoverage = totalCount > 0 ? Math.round((transCnt / totalCount) * 100) : 0;
 
   const rows = await query<any>(
-    `SELECT cv.id, cv.title, cv.call_date as date,
+    `SELECT cv.id, cv.source_id, cv.title, cv.call_date as date,
             ROUND(cv.duration_seconds::numeric / 60, 1) as duration_minutes,
             cv.source,
+            cv.source_data->>'url' as gong_url,
             a.name as account_name,
             d.name as deal_name,
             cv.participants,
@@ -920,6 +923,8 @@ function mapConversationRow(r: any, excerpt: string | null): ConversationRecord 
 
   return {
     id: r.id,
+    source_id: r.source_id || null,
+    gong_url: r.gong_url || null,
     title: r.title,
     date: r.date,
     duration_minutes: r.duration_minutes ? parseFloat(r.duration_minutes) : null,
@@ -1664,6 +1669,7 @@ async function queryContacts(workspaceId: string, params: Record<string, any>): 
   const rows = await query<any>(
     `SELECT DISTINCT ON (c.id)
             c.id,
+            c.source_id,
             COALESCE(c.first_name, '') || ' ' || COALESCE(c.last_name, '') as name,
             c.email, c.title,
             a.name as account_name,
@@ -1683,6 +1689,7 @@ async function queryContacts(workspaceId: string, params: Record<string, any>): 
   return {
     contacts: rows.rows.map((r: any) => ({
       id: r.id,
+      source_id: r.source_id || null,
       name: r.name?.trim() || 'Unknown',
       email: r.email,
       title: r.title,
