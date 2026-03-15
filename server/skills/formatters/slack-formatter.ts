@@ -1776,3 +1776,366 @@ function truncateSection(text: string, maxLength: number): string {
 
   return truncated + '...\n_...see full report for details_';
 }
+
+// ============================================================================
+// Brief-Quality Output — 200-word maximum
+// ============================================================================
+
+/**
+ * Format a dollar amount as compact notation: $200K or $2.5M
+ */
+function formatAmountBrief(amount: number): string {
+  if (amount >= 1_000_000) {
+    const m = amount / 1_000_000;
+    return `$${m % 1 === 0 ? m.toFixed(0) : m.toFixed(1)}M`;
+  }
+  if (amount >= 1_000) {
+    return `$${Math.round(amount / 1_000)}K`;
+  }
+  return `$${Math.round(amount)}`;
+}
+
+/**
+ * Truncate text to at most maxWords words, appending "…" if shortened.
+ */
+function truncateWords(text: string, maxWords: number): string {
+  const words = text.trim().split(/\s+/);
+  if (words.length <= maxWords) return text.trim();
+  return words.slice(0, maxWords).join(' ') + '…';
+}
+
+/**
+ * Concatenate all mrkdwn/plain_text content from Block Kit blocks
+ * so it can be word-counted and pattern-validated.
+ */
+export function extractTextFromBlocks(blocks: any[]): string {
+  const parts: string[] = [];
+  for (const block of blocks) {
+    if (block.text?.text) parts.push(block.text.text);
+    if (block.fields) {
+      for (const f of block.fields) {
+        if (f.text) parts.push(f.text);
+      }
+    }
+    if (block.elements) {
+      for (const el of block.elements) {
+        if (el.text?.text) parts.push(el.text.text);
+        if (typeof el.text === 'string') parts.push(el.text);
+      }
+    }
+  }
+  return parts.join(' ');
+}
+
+/**
+ * Validate a Slack message before sending.
+ *
+ * Checks (in order):
+ *   1. No unfilled template variables ([UPPER CASE] or {{handlebars}})
+ *   2. No pipe-table syntax
+ *   3. Word count ≤ 200
+ *   4. At least one finding block or is_data_quality_alert marker
+ *
+ * Returns { valid, errors }. Callers must NOT send if valid === false.
+ */
+export function validateSlackOutput(
+  message: string,
+  blocks: any[]
+): { valid: boolean; errors: string[] } {
+  const errors: string[] = [];
+
+  // 1. Unfilled template variables
+  const templateVarRegex = /\[([A-Z][A-Z\s]+)\]|\{\{[a-z_]+\}\}/g;
+  let match: RegExpExecArray | null;
+  while ((match = templateVarRegex.exec(message)) !== null) {
+    errors.push(`Unfilled template variable: ${match[0]}`);
+  }
+
+  // 2. Pipe-table syntax
+  if (/\|[-|]+\|/.test(message)) {
+    errors.push('Markdown table detected — use bullets');
+  }
+
+  // 3. Word count
+  const wordCount = message.trim() === '' ? 0 : message.trim().split(/\s+/).length;
+  if (wordCount > 200) {
+    errors.push(`Message too long: ${wordCount} words (max 200)`);
+  }
+
+  // 4. At least one finding block or data-quality-alert marker
+  const isDataQualityAlert = blocks.some(b => b.is_data_quality_alert === true);
+  const hasFindings = blocks.some(
+    b => b.type === 'section' && b.text?.text && b.text.text.trim().length > 0
+  );
+  if (!isDataQualityAlert && !hasFindings) {
+    errors.push('No findings content');
+  }
+
+  return errors.length > 0 ? { valid: false, errors } : { valid: true, errors: [] };
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// PART 2 — formatSkillBrief
+// ──────────────────────────────────────────────────────────────────────────────
+
+export interface SkillBriefFinding {
+  rank: number;
+  severity: 'critical' | 'warning' | 'info';
+  message: string;
+  dealName?: string;
+  amount?: number;
+  soWhat?: string;
+}
+
+export interface SkillBriefInput {
+  skillId: string;
+  skillDisplayName: string;
+  workspaceName: string;
+  temporalContext?: string;
+  attainmentPct?: number;
+  targetLabel?: string;
+  headline: string;
+  topFindings: SkillBriefFinding[];
+  totalFindings: number;
+  pendingActionCount: number;
+  conciergeUrl: string;
+}
+
+/**
+ * New default skill Slack formatter.
+ * Produces brief-quality (≤200 words) Block Kit output framed
+ * against the quarterly goal.
+ */
+export function formatSkillBrief(input: SkillBriefInput): SlackBlock[] {
+  const blocks: SlackBlock[] = [];
+
+  // Block 1 — Header
+  let headerText = `Pandora · ${input.skillDisplayName} · ${input.workspaceName}`;
+  blocks.push({
+    type: 'header',
+    text: { type: 'plain_text', text: headerText, emoji: true },
+  });
+
+  if (input.temporalContext) {
+    blocks.push({
+      type: 'context',
+      elements: [{ type: 'mrkdwn', text: input.temporalContext }],
+    });
+  }
+
+  // Block 2 — Attainment context (muted, only when provided)
+  if (input.attainmentPct !== undefined && input.targetLabel) {
+    blocks.push({
+      type: 'context',
+      elements: [{ type: 'mrkdwn', text: `${input.attainmentPct}% · ${input.targetLabel}` }],
+    });
+  }
+
+  // Block 3 — Headline (the most important thing)
+  blocks.push({
+    type: 'section',
+    text: { type: 'mrkdwn', text: `*${input.headline}*` },
+  });
+
+  // Block 4 — Divider
+  blocks.push({ type: 'divider' });
+
+  // Blocks 5–7 — Top findings (max 3)
+  const findings = input.topFindings.slice(0, 3);
+  for (const finding of findings) {
+    const emoji = finding.severity === 'critical' ? '🔴'
+      : finding.severity === 'warning' ? '🟡' : '🔵';
+
+    const msgWords = finding.message.trim().split(/\s+/);
+    const msg = msgWords.length > 15
+      ? msgWords.slice(0, 12).join(' ') + '...'
+      : finding.message.trim();
+
+    const dealPart = finding.dealName ? `${finding.dealName}: ` : '';
+    const amountPart = finding.amount ? ` (${formatAmountBrief(finding.amount)})` : '';
+
+    let text = `${emoji} ${dealPart}${msg}${amountPart}`;
+
+    if (finding.soWhat) {
+      const soWhatWords = finding.soWhat.trim().split(/\s+/);
+      const soWhat = soWhatWords.length > 15
+        ? soWhatWords.slice(0, 12).join(' ') + '...'
+        : finding.soWhat.trim();
+      text += `\n_${soWhat}_`;
+    }
+
+    blocks.push({ type: 'section', text: { type: 'mrkdwn', text } });
+  }
+
+  // Block 8 — Summary line
+  blocks.push({
+    type: 'context',
+    elements: [{
+      type: 'mrkdwn',
+      text: `_${input.totalFindings} findings · ${input.pendingActionCount} actions pending approval_`,
+    }],
+  });
+
+  // Block 9 — CTA button
+  blocks.push({
+    type: 'actions',
+    elements: [{
+      type: 'button',
+      text: { type: 'plain_text', text: 'Open Concierge →', emoji: true },
+      url: input.conciergeUrl,
+      action_id: 'open_concierge',
+    }],
+  });
+
+  return blocks;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// PART 3 — formatDataQualityAlert
+// ──────────────────────────────────────────────────────────────────────────────
+
+export interface DataQualityAlertInput {
+  skillDisplayName: string;
+  workspaceName: string;
+  missingData: string[];
+  recommendation: string;
+}
+
+/**
+ * 4-line alert sent when a skill has insufficient data to run.
+ * No CTA button, no findings, no further content.
+ */
+export function formatDataQualityAlert(input: DataQualityAlertInput): SlackBlock[] {
+  const blocks: SlackBlock[] = [];
+
+  blocks.push({
+    type: 'section',
+    text: {
+      type: 'mrkdwn',
+      text: [
+        `⚠️ *${input.skillDisplayName} · ${input.workspaceName}*`,
+        'Insufficient data this week.',
+        `Missing: ${input.missingData.join(', ')}`,
+        input.recommendation,
+      ].join('\n'),
+    },
+  });
+
+  // Metadata marker consumed by validateSlackOutput
+  (blocks as any[]).push({ type: '_meta', is_data_quality_alert: true });
+
+  return blocks;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// PART 4 — formatConciergeDaily
+// ──────────────────────────────────────────────────────────────────────────────
+
+export interface ConciergeDailyDealAtRisk {
+  name: string;
+  amount: number;
+  daysSinceActivity: number;
+  isDormant: boolean;
+}
+
+export interface ConciergeDailyInput {
+  workspaceName: string;
+  userName: string;
+  temporalContext: string;
+  attainmentPct: number;
+  targetLabel: string;
+  priorityFrameLabel: string;
+  situationSentence: string;
+  bigDealsAtRisk: ConciergeDailyDealAtRisk[];
+  overnightSkillCount: number;
+  pendingActionCount: number;
+  conciergeUrl: string;
+}
+
+/**
+ * Daily Concierge morning brief push to Slack.
+ * Replaces the need to open the app for the morning check-in.
+ * Maximum 200 words.
+ */
+export function formatConciergeDaily(input: ConciergeDailyInput): SlackBlock[] {
+  const blocks: SlackBlock[] = [];
+
+  // Block 1 — Header
+  blocks.push({
+    type: 'header',
+    text: { type: 'plain_text', text: `Pandora · ${input.workspaceName}`, emoji: true },
+  });
+  blocks.push({
+    type: 'context',
+    elements: [{ type: 'mrkdwn', text: input.temporalContext }],
+  });
+
+  // Block 2 — Attainment
+  blocks.push({
+    type: 'context',
+    elements: [{ type: 'mrkdwn', text: `${input.attainmentPct}% · ${input.targetLabel}` }],
+  });
+
+  // Block 3 — Priority frame + situation (situation capped at 25 words)
+  const situation = truncateWords(input.situationSentence, 25);
+  blocks.push({
+    type: 'section',
+    text: { type: 'mrkdwn', text: `*${input.priorityFrameLabel}*\n${situation}` },
+  });
+
+  // Block 4 — Divider
+  blocks.push({ type: 'divider' });
+
+  // Block 5 — Big deals at risk (max 5)
+  const topDeals = input.bigDealsAtRisk.slice(0, 5);
+  let dealsText = '*Big Deals at Risk*\n';
+  if (topDeals.length === 0) {
+    dealsText += '_No big deals at risk this week_';
+  } else {
+    topDeals.forEach((deal, i) => {
+      const dormant = deal.isDormant ? ' ⚠️' : '';
+      dealsText += `${i + 1}. ${deal.name} (${formatAmountBrief(deal.amount)}) — ${deal.daysSinceActivity} days cold${dormant}\n`;
+    });
+  }
+  blocks.push({ type: 'section', text: { type: 'mrkdwn', text: dealsText.trim() } });
+
+  // Block 6 — Overnight summary
+  let overnightText = `_${input.overnightSkillCount} skills ran overnight_`;
+  if (input.pendingActionCount > 0) {
+    overnightText += `\n_${input.pendingActionCount} actions awaiting approval_`;
+  }
+  blocks.push({
+    type: 'context',
+    elements: [{ type: 'mrkdwn', text: overnightText }],
+  });
+
+  // Block 7 — Actions row (two buttons)
+  blocks.push({
+    type: 'actions',
+    elements: [
+      {
+        type: 'button',
+        text: { type: 'plain_text', text: 'Open Concierge →', emoji: true },
+        url: input.conciergeUrl,
+        action_id: 'open_concierge',
+      },
+      {
+        type: 'button',
+        text: { type: 'plain_text', text: 'Ask Pandora →', emoji: true },
+        url: `${input.conciergeUrl}?openChat=true`,
+        action_id: 'open_chat',
+      },
+    ],
+  });
+
+  // Footer context
+  blocks.push({
+    type: 'context',
+    elements: [{
+      type: 'mrkdwn',
+      text: '_Reply to this message or use /pandora to ask questions_',
+    }],
+  });
+
+  return blocks;
+}

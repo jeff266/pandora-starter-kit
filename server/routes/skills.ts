@@ -1,7 +1,14 @@
 import { Router } from 'express';
 import { getSkillRegistry } from '../skills/registry.js';
 import { getSkillRuntime } from '../skills/runtime.js';
-import { formatForSlack, buildActionButtons, buildPerActionButtons } from '../skills/formatters/slack-formatter.js';
+import {
+  formatForSlack,
+  buildActionButtons,
+  buildPerActionButtons,
+  extractTextFromBlocks,
+  validateSlackOutput,
+  formatDataQualityAlert,
+} from '../skills/formatters/slack-formatter.js';
 import { formatAsMarkdown } from '../skills/formatters/markdown-formatter.js';
 import { getSlackWebhook, postBlocks } from '../connectors/slack/client.js';
 import { getSlackAppClient } from '../connectors/slack/slack-app-client.js';
@@ -703,7 +710,57 @@ async function postSkillToSlack(workspaceId: string, skillId: string, result: Sk
   if (!skill) return;
 
   try {
-    const blocks = formatForSlack(result, skill);
+    // Check for insufficient data — send a 4-line alert instead of the full message
+    const rdata = (result.resultData as any) ?? {};
+    const hasInsufficientData =
+      rdata.totalDeals === 0 ||
+      rdata.activityCoverage === 0 ||
+      rdata.hasInsufficientData === true;
+
+    let blocks: any[];
+
+    if (hasInsufficientData) {
+      let workspaceName = workspaceId;
+      try {
+        const wsRow = await query<{ name: string }>(
+          'SELECT name FROM workspaces WHERE id = $1 LIMIT 1',
+          [workspaceId]
+        );
+        if (wsRow.rows[0]?.name) workspaceName = wsRow.rows[0].name;
+      } catch { /* use workspaceId as fallback */ }
+
+      blocks = formatDataQualityAlert({
+        skillDisplayName: skill.name,
+        workspaceName,
+        missingData: rdata.missingDataSources ?? ['deal data', 'activity data'],
+        recommendation: rdata.dataRecommendation ?? 'Connect your CRM and enable activity sync',
+      });
+
+      const alertText = extractTextFromBlocks(blocks);
+      const alertValidation = validateSlackOutput(alertText, blocks);
+      if (!alertValidation.valid) {
+        console.warn('[Slack formatter] Data quality alert blocked:', alertValidation.errors);
+        return;
+      }
+
+      // Strip internal _meta markers before sending; no action buttons for alerts
+      const alertBlocks = blocks.filter((b: any) => b.type !== '_meta');
+      const webhookUrl = await getSlackWebhook(workspaceId);
+      if (webhookUrl) {
+        await postBlocks(webhookUrl, alertBlocks);
+        console.log(`[skills] Posted data quality alert for ${skillId} to Slack`);
+      }
+      return;
+    } else {
+      blocks = formatForSlack(result, skill);
+
+      const validationText = extractTextFromBlocks(blocks);
+      const validation = validateSlackOutput(validationText, blocks);
+      if (!validation.valid) {
+        console.warn('[Slack formatter] Blocked send:', validation.errors);
+        return;
+      }
+    }
 
     const actionButtons = buildActionButtons({
       skill_id: skillId,

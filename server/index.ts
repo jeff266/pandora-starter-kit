@@ -85,6 +85,7 @@ import { registerBuiltInAgents, getAgentRegistry } from './agents/index.js';
 import slackEventsRouter from './routes/slack-events.js';
 import slackInteractionsRouter from './routes/slack-interactions.js';
 import slackCommandsRouter from './routes/slack-commands.js';
+import slackSlashRouter from './routes/slack-slash.js';
 import analysisRouter from './routes/analysis.js';
 import userAuthRouter from './routes/user-auth.js';
 import consultantRouter from './routes/consultant.js';
@@ -273,6 +274,7 @@ if (process.env.NODE_ENV === 'production') {
 app.use("/api/slack/events", slackEventsRouter);
 app.use("/api/slack/interactions", slackInteractionsRouter);
 app.use("/api/slack/commands", slackCommandsRouter);
+app.use("/api/webhooks/slack/slash", slackSlashRouter);
 
 // Public webhook endpoints - token-based auth in URL path
 app.use("/api", publicWebhooksRouter);
