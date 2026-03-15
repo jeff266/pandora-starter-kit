@@ -27,7 +27,6 @@ import { getPandoraToolsContext } from '../skills/tool-context.js';
 import { validateChartSpec } from '../renderers/types.js';
 import type { ChartSpec } from '../renderers/types.js';
 import { lookupLiveDeal, detectDealMentions, buildLiveDealFactsBlock, detectContradiction, loadProductCatalog, expandDealName } from './deal-lookup.js';
-import { getWorkspaceHubSpotPortalId } from '../connectors/hubspot/portal-id.js';
 import { 
   buildVoiceSystemPromptSection, 
   applyPostTransforms, 
@@ -1128,14 +1127,14 @@ You have tools that query the company's live data. When someone asks a question,
    - Do not present an unrecognized name as an active team member without this flag.
    - This applies to deal owner fields returned by query_deals and query_skill_evidence alike.
 
-27. ENTITY HYPERLINKS: When your response references a specific deal, contact, account, or call by name, and you have its ID from a tool result, format it as a markdown link:
-   - Deals (in-app): [Deal Name](pandora://deals/{id}) — use the id field (UUID) from query_deals results
-   - Deals (HubSpot): [Deal Name](hubspot://deals/{hubspot_portal_id}/{source_id}) — use source_id + the HubSpot portal ID injected above; prefer this when the deal originated from HubSpot (source = "hubspot")
-   - Contacts (HubSpot): [Contact Name](hubspot://contacts/{hubspot_portal_id}/{source_id}) — use the source_id field from query_contacts results + the HubSpot portal ID; use this when source = "hubspot"
-   - Conversations/Calls: use the gong_url field from query_conversations results directly as the href if it is present: [Title or "Call on DATE"](gong_url value). If gong_url is null, fall back to pandora://conversations/{id}
+27. ENTITY HYPERLINKS — MANDATORY: Whenever you reference an entity (deal, contact, account, or call) by name that appeared in a tool result, you MUST include a markdown link. No exceptions.
+   - Deals: [Deal Name](pandora://deals/{id}) — use the id field (UUID) from query_deals or lookup_live_deal results
+   - Deals (HubSpot source): [Deal Name](hubspot://deals/{source_id}) — use source_id when the deal's source field is "hubspot"; preferred over pandora:// for HubSpot-sourced deals
+   - Contacts: [Contact Name](hubspot://contacts/{source_id}) — use the source_id field from query_contacts results; ALWAYS link every contact name you mention from a tool result
+   - Conversations/Calls: use the gong_url field from query_conversations results as the href: [Call Title](gong_url). The call title is the title field from the result. ALWAYS link every call you reference that appeared in a query_conversations result. If gong_url is null, use pandora://conversations/{id}
    - Accounts: [Account Name](pandora://accounts/{id}) — use the id field from query_accounts results
-   - Only link entities whose IDs you actually retrieved from a tool call. Never fabricate an ID or portal ID.
-   - Do not link generic terms, counts, or entities you are inferring without a tool-returned ID.
+   - ENFORCEMENT: If you name a contact, deal, or call that was returned by a tool call, the name MUST be a hyperlink. Unlinked entity names are not acceptable.
+   - Never fabricate an ID. Only use IDs you received directly from tool results.
 
 ## Data Integrity Guard
 
@@ -1615,15 +1614,9 @@ Continue using this scope unless the user explicitly changes it.`;
   const productCatalogPresent = contextBlock.includes('PRODUCT CATALOG');
   console.log(`[PandoraAgent] ws=${workspaceId} product_catalog_in_context=${productCatalogPresent}`);
 
-  // Fetch HubSpot portal ID for deep link construction (cached per workspace, 1-hour TTL)
-  const hubspotPortalId = await getWorkspaceHubSpotPortalId(workspaceId).catch(() => null);
-  const portalIdLine = hubspotPortalId
-    ? `\nHubSpot portal ID for this workspace: ${hubspotPortalId}\n`
-    : '';
-
   let effectiveSystemPrompt = contextBlock
-    ? `${PANDORA_SYSTEM_PROMPT}${portalIdLine}\n\n${contextBlock}\n\n${memoryBlock}${dictionaryContext}${toolContext}${scopeContextBlock}`
-    : `${PANDORA_SYSTEM_PROMPT}${portalIdLine}\n\n${memoryBlock}${dictionaryContext}${toolContext}${scopeContextBlock}`;
+    ? `${PANDORA_SYSTEM_PROMPT}\n\n${contextBlock}\n\n${memoryBlock}${dictionaryContext}${toolContext}${scopeContextBlock}`
+    : `${PANDORA_SYSTEM_PROMPT}\n\n${memoryBlock}${dictionaryContext}${toolContext}${scopeContextBlock}`;
 
   // ── Temporal context injection — resolve time-period references to exact dates ──
   const temporalCtx = resolveTemporalContext(message);

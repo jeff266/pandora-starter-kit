@@ -12,6 +12,7 @@ import { useSaveAsAgentTrigger } from '../hooks/useSaveAsAgentTrigger';
 import SuggestedActionsPanel from './assistant/SuggestedActionsPanel';
 import type { SuggestedAction } from './assistant/useConversationStream';
 import { type ConciergeContext, formatConciergeContextPreamble } from '../types/concierge-context';
+import { useCrmInfo } from '../lib/deeplinks';
 
 interface ToolCall {
   tool: string;
@@ -98,11 +99,15 @@ function getStoredWidth(): number {
 
 // Module-level navigate ref — populated by the component, used by the standalone formatInlineMarkdown function
 let _navigateFn: ((to: string) => void) | undefined;
+// Module-level HubSpot portal ID — populated from useCrmInfo hook, used by resolveLink
+let _hubspotPortalId: number | null = null;
 
 export default function ChatPanel({ isOpen, onClose, scope, initialSessionId, pendingMessage, onPendingMessageSent, conciergeContext, forceNewThread, onForceNewThreadConsumed, wbrContributions, onWbrContributionsConsumed }: ChatPanelProps) {
   const isMobile = useIsMobile();
   const navigate = useNavigate();
   _navigateFn = navigate;
+  const { crmInfo } = useCrmInfo();
+  _hubspotPortalId = crmInfo.portalId ?? null;
   const { anon } = useDemoMode();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatSuggestedActions, setChatSuggestedActions] = useState<SuggestedAction[]>([]);
@@ -1550,12 +1555,18 @@ function resolveLink(href: string): { url: string; external: boolean } {
     return { url: `https://app.gong.io/call?id=${href.replace('gong://calls/', '')}`, external: true };
   }
   if (href.startsWith('hubspot://deals/')) {
-    const [portalId, dealId] = href.replace('hubspot://deals/', '').split('/');
-    return { url: `https://app.hubspot.com/contacts/${portalId}/deal/${dealId}`, external: true };
+    const sourceId = href.replace('hubspot://deals/', '');
+    if (_hubspotPortalId) {
+      return { url: `https://app.hubspot.com/contacts/${_hubspotPortalId}/deal/${sourceId}`, external: true };
+    }
+    return { url: href, external: true };
   }
   if (href.startsWith('hubspot://contacts/')) {
-    const [portalId, contactId] = href.replace('hubspot://contacts/', '').split('/');
-    return { url: `https://app.hubspot.com/contacts/${portalId}/contact/${contactId}`, external: true };
+    const sourceId = href.replace('hubspot://contacts/', '');
+    if (_hubspotPortalId) {
+      return { url: `https://app.hubspot.com/contacts/${_hubspotPortalId}/contact/${sourceId}`, external: true };
+    }
+    return { url: href, external: true };
   }
   return { url: href, external: true };
 }
