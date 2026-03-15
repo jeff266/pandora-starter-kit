@@ -98,13 +98,36 @@ export async function loadCrossWorkspaceSummary() {
   }
 }
 
+async function isAdminWorkspace(workspaceId: string): Promise<boolean> {
+  try {
+    const result = await query(
+      `SELECT is_admin_workspace FROM workspaces WHERE id = $1`,
+      [workspaceId]
+    );
+    return result.rows[0]?.is_admin_workspace === true;
+  } catch {
+    return false;
+  }
+}
+
 export async function prepareProjectRecap(workspaceId: string) {
   try {
     console.log('[ProjectRecap] Preparing project recap for workspace', workspaceId);
 
-    const rawUpdates = await loadProjectUpdates(workspaceId);
+    const [rawUpdates, adminWorkspace] = await Promise.all([
+      loadProjectUpdates(workspaceId),
+      isAdminWorkspace(workspaceId),
+    ]);
+
     const formattedUpdates = formatProjectUpdates(rawUpdates);
-    const crossWorkspace = await loadCrossWorkspaceSummary();
+
+    let crossWorkspace: any[] = [];
+    if (adminWorkspace) {
+      crossWorkspace = await loadCrossWorkspaceSummary();
+      console.log('[ProjectRecap] Admin workspace — cross-workspace summary loaded');
+    } else {
+      console.log('[ProjectRecap] Non-admin workspace — cross-workspace summary skipped');
+    }
 
     return {
       projectUpdates: formattedUpdates,

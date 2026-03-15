@@ -224,6 +224,18 @@ async function checkInputFreshness(workspaceId: string): Promise<{
   }
 }
 
+async function isAdminWorkspace(workspaceId: string): Promise<boolean> {
+  try {
+    const result = await query(
+      `SELECT is_admin_workspace FROM workspaces WHERE id = $1`,
+      [workspaceId]
+    );
+    return result.rows[0]?.is_admin_workspace === true;
+  } catch {
+    return false;
+  }
+}
+
 export async function prepareStrategyInsights(workspaceId: string) {
   try {
     console.log('[StrategyInsights] Preparing strategy insights for workspace', workspaceId);
@@ -277,9 +289,20 @@ export async function prepareStrategyInsights(workspaceId: string) {
       };
     }
 
-    const recentOutputs = await gatherRecentSkillOutputs(workspaceId);
-    const crossWorkspace = await gatherCrossWorkspaceContext();
-    const trends = await gatherTrendAnalysis(workspaceId);
+    const [recentOutputs, trends, adminWorkspace] = await Promise.all([
+      gatherRecentSkillOutputs(workspaceId),
+      gatherTrendAnalysis(workspaceId),
+      isAdminWorkspace(workspaceId),
+    ]);
+
+    let crossWorkspace: { workspaces: any[]; icpProfiles: any[]; leadScoreDistribution: any[] };
+    if (adminWorkspace) {
+      crossWorkspace = await gatherCrossWorkspaceContext();
+      console.log('[StrategyInsights] Admin workspace — cross-workspace context loaded');
+    } else {
+      crossWorkspace = { workspaces: [], icpProfiles: [], leadScoreDistribution: [] };
+      console.log('[StrategyInsights] Non-admin workspace — cross-workspace context skipped');
+    }
 
     return {
       recentOutputs,
