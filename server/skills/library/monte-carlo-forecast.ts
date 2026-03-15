@@ -15,6 +15,8 @@ export const monteCarloForecastSkill: SkillDefinition = {
     'mcLoadUpcomingRenewals',
     'mcComputeRiskAdjustments',
     'mcRunSimulation',
+    'mcComputeAllElseEqual',
+    'mcWritePortfolioCompositionHypothesis',
     'calculateOutputBudget',
   ],
 
@@ -86,12 +88,34 @@ export const monteCarloForecastSkill: SkillDefinition = {
       outputKey: 'simulation',
     },
 
+    // ── Step 5b: All-else-equal sensitivity analysis ──────────────────────
+    {
+      id: 'all-else-equal',
+      name: 'Compute All-Else-Equal Deal & Lever Sensitivities',
+      tier: 'compute',
+      dependsOn: ['run-simulation', 'load-open-deals', 'compute-risk-adjustments', 'resolve-forecast-window'],
+      computeFn: 'mcComputeAllElseEqual',
+      computeArgs: {},
+      outputKey: 'all_else_equal',
+    },
+
+    // ── Step 5c: Write portfolio composition hypothesis ────────────────────
+    {
+      id: 'write-portfolio-hypothesis',
+      name: 'Write Portfolio Composition Standing Hypothesis',
+      tier: 'compute',
+      dependsOn: ['all-else-equal'],
+      computeFn: 'mcWritePortfolioCompositionHypothesis',
+      computeArgs: {},
+      outputKey: 'portfolio_hypothesis',
+    },
+
     // ── Step 6: DeepSeek risk classification ──────────────────────────────
     {
       id: 'classify-risk-signals',
       name: 'Classify Risk Signals & Opportunities',
       tier: 'deepseek',
-      dependsOn: ['run-simulation', 'compute-risk-adjustments'],
+      dependsOn: ['run-simulation', 'compute-risk-adjustments', 'all-else-equal'],
       deepseekPrompt: `You are a revenue analyst reviewing a Monte Carlo sales forecast.
 
 SIMULATION RESULTS:
@@ -152,6 +176,7 @@ Cap at 15 items. Prioritize: (1) variance drivers with high totalVariance, (2) d
         'fit-distributions',
         'run-simulation',
         'classify-risk-signals',
+        'all-else-equal',
         'calculate-output-budget',
       ],
       claudePrompt: `You are a Chief Revenue Officer interpreting a probabilistic annual revenue forecast for your team.
@@ -185,6 +210,17 @@ RISK SIGNAL SOURCES:
 DEEPSEEK RISK CLASSIFICATIONS:
 {{{json risk_classifications}}}
 
+ACTION MENU (all-else-equal analysis — top 3 ranked actions):
+{{#each all_else_equal.allElseEqual.actionMenu}}{{#if (lte rank 3)}}  {{rank}}. {{label}} — expected value: $\{{expectedValueIfDone}} | effort: {{effort}}
+     {{rationale}}
+{{/if}}{{/each}}
+
+PORTFOLIO COMPOSITION:
+{{all_else_equal.allElseEqual.portfolioComposition.swingDescription}}
+{{#if all_else_equal.allElseEqual.portfolioComposition.requiredClosesForQuota.length}}  At historical win rates: {{all_else_equal.allElseEqual.portfolioComposition.requiredClosesForQuota.0.currentExpected}} expected closes
+  Required for quota: {{all_else_equal.allElseEqual.portfolioComposition.requiredClosesForQuota.0.requiredForQuota}}
+  Gap: {{all_else_equal.allElseEqual.portfolioComposition.requiredClosesForQuota.0.gap}} closes{{/if}}
+
 OUTPUT GUIDANCE:
 {{{json output_budget}}}
 
@@ -210,6 +246,12 @@ Produce a Monte Carlo Forecast Briefing with these sections:
 
 5. UPSIDE CASE
    - What must be true for P75 or P90 to materialize (2-3 sentences)
+
+6. WHAT TO DO THIS WEEK
+   - State the swing variable in one sentence: what determines whether this quarter is won or lost
+   - List the top 3 action items from the action menu with their dollar values
+   - Be specific to this workspace's actual deals and numbers
+   - Do not use praise language or say "great"
 
 Rules:
 - Lead with P50 and probability of hitting target every time

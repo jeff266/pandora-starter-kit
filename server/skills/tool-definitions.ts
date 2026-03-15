@@ -7886,6 +7886,195 @@ const mcRunSimulation: ToolDefinition = {
   },
 };
 
+// ─── Step 5b: All-Else-Equal ─────────────────────────────────────────────────
+
+const mcComputeAllElseEqual: ToolDefinition = {
+  name: 'mcComputeAllElseEqual',
+  description: 'Compute per-deal and per-lever all-else-equal sensitivity analysis. Runs mini-simulations to isolate each deal\'s isolated P50 impact. Also computes the ranked action menu.',
+  tier: 'compute',
+  parameters: { type: 'object', properties: {}, required: [] },
+  execute: async (_params, context) => {
+    return safeExecute('mcComputeAllElseEqual', async () => {
+      const { computeAllElseEqual } = await import('../analysis/monte-carlo-all-else-equal.js');
+
+      const stepResults = (context as any).stepResults || {};
+      const simulationStep = stepResults['simulation'] || {};
+      const baseSimulation = simulationStep.simulation;
+      const simulationInputsRaw = simulationStep.simulationInputs;
+
+      if (!baseSimulation || !simulationInputsRaw) {
+        return { error: 'Simulation results not available — run-simulation step must complete first.' };
+      }
+
+      const openDealsRaw = stepResults['open_deals']?.openDeals || [];
+      const openDeals = openDealsRaw.map((d: any) => ({
+        ...d,
+        closeDate: d.closeDate ? new Date(d.closeDate) : new Date(Date.now() + 90 * 86400000),
+        createdAt: d.createdAt ? new Date(d.createdAt) : undefined,
+      }));
+
+      const riskAdjustments = stepResults['risk_adjustments']?.adjustments || {};
+      const forecastWindow = stepResults['forecast_window'] || {};
+      const quota: number | null = forecastWindow.quota ?? null;
+
+      const distributions = simulationInputsRaw.distributions;
+
+      if (distributions?.stageCurves != null &&
+          typeof (distributions.stageCurves as any).get !== 'function') {
+        distributions.stageCurves = new Map(
+          Object.entries(distributions.stageCurves as Record<string, unknown>)
+        );
+      }
+
+      const simInputs = {
+        openDeals,
+        distributions,
+        riskAdjustments,
+        forecastWindowEnd: simulationInputsRaw.forecastWindowEnd
+          ? new Date(simulationInputsRaw.forecastWindowEnd)
+          : new Date(new Date().getFullYear(), 11, 31),
+        today: simulationInputsRaw.today
+          ? new Date(simulationInputsRaw.today)
+          : new Date(),
+        iterations: 2000,
+        pipelineType: simulationInputsRaw.pipelineType ?? 'new_business',
+        storeIterations: false,
+      };
+
+      // Build riskSignals map: dealId -> signal strings
+      const riskSignals: Record<string, string[]> = {};
+      for (const [dealId, adj] of Object.entries(riskAdjustments as Record<string, any>)) {
+        if (adj.signals?.length > 0) {
+          riskSignals[dealId] = adj.signals;
+        }
+      }
+
+      const result = computeAllElseEqual(
+        simInputs as any,
+        baseSimulation,
+        quota,
+        openDeals,
+        riskSignals
+      );
+
+      const commandCenterEnrichment = {
+        actionMenu: result.actionMenu.map(a => ({
+          rank: a.rank,
+          label: a.label,
+          expectedValueIfDone: a.expectedValueIfDone,
+          effort: a.effort,
+          actionType: a.actionType,
+          dealId: a.dealId,
+        })),
+        swingVariable: result.portfolioComposition.swingVariable,
+        swingLabel: result.portfolioComposition.swingLabel,
+        swingDescription: result.portfolioComposition.swingDescription,
+        dealSensitivities: result.dealSensitivities.map(d => ({
+          dealId: d.dealId,
+          dealName: d.dealName,
+          p50Impact: d.p50Impact,
+          currentCloseProbability: d.currentCloseProbability,
+          riskFlags: d.riskFlags,
+        })),
+      };
+
+      return { allElseEqual: result, commandCenterEnrichment };
+    }, _params);
+  },
+};
+
+// ─── Step 5c: Write Portfolio Composition Hypothesis ─────────────────────────
+
+const mcWritePortfolioCompositionHypothesis: ToolDefinition = {
+  name: 'mcWritePortfolioCompositionHypothesis',
+  description: 'Write or update the portfolio composition swing variable as a standing hypothesis. Upserts at most once per 7 days.',
+  tier: 'compute',
+  parameters: { type: 'object', properties: {}, required: [] },
+  execute: async (_params, context) => {
+    return safeExecute('mcWritePortfolioCompositionHypothesis', async () => {
+      const stepResults = (context as any).stepResults || {};
+      const allElseEqualStep = stepResults['all_else_equal'];
+      const allElseEqual = allElseEqualStep?.allElseEqual;
+      const composition = allElseEqual?.portfolioComposition;
+
+      if (!composition?.swingVariable) {
+        return { hypothesisWritten: false, hypothesisId: null };
+      }
+
+      const forecastWindow = stepResults['forecast_window'] || {};
+      const quota: number | null = forecastWindow.quota ?? null;
+      const baseP50: number = allElseEqual.baseP50 ?? 0;
+
+      const swingSegment = composition.requiredClosesForQuota?.[0] ?? null;
+      const currentValue = swingSegment?.currentExpected ?? baseP50;
+      const alertThreshold = swingSegment?.requiredForQuota ?? (quota ? quota * 0.85 : null);
+
+      if (!alertThreshold) {
+        return { hypothesisWritten: false, hypothesisId: null };
+      }
+
+      const existing = await query(
+        `SELECT id, current_value, updated_at, weekly_values
+         FROM standing_hypotheses
+         WHERE workspace_id = $1
+           AND metric = $2
+           AND source = 'monte_carlo'
+           AND status = 'active'
+         LIMIT 1`,
+        [context.workspaceId, composition.swingVariable]
+      ).catch(() => ({ rows: [] as any[] }));
+
+      if (existing.rows.length > 0) {
+        const row = existing.rows[0];
+        const daysSinceUpdate = (Date.now() - new Date(row.updated_at).getTime()) / 86400000;
+        const values: any[] = row.weekly_values ?? [];
+        values.push({ weekOf: new Date().toISOString().split('T')[0], value: currentValue });
+
+        await query(
+          `UPDATE standing_hypotheses
+           SET current_value = $1,
+               weekly_values = $2,
+               updated_at = NOW()
+           WHERE id = $3`,
+          [currentValue, JSON.stringify(values), row.id]
+        ).catch(() => {});
+
+        return {
+          hypothesisWritten: false,
+          hypothesisId: row.id,
+          updatedExisting: true,
+          daysSinceLastUpdate: Math.round(daysSinceUpdate),
+        };
+      }
+
+      const reviewDate = new Date();
+      reviewDate.setDate(reviewDate.getDate() + 56);
+
+      const result = await query(
+        `INSERT INTO standing_hypotheses (
+           workspace_id, hypothesis, metric, current_value,
+           alert_threshold, alert_direction, review_date,
+           status, source, weekly_values
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', 'monte_carlo', $8)
+         RETURNING id`,
+        [
+          context.workspaceId,
+          composition.swingDescription,
+          composition.swingVariable,
+          currentValue,
+          alertThreshold,
+          'below',
+          reviewDate.toISOString().split('T')[0],
+          JSON.stringify([{ weekOf: new Date().toISOString().split('T')[0], value: currentValue }]),
+        ]
+      ).catch(() => ({ rows: [] as any[] }));
+
+      const newId = result.rows[0]?.id ?? null;
+      return { hypothesisWritten: newId !== null, hypothesisId: newId };
+    }, _params);
+  },
+};
+
 // ============================================================================
 // Pipeline Contribution Forecast tools
 // ============================================================================
@@ -9096,6 +9285,8 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['mcLoadUpcomingRenewals', mcLoadUpcomingRenewals],
   ['mcComputeRiskAdjustments', mcComputeRiskAdjustments],
   ['mcRunSimulation', mcRunSimulation],
+  ['mcComputeAllElseEqual', mcComputeAllElseEqual],
+  ['mcWritePortfolioCompositionHypothesis', mcWritePortfolioCompositionHypothesis],
   // Pipeline Contribution Forecast tools
   ['pcfResolveContext', pcfResolveContext],
   ['pcfBuildCohortMatrix', pcfBuildCohortMatrix],

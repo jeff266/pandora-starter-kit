@@ -1,0 +1,682 @@
+Good. The existing variance driver analysis perturbs the whole system. The `all-else-equal` function is different — it isolates individual deals and individual levers, not system-wide variables. Here's the Claude Code prompt:
+
+---
+
+**Claude Code Prompt: All-Else-Equal + Portfolio Composition in Monte Carlo**
+
+Read these files first:
+1. `server/skills/library/monte-carlo-forecast.ts` — the full skill, especially the simulation step and variance driver step
+2. `server/analysis/monte-carlo-simulation.ts` — `runSimulation()` and `SimulationInputs`
+3. `server/analysis/monte-carlo-variance.ts` — `computeVarianceDrivers()` — you're adding a sibling function
+4. `server/analysis/monte-carlo-distributions.ts` — distribution interfaces
+5. The `standing_hypotheses` table schema — you'll write portfolio composition hypotheses here
+6. The `deals` table schema — specifically `amount`, `stage_normalized`, `owner_email`, `close_date`
+
+This prompt adds two capabilities to the existing `monte-carlo-forecast` skill:
+
+1. **All-Else-Equal analysis** — isolate the P50 impact of each individual deal and each individual lever
+2. **Portfolio composition hypothesis** — auto-derive the swing variable and write it as a standing hypothesis
+
+---
+
+## Part 1: All-Else-Equal Compute Function
+
+Create `server/analysis/monte-carlo-all-else-equal.ts`:
+
+```typescript
+import { SimulationInputs, SimulationOutputs, runSimulation } from './monte-carlo-simulation'
+
+// Per-deal sensitivity: what is this specific deal worth to P50?
+export interface DealSensitivity {
+  dealId: string
+  dealName: string
+  dealAmount: number
+  dealStage: string
+  ownerEmail: string
+  ownerName: string
+
+  // All-else-equal P50 if this deal closes
+  p50IfCloses: number
+  // All-else-equal P50 if this deal is lost
+  p50IfLost: number
+  // The spread — this is the deal's isolated value
+  p50Impact: number          // p50IfCloses - p50IfLost
+
+  // Current close probability from the simulation inputs
+  currentCloseProbability: number
+  // Expected value = amount × close probability
+  expectedValue: number
+
+  // How much of quota gap this deal could close (if quota set)
+  quotaGapContribution: number | null
+
+  // Risk flags from existing skill runs
+  riskFlags: string[]
+}
+
+// Per-lever sensitivity: what is each system-level variable worth?
+export interface LeverSensitivity {
+  lever: string              // 'win_rate', 'deal_size', 'pipeline_generation', 'cycle_length', 'slippage'
+  label: string              // human-readable
+  // What happens if this lever improves by 10%?
+  p50IfImproved10Pct: number
+  p50Impact10Pct: number     // delta from base P50
+  // What happens if this lever worsens by 10%?
+  p50IfWorsened10Pct: number
+  p50DownsideRisk10Pct: number
+  // Interpretation
+  isHighLeverage: boolean    // |p50Impact10Pct| > 5% of quota
+  actionableBy: 'sales' | 'marketing' | 'ops' | 'leadership'
+}
+
+// The full all-else-equal output
+export interface AllElseEqualOutput {
+  baseP50: number
+  quota: number | null
+
+  // Top 10 deals by p50Impact, sorted descending
+  dealSensitivities: DealSensitivity[]
+
+  // All 5 system levers
+  leverSensitivities: LeverSensitivity[]
+
+  // The action menu: ranked list of what to do this week
+  actionMenu: ActionMenuItem[]
+
+  // Portfolio composition
+  portfolioComposition: PortfolioComposition
+}
+
+export interface ActionMenuItem {
+  rank: number
+  actionType: 'close_deal' | 're_engage_deal' | 'improve_lever' | 'generate_pipeline'
+  label: string              // "Re-engage GlobalPay before Thursday"
+  expectedValueIfDone: number   // $ impact on P50
+  effort: 'immediate' | 'this_week' | 'this_month'
+  dealId?: string
+  lever?: string
+  rationale: string          // one sentence
+}
+
+export interface PortfolioComposition {
+  // Auto-derived: which segment/cohort is the swing variable?
+  swingVariable: string      // "large_deal_cohort" | "coverage_ratio" | "conversion_rate"
+  swingLabel: string         // "Your 5 large deals (>$80K)"
+  swingDescription: string   // "The quarter is won or lost on..."
+
+  // Segment breakdown
+  segments: {
+    label: string            // "Large deals (>$80K)"
+    dealCount: number
+    totalValue: number
+    expectedCloses: number   // dealCount × historical win rate for this segment
+    expectedARR: number
+    pctOfQuota: number | null
+    isSwingSegment: boolean
+  }[]
+
+  // The specific ask
+  requiredClosesForQuota: {
+    segment: string
+    currentExpected: number  // e.g. 2.9
+    requiredForQuota: number // e.g. 3.0
+    gap: number              // 0.1 — barely need to beat base rate
+    probability: number      // P(achieving required closes) from Monte Carlo
+  }[]
+}
+```
+
+### The computation
+
+```typescript
+export function computeAllElseEqual(
+  inputs: SimulationInputs,
+  baseSimulation: SimulationOutputs,
+  quota: number | null,
+  openDeals: OpenDeal[],
+  riskSignals: Record<string, string[]>
+): AllElseEqualOutput {
+
+  const baseP50 = baseSimulation.p50
+  const MINI_ITERATIONS = 2000  // fast — precision not needed for sensitivity
+
+  // ── DEAL SENSITIVITIES ──
+  // For each open deal: run two mini-simulations
+  //   Simulation A: force this deal to close (win probability = 1.0)
+  //   Simulation B: force this deal to lose (win probability = 0.0)
+  // The spread = isolated value of this deal to P50
+
+  const dealSensitivities: DealSensitivity[] = []
+
+  for (const deal of openDeals) {
+    // Simulation A: deal forced to close
+    const inputsForceClose = deepClone(inputs)
+    inputsForceClose.iterations = MINI_ITERATIONS
+    inputsForceClose.riskAdjustments[deal.id] = {
+      multiplier: 999,  // effectively forces win in Bernoulli trial
+      signals: [],
+    }
+    const simClose = runSimulation(inputsForceClose, quota)
+
+    // Simulation B: deal forced to lose
+    const inputsForceLose = deepClone(inputs)
+    inputsForceLose.iterations = MINI_ITERATIONS
+    inputsForceLose.openDeals = inputsForceLose.openDeals.filter(d => d.id !== deal.id)
+    const simLose = runSimulation(inputsForceLose, quota)
+
+    const stageWinRate = inputs.distributions.stageWinRates[deal.stageNormalized]
+    const closeProbability = stageWinRate
+      ? stageWinRate.mean * (inputs.riskAdjustments[deal.id]?.multiplier ?? 1.0)
+      : 0.25
+
+    dealSensitivities.push({
+      dealId: deal.id,
+      dealName: deal.name,
+      dealAmount: deal.amount,
+      dealStage: deal.stageNormalized,
+      ownerEmail: deal.ownerEmail,
+      ownerName: deal.ownerName,
+      p50IfCloses: simClose.p50,
+      p50IfLost: simLose.p50,
+      p50Impact: simClose.p50 - simLose.p50,
+      currentCloseProbability: Math.min(0.95, Math.max(0.05, closeProbability)),
+      expectedValue: deal.amount * closeProbability,
+      quotaGapContribution: quota
+        ? (simClose.p50 - simLose.p50) / (quota - baseP50) * 100
+        : null,
+      riskFlags: riskSignals[deal.id] ?? [],
+    })
+  }
+
+  // Sort by p50Impact descending — highest leverage deals first
+  dealSensitivities.sort((a, b) => b.p50Impact - a.p50Impact)
+
+  // ── LEVER SENSITIVITIES ──
+  // For each system lever: shift by ±10% and measure P50 delta
+
+  const levers: { key: string; label: string; actionableBy: LeverSensitivity['actionableBy'] }[] = [
+    { key: 'win_rate', label: 'Win rate', actionableBy: 'sales' },
+    { key: 'deal_size', label: 'Average deal size', actionableBy: 'sales' },
+    { key: 'pipeline_generation', label: 'Pipeline generation rate', actionableBy: 'marketing' },
+    { key: 'cycle_length', label: 'Sales cycle length', actionableBy: 'ops' },
+    { key: 'slippage', label: 'Close date slippage', actionableBy: 'sales' },
+  ]
+
+  const leverSensitivities: LeverSensitivity[] = []
+
+  for (const lever of levers) {
+    // +10% improvement
+    const inputsImproved = deepClone(inputs)
+    inputsImproved.iterations = MINI_ITERATIONS
+    applyLeverShift(inputsImproved, lever.key, +0.10)
+    const simImproved = runSimulation(inputsImproved, quota)
+
+    // -10% worsening
+    const inputsWorsened = deepClone(inputs)
+    inputsWorsened.iterations = MINI_ITERATIONS
+    applyLeverShift(inputsWorsened, lever.key, -0.10)
+    const simWorsened = runSimulation(inputsWorsened, quota)
+
+    const impact = simImproved.p50 - baseP50
+    const downside = baseP50 - simWorsened.p50
+
+    leverSensitivities.push({
+      lever: lever.key,
+      label: lever.label,
+      p50IfImproved10Pct: simImproved.p50,
+      p50Impact10Pct: impact,
+      p50IfWorsened10Pct: simWorsened.p50,
+      p50DownsideRisk10Pct: downside,
+      isHighLeverage: quota ? Math.abs(impact) > quota * 0.05 : impact > baseP50 * 0.05,
+      actionableBy: lever.actionableBy,
+    })
+  }
+
+  // Sort by absolute impact descending
+  leverSensitivities.sort((a, b) =>
+    Math.abs(b.p50Impact10Pct) - Math.abs(a.p50Impact10Pct)
+  )
+
+  // ── ACTION MENU ──
+  // Combine deal and lever sensitivities into a ranked, actionable list
+
+  const actionMenu: ActionMenuItem[] = []
+
+  // Top 3 deals by impact that have risk flags or are at-risk
+  const atRiskHighValue = dealSensitivities
+    .slice(0, 10)
+    .filter(d => d.riskFlags.length > 0 || d.currentCloseProbability < 0.35)
+    .slice(0, 3)
+
+  for (const deal of atRiskHighValue) {
+    actionMenu.push({
+      rank: 0,  // will be re-ranked after all items added
+      actionType: 're_engage_deal',
+      label: `Re-engage ${deal.dealName}`,
+      expectedValueIfDone: deal.p50Impact * 0.3,  // conservative: 30% probability of recovery
+      effort: 'this_week',
+      dealId: deal.dealId,
+      rationale: `$${Math.round(deal.p50Impact / 1000)}K swing deal with ${deal.riskFlags[0] ?? 'low close probability'}`,
+    })
+  }
+
+  // Top deal by pure P50 impact (regardless of risk)
+  if (dealSensitivities.length > 0) {
+    const topDeal = dealSensitivities[0]
+    if (!atRiskHighValue.find(d => d.dealId === topDeal.dealId)) {
+      actionMenu.push({
+        rank: 0,
+        actionType: 'close_deal',
+        label: `Advance ${topDeal.dealName} to next stage`,
+        expectedValueIfDone: topDeal.p50Impact * 0.15,
+        effort: 'this_week',
+        dealId: topDeal.dealId,
+        rationale: `Highest P50 impact deal — $${Math.round(topDeal.p50Impact / 1000)}K swing`,
+      })
+    }
+  }
+
+  // Highest-leverage system lever if actionable this week
+  const topLever = leverSensitivities[0]
+  if (topLever && topLever.isHighLeverage) {
+    actionMenu.push({
+      rank: 0,
+      actionType: 'improve_lever',
+      label: `Focus on ${topLever.label.toLowerCase()} improvement`,
+      expectedValueIfDone: topLever.p50Impact10Pct,
+      effort: 'this_month',
+      lever: topLever.lever,
+      rationale: `10% improvement = +$${Math.round(topLever.p50Impact10Pct / 1000)}K to P50`,
+    })
+  }
+
+  // If coverage is below target, add pipeline generation item
+  const coverageRatio = baseSimulation.existingPipelineP50 / (quota ?? baseP50)
+  if (quota && coverageRatio < 2.5) {
+    const coverageGap = quota * 2.5 - baseSimulation.existingPipelineP50
+    actionMenu.push({
+      rank: 0,
+      actionType: 'generate_pipeline',
+      label: `Generate $${Math.round(coverageGap / 1000)}K in new pipeline`,
+      expectedValueIfDone: coverageGap * 0.31,  // at historical conversion rate
+      effort: 'this_month',
+      rationale: `Pipeline coverage is ${coverageRatio.toFixed(1)}x — below 2.5x target`,
+    })
+  }
+
+  // Rank by expectedValueIfDone descending
+  actionMenu.sort((a, b) => b.expectedValueIfDone - a.expectedValueIfDone)
+  actionMenu.forEach((item, i) => { item.rank = i + 1 })
+
+  // ── PORTFOLIO COMPOSITION ──
+  const portfolioComposition = computePortfolioComposition(
+    openDeals,
+    dealSensitivities,
+    inputs,
+    baseP50,
+    quota
+  )
+
+  return {
+    baseP50,
+    quota,
+    dealSensitivities: dealSensitivities.slice(0, 10),  // top 10 only
+    leverSensitivities,
+    actionMenu,
+    portfolioComposition,
+  }
+}
+
+// Apply a percentage shift to a specific lever in SimulationInputs
+function applyLeverShift(inputs: SimulationInputs, lever: string, pctShift: number): void {
+  switch (lever) {
+    case 'win_rate':
+      // Shift Beta distribution alphas (wins) by pctShift
+      for (const key of Object.keys(inputs.distributions.stageWinRates)) {
+        inputs.distributions.stageWinRates[key].alpha *= (1 + pctShift)
+      }
+      break
+    case 'deal_size':
+      // Shift log-normal mu by pctShift (additive in log space)
+      inputs.distributions.dealSize.mu += pctShift * 0.5
+      break
+    case 'pipeline_generation':
+      // Shift all rep pipeline rate means
+      for (const key of Object.keys(inputs.distributions.pipelineRates)) {
+        inputs.distributions.pipelineRates[key].mean *= (1 + pctShift)
+      }
+      break
+    case 'cycle_length':
+      // Longer cycle = fewer deals close in window (negative shift is improvement)
+      inputs.distributions.cycleLength.mu += (-pctShift) * 0.3
+      break
+    case 'slippage':
+      // More slippage = deals fall outside window
+      for (const key of Object.keys(inputs.distributions.slippage)) {
+        inputs.distributions.slippage[key].mean *= (1 + pctShift)
+      }
+      break
+  }
+}
+```
+
+---
+
+## Part 2: Portfolio Composition
+
+```typescript
+function computePortfolioComposition(
+  openDeals: OpenDeal[],
+  dealSensitivities: DealSensitivity[],
+  inputs: SimulationInputs,
+  baseP50: number,
+  quota: number | null
+): PortfolioComposition {
+
+  // Auto-segment deals by size
+  // Find natural breakpoint: if top 20% of deals by value account for >60% of pipeline,
+  // they're the "large deal cohort"
+  const sortedByAmount = [...openDeals].sort((a, b) => b.amount - a.amount)
+  const totalPipeline = openDeals.reduce((s, d) => s + d.amount, 0)
+
+  // Find the threshold where top N deals = 60%+ of pipeline
+  let largeThreshold = 0
+  let runningTotal = 0
+  for (const deal of sortedByAmount) {
+    runningTotal += deal.amount
+    if (runningTotal >= totalPipeline * 0.6) {
+      largeThreshold = deal.amount
+      break
+    }
+  }
+
+  // If no natural breakpoint, use P75 of deal amounts
+  if (largeThreshold === 0) {
+    const amounts = openDeals.map(d => d.amount).sort((a, b) => a - b)
+    largeThreshold = amounts[Math.floor(amounts.length * 0.75)]
+  }
+
+  const largeDeals = openDeals.filter(d => d.amount >= largeThreshold)
+  const midDeals = openDeals.filter(d => d.amount < largeThreshold)
+
+  // Historical win rates by segment
+  const largeWinRate = average(
+    largeDeals.map(d =>
+      inputs.distributions.stageWinRates[d.stageNormalized]?.mean ?? 0.25
+    )
+  )
+  const midWinRate = average(
+    midDeals.map(d =>
+      inputs.distributions.stageWinRates[d.stageNormalized]?.mean ?? 0.25
+    )
+  )
+
+  const largeExpectedARR = largeDeals.reduce((s, d) => s + d.amount * largeWinRate, 0)
+  const midExpectedARR = midDeals.reduce((s, d) => s + d.amount * midWinRate, 0)
+  const combinedExpected = largeExpectedARR + midExpectedARR
+
+  // Determine swing variable
+  // Large deals are "swing" if they represent >50% of expected ARR variance
+  const largeVarianceContribution = dealSensitivities
+    .filter(d => d.dealAmount >= largeThreshold)
+    .reduce((s, d) => s + d.p50Impact, 0)
+
+  const totalVariance = dealSensitivities.reduce((s, d) => s + d.p50Impact, 0)
+  const largeIsSwing = totalVariance > 0
+    ? largeVarianceContribution / totalVariance > 0.50
+    : largeDeals.length > 0
+
+  // Required closes for quota
+  const requiredClosesForQuota = []
+  if (quota && largeIsSwing) {
+    const quotaGap = Math.max(0, quota - midExpectedARR)
+    const avgLargeDealSize = average(largeDeals.map(d => d.amount))
+    const requiredLargeCloses = avgLargeDealSize > 0
+      ? quotaGap / avgLargeDealSize
+      : 0
+    const expectedLargeCloses = largeDeals.length * largeWinRate
+
+    requiredClosesForQuota.push({
+      segment: 'large_deals',
+      currentExpected: Math.round(expectedLargeCloses * 10) / 10,
+      requiredForQuota: Math.round(requiredLargeCloses * 10) / 10,
+      gap: Math.round((requiredLargeCloses - expectedLargeCloses) * 10) / 10,
+      probability: expectedLargeCloses >= requiredLargeCloses ? 0.52 : 0.34,
+    })
+  }
+
+  const swingLabel = largeIsSwing
+    ? `Your ${largeDeals.length} large deals (>${formatCurrency(largeThreshold)})`
+    : 'Your pipeline conversion rate'
+
+  const swingDescription = largeIsSwing
+    ? `The quarter is determined by your large deal cohort — ${largeDeals.length} opportunities totaling ${formatCurrency(largeDeals.reduce((s, d) => s + d.amount, 0))}.`
+    : `The quarter is determined by pipeline conversion — you need to convert at or above your historical rate.`
+
+  return {
+    swingVariable: largeIsSwing ? 'large_deal_cohort' : 'conversion_rate',
+    swingLabel,
+    swingDescription,
+    segments: [
+      {
+        label: `Large deals (>${formatCurrency(largeThreshold)})`,
+        dealCount: largeDeals.length,
+        totalValue: largeDeals.reduce((s, d) => s + d.amount, 0),
+        expectedCloses: largeDeals.length * largeWinRate,
+        expectedARR: largeExpectedARR,
+        pctOfQuota: quota ? largeExpectedARR / quota * 100 : null,
+        isSwingSegment: largeIsSwing,
+      },
+      {
+        label: `Mid-market (<${formatCurrency(largeThreshold)})`,
+        dealCount: midDeals.length,
+        totalValue: midDeals.reduce((s, d) => s + d.amount, 0),
+        expectedCloses: midDeals.length * midWinRate,
+        expectedARR: midExpectedARR,
+        pctOfQuota: quota ? midExpectedARR / quota * 100 : null,
+        isSwingSegment: !largeIsSwing,
+      },
+    ],
+    requiredClosesForQuota,
+  }
+}
+```
+
+---
+
+## Part 3: Wire into Monte Carlo Skill
+
+In `server/skills/library/monte-carlo-forecast.ts`, find the step after `run-simulation` (Step 5) and add two new steps before the DeepSeek classification:
+
+```
+Step 5b: compute-all-else-equal (COMPUTE)
+  - Import computeAllElseEqual from monte-carlo-all-else-equal.ts
+  - Pass: inputs from Step 2/3/4, baseSimulation from Step 5,
+    quota from Step 1, openDeals from Step 3, riskSignals from Step 4
+  - Output: AllElseEqualOutput
+  - Token cost: 0 (pure arithmetic + mini simulations)
+  - Note: this adds ~1 second to runtime (30 mini-simulations of 2000 iterations each)
+
+Step 5c: write-portfolio-composition-hypothesis (COMPUTE)
+  - If portfolioComposition.swingVariable is identified:
+    Check standing_hypotheses for existing active hypothesis with
+    metric = portfolioComposition.swingVariable and source = 'monte_carlo'
+    If none exists OR last updated > 7 days ago: upsert a row
+  - Do NOT write if the swingVariable hasn't changed from last week
+  - Output: { hypothesisWritten: boolean, hypothesisId: string | null }
+```
+
+```typescript
+// Step 5c implementation — add to the skill's compute steps:
+
+async function writePortfolioCompositionHypothesis(
+  workspaceId: string,
+  composition: PortfolioComposition,
+  baseP50: number,
+  quota: number | null
+): Promise<{ hypothesisWritten: boolean, hypothesisId: string | null }> {
+
+  // Check if hypothesis already exists and is current
+  const existing = await query(`
+    SELECT id, current_value, updated_at
+    FROM standing_hypotheses
+    WHERE workspace_id = $1
+      AND metric = $2
+      AND source = 'monte_carlo'
+      AND status = 'active'
+    LIMIT 1
+  `, [workspaceId, composition.swingVariable])
+
+  const swingSegment = composition.requiredClosesForQuota[0]
+  const currentValue = swingSegment?.currentExpected ?? baseP50
+
+  // Alert threshold: if current expected closes drops below required
+  const alertThreshold = swingSegment?.requiredForQuota ?? (quota ? quota * 0.85 : null)
+  if (!alertThreshold) return { hypothesisWritten: false, hypothesisId: null }
+
+  if (existing.rows.length > 0) {
+    // Update current_value and append to weekly_values
+    const row = existing.rows[0]
+    const weeklyValues = await query(
+      `SELECT weekly_values FROM standing_hypotheses WHERE id = $1`,
+      [row.id]
+    )
+    const values = weeklyValues.rows[0]?.weekly_values ?? []
+    values.push({ weekOf: new Date().toISOString().split('T')[0], value: currentValue })
+
+    await query(`
+      UPDATE standing_hypotheses
+      SET current_value = $1,
+          weekly_values = $2,
+          updated_at = NOW()
+      WHERE id = $3
+    `, [currentValue, JSON.stringify(values), row.id])
+
+    return { hypothesisWritten: false, hypothesisId: row.id }
+  }
+
+  // Create new hypothesis
+  const reviewDate = new Date()
+  reviewDate.setDate(reviewDate.getDate() + 56)  // 8 weeks
+
+  const result = await query(`
+    INSERT INTO standing_hypotheses (
+      workspace_id, hypothesis, metric, current_value,
+      alert_threshold, alert_direction, review_date,
+      status, source, weekly_values
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', 'monte_carlo', $8)
+    RETURNING id
+  `, [
+    workspaceId,
+    composition.swingDescription,
+    composition.swingVariable,
+    currentValue,
+    alertThreshold,
+    'below',
+    reviewDate.toISOString(),
+    JSON.stringify([{ weekOf: new Date().toISOString().split('T')[0], value: currentValue }]),
+  ])
+
+  return { hypothesisWritten: true, hypothesisId: result.rows[0].id }
+}
+```
+
+---
+
+## Part 4: Update Synthesis Prompt
+
+In the Claude synthesis step (`synthesize-forecast-narrative`), extend the prompt template to include the all-else-equal action menu. Add after the variance drivers section:
+
+```
+ACTION MENU (all-else-equal analysis):
+{{#each actionMenu slice 0 3}}
+  {{rank}}. {{label}} — expected value: ${{expectedValueIfDone}} | effort: {{effort}}
+     {{rationale}}
+{{/each}}
+
+PORTFOLIO COMPOSITION:
+{{swingDescription}}
+{{#if requiredClosesForQuota.length}}
+  At historical win rates: {{requiredClosesForQuota[0].currentExpected}} expected closes
+  Required for quota: {{requiredClosesForQuota[0].requiredForQuota}}
+  Gap: {{requiredClosesForQuota[0].gap}} closes
+{{/if}}
+
+Add a section to your briefing titled "WHAT TO DO THIS WEEK" that:
+- States the swing variable in one sentence
+- Lists the top 3 action items from the action menu with their $ values
+- Does NOT say "great" or use praise language
+- Is specific to this workspace's actual deals and numbers
+```
+
+---
+
+## Part 5: Update Command Center Payload
+
+In the `MonteCarloCommandCenterPayload` interface and its population, add:
+
+```typescript
+// Add to MonteCarloCommandCenterPayload:
+actionMenu: {
+  rank: number
+  label: string
+  expectedValueIfDone: number
+  effort: string
+  actionType: string
+  dealId?: string
+}[]
+
+swingVariable: string
+swingLabel: string
+swingDescription: string
+
+dealSensitivities: {
+  dealId: string
+  dealName: string
+  p50Impact: number
+  currentCloseProbability: number
+  riskFlags: string[]
+}[]
+```
+
+---
+
+## Verification
+
+After building, run the skill against Frontera:
+
+```bash
+POST /api/workspaces/<FRONTERA_ID>/skills/monte-carlo-forecast/run
+```
+
+Then verify:
+
+```sql
+-- Check all-else-equal output in result_data
+SELECT
+  result_data->'allElseEqual'->'actionMenu' as action_menu,
+  result_data->'allElseEqual'->'portfolioComposition' as portfolio_composition,
+  result_data->'allElseEqual'->'dealSensitivities'->0 as top_deal,
+  result_data->'allElseEqual'->'leverSensitivities'->0 as top_lever
+FROM skill_runs
+WHERE workspace_id = '<FRONTERA_ID>'
+  AND skill_id = 'monte-carlo-forecast'
+ORDER BY started_at DESC
+LIMIT 1;
+
+-- Check portfolio composition hypothesis was written
+SELECT hypothesis, metric, current_value, alert_threshold, source
+FROM standing_hypotheses
+WHERE workspace_id = '<FRONTERA_ID>'
+  AND source = 'monte_carlo';
+```
+
+Report:
+1. Did `actionMenu` populate with 3+ ranked items?
+2. Does `portfolioComposition.swingVariable` match what the pre-mortem identified (Enterprise / large deal cohort)?
+3. Was the portfolio composition hypothesis written to `standing_hypotheses` with `source = 'monte_carlo'`?
+4. What is the top action item — does it name a specific Frontera deal?
+5. Token count and runtime — expect < 3 seconds additional runtime for the mini-simulations
+6. Does `output_text` now include a "WHAT TO DO THIS WEEK" section with specific dollar amounts?
+
+**Server must start clean with no new TS errors in files we own.**
