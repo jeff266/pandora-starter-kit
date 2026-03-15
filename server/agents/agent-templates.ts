@@ -21,6 +21,8 @@ export interface AgentBriefingConfig {
     event_dates?: string[];
     event_name?: string;
   };
+  execution_mode?: 'pipeline' | 'loop' | 'auto';
+  loop_config?: Record<string, any>;
 }
 
 export interface AgentTemplateRow {

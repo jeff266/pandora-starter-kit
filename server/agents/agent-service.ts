@@ -58,6 +58,8 @@ export interface Agent {
   standing_questions: string[];
   created_from: 'manual' | 'conversation';
   seed_conversation_id: string | null;
+  execution_mode?: 'pipeline' | 'loop' | 'auto';
+  loop_config?: Record<string, any>;
 }
 
 export interface AgentPerformance {

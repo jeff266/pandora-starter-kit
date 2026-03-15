@@ -1117,7 +1117,7 @@ export class SalesforceAdapter implements CRMAdapter {
     const { recordStageChanges } = await import('../hubspot/stage-tracker.js');
     const recorded = await recordStageChanges(transitions as any, 'salesforce_history');
 
-    import('../webhooks/deal-events.js')
+    import('../../webhooks/deal-events.js')
       .then(m => m.emitDealStageChangedEvents(workspaceId, transitions as any))
       .catch(() => {});
 
@@ -1168,7 +1168,7 @@ export class SalesforceAdapter implements CRMAdapter {
       const { recordStageChanges } = await import('../hubspot/stage-tracker.js');
       const recorded = await recordStageChanges(transitions as any, 'salesforce_history');
 
-      import('../webhooks/deal-events.js')
+      import('../../webhooks/deal-events.js')
         .then(m => m.emitDealStageChangedEvents(workspaceId, transitions as any))
         .catch(() => {});
 

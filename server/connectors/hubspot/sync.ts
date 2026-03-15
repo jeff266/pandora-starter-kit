@@ -112,13 +112,13 @@ async function buildOwnerMap(client: HubSpotClient): Promise<Map<string, { name:
   return ownerMap;
 }
 
-async function backfillOwnerNames(workspaceId: string, ownerMap: Map<string, string>): Promise<number> {
+async function backfillOwnerNames(workspaceId: string, ownerMap: Map<string, string | { name: string; email: string }>): Promise<number> {
   if (ownerMap.size === 0) return 0;
 
   let updated = 0;
 
   const ownerIds = Array.from(ownerMap.keys());
-  const ownerNames = ownerIds.map(id => ownerMap.get(id)!);
+  const ownerNames = ownerIds.map(id => { const v = ownerMap.get(id)!; return typeof v === 'string' ? v : v.name; });
 
   const caseClauses = ownerIds.map((_, i) => `WHEN owner = $${i + 2} THEN $${i + 2 + ownerIds.length}`).join(' ');
   const ownerIdPattern = ownerIds.map((_, i) => `$${i + 2}`).join(', ');

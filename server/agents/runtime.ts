@@ -87,7 +87,7 @@ export class AgentRuntime {
         ...(dbAgent.standing_questions?.length ? { standing_questions: dbAgent.standing_questions } : {}),
         ...(dbAgent.execution_mode ? { execution_mode: dbAgent.execution_mode } : {}),
         ...(dbAgent.loop_config ? { loop_config: dbAgent.loop_config } : {}),
-      };
+      } as AgentDefinition;
     }
 
     if (!agent.enabled) {
@@ -429,7 +429,7 @@ export class AgentRuntime {
     skillOutputs: Record<string, SkillOutput>,
     workspaceId: string,
     runId: string
-  ): Promise<{ output: string; tokens: { input: number; output: number } }> {
+  ): Promise<{ output: string; tokens: { input: number; output: number }; synthesisMode: 'goal_aware' | 'findings_dump' }> {
     let userPrompt = agent.synthesis.userPromptTemplate || '{{skill_outputs}}';
 
     for (const [key, skillOutput] of Object.entries(skillOutputs)) {
