@@ -88,7 +88,6 @@ interface MappingPanelProps {
 }
 
 function MappingPanel({ initial, onSave, onCancel }: MappingPanelProps) {
-  const { workspace } = useWorkspace();
   const [objectName, setObjectName] = useState(initial?.object_name ?? 'Transcript__c');
   const [label, setLabel] = useState(initial?.label ?? '');
   const [sfFields, setSfFields] = useState<SalesforceFieldMeta[]>([]);
@@ -111,7 +110,7 @@ function MappingPanel({ initial, onSave, onCancel }: MappingPanelProps) {
     setFieldError(null);
     try {
       const data = await api.get(
-        `/workspaces/${workspace!.id}/connectors/salesforce/objects/${encodeURIComponent(obj)}/fields`
+        `/connectors/salesforce/objects/${encodeURIComponent(obj)}/fields`
       );
       setSfFields(data.fields ?? []);
       if (!label) setLabel(data.object_name.replace(/__c$/i, '').replace(/_/g, ' '));
@@ -441,7 +440,7 @@ export default function CustomObjectMapper({ salesforceConnected }: CustomObject
   const load = useCallback(async () => {
     if (!workspace?.id) return;
     try {
-      const data = await api.get(`/workspaces/${workspace.id}/custom-objects`);
+      const data = await api.get(`/custom-objects`);
       setConfigs(data.custom_objects ?? []);
     } catch {
       setConfigs([]);
@@ -455,7 +454,7 @@ export default function CustomObjectMapper({ salesforceConnected }: CustomObject
   async function persist(updated: CustomObjectConfig[]) {
     setSaveStatus('saving');
     try {
-      await api.put(`/workspaces/${workspace!.id}/custom-objects`, { custom_objects: updated });
+      await api.put(`/custom-objects`, { custom_objects: updated });
       setConfigs(updated);
       setSaveStatus('saved');
       setTimeout(() => setSaveStatus('idle'), 2000);
