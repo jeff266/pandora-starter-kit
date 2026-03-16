@@ -1703,7 +1703,7 @@ export interface StageMismatchDeal {
   stage: string;
   stage_normalized: string;
   inferred_phase: string | null;
-  inferred_phase_confidence: number | null;
+  phase_confidence: number | null;
   owner: string;
   close_date: string | null;
   stage_age_days: number;
@@ -1750,12 +1750,12 @@ export async function stageMismatchAnalysis(
         d.stage,
         d.stage_normalized,
         d.inferred_phase,
-        d.inferred_phase_confidence,
+        d.phase_confidence,
         d.owner,
         d.close_date,
         COALESCE(d.days_in_stage, 0) as stage_age_days,
         d.last_activity_date,
-        d.account_name,
+        a.name as account_name,
         d.source,
         d.source_id,
         -- Count conversations
@@ -1763,8 +1763,9 @@ export async function stageMismatchAnalysis(
         -- Count contacts
         (SELECT COUNT(DISTINCT contact_id) FROM deal_contacts dc WHERE dc.deal_id = d.id) as contact_count
       FROM deals d
+      LEFT JOIN accounts a ON a.id = d.account_id AND a.workspace_id = d.workspace_id
       WHERE d.workspace_id = $1
-        AND d.is_open = true
+        AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
         ${scopeClause}
     ),
     mismatch_deals AS (
@@ -1773,7 +1774,7 @@ export async function stageMismatchAnalysis(
       WHERE inferred_phase IS NOT NULL
         AND stage_normalized IS NOT NULL
         AND inferred_phase != stage_normalized
-        AND inferred_phase_confidence >= 0.6
+        AND phase_confidence >= 0.6
     )
     SELECT
       md.*,
@@ -1802,7 +1803,7 @@ export async function stageMismatchAnalysis(
     stage: row.stage,
     stage_normalized: row.stage_normalized,
     inferred_phase: row.inferred_phase,
-    inferred_phase_confidence: row.inferred_phase_confidence,
+    phase_confidence: row.phase_confidence,
     owner: row.owner,
     close_date: row.close_date,
     stage_age_days: parseInt(row.stage_age_days, 10) || 0,
