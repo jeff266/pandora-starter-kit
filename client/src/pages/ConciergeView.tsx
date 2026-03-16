@@ -463,22 +463,24 @@ function deriveSituationLine(brief: OpeningBriefData): string {
 
 type ConciergeFilter = { id: string; label: string; pipelineGroup?: string; repEmail?: string };
 
-const BUILT_IN_PIPELINE_FILTERS: ConciergeFilter[] = [
-  { id: 'all', label: 'All Data' },
-  { id: 'renewal', label: 'Renewal Only', pipelineGroup: 'renewal' },
-  { id: 'expansion', label: 'Expansion Only', pipelineGroup: 'expansion' },
-  { id: 'new_business', label: 'New Business Only', pipelineGroup: 'new_business' },
-];
+const GROUP_LABEL_MAP: Record<string, string> = {
+  renewal: 'Renewal Only',
+  expansion: 'Expansion Only',
+  new_business: 'New Business Only',
+  other: 'Other Only',
+};
 
 function ConciergeFilterDropdown({
   activeFilter,
   onSelect,
   reps,
+  pipelineGroups,
   colors: C,
 }: {
   activeFilter: ConciergeFilter;
   onSelect: (f: ConciergeFilter) => void;
   reps: Array<{ name: string; email: string }>;
+  pipelineGroups: Array<{ id: string; label: string }>;
   colors: typeof S;
 }) {
   const [open, setOpen] = useState(false);
@@ -493,6 +495,15 @@ function ConciergeFilterDropdown({
   }, []);
 
   const isFiltered = activeFilter.id !== 'all';
+
+  const pipelineFilters: ConciergeFilter[] = [
+    { id: 'all', label: 'All Data' },
+    ...pipelineGroups.map(g => ({
+      id: g.id,
+      label: GROUP_LABEL_MAP[g.id] ?? g.label,
+      pipelineGroup: g.id,
+    })),
+  ];
 
   return (
     <div ref={ref} style={{ position: 'relative' }}>
@@ -524,10 +535,14 @@ function ConciergeFilterDropdown({
           borderRadius: 10, boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
           zIndex: 200, padding: 4,
         }}>
-          <div style={{ padding: '6px 12px 4px', fontSize: 10, color: C.textMuted, textTransform: 'uppercase', letterSpacing: 1 }}>View by type</div>
-          {BUILT_IN_PIPELINE_FILTERS.map(f => (
-            <FilterOption key={f.id} label={f.label} selected={activeFilter.id === f.id} onClick={() => { onSelect(f); setOpen(false); }} colors={C} />
-          ))}
+          {pipelineGroups.length > 0 && (
+            <>
+              <div style={{ padding: '6px 12px 4px', fontSize: 10, color: C.textMuted, textTransform: 'uppercase', letterSpacing: 1 }}>View by type</div>
+              {pipelineFilters.map(f => (
+                <FilterOption key={f.id} label={f.label} selected={activeFilter.id === f.id} onClick={() => { onSelect(f); setOpen(false); }} colors={C} />
+              ))}
+            </>
+          )}
 
           {reps.length > 0 && (
             <>
@@ -917,10 +932,9 @@ export default function ConciergeView() {
                 ↗ Projection
               </span>
             )}
-            <ConciergeFilterDropdown
-              activeFilter={activeFilter}
-              onSelect={f => { setAndPersistFilter(f); }}
-              reps={Array.from(
+            {(() => {
+              const pipelineGroups = (brief?.groupedDeals ?? []).map(g => ({ id: g.group, label: g.label }));
+              const reps = Array.from(
                 new Map(
                   (brief?.bigDealsAtRisk ?? [])
                     .filter(d => d.ownerEmail)
@@ -930,9 +944,18 @@ export default function ConciergeView() {
                       return [d.ownerEmail, { name, email: d.ownerEmail }] as const;
                     })
                 ).values()
-              )}
-              colors={S}
-            />
+              );
+              if (pipelineGroups.length < 2 && reps.length < 2) return null;
+              return (
+                <ConciergeFilterDropdown
+                  activeFilter={activeFilter}
+                  onSelect={f => { setAndPersistFilter(f); }}
+                  pipelineGroups={pipelineGroups}
+                  reps={reps}
+                  colors={S}
+                />
+              );
+            })()}
           </div>
         </div>
 
