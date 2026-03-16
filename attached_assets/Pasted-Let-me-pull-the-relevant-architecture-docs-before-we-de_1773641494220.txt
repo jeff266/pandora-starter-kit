@@ -1,0 +1,348 @@
+Let me pull the relevant architecture docs before we design anything.
+
+Good, I have everything I need. Let me design this properly.
+
+Here's the full design — the graph itself, then exactly how each surface uses it.
+
+---
+
+## The Entity Graph
+
+```typescript
+// server/context/entity-graph.ts
+
+export const PANDORA_ENTITY_GRAPH = {
+
+  entities: {
+
+    deal: {
+      table: "deals",
+      primary_key: "id",
+      crm_key: "crm_deal_id",
+      workspace_scoped: true,
+      fields: {
+        native: ["name", "amount", "stage", "close_date", "owner_id", 
+                 "pipeline_id", "days_in_stage", "created_date"],
+        never_on_deal: ["forecast_category", "prospect_score", "health_score",
+                        "behavioral_path", "icp_fit_score"],
+        // ↑ Critical: these live in skill_runs.result_data, not on the deal record
+      },
+      relationships: {
+        stage_history:        { table: "deal_stage_history",  via: "deal_id",     type: "one_to_many", order: "changed_at ASC" },
+        conversations:        { table: "conversations",        via: "crm_deal_id", type: "one_to_many", order: "started_at DESC" },
+        contacts:             { table: "contacts",             via: "crm_deal_id", type: "one_to_many" },
+        skill_findings:       { table: "skill_runs",           via: "deal_id",     type: "one_to_many", latest_per_skill: true },
+        owner:                { table: "users",                via: "owner_id",    type: "many_to_one" },
+        calendar_events:      { table: "calendar_events",      via: "deal_id",     type: "one_to_many", order: "start_time ASC" },
+      }
+    },
+
+    skill_run: {
+      table: "skill_runs",
+      primary_key: "id",
+      workspace_scoped: true,
+      access_rule: "READ_LATEST_ONLY — never re-execute on user query. Always SELECT WHERE skill_name = $skill AND workspace_id = $ws ORDER BY created_at DESC LIMIT 1",
+      computed_fields: {
+        // These are what skill_runs PRODUCE — the model must know to look here, not on deals
+        deal_level:       ["forecast_category", "prospect_score", "health_score", 
+                           "behavioral_winning_path", "days_stale", "risk_flags"],
+        pipeline_level:   ["coverage_ratio", "weighted_forecast", "pandora_weighted",
+                           "stage_conversion_rates", "waterfall_adjustments"],
+        rep_level:        ["attainment_pct", "pipeline_multiple", "activity_score",
+                           "avg_days_to_close", "win_rate_90d"],
+        workspace_level:  ["icp_fit_distribution", "competitor_mentions", 
+                           "persona_patterns", "quarter_health"]
+      },
+      relationships: {
+        deal:       { via: "deal_id",      type: "many_to_one", nullable: true },
+        workspace:  { via: "workspace_id", type: "many_to_one" }
+      }
+    },
+
+    stage_history: {
+      table: "deal_stage_history",
+      primary_key: "id",
+      workspace_scoped: true,
+      order: "changed_at ASC",
+      derived_signals: ["days_in_stage", "regression_detected", "velocity_vs_baseline",
+                        "gap_at_stage", "stage_entered_at", "stage_exited_at"],
+      temporal_join: {
+        // Use this to answer "what happened DURING stage X"
+        pattern: "event_date BETWEEN stage_entered_at AND COALESCE(stage_exited_at, NOW())",
+        joinable_with: ["conversations", "calendar_events"]
+      },
+      relationships: {
+        deal: { via: "deal_id", type: "many_to_one" }
+      }
+    },
+
+    conversation: {
+      table: "conversations",
+      primary_key: "id",
+      workspace_scoped: true,
+      sources: ["gong", "fireflies", "fathom"],
+      link_confidence: ["confirmed", "inferred", "unlinked"],
+      pandora_principle: "Surface WHAT HAPPENED BECAUSE OF a call, not what was said in it. Never recreate what Gong/Fireflies do natively.",
+      fields: ["title", "started_at", "duration_seconds", "participants", 
+               "summary", "link_confidence", "crm_deal_id"],
+      temporal_join: {
+        // Use to resolve which stage a call occurred in
+        pattern: "conversations.started_at BETWEEN stage_history.changed_at AND COALESCE(next_stage.changed_at, NOW())"
+      },
+      relationships: {
+        deal:          { via: "crm_deal_id", type: "many_to_one", nullable: true },
+        stage_context: { via: "temporal_join", type: "derived" }
+      }
+    },
+
+    contact: {
+      table: "contacts",
+      primary_key: "id",
+      workspace_scoped: true,
+      fields: ["name", "title", "email", "seniority", "buying_role", 
+               "last_activity_date", "crm_deal_id"],
+      relationships: {
+        deal:           { via: "crm_deal_id", type: "many_to_one" },
+        conversations:  { via: "email_match OR domain_match", type: "inferred" }
+      }
+    },
+
+    calendar_event: {
+      table: "calendar_events",
+      primary_key: "id",
+      workspace_scoped: true,
+      sync: "15-minute background sync via Google Calendar OAuth (workspace-level)",
+      fields: ["title", "start_time", "end_time", "attendees", "deal_id", "status"],
+      relationships: {
+        deal:         { via: "deal_id",    type: "many_to_one", nullable: true },
+        stage_context: { via: "temporal_join", type: "derived" }
+      }
+    },
+
+    user: {
+      table: "users",
+      primary_key: "id",
+      roles: ["admin", "rep"],
+      scoping_rule: "rep → own deals only (deals.owner_id = current_user.id). admin → full workspace.",
+      relationships: {
+        deals:      { via: "owner_id",    type: "one_to_many" },
+        agent_runs: { via: "triggered_by", type: "one_to_many" }
+      }
+    },
+
+    agent_run: {
+      table: "agent_runs",
+      primary_key: "id",
+      workspace_scoped: true,
+      relationships: {
+        deal:     { via: "deal_id",      type: "many_to_one", nullable: true },
+        feedback: { via: "agent_run_id", table: "agent_feedback", type: "one_to_many" }
+      }
+    }
+
+  },
+
+  // ── QUERY ROUTING ─────────────────────────────────────────────────────────
+  // Used by the planning step (iteration 0) to sequence tool calls correctly.
+  // Prevents multi-hop guessing and redundant skill re-execution.
+
+  query_routing: {
+    deal_health:           ["deal", "stage_history", "skill_run:pipeline-hygiene",
+                            "skill_run:prospect-score", "conversations"],
+    deal_stall_diagnosis:  ["stage_history", "conversations", 
+                            "skill_run:behavioral-winning-path", "calendar_events"],
+    forecast:              ["deal", "skill_run:forecast-rollup", 
+                            "skill_run:pandora-weighted", "skill_run:monte-carlo"],
+    pipeline_coverage:     ["deal", "skill_run:pipeline-coverage-by-rep",
+                            "skill_run:pipeline-waterfall"],
+    rep_performance:       ["user", "deal", "stage_history", 
+                            "skill_run:rep-scorecard"],
+    relationship_health:   ["contact", "conversations", "calendar_events", "deal"],
+    data_quality:          ["deal", "skill_run:data-quality-audit"],
+    icp_fit:               ["deal", "contact", "skill_run:icp-fit",
+                            "skill_run:conversation-intelligence"]
+  },
+
+  // ── INJECTION RULES ───────────────────────────────────────────────────────
+  // Controls what gets loaded, when, and at what cost.
+
+  injection: {
+    full_graph_threshold:    "query_complexity > 1 OR multi_entity_question",
+    single_entity_skip:      "Simple lookups skip the graph entirely",
+    max_tokens_in_prompt:    "~800 tokens for full graph — acceptable overhead",
+    scoped_variant_triggers: ["deal_id present", "rep_id present", "stage filter active"]
+  }
+
+} as const;
+```
+
+---
+
+## How Each Surface Uses It
+
+### Ask Pandora
+
+Ask Pandora uses the graph at the **planning step** (iteration 0), and only when complexity warrants it.
+
+```typescript
+// server/chat/orchestrator.ts
+
+async function buildAskPandoraSystemPrompt(
+  workspaceId: string,
+  userId: string,
+  role: 'admin' | 'rep',
+  question: string
+): Promise<string> {
+
+  const complexity = await classifyQueryComplexity(question);
+  // Returns: 'single_entity' | 'multi_hop' | 'aggregate'
+
+  const entityGraph = complexity !== 'single_entity'
+    ? buildGraphBlock(role)   // strips rep-irrelevant nodes for rep role
+    : null;
+
+  const routingHint = entityGraph
+    ? inferRoutingHint(question, PANDORA_ENTITY_GRAPH.query_routing)
+    : null;
+
+  return `
+You are Ask Pandora, Pandora's conversational intelligence layer.
+
+ROLE SCOPE: ${role === 'rep' ? 'You see only deals owned by this user.' : 'Full workspace access.'}
+
+${entityGraph ? `DATA MODEL:\n${JSON.stringify(entityGraph, null, 2)}` : ''}
+
+${routingHint ? `QUERY PATH: To answer this, pull from: ${routingHint.join(' → ')}` : ''}
+
+RULES:
+- skill_run fields (forecast_category, prospect_score, health_score) 
+  live in skill_runs.result_data — NOT on the deal record.
+- Never re-execute a skill. Read the latest skill_run per skill_name + workspace_id.
+- Stage velocity analysis requires stage_history, not deal.stage alone.
+- When diagnosing a stall, use the temporal_join pattern to 
+  correlate conversations with the stage where the gap occurred.
+  `;
+}
+```
+
+The graph earns its tokens on queries like "why did pipeline drop last month?" (multi-hop: deal → stage_history → conversations → skill_run:pipeline-waterfall) but gets skipped entirely on "how many deals are in Proposal?" (single entity lookup).
+
+---
+
+### Concierge
+
+Concierge has **two distinct graph moments** — and they're different from Ask Pandora.
+
+**Moment 1: Brief assembly (pre-conversation)**
+The graph is not injected here. Brief cards are assembled from pre-computed `skill_runs` output — the relationships are already resolved. Injecting the graph before the user has said anything wastes tokens on every session load.
+
+**Moment 2: Card activation (conversation start)**
+When the user clicks a drillable number or brief card, a conversation thread opens. This is where the graph gets injected — but scoped to the entity anchor of the card clicked.
+
+```typescript
+// server/concierge/context-builder.ts
+
+async function buildConciergeConversationContext(
+  workspaceId: string,
+  role: 'admin' | 'rep',
+  cardAnchor: CardAnchor   // { type: 'deal' | 'rep' | 'pipeline', entity_id?: string }
+): Promise<ConversationContext> {
+
+  // Scope the graph to the card's entity type
+  // A rep clicking a deal card doesn't need the pipeline-level routing rules
+  const scopedGraph = buildScopedGraph(
+    PANDORA_ENTITY_GRAPH,
+    cardAnchor.type,
+    role
+  );
+
+  // Pre-load the dossier for the anchored entity
+  // This is already computed data — no skill re-execution
+  const dossier = cardAnchor.entity_id
+    ? await assembleDossier(workspaceId, cardAnchor)
+    : null;
+
+  return {
+    entity_graph: scopedGraph,
+    anchor: cardAnchor,
+    pre_loaded: dossier,
+    system_prompt_block: buildConciergeSystemPrompt(scopedGraph, dossier, role)
+  };
+}
+```
+
+The scoped graph for a deal card looks like this:
+
+```typescript
+function buildScopedGraph(graph, anchorType: 'deal' | 'rep' | 'pipeline', role) {
+
+  const scopeMap = {
+    deal:     ["deal", "stage_history", "conversations", "contacts",
+               "calendar_events", "skill_run:prospect-score",
+               "skill_run:behavioral-winning-path", "skill_run:pipeline-hygiene"],
+    rep:      ["user", "deal", "stage_history", "skill_run:rep-scorecard",
+               "skill_run:pipeline-coverage-by-rep"],
+    pipeline: ["deal", "skill_run:forecast-rollup", "skill_run:pandora-weighted",
+               "skill_run:pipeline-waterfall", "skill_run:pipeline-coverage-by-rep"]
+  };
+
+  return {
+    relevant_entities: scopeMap[anchorType],
+    query_routing: graph.query_routing,  // always include — shapes tool sequencing
+    injection: graph.injection,
+    role_scope: role === 'rep' ? 'own_deals_only' : 'workspace_wide'
+  };
+}
+```
+
+---
+
+## The Shared Module
+
+Both surfaces call one function. No graph divergence to maintain.
+
+```typescript
+// server/context/build-conversation-context.ts
+
+export async function buildConversationContext(params: {
+  workspaceId: string;
+  userId: string;
+  role: 'admin' | 'rep';
+  surface: 'ask_pandora' | 'concierge';
+  question?: string;          // Ask Pandora: user's first message
+  cardAnchor?: CardAnchor;    // Concierge: which card opened the thread
+}): Promise<ConversationContext> {
+
+  const { surface, question, cardAnchor, role } = params;
+
+  if (surface === 'ask_pandora') {
+    const complexity = question ? await classifyQueryComplexity(question) : 'multi_hop';
+    const graph = complexity !== 'single_entity'
+      ? buildGraphBlock(PANDORA_ENTITY_GRAPH, role)
+      : null;
+    const routingHint = graph ? inferRoutingHint(question!, PANDORA_ENTITY_GRAPH.query_routing) : null;
+    return { entity_graph: graph, routing_hint: routingHint };
+  }
+
+  if (surface === 'concierge') {
+    const anchor = cardAnchor ?? { type: 'pipeline' };
+    const scopedGraph = buildScopedGraph(PANDORA_ENTITY_GRAPH, anchor.type, role);
+    const dossier = anchor.entity_id
+      ? await assembleDossier(params.workspaceId, anchor)
+      : null;
+    return { entity_graph: scopedGraph, pre_loaded: dossier };
+  }
+}
+```
+
+---
+
+## Summary of the Key Design Decisions
+
+**Ask Pandora gets complexity-gated injection.** Simple queries skip the graph. Multi-hop queries get the full graph plus an inferred routing hint pre-computed from the query. This keeps simple interactions fast and cheap while giving complex diagnostic queries the context they need.
+
+**Concierge gets anchor-scoped injection.** The graph only loads when the user activates a card (not on brief render), and it's scoped to the card's entity type. A rep clicking a deal card gets the deal subgraph. A CRO clicking the pipeline coverage number gets the pipeline subgraph. The dossier for that entity is pre-loaded into context alongside the graph, so the first question in the thread is answered without any additional tool calls.
+
+**The `never_on_deal` field list is the single highest-value line in the graph.** Explicitly telling the model that `forecast_category`, `prospect_score`, and `health_score` are not deal columns prevents the most common hallucination pattern — querying the deal record for a field that doesn't exist there.
+
+**The `temporal_join` pattern on stage_history and conversations is the second highest-value line.** It's the only way to correctly answer "what happened during the Proposal stage?" without guessing at the logic.

@@ -37,6 +37,7 @@ import { formatCurrency } from '../utils/format-currency.js';
 import { runRetroPipeline } from '../retro/pipeline.js';
 import { createSessionContext, type SessionContext } from '../agents/session-context.js';
 import { extractSkillContext, formatMethodologyComparisons } from './context-assembler.js';
+import { buildConversationContext } from '../context/build-conversation-context.js';
 
 export interface ConversationTurnInput {
   surface: 'slack_thread' | 'slack_dm' | 'in_app';
@@ -176,6 +177,46 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
       content: parts.join('\n'),
       timestamp: new Date().toISOString(),
     });
+  }
+
+  // ── Entity graph injection ──────────────────────────────────────────────
+  // Complexity-gated: single-entity questions skip the graph entirely.
+  // Multi-hop and aggregate questions get the relevant graph subgraph + routing hint.
+  // Only injected on first turn — follow-ups rely on established context.
+  if (!isFollowUp) {
+    try {
+      const effectiveRole = (userRole ?? 'admin') as Parameters<typeof buildConversationContext>[0]['role'];
+      const anchorType = (anchor?.type ?? inputScope?.type) as 'deal' | 'rep' | 'pipeline' | undefined;
+      const graphCtx = await buildConversationContext({
+        workspaceId,
+        userId: userId || '',
+        role: effectiveRole,
+        surface: conciergeContext ? 'concierge' : 'ask_pandora',
+        question: message,
+        cardAnchor: anchorType && ['deal', 'rep', 'pipeline'].includes(anchorType)
+          ? { type: anchorType as 'deal' | 'rep' | 'pipeline', entity_id: inputScope?.entity_id }
+          : undefined,
+      });
+
+      if (graphCtx.entity_graph) {
+        const graphParts: string[] = ['[Entity Graph — Data Model]'];
+        graphParts.push(JSON.stringify(graphCtx.entity_graph, null, 2));
+        if (graphCtx.routing_hint?.length) {
+          graphParts.push(`\nQUERY PATH: ${graphCtx.routing_hint.join(' → ')}`);
+        }
+        if (graphCtx.pre_loaded) {
+          graphParts.push(`\nPRE-LOADED ENTITY:\n${JSON.stringify(graphCtx.pre_loaded, null, 2)}`);
+        }
+        await appendMessage(workspaceId, channelId, threadId, {
+          role: 'system',
+          content: graphParts.join('\n'),
+          timestamp: new Date().toISOString(),
+        });
+      }
+    } catch (err) {
+      // Non-fatal — graph injection is best-effort
+      console.warn('[orchestrator] Entity graph injection failed (non-fatal):', err);
+    }
   }
 
   await appendMessage(workspaceId, channelId, threadId, {
