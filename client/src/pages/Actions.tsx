@@ -9,6 +9,8 @@ import { useDemoMode } from '../contexts/DemoModeContext';
 import { useIsMobile } from '../hooks/useIsMobile';
 import ExecutionDialog from '../components/ExecutionDialog';
 import { openAskPandora } from '../lib/askPandora';
+import RedTeamPanel from '../components/RedTeamPanel';
+import { getAuthToken, getWorkspaceId } from '../lib/api';
 
 // ── Interfaces ───────────────────────────────────────────────────────────────
 
@@ -904,6 +906,37 @@ function HypothesesView({
   onSelectAction: (a: Action) => void;
   onStateChange: (id: string, state: string) => void;
 }) {
+  const [redTeamResults, setRedTeamResults] = useState<Map<string, any>>(new Map());
+  const [redTeamLoading, setRedTeamLoading] = useState<Set<string>>(new Set());
+
+  async function triggerRedTeam(hypothesisId: string) {
+    setRedTeamLoading(prev => new Set(prev).add(hypothesisId));
+    try {
+      const res = await fetch(
+        `/api/workspaces/${getWorkspaceId()}/deliberation/hypothesis/${hypothesisId}`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${getAuthToken()}`,
+          },
+        }
+      );
+      const data = await res.json();
+      if (data.success) {
+        setRedTeamResults(prev => new Map(prev).set(hypothesisId, data.deliberation));
+      }
+    } catch (err) {
+      console.error('[RedTeam] trigger failed:', err);
+    } finally {
+      setRedTeamLoading(prev => {
+        const next = new Set(prev);
+        next.delete(hypothesisId);
+        return next;
+      });
+    }
+  }
+
   if (loading) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -1011,6 +1044,35 @@ function HypothesesView({
             {linked.length === 0 && (
               <div style={{ padding: '10px 20px', fontSize: 12, color: colors.textMuted, fontStyle: 'italic' }}>
                 No sprint actions linked to this hypothesis this week.
+              </div>
+            )}
+
+            {breached && (
+              <div style={{
+                marginTop: 0,
+                padding: '12px 20px',
+                borderTop: `0.5px solid ${colors.border}`,
+              }}>
+                {!redTeamResults.get(hyp.id) ? (
+                  <button
+                    onClick={() => triggerRedTeam(hyp.id)}
+                    disabled={redTeamLoading.has(hyp.id)}
+                    style={{
+                      fontSize: '12px',
+                      color: '#ef4444',
+                      background: 'none',
+                      border: `0.5px solid ${colors.border}`,
+                      borderRadius: 8,
+                      padding: '4px 10px',
+                      cursor: redTeamLoading.has(hyp.id) ? 'wait' : 'pointer',
+                      opacity: redTeamLoading.has(hyp.id) ? 0.6 : 1,
+                    }}
+                  >
+                    {redTeamLoading.has(hyp.id) ? 'Challenging...' : '\u26A1 Challenge this plan'}
+                  </button>
+                ) : (
+                  <RedTeamPanel result={redTeamResults.get(hyp.id)!} />
+                )}
               </div>
             )}
           </div>
