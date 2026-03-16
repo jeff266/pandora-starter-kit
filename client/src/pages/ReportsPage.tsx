@@ -4,6 +4,7 @@ import { Plus, FileText, Calendar, Clock, AlertCircle, CheckCircle, Play } from 
 import { colors, fonts } from '../styles/theme';
 import { api } from '../lib/api';
 import AvatarDisplay from '../components/avatars/AvatarDisplay';
+import IntelligenceNav from '../components/IntelligenceNav';
 
 interface ReportTemplate {
   id: string;
@@ -28,11 +29,15 @@ export default function ReportsPage() {
   const [reports, setReports] = useState<ReportTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [showTemplateGallery, setShowTemplateGallery] = useState(false);
+  const [pendingCount, setPendingCount] = useState(0);
 
   const workspaceId = window.location.pathname.split('/')[2] || 'default';
 
   useEffect(() => {
     loadReports();
+    api.get('/governance/summary')
+      .then(s => setPendingCount(s?.pending_approval ?? 0))
+      .catch(() => {});
   }, []);
 
   async function loadReports() {
@@ -80,6 +85,7 @@ export default function ReportsPage() {
 
   return (
     <div style={{ maxWidth: 1280, margin: '0 auto' }}>
+      <IntelligenceNav activeTab="reports" pendingCount={pendingCount} />
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
         <div>

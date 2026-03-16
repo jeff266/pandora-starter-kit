@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { colors, fonts } from '../styles/theme';
 
 interface IntelligenceNavProps {
-  activeTab: 'skills' | 'tools' | 'agents' | 'governance';
+  activeTab: 'skills' | 'tools' | 'agents' | 'governance' | 'reports';
   pendingCount?: number;
 }
 
@@ -14,6 +14,7 @@ const IntelligenceNav: React.FC<IntelligenceNavProps> = ({ activeTab, pendingCou
     { id: 'skills', label: 'Skills', path: '/skills' },
     { id: 'tools', label: 'Tools', path: '/tools' },
     { id: 'agents', label: 'Agents', path: '/agents' },
+    { id: 'reports', label: 'Reports', path: '/reports' },
     { id: 'governance', label: 'Governance', path: '/governance', badge: pendingCount },
   ];
 
