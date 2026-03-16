@@ -64,7 +64,7 @@ function adminGreeting(ctx: GreetingCtx): string {
     );
   }
 
-  return lines.join(' ');
+  return lines.join(' ').replace(/ — /g, '. ');
 }
 
 function repGreeting(ctx: GreetingCtx): string {
@@ -86,7 +86,7 @@ function repGreeting(ctx: GreetingCtx): string {
     );
   }
 
-  return lines.join(' ');
+  return lines.join(' ').replace(/ — /g, '. ');
 }
 
 export async function buildConciergeGreeting(
@@ -112,8 +112,8 @@ export async function buildConciergeGreeting(
   const weekOfQuarter = Number(temporal.weekOfQuarter ?? 1);
   const daysRemaining = Number(temporal.daysRemainingInQuarter ?? 90);
   const fiscalQuarter = String(temporal.fiscalQuarter ?? 'Q1');
-  const fiscalYear = String(temporal.fiscalYear ?? '');
-  const quarterLabel = fiscalYear ? `${fiscalQuarter} ${fiscalYear}` : fiscalQuarter;
+  const calendarYear = now.getFullYear();
+  const quarterLabel = `${fiscalQuarter} ${calendarYear}`;
   const totalWeeks = 13;
 
   const quarterUrgency: GreetingCtx['quarterUrgency'] =
