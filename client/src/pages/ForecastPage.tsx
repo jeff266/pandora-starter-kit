@@ -536,7 +536,7 @@ export default function ForecastPage() {
       mc_p50: mcP50,
       mc_p25: mcP25,
       mc_p75: mcP75,
-      closed_won: src?.attainment ?? undefined,
+      closed_won: liveSnapshot?.attainment ?? src?.attainment ?? undefined,
       closed_deal_count: closedDealCount || undefined,
       pipeline_total: src?.total_pipeline ?? undefined,
       quota: src?.quota ?? liveQuota ?? undefined,
@@ -545,7 +545,7 @@ export default function ForecastPage() {
       category_weighted: src?.category_weighted_forecast ?? undefined,
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pipelineMetricSource, latestReal, liveQuota, quarterSeries, deals, fiscalYearStartMonth, selectedPipeline, pipelineMc]);
+  }, [pipelineMetricSource, latestReal, liveSnapshot, liveQuota, quarterSeries, deals, fiscalYearStartMonth, selectedPipeline, pipelineMc]);
 
   const previousMetrics = useMemo(() => {
     // When a pipeline is selected the "previous" snapshot is all-pipeline — comparing it against
