@@ -169,7 +169,7 @@ export async function computeTemporalContext(workspaceId: string): Promise<Tempo
   let daysElapsedInQuarter = 0;
   let pctQuarterComplete = 0;
   let fiscalQuarter = 'Q1';
-  let fiscalYear = `FY${now.getUTCFullYear() + 1}`;
+  let fiscalYear = `FY${now.getUTCFullYear()}`;
   let monthOfFiscalYear = 1;
   let quarterOfFiscalYear = 1;
   let pctYearComplete = 0;
@@ -195,7 +195,9 @@ export async function computeTemporalContext(workspaceId: string): Promise<Tempo
     quarterOfFiscalYear = Math.ceil(monthOfFiscalYear / 3);
     fiscalQuarter = `Q${quarterOfFiscalYear}`;
     const fyStartYear = calendarMonth >= fyStartMonth ? now.getUTCFullYear() : now.getUTCFullYear() - 1;
-    fiscalYear = `FY${fyStartYear + 1}`;
+    // For January-start (calendar-year) companies, FY label = fyStartYear (e.g. FY2026).
+    // For mid-year starts, FY label = fyStartYear + 1 (e.g. July 2025 start → FY2026).
+    fiscalYear = fyStartMonth === 1 ? `FY${fyStartYear}` : `FY${fyStartYear + 1}`;
     pctYearComplete = monthOfFiscalYear / 12;
   }
 

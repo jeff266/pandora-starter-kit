@@ -70,6 +70,8 @@ interface ChatPanelProps {
   onForceNewThreadConsumed?: () => void;
   wbrContributions?: any[] | null;
   onWbrContributionsConsumed?: () => void;
+  prefillInput?: string | null;
+  onPrefillInputConsumed?: () => void;
 }
 
 interface ChatSessionPreview {
@@ -104,7 +106,7 @@ let _navigateFn: ((to: string) => void) | undefined;
 // Module-level HubSpot portal ID — populated from useCrmInfo hook, used by resolveLink
 let _hubspotPortalId: number | null = null;
 
-export default function ChatPanel({ isOpen, onClose, scope, initialSessionId, pendingMessage, onPendingMessageSent, conciergeContext, forceNewThread, onForceNewThreadConsumed, wbrContributions, onWbrContributionsConsumed }: ChatPanelProps) {
+export default function ChatPanel({ isOpen, onClose, scope, initialSessionId, pendingMessage, onPendingMessageSent, conciergeContext, forceNewThread, onForceNewThreadConsumed, wbrContributions, onWbrContributionsConsumed, prefillInput, onPrefillInputConsumed }: ChatPanelProps) {
   const isMobile = useIsMobile();
   const navigate = useNavigate();
   _navigateFn = navigate;
@@ -148,6 +150,7 @@ export default function ChatPanel({ isOpen, onClose, scope, initialSessionId, pe
       setSessionId(null);
       setError(null);
       setInput('');
+      setLoading(false);
       setIsHistoryView(false);
       contextInjectedRef.current = false;
       onForceNewThreadConsumed?.();
@@ -366,6 +369,7 @@ export default function ChatPanel({ isOpen, onClose, scope, initialSessionId, pe
     setSessionId(null);
     setError(null);
     setInput('');
+    setLoading(false);
     setIsHistoryView(false);
   }, []);
 
@@ -394,7 +398,16 @@ export default function ChatPanel({ isOpen, onClose, scope, initialSessionId, pe
       }, 300);
       return () => clearTimeout(t);
     }
-  }, [isOpen, pendingMessage]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, pendingMessage, loading]);
+
+  useEffect(() => {
+    if (isOpen && prefillInput) {
+      setInput(prefillInput);
+      onPrefillInputConsumed?.();
+      setTimeout(() => inputRef.current?.focus(), 100);
+    }
+  }, [isOpen, prefillInput]);
 
   const sendMessage = async (overrideText?: string) => {
     const text = (overrideText || input).trim();

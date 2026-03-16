@@ -164,6 +164,7 @@ export default function App() {
   const [chatConciergeContext, setChatConciergeContext] = useState<Record<string, unknown> | null>(null);
   const [chatForceNewThread, setChatForceNewThread] = useState(false);
   const [chatWbrContributions, setChatWbrContributions] = useState<any[] | null>(null);
+  const [chatPrefillInput, setChatPrefillInput] = useState<string | null>(null);
   const isMobile = useIsMobile();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
@@ -207,6 +208,16 @@ export default function App() {
     setChatOpen(true);
     navigate(location.pathname, { replace: true, state: {} });
   }, [location.state?.openChatSession]);
+
+  // Open chat with input pre-filled but NOT auto-sent (e.g. deal card "Ask →" button)
+  useEffect(() => {
+    const msg = location.state?.prefillChatInput;
+    if (!msg) return;
+    setChatPrefillInput(msg);
+    if (location.state?.chatScope) setChatScope(location.state.chatScope);
+    setChatOpen(true);
+    navigate(location.pathname, { replace: true, state: {} });
+  }, [location.state?.prefillChatInput]);
 
   // Open chat with a pre-seeded message (e.g. from report deepdive right-click or Concierge)
   useEffect(() => {
@@ -484,7 +495,7 @@ export default function App() {
       <CommandPalette isOpen={commandPaletteOpen} onClose={() => setCommandPaletteOpen(false)} />
       <ChatPanel
         isOpen={chatOpen}
-        onClose={() => { setChatOpen(false); setChatInitialSession(null); setChatPendingMessage(null); setChatConciergeContext(null); setChatForceNewThread(false); setChatWbrContributions(null); }}
+        onClose={() => { setChatOpen(false); setChatInitialSession(null); setChatPendingMessage(null); setChatConciergeContext(null); setChatForceNewThread(false); setChatWbrContributions(null); setChatPrefillInput(null); }}
         scope={chatScope}
         initialSessionId={chatInitialSession || undefined}
         pendingMessage={chatPendingMessage}
@@ -494,6 +505,8 @@ export default function App() {
         onForceNewThreadConsumed={() => setChatForceNewThread(false)}
         wbrContributions={chatWbrContributions}
         onWbrContributionsConsumed={() => setChatWbrContributions(null)}
+        prefillInput={chatPrefillInput}
+        onPrefillInputConsumed={() => setChatPrefillInput(null)}
       />
       <style>{`
         @keyframes skeleton-pulse {

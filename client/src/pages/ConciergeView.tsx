@@ -672,14 +672,13 @@ export default function ConciergeView() {
   }, [currentWorkspace?.id]);
 
   const openAskPandora = useCallback((deal: { id: string; name: string }) => {
-    const ctx = buildConciergeContext();
-    navigateToChat(
-      `Tell me about ${deal.name}`,
-      ctx,
-      undefined,
-      { type: 'deal', entity_id: deal.id, entity_name: deal.name },
-    );
-  }, [buildConciergeContext, navigateToChat]);
+    navigate(window.location.pathname, {
+      state: {
+        prefillChatInput: `Tell me about ${deal.name}`,
+        chatScope: { type: 'deal', entity_id: deal.id, entity_name: deal.name },
+      },
+    });
+  }, [navigate]);
 
   const handleChipClick = useCallback((chipId: ChipId) => {
     switch (chipId) {
@@ -896,9 +895,9 @@ export default function ConciergeView() {
               const q2Value = estQ2Valid ? estQ2Raw! : fallbackCoverage;
               const q2Color = q2Value === null || isNaN(q2Value!) ? S.textMuted : q2Value >= 3 ? S.teal : q2Value >= 1.5 ? S.yellow : S.red;
               const attainColor = pct == null ? S.teal : pct >= 100 ? S.teal : pct >= 85 ? S.yellow : S.red;
-              const periodLabel = (typeof brief.targets?.headline === 'object' && brief.targets?.headline?.label)
-                ? brief.targets.headline.label
-                : 'Q1';
+              const fiscalQ = (brief.temporal?.fiscalQuarter as string) ?? 'Q1';
+              const fiscalY = (brief.temporal?.fiscalYear as string) ?? '';
+              const periodLabel = fiscalY ? `${fiscalQ} ${fiscalY}` : fiscalQ;
               const metricCellStyle: React.CSSProperties = {
                 padding: '12px 14px',
                 cursor: 'pointer',
@@ -929,7 +928,7 @@ export default function ConciergeView() {
                     </span>
                     <span style={{ fontSize: 10, color: S.textSub, fontWeight: 600 }}>Attained</span>
                     <span style={{ fontSize: 10, color: S.textDim }}>
-                      {pct != null && pct >= 100 ? 'Q1 done' : 'Q1 in progress'}
+                      {pct != null && pct >= 100 ? `${fiscalQ} done` : `${fiscalQ} in progress`}
                     </span>
                   </div>
                   {/* Col 2: Closed */}
