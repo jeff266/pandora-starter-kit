@@ -5,6 +5,7 @@ import { useWorkspace } from '../context/WorkspaceContext';
 import { usePandoraRole, type PandoraRole } from '../context/PandoraRoleContext';
 import BriefCard from '../components/BriefCard';
 import MathModal from '../components/MathModal';
+import StreamingGreeting from '../components/StreamingGreeting';
 import AskBar, { type ChipId } from '../components/AskBar';
 import { type ConciergeContext, formatConciergeContextPreamble } from '../types/concierge-context';
 import { colors as themeColors } from '../styles/theme';
@@ -465,6 +466,7 @@ export default function ConciergeView() {
 
   const [sessionId] = useState(() => crypto.randomUUID());
   const pageLoadTime = useRef(Date.now());
+  const [greetingDone, setGreetingDone] = useState(false);
 
   const trackInteraction = useCallback((payload: Record<string, unknown>) => {
     if (!currentWorkspace?.id) return;
@@ -759,6 +761,23 @@ export default function ConciergeView() {
             )}
           </div>
         </div>
+
+        {/* STREAMING GREETING */}
+        {currentWorkspace?.id && (
+          <div style={{ marginBottom: 18, marginTop: 6 }}>
+            <StreamingGreeting
+              workspaceId={currentWorkspace.id}
+              onComplete={() => setGreetingDone(true)}
+            />
+          </div>
+        )}
+
+        {/* fade-in content */}
+        <div style={{
+          opacity: (greetingDone || !currentWorkspace?.id) ? 1 : 0,
+          transform: (greetingDone || !currentWorkspace?.id) ? 'translateY(0)' : 'translateY(8px)',
+          transition: 'opacity 0.4s ease, transform 0.4s ease',
+        }}>
 
         {/* PROJECTION / PAST BANNER */}
         {(() => {
@@ -1467,6 +1486,7 @@ export default function ConciergeView() {
             )}
           </>
         ) : null}
+        </div>{/* end fade-in content */}
       </div>
 
       {/* ASK BAR — sticky bottom */}

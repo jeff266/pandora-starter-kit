@@ -1,5 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { generateGreeting } from '../briefing/greeting-engine.js';
+import { buildConciergeGreeting } from '../briefing/concierge-greeting.js';
 import { getOperatorStatuses } from '../briefing/operator-status.js';
 import { query } from '../db.js';
 import { getPandoraRole, type PandolaRole } from '../context/pandora-role.js';
@@ -118,6 +119,27 @@ router.get('/:workspaceId/briefing/greeting', optionalAuth, async (req: Request,
     res.status(500).json({ error: msg });
   }
 });
+
+router.get(
+  '/:workspaceId/briefing/concierge-greeting',
+  requireWorkspaceAccess,
+  async (req: Request, res: Response): Promise<void> => {
+    const workspaceId = req.params.workspaceId as string;
+    const userId = (req as any).user?.user_id as string;
+    try {
+      const brief = await getOrAssembleBrief(workspaceId, userId);
+      const pandoraRole = (brief?.user?.pandoraRole ?? null) as PandolaRole | null;
+      const greeting = await buildConciergeGreeting(workspaceId, pandoraRole, {
+        temporal: (brief?.temporal ?? null) as Record<string, unknown> | null,
+        targets: (brief?.targets ?? null) as Record<string, unknown> | null,
+      });
+      res.json({ greeting });
+    } catch (err: any) {
+      console.error('[briefing] concierge-greeting error:', err?.message);
+      res.json({ greeting: null });
+    }
+  }
+);
 
 router.get('/:workspaceId/briefing/brief', async (req: Request, res: Response): Promise<void> => {
   try {
