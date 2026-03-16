@@ -1882,22 +1882,22 @@ export async function enrichMismatchedDeals(
         c.id,
         c.deal_id,
         c.title,
-        c.date,
+        c.call_date,
         COALESCE(
           LEFT(c.summary, 200),
-          LEFT(c.transcript, 200),
+          LEFT(c.transcript_text, 200),
           'No transcript available'
         ) as excerpt,
-        ROW_NUMBER() OVER (PARTITION BY c.deal_id ORDER BY c.date DESC) as rn
+        ROW_NUMBER() OVER (PARTITION BY c.deal_id ORDER BY c.call_date DESC) as rn
       FROM conversations c
       WHERE c.workspace_id = $1
         AND c.deal_id = ANY($2)
-        AND c.date >= NOW() - INTERVAL '30 days'
+        AND c.call_date >= NOW() - INTERVAL '30 days'
     )
     SELECT *
     FROM ranked_conversations
     WHERE rn <= 3
-    ORDER BY deal_id, date DESC
+    ORDER BY deal_id, call_date DESC
     `,
     [workspaceId, dealIds]
   );
@@ -1909,7 +1909,7 @@ export async function enrichMismatchedDeals(
     convsByDeal[row.deal_id].push({
       id: row.id,
       title: row.title,
-      date: row.date,
+      date: row.call_date,
       excerpt: row.excerpt,
     });
   });
