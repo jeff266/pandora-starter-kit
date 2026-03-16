@@ -192,6 +192,349 @@ ORDER BY days_open ASC`,
         { query: 'How long does it take deals to close?', params: { groupBy: 'none' } },
       ],
     },
+
+    // ── Extended Ask Pandora tools ────────────────────────────────────────
+
+    {
+      id: 'query_prior_deals',
+      name: 'Prior Deals (Account History)',
+      category: 'query',
+      description: 'Find closed deals (won or lost) for a given account. Used for second-attempt detection, Bull/Bear evidence, and "have we worked with this account before?" queries.',
+      source: 'query_tool',
+      status: 'live',
+      answers_questions: [
+        'prior deal', 'account history', 'worked with before', 'previous attempt',
+        'second attempt', 'closed won', 'closed lost', 'past deal',
+      ],
+      examples: [
+        { query: 'Have we worked with ABS Kids before?' },
+        { query: 'Did we close a deal with Bright Health previously?' },
+        { query: 'What was the outcome of our last attempt with this account?' },
+      ],
+      sql: `-- Prior closed deals for an account (fuzzy name match)
+-- Used by deliberation engine for second-attempt context
+SELECT
+  d.id,
+  d.name,
+  d.amount,
+  d.stage_normalized       AS outcome,
+  d.close_date,
+  COALESCE(d.owner_name, d.owner_email) AS owner_name,
+  COALESCE(
+    d.source_data->'properties'->>'closed_lost_reason',
+    d.custom_fields->>'close_reason'
+  ) AS loss_reason
+FROM deals d
+WHERE d.workspace_id = $1
+  AND (d.name ILIKE '%:account_name%' OR d.account_name ILIKE '%:account_name%')
+  AND d.stage_normalized IN ('closed_won', 'closed_lost')
+  AND d.close_date > NOW() - INTERVAL '24 months'
+  AND d.close_date IS NOT NULL
+ORDER BY d.close_date DESC
+LIMIT 10`,
+    },
+
+    {
+      id: 'query_rep_performance',
+      name: 'Rep Performance',
+      category: 'analysis',
+      description: 'Close rate, pipeline pace, avg cycle length, and deal size for a specific rep over a rolling window. Used for Bull/Bear Defense evidence and coaching context.',
+      source: 'query_tool',
+      status: 'live',
+      answers_questions: [
+        'rep performance', 'close rate', 'win rate by rep', 'how is doing',
+        'pipeline pace', 'quota attainment', 'rep metrics', 'rep scorecard',
+        'nate', 'sarah', 'who is behind',
+      ],
+      examples: [
+        { query: 'How is Nate performing this quarter?' },
+        { query: "What's the close rate for this rep?" },
+        { query: 'How much pipeline has Sara created in the last 90 days?' },
+      ],
+      sql: `-- Rep performance: close rate, cycle length, pipeline pace
+-- Rolling 12-month window, segmented by closed outcome
+SELECT
+  COALESCE(d.owner_name, d.owner_email)            AS rep_name,
+  d.owner_email,
+  COUNT(*) FILTER (WHERE d.stage_normalized = 'closed_won')  AS deals_won,
+  COUNT(*) FILTER (WHERE d.stage_normalized = 'closed_lost') AS deals_lost,
+  ROUND(
+    100.0 * COUNT(*) FILTER (WHERE d.stage_normalized = 'closed_won')
+    / NULLIF(COUNT(*), 0), 1
+  )                                                 AS close_rate_pct,
+  ROUND(AVG(
+    EXTRACT(EPOCH FROM d.close_date - d.created_at) / 86400
+  ) FILTER (WHERE d.stage_normalized = 'closed_won'), 0)     AS avg_cycle_days,
+  ROUND(AVG(d.amount) FILTER (WHERE d.stage_normalized = 'closed_won'), 0) AS avg_deal_size
+FROM deals d
+WHERE d.workspace_id = $1
+  AND LOWER(d.owner_email) = LOWER(:owner_email)
+  AND d.stage_normalized IN ('closed_won', 'closed_lost')
+  AND d.close_date > NOW() - INTERVAL '12 months'
+  AND d.close_date IS NOT NULL
+GROUP BY d.owner_name, d.owner_email`,
+    },
+
+    {
+      id: 'query_deal_velocity',
+      name: 'Deal Velocity',
+      category: 'analysis',
+      description: 'Time in each stage vs. workspace median — fast, normal, slow, or stalled. Uses stage history and median from completed deals in last 18 months.',
+      source: 'query_tool',
+      status: 'live',
+      answers_questions: [
+        'deal velocity', 'stalled', 'stage time', 'how long in stage',
+        'moving at normal pace', 'slow deal', 'stuck', 'typical pace',
+      ],
+      examples: [
+        { query: 'Is this deal stalled or moving at a normal pace?' },
+        { query: 'How long has this deal been in Proposal?' },
+        { query: 'Compare this deal to typical stage times' },
+      ],
+      sql: `-- Deal velocity: time in stage vs. workspace median
+-- Medians computed from completed deals (closed won/lost) in last 18 months
+WITH stage_medians AS (
+  SELECT
+    dsh.stage_name,
+    PERCENTILE_CONT(0.5) WITHIN GROUP (
+      ORDER BY EXTRACT(EPOCH FROM dsh.exited_at - dsh.entered_at) / 86400
+    ) AS median_days
+  FROM deal_stage_history dsh
+  JOIN deals d ON d.id = dsh.deal_id
+  WHERE d.workspace_id = $1
+    AND dsh.exited_at IS NOT NULL
+    AND d.stage_normalized IN ('closed_won', 'closed_lost')
+    AND d.close_date > NOW() - INTERVAL '18 months'
+  GROUP BY dsh.stage_name
+  HAVING COUNT(*) >= 5
+)
+SELECT
+  dsh.stage_name,
+  ROUND(EXTRACT(EPOCH FROM COALESCE(dsh.exited_at, NOW()) - dsh.entered_at) / 86400) AS days_in_stage,
+  ROUND(sm.median_days::numeric, 0)                 AS median_days,
+  ROUND(
+    EXTRACT(EPOCH FROM COALESCE(dsh.exited_at, NOW()) - dsh.entered_at) / 86400
+    / NULLIF(sm.median_days, 0) * 100
+  )                                                  AS pct_of_median
+FROM deal_stage_history dsh
+LEFT JOIN stage_medians sm ON sm.stage_name = dsh.stage_name
+WHERE dsh.workspace_id = $1
+  AND dsh.deal_id = :deal_id
+ORDER BY dsh.entered_at ASC`,
+    },
+
+    {
+      id: 'query_icp_fit',
+      name: 'ICP Fit Score',
+      category: 'analysis',
+      description: 'How well a deal matches the workspace ICP profile. Pulls from lead-scoring skill if run; gracefully degrades to deal-size-vs-median comparison.',
+      source: 'query_tool',
+      status: 'live',
+      answers_questions: [
+        'icp', 'ideal customer', 'icp fit', 'good fit', 'target customer',
+        'deal quality', 'does this account fit', 'our kind of deal',
+      ],
+      examples: [
+        { query: 'Is this account a good fit for us?' },
+        { query: 'Does this deal match our ICP?' },
+        { query: 'How does this deal compare to our typical wins?' },
+      ],
+      sql: `-- ICP fit: from lead-scoring skill run result_data
+-- Gracefully degrades to deal-size-vs-workspace-median if skill not run
+SELECT
+  sr.skill_id,
+  sr.started_at,
+  score_entry->>'deal_id'          AS deal_id,
+  score_entry->>'icp_fit_score'    AS icp_fit_score,
+  score_entry->>'icp_tier'         AS icp_tier
+FROM skill_runs sr,
+  LATERAL jsonb_array_elements(sr.result_data->'scores') AS score_entry
+WHERE sr.workspace_id = $1
+  AND sr.skill_id = 'lead-scoring'
+  AND sr.status = 'completed'
+  AND score_entry->>'deal_id' = :deal_id
+ORDER BY sr.started_at DESC
+LIMIT 1`,
+    },
+
+    {
+      id: 'query_competitor_signals',
+      name: 'Competitor Signals',
+      category: 'analysis',
+      description: 'Competitor mentions from call recordings and conversation signals. Returns mention context, sentiment, and recency — scoped to a deal or workspace-wide.',
+      source: 'query_tool',
+      status: 'live',
+      answers_questions: [
+        'competitor', 'competition', 'competitive', 'in the mix', 'evaluating',
+        'head to head', 'against us', 'displacement', 'replacing', 'competitor mentions',
+      ],
+      examples: [
+        { query: 'Are any competitors mentioned in recent calls?' },
+        { query: 'Is CentralReach in the mix on this deal?' },
+        { query: 'What competitive dynamics are we seeing this quarter?' },
+      ],
+      sql: `-- Competitor signals from conversation_signals
+-- signal_type = 'competitor_mention', context capped at 150 chars
+SELECT
+  cs.signal_value             AS competitor,
+  cs.signal_text              AS context,
+  cs.created_at               AS mention_date,
+  d.name                      AS deal_name,
+  cs.deal_id
+FROM conversation_signals cs
+LEFT JOIN deals d ON d.id = cs.deal_id AND d.workspace_id = cs.workspace_id
+WHERE cs.workspace_id = $1
+  AND cs.signal_type = 'competitor_mention'
+  AND cs.created_at > NOW() - INTERVAL '180 days'
+ORDER BY cs.created_at DESC
+LIMIT 50`,
+    },
+
+    {
+      id: 'search_deals',
+      name: 'Search Deals (Fuzzy)',
+      category: 'query',
+      description: 'Fuzzy name search across deal and account names. The navigation tool — resolves partial names ("the autism deal", "Butterfly") to deal IDs before running analysis.',
+      source: 'query_tool',
+      status: 'live',
+      answers_questions: [
+        'search deal', 'find deal', 'which deal', 'what deal', 'deal name',
+        'deal lookup', 'find account', 'which account',
+      ],
+      examples: [
+        { query: 'Find the ABS Kids deal' },
+        { query: "What's the status of the autism services deal?" },
+        { query: 'Show me the Butterfly account deal' },
+      ],
+      sql: `-- Fuzzy deal search by name or account name
+-- Orders by name match quality then deal amount descending
+SELECT
+  d.id,
+  d.name,
+  d.amount,
+  d.stage,
+  COALESCE(d.owner_name, d.owner_email) AS owner_name,
+  d.close_date,
+  EXTRACT(EPOCH FROM NOW() - d.last_activity_at)::int / 86400 AS days_since_activity
+FROM deals d
+WHERE d.workspace_id = $1
+  AND (d.name ILIKE '%:query%' OR d.account_name ILIKE '%:query%')
+  AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
+ORDER BY
+  CASE WHEN LOWER(d.name) = LOWER(:query) THEN 0
+       WHEN LOWER(d.name) LIKE LOWER(:query) THEN 1
+       ELSE 2 END,
+  d.amount DESC NULLS LAST
+LIMIT 5`,
+    },
+
+    {
+      id: 'query_calendar_context',
+      name: 'Calendar Context',
+      category: 'query',
+      description: 'Calendar events linked to a deal\'s contacts — upcoming and recent meetings. Reveals next touchpoint, meeting cadence, and contacts with no scheduled time.',
+      source: 'query_tool',
+      status: 'live',
+      answers_questions: [
+        'calendar', 'meeting', 'scheduled', 'next call', 'upcoming', 'touchpoint',
+        'when is the next meeting', 'do we have anything scheduled',
+      ],
+      examples: [
+        { query: 'Do we have anything scheduled with this account?' },
+        { query: 'When is the next touchpoint for this deal?' },
+        { query: 'Which contacts have we not met with?' },
+      ],
+      sql: `-- Calendar events linked to deal contacts
+-- Resolved via deal_contacts → contact email → calendar_events.attendees
+SELECT
+  ce.id,
+  ce.title,
+  ce.start_time,
+  ce.end_time,
+  EXTRACT(EPOCH FROM ce.end_time - ce.start_time)::int / 60 AS duration_minutes,
+  ce.attendees,
+  ce.status,
+  CASE WHEN ce.start_time > NOW() THEN 'upcoming' ELSE 'past' END AS timing
+FROM calendar_events ce
+WHERE ce.workspace_id = $1
+  AND $2::uuid = ANY(ce.resolved_deal_ids)
+  AND ce.start_time >= NOW() - INTERVAL '30 days'
+  AND ce.start_time <= NOW() + INTERVAL '60 days'
+  AND ce.status != 'cancelled'
+ORDER BY ce.start_time ASC
+LIMIT 20`,
+    },
+
+    {
+      id: 'query_hypothesis_history',
+      name: 'Hypothesis History',
+      category: 'analysis',
+      description: 'Trend data for standing hypothesis metrics over time. Shows whether a metric is improving, declining, stable, or volatile — not just the current value.',
+      source: 'query_tool',
+      status: 'live',
+      answers_questions: [
+        'hypothesis', 'threshold', 'metric trend', 'improving', 'declining',
+        'has been getting better', 'conversion rate trend', 'coverage trend',
+        'standing hypothesis', 'breach streak',
+      ],
+      examples: [
+        { query: 'Is our conversion rate trending toward or away from threshold?' },
+        { query: 'Has pipeline coverage been improving over the last 12 weeks?' },
+        { query: 'Which failure mode has been getting worse?' },
+      ],
+      sql: `-- Hypothesis weekly values and breach tracking
+-- weekly_values is a JSONB array of { week_of, value } objects
+SELECT
+  h.metric,
+  h.hypothesis,
+  h.current_value,
+  h.alert_threshold,
+  h.alert_direction,
+  CASE
+    WHEN h.alert_direction = 'below' AND h.current_value < h.alert_threshold THEN TRUE
+    WHEN h.alert_direction = 'above' AND h.current_value > h.alert_threshold THEN TRUE
+    ELSE FALSE
+  END AS is_breached,
+  h.weekly_values,
+  h.status,
+  h.updated_at
+FROM standing_hypotheses h
+WHERE h.workspace_id = $1
+  AND h.status = 'active'
+  AND LOWER(h.metric) = LOWER(:metric)
+ORDER BY h.created_at DESC
+LIMIT 1`,
+    },
+
+    {
+      id: 'get_pandora_capabilities',
+      name: 'Pandora Capabilities',
+      category: 'query',
+      description: 'Returns what Pandora can do, what skills are registered, what data is connected, and example queries. The self-documentation and navigation tool.',
+      source: 'query_tool',
+      status: 'live',
+      answers_questions: [
+        'what can you do', 'capabilities', 'what skills', 'help', 'how do i use pandora',
+        'getting started', 'available tools', 'what data', 'new here',
+      ],
+      examples: [
+        { query: "What can you do?" },
+        { query: "What skills are available?" },
+        { query: "What data do you have access to?" },
+        { query: "I'm new here, where do I start?" },
+      ],
+      sql: `-- Pandora capabilities: skill registry + connection status + recent insights
+SELECT
+  sr.skill_id,
+  sr.status,
+  MAX(sr.started_at)   AS last_run_at,
+  COUNT(*)             AS total_runs
+FROM skill_runs sr
+WHERE sr.workspace_id = $1
+  AND sr.status = 'completed'
+GROUP BY sr.skill_id
+ORDER BY MAX(sr.started_at) DESC`,
+    },
   ];
 }
 
