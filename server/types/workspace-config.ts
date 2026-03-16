@@ -194,6 +194,15 @@ export interface WorkspaceConfig {
     confidence: number;
     source: string;
   };
+
+  /** System character avatar overrides (Pandora, Bull Case, Bear Case) */
+  system_avatars?: SystemAvatarsConfig;
+}
+
+export interface SystemAvatarsConfig {
+  pandora?: string;
+  bull?: string;
+  bear?: string;
 }
 
 // ===== VOICE CONFIG =====

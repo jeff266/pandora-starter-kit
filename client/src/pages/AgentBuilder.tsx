@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { api, getWorkspaceId } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
 import Skeleton from '../components/Skeleton';
-import { ChevronLeft, Plus, X, GripVertical, Save, Zap, Play, Loader2 } from 'lucide-react';
+import { ChevronLeft, Plus, X, GripVertical, Save, Zap, Play, Loader2, Pencil } from 'lucide-react';
 import LearnedPreferences from '../components/agents/LearnedPreferences';
 import RunHistoryPanel from '../components/agents/RunHistoryPanel';
 import GuidedAgentChat from '../components/agents/GuidedAgentChat';
@@ -15,6 +15,7 @@ import AvatarDisplay from '../components/avatars/AvatarDisplay';
 import { AVATAR_GALLERY } from '../components/avatars/avatar-data';
 import IntelligenceNav from '../components/IntelligenceNav';
 import { suggestSkills as staticSuggestSkills } from '../components/copilot/copilot-steps';
+import { useSystemAvatars } from '../context/SystemAvatarContext';
 
 interface AudienceConfig {
   role: string;
@@ -164,6 +165,8 @@ export default function AgentBuilder() {
 
   const [seedConversationId, setSeedConversationId] = useState<string | null>(null);
   const [fromChat, setFromChat] = useState(false);
+  const [systemPickerOpen, setSystemPickerOpen] = useState<'pandora' | 'bull' | 'bear' | null>(null);
+  const { pandoraSrc, bullSrc, bearSrc, updateAvatar } = useSystemAvatars();
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -531,8 +534,72 @@ export default function AgentBuilder() {
             </div>
           );
 
+          const systemChars: { role: 'pandora' | 'bull' | 'bear'; label: string; desc: string; src: string; color: string }[] = [
+            { role: 'pandora', label: 'Pandora', desc: 'Your RevOps AI concierge — appears in chat and briefings', src: pandoraSrc, color: '#6488ea' },
+            { role: 'bull',    label: 'Bull Case', desc: 'Argues why the deal will close in Bull/Bear deliberations', src: bullSrc,    color: '#14b8a6' },
+            { role: 'bear',    label: 'Bear Case', desc: 'Argues why the deal won\'t close in Bull/Bear deliberations', src: bearSrc,   color: '#f97068' },
+          ];
+
           return (
             <>
+              <div style={{ marginBottom: 32 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                  <h3 style={{ font: `600 13px ${fonts.sans}`, color: colors.textMuted, margin: 0, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                    Pandora Characters
+                  </h3>
+                  <div style={{ flex: 1, height: 1, background: colors.border }} />
+                  <span style={{ font: `400 12px ${fonts.sans}`, color: colors.textMuted }}>
+                    Avatars shared across all workspaces
+                  </span>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>
+                  {systemChars.map(({ role, label, desc, src, color }) => (
+                    <div key={role} style={{
+                      background: colors.surface,
+                      border: `1px solid ${colors.border}`,
+                      borderRadius: 12,
+                      padding: '16px 18px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 14,
+                    }}>
+                      <div style={{ position: 'relative', flexShrink: 0 }}>
+                        <img
+                          src={src}
+                          alt={label}
+                          style={{ width: 52, height: 52, borderRadius: 10, imageRendering: 'pixelated', objectFit: 'cover', display: 'block' }}
+                        />
+                        <button
+                          onClick={() => setSystemPickerOpen(role)}
+                          title="Change avatar"
+                          style={{
+                            position: 'absolute', bottom: -4, right: -4,
+                            width: 20, height: 20, borderRadius: 9999,
+                            background: colors.surface, border: `1px solid ${colors.border}`,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            cursor: 'pointer', padding: 0,
+                          }}
+                        >
+                          <Pencil size={10} color={colors.textMuted} />
+                        </button>
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
+                          <span style={{ font: `600 14px ${fonts.sans}`, color: colors.text }}>{label}</span>
+                          <span style={{
+                            padding: '1px 7px', borderRadius: 9999,
+                            font: `500 10px ${fonts.sans}`,
+                            background: color + '22', color,
+                            border: `1px solid ${color}44`,
+                          }}>character</span>
+                        </div>
+                        <p style={{ font: `400 12px ${fonts.sans}`, color: colors.textSecondary, margin: 0, lineHeight: 1.4 }}>{desc}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
               {builtInAgents.length > 0 && (
                 <div style={{ marginBottom: 32 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
@@ -581,6 +648,18 @@ export default function AgentBuilder() {
             </>
           );
         })()}
+
+        {/* ─── System Character Avatar Picker ─── */}
+        {systemPickerOpen && (
+          <AvatarPicker
+            currentValue={
+              systemPickerOpen === 'pandora' ? pandoraSrc :
+              systemPickerOpen === 'bull'    ? bullSrc    : bearSrc
+            }
+            onSelect={src => updateAvatar(systemPickerOpen, src)}
+            onClose={() => setSystemPickerOpen(null)}
+          />
+        )}
 
         {/* ─── Creation Path Picker Modal ─── */}
       {pickerOpen && (

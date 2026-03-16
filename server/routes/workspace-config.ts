@@ -160,6 +160,7 @@ router.patch(
         'voice',
         'tool_filters',
         'experimental_skills',
+        'system_avatars',
       ];
 
       if (!validSections.includes(section)) {
@@ -173,6 +174,10 @@ router.patch(
       if (section === 'cadence') {
         const mergedCadence = { ...(existing.cadence || {}), ...sectionData };
         sectionData = mergedCadence;
+      }
+
+      if (section === 'system_avatars') {
+        sectionData = { ...(existing.system_avatars || {}), ...sectionData };
       }
 
       if (section === 'voice') {

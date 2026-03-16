@@ -1,14 +1,11 @@
 import React from 'react';
+import { useSystemAvatars } from '../context/SystemAvatarContext';
 
 interface PixelAvatarProps {
   size?: number;
   borderRadius?: number;
   style?: React.CSSProperties;
 }
-
-const PANDORA_SRC = '/avatars/char-14.png';
-const BULL_SRC = '/avatars/char-15.png';
-const BEAR_SRC = '/avatars/char-08.png';
 
 function PixelImg({
   src,
@@ -40,13 +37,16 @@ function PixelImg({
 }
 
 export function PixelAvatarPandora({ size = 32, borderRadius = 6, style }: PixelAvatarProps) {
-  return <PixelImg src={PANDORA_SRC} size={size} borderRadius={borderRadius} style={style} />;
+  const { pandoraSrc } = useSystemAvatars();
+  return <PixelImg src={pandoraSrc} size={size} borderRadius={borderRadius} style={style} />;
 }
 
 export function PixelAvatarBull({ size = 32, borderRadius = 6, style }: PixelAvatarProps) {
-  return <PixelImg src={BULL_SRC} size={size} borderRadius={borderRadius} style={style} />;
+  const { bullSrc } = useSystemAvatars();
+  return <PixelImg src={bullSrc} size={size} borderRadius={borderRadius} style={style} />;
 }
 
 export function PixelAvatarBear({ size = 32, borderRadius = 6, style }: PixelAvatarProps) {
-  return <PixelImg src={BEAR_SRC} size={size} borderRadius={borderRadius} style={style} />;
+  const { bearSrc } = useSystemAvatars();
+  return <PixelImg src={bearSrc} size={size} borderRadius={borderRadius} style={style} />;
 }

@@ -5,6 +5,7 @@ import { useWorkspace } from './context/WorkspaceContext';
 import { useDemoMode } from './contexts/DemoModeContext';
 import { setApiCredentials, api } from './lib/api';
 import { PandoraRoleProvider } from './context/PandoraRoleContext';
+import { SystemAvatarProvider } from './context/SystemAvatarContext';
 import Sidebar from './components/Sidebar';
 import CommandPalette from './components/CommandPalette';
 import TopBar from './components/TopBar';
@@ -378,6 +379,7 @@ export default function App() {
 
   return (
     <div style={{ display: 'flex', height: '100vh', background: colors.bg }}>
+      <SystemAvatarProvider>
       <PandoraRoleProvider>
       <Sidebar badges={badges} showAllClients={hasMultipleWorkspaces} collapsed={sidebarCollapsed} onToggleCollapse={toggleSidebar} mobileOpen={mobileMenuOpen} onMobileClose={() => setMobileMenuOpen(false)} mode={activeView} onModeChange={handleViewChange} />
       <main style={{ marginLeft: isMobile ? 0 : (sidebarCollapsed ? 48 : 200), flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', transition: 'margin-left 0.15s ease' }}>
@@ -515,6 +517,7 @@ export default function App() {
         }
       `}</style>
       </PandoraRoleProvider>
+      </SystemAvatarProvider>
     </div>
   );
 }
