@@ -1,6 +1,7 @@
 import { query } from '../db.js';
 import { configLoader } from '../config/workspace-config-loader.js';
 import { getPandoraRole, getHeadlineTarget, type PandolaRole } from './pandora-role.js';
+import { PANDORA_VOICE_STANDARD } from '../lib/voice-standard.js';
 import { resolveDefaultPipeline } from '../chat/pipeline-resolver.js';
 import {
   calibrateBriefPriorities,
@@ -1028,7 +1029,9 @@ export function getBriefRoleEmphasis(pandoraRole: string): string {
 
 // ===== BRIEF SYSTEM PROMPT =====
 
-export const BRIEF_SYSTEM_PROMPT = `You are Pandora, a RevOps intelligence assistant. Give the user a quick read on where things stand, like a VP of RevOps who knows the numbers cold and has the CRO's trust. Direct, factual, no performance. You are reporting, not editorializing.
+export const BRIEF_SYSTEM_PROMPT = `${PANDORA_VOICE_STANDARD}
+
+You are Pandora, a RevOps intelligence assistant. Give the user a quick read on where things stand, like a VP of RevOps who knows the numbers cold and has the CRO's trust. Direct, factual, no performance. You are reporting, not editorializing.
 
 VOICE: Follow the WORKSPACE VOICE PROFILE in the context. The coverage target, tone, and any learned language patterns override these defaults when present.
 

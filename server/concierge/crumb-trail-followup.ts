@@ -13,6 +13,7 @@ import { query } from '../db.js';
 import { callLLM } from '../utils/llm-router.js';
 import { getSlackAppClient } from '../connectors/slack/slack-app-client.js';
 import { slackPost } from '../slack/thread-tracker.js';
+import { PANDORA_VOICE_STANDARD } from '../lib/voice-standard.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -138,6 +139,7 @@ In 1-2 sentences: acknowledge that 6 weeks have passed and invite the user to sh
   let synthesis = '';
   try {
     const llmResult = await callLLM(workspaceId, 'synthesize', {
+      systemPrompt: PANDORA_VOICE_STANDARD,
       messages: [{ role: 'user', content: prompt }],
       maxTokens: 200,
       temperature: 0.3,

@@ -1,0 +1,27 @@
+That's the shareable version. Screenshot-ready, covers every surface, and the prompt block at the bottom is copy-paste ready for Claude Code.
+The Claude Code prompt to apply it:
+
+In server/skills/runtime.ts or wherever synthesis prompts are assembled before being sent to Claude, find the function that builds the system prompt for Claude synthesis steps. Add a constant at the top of the file:
+typescriptexport const PANDORA_VOICE_STANDARD = `VOICE AND TONE
+
+You are writing for a VP RevOps or CRO with 10+ years of experience. They will verify your numbers. Write like a trusted Chief of Staff, not a motivational poster.
+
+Rules:
+- No em dashes. Use periods. If a sentence needs an em dash, split it into two sentences.
+- No single-word verdicts. ("Won.", "Critical.", "Great.")
+- No throat-clearing. Never start with "Based on the available data" or "It's worth noting that."
+- No editorializing. Never say a result is good, bad, strong, or concerning. State the number and its implication.
+- Numbers over adjectives. "Coverage is 2.9x" not "coverage is strong."
+- Name the specifics. Deal names, rep names, dates, dollar amounts.
+- Short sentences. One idea per sentence.
+- Show uncertainty numerically. "Based on 3 quarters of data" not "results may vary."
+- State what the data cannot tell you. If context is missing, say so and say what would resolve it.
+- Never motivate. The reader decides what to do with your analysis.`
+Prepend PANDORA_VOICE_STANDARD to every Claude synthesis prompt. This includes: all skill synthesis steps, the Concierge opening brief, Ask Pandora system prompt, Slack editorial synthesizer, and crumb trail follow-up messages. One constant, applied universally.
+After applying, re-run the Frontera Concierge brief and confirm the output no longer contains em dashes, single-word verdicts, or motivational framing.
+So what do i share?5:58 PMShare the widget that just rendered in this conversation. It's already formatted as a standalone document — screenshot it directly or use your browser's screenshot tool to capture the full card.
+If you want to share it digitally rather than as an image, send this conversation link or paste the rendered output into a Notion doc or Google Doc.
+What it covers that's worth calling out to your team when you share it:
+The prompt block at the bottom is the most actionable part — that's the exact text that goes into every Claude synthesis step. Anyone reviewing skill output or writing new skills should know that block exists and that it applies everywhere.
+The em dash rule is worth highlighting separately. It sounds small but it's the most visible tell that output is AI-generated. Fixing it changes how the product reads to executive buyers more than almost anything else.
+The audience framing at the top — "write for a VP RevOps or CRO with 10 years of experience" — is the mental model the whole standard hangs on. If you share nothing else, share that sentence. It answers every ambiguous tone question: would a VP RevOps find this condescending, glib, or obvious? If yes, rewrite it. Sonnet 4.6Extended

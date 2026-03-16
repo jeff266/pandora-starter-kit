@@ -8,6 +8,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { createLogger } from '../utils/logger.js';
+import { PANDORA_VOICE_STANDARD } from '../lib/voice-standard.js';
 import type {
   EditorialInput,
   EditorialOutput,
@@ -96,6 +97,9 @@ export async function editorialSynthesize(
  */
 function buildSystemPrompt(input: EditorialInput): string {
   const parts: string[] = [];
+
+  parts.push(PANDORA_VOICE_STANDARD);
+  parts.push('');
 
   // Role and goal
   parts.push(`You are the ${input.agent.name} for ${(input.agent as any).workspaceId || 'this workspace'}.`);

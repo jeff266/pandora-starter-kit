@@ -50,6 +50,7 @@ import pool from '../db.js';
 import { buildQueryScope } from '../context/query-scope.js';
 import { getMethodologyConfigResolver } from '../methodology/config-resolver.js';
 import crypto from 'crypto';
+import { PANDORA_VOICE_STANDARD } from '../lib/voice-standard.js';
 
 // ============================================================================
 // Skill Runtime
@@ -1042,7 +1043,9 @@ export class SkillRuntime {
 
     const scopeBlock = this.buildScopeNotice(context);
 
-    return `You are analyzing GTM data for a workspace.
+    return `${PANDORA_VOICE_STANDARD}
+
+You are analyzing GTM data for a workspace.
 
 Business Context:
 - GTM Motion: ${(business_model as any).gtm_motion || 'unknown'}

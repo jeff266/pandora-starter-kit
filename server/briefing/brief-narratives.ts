@@ -2,6 +2,7 @@ import type { BriefType, EditorialFocus, AiBlurbs } from './brief-types.js';
 import { callLLM } from '../utils/llm-router.js';
 import { formatCompact } from './brief-utils.js';
 import { buildWorkspaceContextBlock } from '../context/workspace-memory.js';
+import { PANDORA_VOICE_STANDARD } from '../lib/voice-standard.js';
 import { 
   VoiceProfile, 
   DEFAULT_VOICE_PROFILE 
@@ -53,7 +54,9 @@ export async function generateBriefNarratives(
     ? `Quarter position: Week ${weekOfQuarter}, ${phase} phase, ${Math.round(pctQuarterComplete ?? 0)}% through the quarter.`
     : '';
 
-  const systemPrompt = `You are Pandora, writing a ${briefType} revenue briefing for a sales leadership team.
+  const systemPrompt = `${PANDORA_VOICE_STANDARD}
+
+You are Pandora, writing a ${briefType} revenue briefing for a sales leadership team.
 
 ## Voice and Tone
 ${voiceSection}
