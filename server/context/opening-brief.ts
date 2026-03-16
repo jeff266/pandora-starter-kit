@@ -14,7 +14,7 @@ import { loadProductCatalog, expandDealName } from '../chat/deal-lookup.js';
 
 // ===== DEAL GROUP TYPES =====
 
-export type DealGroup = 'renewal' | 'expansion' | 'new_business' | 'other';
+export type DealGroup = string; // actual pipeline name slug (e.g. "Renewal", "Core Sales Pipeline")
 
 export interface BigDealAtRisk {
   id: string;
@@ -30,58 +30,40 @@ export interface BigDealAtRisk {
 }
 
 export interface GroupedDealFindings {
-  group: DealGroup;
-  label: string;
+  group: string;   // pipeline name used as key
+  label: string;   // display label (same as group for named pipelines)
   deals: BigDealAtRisk[];
   totalValue: number;
   criticalCount: number;
 }
 
-const GROUP_LABELS: Record<DealGroup, string> = {
-  renewal: 'Renewal',
-  expansion: 'Expansion',
-  new_business: 'New Business',
-  other: 'Pipeline',
-};
-
-const GROUP_ORDER: DealGroup[] = ['renewal', 'expansion', 'new_business', 'other'];
-
-export function classifyDealGroup(deal: { name: string; pipeline: string; scopeId: string }): DealGroup {
-  // 1. Check scope_id (most reliable — set by pipeline config)
-  const sid = (deal.scopeId ?? '').toLowerCase();
-  if (sid.includes('renewal') || sid.includes('renew')) return 'renewal';
-  if (sid.includes('expansion') || sid.includes('expand') || sid.includes('upsell')) return 'expansion';
-  if (sid.includes('new') || sid.includes('core') || sid.includes('nb')) return 'new_business';
-
-  // 2. Check pipeline name
-  const pname = (deal.pipeline ?? '').toLowerCase();
-  if (pname.includes('renewal') || pname.includes('renew')) return 'renewal';
-  if (pname.includes('expansion') || pname.includes('expand') || pname.includes('upsell')) return 'expansion';
-  if (pname.includes('new') || pname.includes('core')) return 'new_business';
-
-  // 3. Fall back to deal name keywords
-  const dname = (deal.name ?? '').toLowerCase();
-  if (dname.includes('renewal') || dname.includes('renew')) return 'renewal';
-  if (dname.includes('expansion') || dname.includes('expand') || dname.includes('upsell')) return 'expansion';
-
-  return 'other';
+/** Resolve the display label for a deal's pipeline — uses the pipeline name when present,
+ *  falls back to a humanised scope_id (e.g. "new-business" → "New Business"). */
+export function resolvePipelineLabel(deal: { pipeline: string; scopeId: string }): string {
+  const name = (deal.pipeline ?? '').trim();
+  if (name) return name;
+  const sid = (deal.scopeId ?? '').trim();
+  if (!sid || sid === 'default') return 'Other';
+  // humanise kebab-case: "new-business" → "New Business"
+  return sid.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
 export function groupDealFindings(deals: BigDealAtRisk[]): GroupedDealFindings[] | null {
-  const groups = new Map<DealGroup, BigDealAtRisk[]>();
+  // Group by actual pipeline label — no keyword taxonomy
+  const order: string[] = [];
+  const groups = new Map<string, BigDealAtRisk[]>();
   for (const deal of deals) {
-    const g = classifyDealGroup(deal);
-    if (!groups.has(g)) groups.set(g, []);
-    groups.get(g)!.push(deal);
+    const label = resolvePipelineLabel(deal);
+    if (!groups.has(label)) { groups.set(label, []); order.push(label); }
+    groups.get(label)!.push(deal);
   }
-  const populated = GROUP_ORDER.filter(g => groups.has(g));
-  if (populated.length <= 1) return null; // single group → flat render
-  return populated.map(g => ({
-    group: g,
-    label: GROUP_LABELS[g],
-    deals: groups.get(g)!,
-    totalValue: groups.get(g)!.reduce((s, d) => s + d.amount, 0),
-    criticalCount: groups.get(g)!.filter(d => d.daysSinceActivity > 90).length,
+  if (groups.size <= 1) return null; // single pipeline → flat render
+  return order.map(label => ({
+    group: label,
+    label,
+    deals: groups.get(label)!,
+    totalValue: groups.get(label)!.reduce((s, d) => s + d.amount, 0),
+    criticalCount: groups.get(label)!.filter(d => d.daysSinceActivity > 90).length,
   }));
 }
 

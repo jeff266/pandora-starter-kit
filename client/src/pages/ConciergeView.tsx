@@ -463,12 +463,6 @@ function deriveSituationLine(brief: OpeningBriefData): string {
 
 type ConciergeFilter = { id: string; label: string; pipelineGroup?: string; repEmail?: string };
 
-const GROUP_LABEL_MAP: Record<string, string> = {
-  renewal: 'Renewal Only',
-  expansion: 'Expansion Only',
-  new_business: 'New Business Only',
-  other: 'Other Only',
-};
 
 function ConciergeFilterDropdown({
   activeFilter,
@@ -500,7 +494,7 @@ function ConciergeFilterDropdown({
     { id: 'all', label: 'All Data' },
     ...pipelineGroups.map(g => ({
       id: g.id,
-      label: GROUP_LABEL_MAP[g.id] ?? g.label,
+      label: g.label,
       pipelineGroup: g.id,
     })),
   ];

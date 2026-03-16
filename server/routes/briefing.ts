@@ -9,7 +9,7 @@ import {
   assembleOpeningBrief,
   getOrAssembleBrief,
   logBriefInteraction,
-  classifyDealGroup,
+  resolvePipelineLabel,
   groupDealFindings,
   type BriefInteraction,
   type OpeningBriefData,
@@ -318,7 +318,7 @@ router.get(
           deals = deals.filter(d => d.ownerEmail === repEmailFilter);
         }
         if (pipelineGroupFilter) {
-          deals = deals.filter(d => classifyDealGroup(d) === (pipelineGroupFilter as DealGroup));
+          deals = deals.filter(d => resolvePipelineLabel(d) === pipelineGroupFilter);
         }
         brief.bigDealsAtRisk = deals;
         brief.groupedDeals = groupDealFindings(deals);
