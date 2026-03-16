@@ -6,7 +6,7 @@ interface PixelAvatarProps {
   style?: React.CSSProperties;
 }
 
-const PANDORA_SRC = '/avatars/char-17.png';
+const PANDORA_SRC = '/avatars/char-14.png';
 const BULL_SRC = '/avatars/char-15.png';
 const BEAR_SRC = '/avatars/char-08.png';
 
