@@ -1,6 +1,7 @@
 import { query } from '../db.js';
 import { callLLM } from '../utils/llm-router.js';
 import { PANDORA_VOICE_STANDARD } from '../lib/voice-standard.js';
+import { formatCurrency } from '../utils/format-currency.js';
 
 export interface BullEvidence {
   contactCount: number;
@@ -405,5 +406,216 @@ BEAR CASE SAID: ${bearOutput}`,
     tokenCost,
     bullEvidence,
     bearEvidence,
+  };
+}
+
+// ============================================================================
+// Hypothesis Red Team Deliberation
+// ============================================================================
+
+export interface HypothesisRedTeamResult {
+  pattern: 'red_team';
+  hypothesisId: string;
+  perspectives: {
+    agent: 'plan' | 'red_team';
+    label: string;
+    output: string;
+  }[];
+  verdict: {
+    planSufficiency: string;      // "sufficient" | "insufficient" | "borderline"
+    missingAction: string | null;  // the single most important gap, or null
+    watchMetric: string;           // what to look for by end of next week
+    raw: string;                   // full verdict text
+  };
+  tokenCost: number;
+}
+
+function formatMetricValue(value: number, metric: string): string {
+  const m = metric.toLowerCase();
+  if (m.includes('ratio')) return `${value.toFixed(1)}x`;
+  if (m.includes('rate') || m.includes('pct') || m.includes('win') || m.includes('conversion')) {
+    return `${Math.round(value)}%`;
+  }
+  if (m.includes('days') || m.includes('cycle')) return `${Math.round(value)} days`;
+  if (m.includes('count') || m.includes('closes')) return value.toFixed(1);
+  return formatCurrency(value);
+}
+
+export async function runHypothesisRedTeam(
+  workspaceId: string,
+  hypothesisId: string
+): Promise<HypothesisRedTeamResult> {
+
+  // COMPUTE — gather evidence
+  const hypothesisResult = await query(
+    `SELECT * FROM standing_hypotheses
+     WHERE workspace_id = $1 AND id = $2`,
+    [workspaceId, hypothesisId]
+  );
+
+  if (hypothesisResult.rows.length === 0) {
+    throw new Error(`Hypothesis ${hypothesisId} not found`);
+  }
+
+  const hyp = hypothesisResult.rows[0];
+
+  const sprintActionsResult = await query(
+    `SELECT title, expected_value_delta, effort, state
+     FROM actions
+     WHERE workspace_id = $1
+       AND hypothesis_id = $2
+       AND sprint_week = date_trunc('week', NOW())
+       AND state IN ('pending', 'in_progress')
+     ORDER BY expected_value_delta DESC NULLS LAST`,
+    [workspaceId, hypothesisId]
+  );
+
+  const totalSprintEV = sprintActionsResult.rows.reduce(
+    (sum: number, a: any) => sum + (parseFloat(a.expected_value_delta) || 0),
+    0
+  );
+
+  const currentValue = parseFloat(hyp.current_value || '0');
+  const threshold = parseFloat(hyp.alert_threshold || '0');
+  const gap = Math.abs(currentValue - threshold);
+  const gapLabel = formatMetricValue(gap, hyp.metric);
+  const currentLabel = formatMetricValue(currentValue, hyp.metric);
+  const thresholdLabel = formatMetricValue(threshold, hyp.metric);
+  const direction = hyp.alert_direction === 'below' ? '≥' : '≤';
+
+  const contextBlock = `
+HYPOTHESIS: ${hyp.hypothesis}
+METRIC: ${hyp.metric}
+CURRENT VALUE: ${currentLabel}
+THRESHOLD: ${direction} ${thresholdLabel}
+GAP TO CLOSE: ${gapLabel}
+
+CURRENT SPRINT ACTIONS (${sprintActionsResult.rows.length} actions, ${formatCurrency(totalSprintEV)} total expected value):
+${
+  sprintActionsResult.rows.length > 0
+    ? sprintActionsResult.rows
+        .map(
+          (a: any) =>
+            `- ${a.title} | EV: ${a.expected_value_delta ? formatCurrency(parseFloat(a.expected_value_delta)) : 'unknown'} | ${a.effort} | ${a.state}`
+        )
+        .join('\n')
+    : '(no sprint actions linked to this hypothesis)'
+}
+`.trim();
+
+  let tokenCost = 0;
+
+  // CALL 1 — Plan defense
+  const planResult = await callLLM(workspaceId, 'reason', {
+    systemPrompt: `${PANDORA_VOICE_STANDARD}
+
+You are defending the current sprint plan for addressing this hypothesis breach.
+Argue why the listed actions are sufficient to close the gap.
+If there are no actions, argue why the gap is self-correcting or less urgent than it appears.
+Cite specific action titles and their expected values.
+2-3 arguments. End with one sentence: "Plan sufficiency: [X]%" where X is your estimate.`,
+    messages: [{ role: 'user', content: contextBlock }],
+    maxTokens: 400,
+    temperature: 0.3,
+    _tracking: { workspaceId, phase: 'chat', stepName: 'red-team-plan' },
+  });
+  tokenCost += (planResult.usage?.input ?? 0) + (planResult.usage?.output ?? 0);
+
+  // CALL 2 — Red team attack
+  const redTeamResult = await callLLM(workspaceId, 'reason', {
+    systemPrompt: `${PANDORA_VOICE_STANDARD}
+
+You are attacking the current sprint plan for this hypothesis breach.
+Argue why the listed actions will NOT close the gap in time.
+What root cause is being ignored? What is missing from the sprint?
+Is the total expected value of actions sufficient to move the metric by the required amount?
+Be specific. Cite the gap between sprint expected value and the threshold gap.
+2-3 arguments. End with one sentence: "Estimated plan effectiveness: [X]%" where X is your estimate.`,
+    messages: [{ role: 'user', content: contextBlock }],
+    maxTokens: 400,
+    temperature: 0.3,
+    _tracking: { workspaceId, phase: 'chat', stepName: 'red-team-attack' },
+  });
+  tokenCost += (redTeamResult.usage?.input ?? 0) + (redTeamResult.usage?.output ?? 0);
+
+  // CALL 3 — Verdict
+  const verdictResult = await callLLM(workspaceId, 'reason', {
+    systemPrompt: `${PANDORA_VOICE_STANDARD}
+
+You have heard the plan defense and the red team attack on this hypothesis sprint.
+State exactly four things:
+1. Whether the plan is sufficient, insufficient, or borderline — one word
+2. The single most important missing action if insufficient — one sentence, or "none" if sufficient
+3. What metric movement to look for by end of next week — one sentence
+4. Nothing else.
+
+Format:
+SUFFICIENCY: [sufficient|insufficient|borderline]
+MISSING: [one sentence or "none"]
+WATCH: [one sentence]`,
+    messages: [
+      {
+        role: 'user',
+        content: `
+PLAN DEFENDED: ${planResult.content}
+
+RED TEAM ATTACKED: ${redTeamResult.content}
+
+HYPOTHESIS GAP: ${gapLabel} remaining to close.
+    `.trim(),
+      },
+    ],
+    maxTokens: 250,
+    temperature: 0.2,
+    _tracking: { workspaceId, phase: 'chat', stepName: 'red-team-verdict' },
+  });
+  tokenCost += (verdictResult.usage?.input ?? 0) + (verdictResult.usage?.output ?? 0);
+
+  // Parse structured verdict
+  const verdictText = verdictResult.content || '';
+  const sufficiencyMatch = verdictText.match(/SUFFICIENCY:\s*(sufficient|insufficient|borderline)/i);
+  const missingMatch = verdictText.match(/MISSING:\s*(.+?)(?:\n|$)/i);
+  const watchMatch = verdictText.match(/WATCH:\s*(.+?)(?:\n|$)/i);
+
+  const verdict = {
+    planSufficiency: sufficiencyMatch?.[1]?.toLowerCase() ?? 'borderline',
+    missingAction:
+      missingMatch?.[1]?.trim().toLowerCase() === 'none' ? null : missingMatch?.[1]?.trim() ?? null,
+    watchMetric: watchMatch?.[1]?.trim() ?? verdictText,
+    raw: verdictText,
+  };
+
+  // Write to deliberation_runs
+  await query(
+    `INSERT INTO deliberation_runs (
+      workspace_id, pattern, trigger_surface,
+      entity_type, entity_id, hypothesis_id,
+      perspectives, verdict, token_cost
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+    [
+      workspaceId,
+      'red_team',
+      'hypothesis_card',
+      'hypothesis',
+      hypothesisId,
+      hypothesisId,
+      JSON.stringify([
+        { agent: 'plan', label: 'Current Plan', output: planResult.content || '' },
+        { agent: 'red_team', label: 'Red Team', output: redTeamResult.content || '' },
+      ]),
+      JSON.stringify(verdict),
+      tokenCost,
+    ]
+  );
+
+  return {
+    pattern: 'red_team',
+    hypothesisId,
+    perspectives: [
+      { agent: 'plan', label: 'Current Plan', output: planResult.content || '' },
+      { agent: 'red_team', label: 'Red Team', output: redTeamResult.content || '' },
+    ],
+    verdict,
+    tokenCost,
   };
 }

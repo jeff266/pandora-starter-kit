@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import dbPool, { query as dbQuery } from '../db.js';
 import { executeAction } from '../actions/executor.js';
+import { runHypothesisRedTeam } from '../chat/deliberation-engine.js';
 
 const router = Router();
 
@@ -717,5 +718,24 @@ router.post('/:workspaceId/action-items/:actionId/snooze', async (req: Request<W
     res.status(500).json({ error: (err as Error).message });
   }
 });
+
+// POST /api/workspaces/:workspaceId/deliberation/hypothesis/:hypothesisId
+// Trigger Red Team deliberation for a hypothesis
+router.post(
+  '/:workspaceId/deliberation/hypothesis/:hypothesisId',
+  requirePermission('read'),
+  async (req: Request<WorkspaceParams & { hypothesisId: string }>, res: Response) => {
+    const { workspaceId, hypothesisId } = req.params;
+
+    try {
+      console.log(`[RedTeam] Triggering hypothesis deliberation for ${hypothesisId}`);
+      const result = await runHypothesisRedTeam(workspaceId, hypothesisId);
+      res.json({ success: true, deliberation: result });
+    } catch (err) {
+      console.error('[RedTeam] Error:', err);
+      res.status(500).json({ error: 'Deliberation failed', message: (err as Error).message });
+    }
+  }
+);
 
 export default router;
