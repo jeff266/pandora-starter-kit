@@ -139,6 +139,13 @@ interface ContactFeatures {
   dealStage: string;
   dealScore?: number; // Will be populated after deal scoring
 
+  // Activity signals on the deal
+  dealActivityCount: number;
+  dealEmailCount: number;
+  dealMeetingCount: number;
+  dealCallCount: number;
+  dealLastActivity: Date | null;
+
   // CRM source tracking (for webhook outbound)
   source: string;
   sourceId: string;
@@ -553,11 +560,28 @@ async function extractContactFeatures(workspaceId: string): Promise<ContactFeatu
       c.custom_fields,
       dc.buying_role, dc.role_confidence,
       dc.tenure_months, dc.seniority_verified,
-      d.id as deal_id, d.amount as deal_amount, d.stage_normalized as deal_stage
+      d.id as deal_id, d.amount as deal_amount, d.stage_normalized as deal_stage,
+      COALESCE(act.total_activities, 0) as deal_activity_count,
+      COALESCE(act.emails, 0) as deal_email_count,
+      COALESCE(act.meetings, 0) as deal_meeting_count,
+      COALESCE(act.calls, 0) as deal_call_count,
+      act.last_activity as deal_last_activity
     FROM contacts c
     JOIN deal_contacts dc ON dc.contact_id = c.id
       AND dc.workspace_id = c.workspace_id
     JOIN deals d ON dc.deal_id = d.id AND d.workspace_id = dc.workspace_id
+    LEFT JOIN (
+      SELECT
+        deal_id,
+        COUNT(*)::int as total_activities,
+        COUNT(*) FILTER (WHERE activity_type = 'email')::int as emails,
+        COUNT(*) FILTER (WHERE activity_type = 'meeting')::int as meetings,
+        COUNT(*) FILTER (WHERE activity_type = 'call')::int as calls,
+        MAX(timestamp) as last_activity
+      FROM activities
+      WHERE workspace_id = $1 AND deal_id IS NOT NULL
+      GROUP BY deal_id
+    ) act ON act.deal_id = d.id
     WHERE c.workspace_id = $1
       AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
   `, [workspaceId]);
@@ -577,6 +601,11 @@ async function extractContactFeatures(workspaceId: string): Promise<ContactFeatu
     dealId: row.deal_id,
     dealAmount: row.deal_amount,
     dealStage: row.deal_stage,
+    dealActivityCount: parseInt(row.deal_activity_count || '0', 10),
+    dealEmailCount: parseInt(row.deal_email_count || '0', 10),
+    dealMeetingCount: parseInt(row.deal_meeting_count || '0', 10),
+    dealCallCount: parseInt(row.deal_call_count || '0', 10),
+    dealLastActivity: row.deal_last_activity ? new Date(row.deal_last_activity) : null,
     source: row.source,
     sourceId: row.source_id,
   }));
@@ -1932,6 +1961,37 @@ function scoreContact(
     category: 'fit',
     explanation: seniorityHigh ? 'VP/C-level/Director seniority.' : undefined,
   });
+
+  // activity_on_deals (engagement dimension) — queries fetched in extractContactFeatures
+  const hasActivity = contact.dealActivityCount > 0;
+  const activityPts = hasActivity ? Math.min(weights.activity_on_deals, Math.round((contact.dealActivityCount / 20) * weights.activity_on_deals)) : 0;
+  allFactors.push({
+    field: 'activity_on_deals',
+    label: 'Deal Activity',
+    value: hasActivity ? `${contact.dealActivityCount} activities` : 'No activity on deals',
+    contribution: activityPts,
+    maxPossible: weights.activity_on_deals,
+    direction: determineDirection(activityPts, weights.activity_on_deals),
+    category: 'engagement',
+    explanation: hasActivity
+      ? `${contact.dealActivityCount} activities across deal — emails, meetings, and calls tracked.`
+      : undefined,
+  });
+
+  // multi_channel_engagement (engagement dimension)
+  const channels = [contact.dealEmailCount > 0, contact.dealMeetingCount > 0, contact.dealCallCount > 0].filter(Boolean).length;
+  if (channels > 0) {
+    const channelPts = channels >= 3 ? 10 : channels >= 2 ? 6 : 3;
+    allFactors.push({
+      field: 'multi_channel_engagement',
+      label: 'Multi-Channel Engagement',
+      value: `${channels} channel${channels > 1 ? 's' : ''} (${[contact.dealEmailCount > 0 && 'email', contact.dealMeetingCount > 0 && 'meeting', contact.dealCallCount > 0 && 'call'].filter(Boolean).join(', ')})`,
+      contribution: channelPts,
+      maxPossible: 10,
+      direction: 'positive',
+      category: 'engagement',
+    });
+  }
 
   // deal_quality (deal_score_inheritance / intent dimension)
   const dealQualityPts = dealScore ? Math.round((dealScore / 100) * weights.deal_quality) : 0;
