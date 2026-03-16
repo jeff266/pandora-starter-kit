@@ -185,57 +185,57 @@ const GRID: Record<string, CellSpec> = {
   early_at: {
     primaryTopics: ['pipeline_velocity', 'coverage_trend'],
     suppressTopics: ['board_narrative'],
-    frameLabel: 'On track — maintain momentum',
+    frameLabel: 'On pace. Protect what is converting.',
   },
   early_above: {
     primaryTopics: ['q2_setup', 'rep_variance', 'expansion'],
     suppressTopics: ['q1_close_risk'],
-    frameLabel: 'Ahead — protect margin and build Q2',
+    frameLabel: 'Ahead of pace. Protect margin and build Q2.',
   },
   mid_below: {
     primaryTopics: ['deal_reality', 'rep_coaching', 'forecast_prep', 'big_deals_at_risk'],
     suppressTopics: ['q2_setup'],
-    frameLabel: 'Behind — focus on what can close',
+    frameLabel: 'Behind pace. Focus on what can close.',
   },
   mid_at: {
     primaryTopics: ['fragile_deals', 'q2_coverage', 'big_deals_at_risk'],
     suppressTopics: [],
-    frameLabel: "On pace — protect what's real",
+    frameLabel: 'On pace. Protect what is real.',
   },
   mid_above: {
     primaryTopics: ['q2_setup', 'rep_variance', 'big_deals_at_risk', 'expansion'],
     suppressTopics: ['q1_close_risk'],
-    frameLabel: 'Ahead — seed Q2 while closing Q1',
+    frameLabel: 'Ahead of pace. Seed Q2 while closing Q1.',
   },
   late_below: {
     primaryTopics: ['recovery_path', 'closable_deals', 'board_narrative', 'big_deals_at_risk'],
     suppressTopics: ['q2_setup', 'rep_coaching'],
-    frameLabel: 'Behind at week 10 — what can close',
+    frameLabel: 'Behind at week 10. Focus on what can close.',
   },
   late_at: {
     primaryTopics: ['protect_number', 'crm_hygiene', 'q2_coverage', 'big_deals_at_risk'],
     suppressTopics: [],
-    frameLabel: 'On target — protect and set up Q2',
+    frameLabel: 'On target. Protect the number and set up Q2.',
   },
   late_above: {
     primaryTopics: ['q2_setup', 'rep_variance', 'big_deals_at_risk', 'crm_hygiene'],
     suppressTopics: ['q1_close_risk', 'deal_hygiene'],
-    frameLabel: 'Won — build Q2 this week',
+    frameLabel: 'Q1 is won. Build Q2 pipeline this week.',
   },
   end_below: {
     primaryTopics: ['damage_control', 'board_narrative', 'q2_story', 'closable_now'],
     suppressTopics: ['q2_setup', 'rep_coaching'],
-    frameLabel: 'Final week — close what can close',
+    frameLabel: 'Final week. Close what can close.',
   },
   end_at: {
     primaryTopics: ['close_decisions', 'crm_hygiene', 'q2_story', 'board_narrative'],
     suppressTopics: [],
-    frameLabel: 'Final week — close and clean up',
+    frameLabel: 'Final week. Close and clean up CRM.',
   },
   end_above: {
     primaryTopics: ['q2_pipeline', 'crm_hygiene', 'rep_recognition', 'q2_story'],
     suppressTopics: ['q1_close_risk'],
-    frameLabel: 'Final week — won, seed Q2',
+    frameLabel: 'Final week. Q1 is won. Seed Q2.',
   },
   no_target: {
     primaryTopics: ['pipeline_velocity', 'big_deals_at_risk', 'coverage_trend', 'rep_variance'],

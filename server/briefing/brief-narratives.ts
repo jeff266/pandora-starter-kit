@@ -101,16 +101,16 @@ Return a valid JSON object only. No markdown fences. No explanation outside the 
   let requestedKeys = '';
   if (briefType === 'monday_setup') {
     requestedKeys = `Return JSON with exactly these keys:
-{"overall_summary":"1-2 sentences: where we stand entering the week and whether we're on pace. Reference the coverage ratio and what it means for the week ahead.","rep_conversation":"2-3 sentences. Which rep needs attention and specifically what they need to do this week — name the deal, name the action, name the stakes.","deal_recommendation":"2-3 sentences. The ONE deal to focus on today. Name it, state the specific risk, and tell them exactly what question to ask."}`;
+{"overall_summary":"1-2 sentences. State coverage ratio, attainment pace, and what needs to happen this week to stay on track. No adjectives.","rep_conversation":"2-3 sentences. Name the rep, name the deal, name the specific action required this week. State the dollar amount and close date.","deal_recommendation":"2-3 sentences. Name the deal. State the specific risk as a fact. State the one question to ask or action to take this week."}`;
   } else if (briefType === 'pulse') {
     requestedKeys = `Return JSON with exactly these keys:
-{"pulse_summary":"1-2 sentences: what changed since Monday AND whether the forecast still shows we hit target. Reference coverage ratio if available.","key_action":"1 sentence: the single most important thing to do today — specific deal or rep, specific action, specific reason why it matters to hitting the number."}`;
+{"pulse_summary":"1-2 sentences. State what changed since Monday and whether the forecast is still on track. Reference the coverage ratio if available.","key_action":"1 sentence. Name the deal or rep. State the specific action. State the dollar amount or date that makes it relevant this week."}`;
   } else if (briefType === 'friday_recap') {
     requestedKeys = `Return JSON with exactly these keys:
-{"week_summary":"1-2 sentences on how the week went. Wins, misses, net result, and whether attainment moved in the right direction.","next_week_focus":"1-2 sentences on the one concrete thing to prioritize when Monday arrives — name it specifically."}`;
+{"week_summary":"1-2 sentences. State what closed, what slipped, and whether attainment moved. Use dollar amounts, not adjectives.","next_week_focus":"1-2 sentences. Name the specific deal or rep to prioritize Monday. State why it is the highest-leverage action."}`;
   } else if (briefType === 'quarter_close') {
     requestedKeys = `Return JSON with exactly these keys:
-{"quarter_situation":"2 sentences. Days remaining, gap to quota, and a frank assessment: will we hit it based on what's in the pipe?","close_plan":"2 sentences. Name the 2-3 specific deals that will determine the quarter outcome and what needs to happen with each one this week."}`;
+{"quarter_situation":"2 sentences. State days remaining, gap to quota, and pipeline coverage as numbers. Do not characterize them.","close_plan":"2 sentences. Name 2-3 specific deals that will determine the quarter. State what needs to happen with each one this week."}`;
   }
 
   const userPrompt = `Brief Type: ${briefType}

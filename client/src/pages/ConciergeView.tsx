@@ -1120,30 +1120,30 @@ export default function ConciergeView() {
                 if (topics.includes('q2_setup') && (estQ2 === null || isNaN(estQ2) || estQ2 < 3)) {
                   const coldTotal = riskDeals.reduce((s, d) => s + d.amount, 0);
                   if (riskDeals.length > 0) {
-                    frameSentence = `${riskDeals.length} cold deal${riskDeals.length !== 1 ? 's' : ''} worth ${fmtCurrency(coldTotal)} are your fastest path to 3× Q2 coverage.`;
+                    frameSentence = `${riskDeals.length} cold deal${riskDeals.length !== 1 ? 's' : ''} worth ${fmtCurrency(coldTotal)} represent the fastest path to Q2 coverage.`;
                   } else {
-                    frameSentence = `Build Q2 pipeline now — current coverage estimate is ${estQ2 != null && !isNaN(estQ2) ? `~${estQ2.toFixed(1)}×` : 'below'} the 3× threshold.`;
+                    frameSentence = `Q2 coverage is currently ${estQ2 != null && !isNaN(estQ2) ? `${estQ2.toFixed(1)}×` : 'below'} the 3× threshold.`;
                   }
                 } else if (topics.includes('rep_variance')) {
-                  frameSentence = 'Rep performance varies — review coverage by rep before the quarter closes.';
+                  frameSentence = 'Pipeline coverage varies by rep. Review by rep before quarter close.';
                 } else if (topics.includes('q1_close_risk')) {
                   const daysLeft = (brief.temporal as any)?.daysRemainingInQuarter;
                   frameSentence = daysLeft
-                    ? `Deals at risk with ${daysLeft} days left to close — act now.`
-                    : 'Deals at risk this quarter need action before close.';
+                    ? `${daysLeft} days remain. Review deal risk.`
+                    : 'Review deal risk before quarter close.';
                 } else if (topics.includes('big_deals_at_risk')) {
-                  frameSentence = `${riskDeals.length > 0 ? riskDeals.length : 'High-value'} deal${riskDeals.length !== 1 ? 's' : ''} at risk — prioritize re-engagement this week.`;
+                  frameSentence = `${riskDeals.length > 0 ? riskDeals.length : 'High-value'} deal${riskDeals.length !== 1 ? 's' : ''} require re-engagement.`;
                 }
                 if (frameSentence) {
-                  contextNarrative = `${priorityFrame.frameLabel} — ${frameSentence}`;
+                  contextNarrative = `${priorityFrame.frameLabel} ${frameSentence}`;
                 }
               } else if (riskDeals.length > 0 && _pctAttained >= 100 && q2Coverage !== null) {
                 const covStr = `${q2Coverage.toFixed(1)}×`;
                 const dealWord = riskDeals.length === 1 ? 'deal' : 'deals';
                 if (q2Coverage < 3) {
-                  contextNarrative = `Q1 is won at ${Math.round(_pctAttained)}%. Q2 coverage is at ${covStr} — short of the 3× threshold. These ${riskDeals.length} cold ${dealWord} averaging ${fmtCurrency(avgRiskAmt)} are Q2 opportunities. Re-engaging them this week adds pipeline buffer before the quarter turns.`;
+                  contextNarrative = `Q1 closed at ${Math.round(_pctAttained)}% attainment. Q2 coverage is ${covStr}, below the 3× threshold. These ${riskDeals.length} cold ${dealWord} average ${fmtCurrency(avgRiskAmt)} and represent available Q2 pipeline.`;
                 } else {
-                  contextNarrative = `Q1 is won at ${Math.round(_pctAttained)}%. Q2 coverage is at ${covStr} — above threshold. These ${riskDeals.length} cold ${dealWord} averaging ${fmtCurrency(avgRiskAmt)} build additional buffer.`;
+                  contextNarrative = `Q1 closed at ${Math.round(_pctAttained)}% attainment. Q2 coverage is ${covStr}, above the 3× threshold. These ${riskDeals.length} cold ${dealWord} average ${fmtCurrency(avgRiskAmt)}.`;
                 }
               }
 
