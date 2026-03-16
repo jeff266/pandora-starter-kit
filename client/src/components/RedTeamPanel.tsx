@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { colors } from '../styles/theme';
 
-interface RedTeamResult {
+export interface RedTeamResult {
   pattern: 'red_team';
   hypothesisId: string;
   perspectives: {

@@ -9,7 +9,7 @@ import { useDemoMode } from '../contexts/DemoModeContext';
 import { useIsMobile } from '../hooks/useIsMobile';
 import ExecutionDialog from '../components/ExecutionDialog';
 import { openAskPandora } from '../lib/askPandora';
-import RedTeamPanel from '../components/RedTeamPanel';
+import RedTeamPanel, { type RedTeamResult } from '../components/RedTeamPanel';
 import { getAuthToken, getWorkspaceId } from '../lib/api';
 
 // ── Interfaces ───────────────────────────────────────────────────────────────
@@ -906,7 +906,7 @@ function HypothesesView({
   onSelectAction: (a: Action) => void;
   onStateChange: (id: string, state: string) => void;
 }) {
-  const [redTeamResults, setRedTeamResults] = useState<Map<string, any>>(new Map());
+  const [redTeamResults, setRedTeamResults] = useState<Map<string, RedTeamResult>>(new Map());
   const [redTeamLoading, setRedTeamLoading] = useState<Set<string>>(new Set());
 
   async function triggerRedTeam(hypothesisId: string) {
