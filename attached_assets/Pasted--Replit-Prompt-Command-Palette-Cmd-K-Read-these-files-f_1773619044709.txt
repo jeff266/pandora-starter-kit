@@ -1,0 +1,395 @@
+**Replit Prompt: Command Palette (Cmd+K)**
+
+Read these files first:
+1. `App.tsx` or the root layout component — find where global keyboard shortcuts are registered
+2. The sidebar navigation component — find all route definitions (these become page results)
+3. How deals and reps are queried — find the existing API endpoints for deal lists and rep lists
+4. The `openAskPandora` utility — you'll call this for deal results
+5. The skill registry endpoint — `GET /api/workspaces/:id/skills`
+
+---
+
+### What to build
+
+A command palette triggered by Cmd+K (Mac) / Ctrl+K (Windows). Fuzzy search across 5 categories. Pure client-side matching after an initial data fetch. No LLM, no tokens.
+
+---
+
+### Part 1 — Data fetch on workspace load
+
+When the workspace loads, fetch and cache the searchable index in memory. This runs once, not on every keystroke.
+
+```typescript
+// server: add one endpoint
+GET /api/workspaces/:id/search-index
+
+// Returns:
+{
+  deals: [
+    {
+      id: string,
+      name: string,           // expanded — run expandDealName()
+      amount: number,
+      stage: string,
+      ownerName: string,
+      daysSinceActivity: number,
+      closeDate: string,
+    }
+  ],  // all open deals, max 500
+  reps: [
+    { email: string, name: string, role: string }
+  ],
+  hypotheses: [
+    { id: string, metric: string, hypothesis: string, status: string }
+  ],
+  skills: [
+    { id: string, name: string, category: string }
+  ]
+}
+```
+
+Static pages and skills are hardcoded on the client — they don't need an API call.
+
+Cache the response in React state or a module-level variable. Refresh every 5 minutes or on manual sync.
+
+---
+
+### Part 2 — Command palette component
+
+Create `components/CommandPalette.tsx`:
+
+```tsx
+// Triggered by: Cmd+K / Ctrl+K anywhere in the app
+// Dismissed by: Escape, click outside, selecting a result
+
+interface SearchResult {
+  type: 'deal' | 'rep' | 'page' | 'skill' | 'hypothesis' | 'ask'
+  id: string
+  title: string
+  subtitle: string       // context line shown below title
+  icon: string           // emoji or icon name
+  action: () => void     // what happens on selection
+}
+```
+
+**Fuzzy matching** — use `fuse.js` (already likely in deps, or install it — it's tiny):
+
+```typescript
+import Fuse from 'fuse.js'
+
+// One Fuse instance per category, created when index loads:
+const dealFuse = new Fuse(searchIndex.deals, {
+  keys: ['name', 'ownerName'],
+  threshold: 0.3,
+  includeScore: true,
+})
+
+const repFuse = new Fuse(searchIndex.reps, {
+  keys: ['name', 'email'],
+  threshold: 0.3,
+})
+
+const hypothesisFuse = new Fuse(searchIndex.hypotheses, {
+  keys: ['hypothesis', 'metric'],
+  threshold: 0.4,
+})
+```
+
+**Static pages** (hardcoded, always searched):
+```typescript
+const PAGES = [
+  { id: 'concierge',   title: 'Concierge',   subtitle: 'Weekly briefing and deal cards',     route: '/concierge' },
+  { id: 'gtm',         title: 'GTM',          subtitle: 'Pipeline and forecast overview',     route: '/gtm' },
+  { id: 'actions',     title: 'Actions',      subtitle: 'Sprint view and hypothesis tracker', route: '/actions' },
+  { id: 'hypotheses',  title: 'Hypotheses',   subtitle: 'Standing hypothesis monitor',        route: '/actions?tab=hypotheses' },
+  { id: 'backlog',     title: 'Action Backlog', subtitle: 'Full action queue',                route: '/actions?tab=backlog' },
+  { id: 'agents',      title: 'Agents',       subtitle: 'Operator configuration',             route: '/agents' },
+  { id: 'targets',     title: 'Targets',      subtitle: 'Quota and goal tracking',            route: '/targets' },
+  { id: 'data',        title: 'Data',         subtitle: 'Connectors and sync status',         route: '/data' },
+  { id: 'settings',    title: 'Settings',     subtitle: 'Workspace configuration',            route: '/settings' },
+]
+```
+
+**Result builder** — runs on every keystroke, debounced 80ms:
+
+```typescript
+function buildResults(query: string): SearchResult[] {
+  if (!query.trim()) return getDefaultResults()  // show recent + top actions when empty
+
+  const results: SearchResult[] = []
+
+  // Deals — show top 4
+  dealFuse.search(query).slice(0, 4).forEach(({ item }) => {
+    results.push({
+      type: 'deal',
+      id: item.id,
+      title: item.name,
+      subtitle: `${item.stage} · $${formatCurrency(item.amount)} · ${item.ownerName} · ${item.daysSinceActivity}d silent`,
+      icon: '📋',
+      action: () => {
+        openAskPandora({ type: 'deal', entity_id: item.id, entity_name: item.name })
+        close()
+      },
+    })
+  })
+
+  // Reps — show top 2
+  repFuse.search(query).slice(0, 2).forEach(({ item }) => {
+    results.push({
+      type: 'rep',
+      id: item.email,
+      title: item.name,
+      subtitle: `Rep · ${item.email}`,
+      icon: '👤',
+      action: () => {
+        navigate(`/reps/${encodeURIComponent(item.email)}`)
+        close()
+      },
+    })
+  })
+
+  // Pages — show top 3
+  const pageQuery = query.toLowerCase()
+  PAGES.filter(p =>
+    p.title.toLowerCase().includes(pageQuery) ||
+    p.subtitle.toLowerCase().includes(pageQuery)
+  ).slice(0, 3).forEach(page => {
+    results.push({
+      type: 'page',
+      id: page.id,
+      title: page.title,
+      subtitle: page.subtitle,
+      icon: '→',
+      action: () => { navigate(page.route); close() },
+    })
+  })
+
+  // Hypotheses — show top 2
+  hypothesisFuse.search(query).slice(0, 2).forEach(({ item }) => {
+    results.push({
+      type: 'hypothesis',
+      id: item.id,
+      title: item.hypothesis.slice(0, 60) + (item.hypothesis.length > 60 ? '...' : ''),
+      subtitle: `Hypothesis · ${item.metric} · ${item.status}`,
+      icon: '📊',
+      action: () => {
+        navigate(`/actions?tab=hypotheses&highlight=${item.id}`)
+        close()
+      },
+    })
+  })
+
+  // Skills — show top 2
+  const skillMatches = searchIndex.skills.filter(s =>
+    s.name.toLowerCase().includes(pageQuery)
+  ).slice(0, 2)
+  skillMatches.forEach(skill => {
+    results.push({
+      type: 'skill',
+      id: skill.id,
+      title: `Run: ${skill.name}`,
+      subtitle: `Skill · ${skill.category}`,
+      icon: '⚡',
+      action: () => {
+        triggerSkillRun(skill.id)
+        close()
+      },
+    })
+  })
+
+  // Always offer "Ask Pandora" as last result if query is a question
+  if (query.length > 10) {
+    results.push({
+      type: 'ask',
+      id: 'ask-pandora',
+      title: `Ask Pandora: "${query.slice(0, 40)}${query.length > 40 ? '...' : ''}"`,
+      subtitle: 'Open in Ask Pandora',
+      icon: '✦',
+      action: () => {
+        openAskPandora({ prefillQuery: query })
+        close()
+      },
+    })
+  }
+
+  return results
+}
+
+function getDefaultResults(): SearchResult[] {
+  // When palette opens with no query:
+  // Show: top 3 deals by days silent, top 3 pages, "Ask Pandora" prompt
+  const stalestDeals = [...searchIndex.deals]
+    .sort((a, b) => b.daysSinceActivity - a.daysSinceActivity)
+    .slice(0, 3)
+
+  return [
+    ...stalestDeals.map(deal => ({
+      type: 'deal' as const,
+      id: deal.id,
+      title: deal.name,
+      subtitle: `${deal.daysSinceActivity}d silent · $${formatCurrency(deal.amount)} · ${deal.ownerName}`,
+      icon: '📋',
+      action: () => {
+        openAskPandora({ type: 'deal', entity_id: deal.id, entity_name: deal.name })
+        close()
+      },
+    })),
+    { type: 'page', id: 'actions', title: 'Actions', subtitle: 'Sprint view', icon: '→',
+      action: () => { navigate('/actions'); close() } },
+    { type: 'page', id: 'concierge', title: 'Concierge', subtitle: 'Weekly briefing', icon: '→',
+      action: () => { navigate('/concierge'); close() } },
+    { type: 'ask', id: 'ask', title: 'Ask Pandora anything...', subtitle: 'Open Ask Pandora',
+      icon: '✦', action: () => { openAskPandora({}); close() } },
+  ]
+}
+```
+
+---
+
+### Part 3 — UI
+
+```tsx
+// Modal overlay — full screen backdrop, palette centered top-third of screen
+// Same dark theme as rest of Pandora
+
+return (
+  <div className="fixed inset-0 z-50 bg-black/60" onClick={close}>
+    <div
+      className="mx-auto mt-[15vh] w-[600px] rounded-xl bg-[#1a1a2e] border border-white/10 shadow-2xl overflow-hidden"
+      onClick={e => e.stopPropagation()}
+    >
+      {/* Search input */}
+      <div className="flex items-center gap-3 px-4 py-3 border-b border-white/10">
+        <span className="text-white/40 text-lg">⌘</span>
+        <input
+          ref={inputRef}
+          autoFocus
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="Search deals, reps, pages... or ask a question"
+          className="flex-1 bg-transparent text-white placeholder-white/30 outline-none text-sm"
+        />
+        {query && (
+          <button onClick={() => setQuery('')} className="text-white/30 hover:text-white/60">
+            ✕
+          </button>
+        )}
+      </div>
+
+      {/* Results list */}
+      <div className="max-h-[400px] overflow-y-auto py-2">
+        {results.length === 0 ? (
+          <div className="px-4 py-8 text-center text-white/30 text-sm">
+            No results for "{query}"
+          </div>
+        ) : (
+          results.map((result, index) => (
+            <div
+              key={result.id}
+              onClick={result.action}
+              onMouseEnter={() => setSelectedIndex(index)}
+              className={`
+                flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors
+                ${index === selectedIndex ? 'bg-white/10' : 'hover:bg-white/5'}
+              `}
+            >
+              <span className="text-base w-5 text-center shrink-0">{result.icon}</span>
+              <div className="flex-1 min-w-0">
+                <div className="text-white text-sm font-medium truncate">
+                  {result.title}
+                </div>
+                <div className="text-white/40 text-xs truncate mt-0.5">
+                  {result.subtitle}
+                </div>
+              </div>
+              <span className="text-white/20 text-xs shrink-0">
+                {result.type === 'deal' ? 'deal' :
+                 result.type === 'rep' ? 'rep' :
+                 result.type === 'skill' ? 'skill' :
+                 result.type === 'ask' ? 'ask pandora' : ''}
+              </span>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Footer */}
+      <div className="flex items-center gap-4 px-4 py-2 border-t border-white/10 text-white/25 text-xs">
+        <span>↑↓ navigate</span>
+        <span>↵ select</span>
+        <span>esc close</span>
+      </div>
+    </div>
+  </div>
+)
+```
+
+---
+
+### Part 4 — Keyboard handler
+
+```typescript
+function handleKeyDown(e: React.KeyboardEvent) {
+  switch (e.key) {
+    case 'ArrowDown':
+      e.preventDefault()
+      setSelectedIndex(i => Math.min(i + 1, results.length - 1))
+      break
+    case 'ArrowUp':
+      e.preventDefault()
+      setSelectedIndex(i => Math.max(i - 1, 0))
+      break
+    case 'Enter':
+      e.preventDefault()
+      if (results[selectedIndex]) results[selectedIndex].action()
+      break
+    case 'Escape':
+      close()
+      break
+  }
+}
+```
+
+---
+
+### Part 5 — Global registration
+
+In `App.tsx` or the root layout:
+
+```typescript
+useEffect(() => {
+  const handler = (e: KeyboardEvent) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      e.preventDefault()
+      setCommandPaletteOpen(true)
+    }
+  }
+  window.addEventListener('keydown', handler)
+  return () => window.removeEventListener('keydown', handler)
+}, [])
+```
+
+Add a subtle hint in the sidebar or header so users discover it:
+```tsx
+// In the sidebar, below the nav links:
+<div className="text-white/20 text-xs px-4 mt-auto mb-4">
+  Press ⌘K to search
+</div>
+```
+
+---
+
+### Verification
+
+1. Press Cmd+K anywhere in the app — palette opens
+2. Empty state shows 3 stalest deals + pages + Ask Pandora prompt
+3. Type "butterfly" — Butterfly Effects Inc appears as first result with stage, amount, days silent
+4. Press Enter on a deal — Ask Pandora opens scoped to that deal
+5. Type "action" — Actions page and Action Behavior Centers both appear in results
+6. Type "run pipeline" — pipeline-hygiene skill appears with "Run:" prefix
+7. Type "why are we missing forecast?" — "Ask Pandora: why are we missing..." appears as last result
+8. Arrow keys navigate, Escape closes, clicking outside closes
+9. Type "nate" — Nate Phillips appears as rep result
+
+**Server must be clean. fuse.js install if not already present: `npm install fuse.js`**

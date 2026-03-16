@@ -273,6 +273,17 @@ export default function Sidebar({
           })}
         </nav>
 
+        {/* Cmd+K hint */}
+        {expanded && (
+          <div style={{
+            padding: '6px 16px 2px',
+            display: 'flex', alignItems: 'center', gap: 5,
+          }}>
+            <span style={{ fontSize: 10, color: '#2a3040', letterSpacing: '0.02em', userSelect: 'none' }}>⌘K</span>
+            <span style={{ fontSize: 10, color: '#2a3040', userSelect: 'none' }}>search</span>
+          </div>
+        )}
+
         {/* BOTTOM: workspace info + user */}
         <div style={{ borderTop: `0.5px solid ${S.border}`, padding: '10px 0', flexShrink: 0 }}>
           {/* Workspace name row — clickable switcher when multiple workspaces exist */}

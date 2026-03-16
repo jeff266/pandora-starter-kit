@@ -31,6 +31,8 @@ import { query } from '../db.js';
 import { setDealScopeOverride } from '../config/scope-stamper.js';
 import { computeAccountRFM, persistAccountRFM } from '../analysis/account-rfm.js';
 import { buildDealScopeFilter, buildAccountScopeFilter } from '../middleware/apply-data-scope.js';
+import { expandDealName, loadProductCatalog } from '../chat/deal-lookup.js';
+import { getSkillRegistry } from '../skills/registry.js';
 
 const router = Router();
 const filterResolver = new FilterResolver();
@@ -1084,6 +1086,82 @@ router.get('/:id/signals/scan-status', async (req: Request, res: Response): Prom
       last_scan_at: null,
       accounts_scanned_this_week: 0,
     });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
+  }
+});
+
+// ── Command palette search index ─────────────────────────────────────────────
+// GET /:id/search-index  — returns deals, reps, hypotheses, skills for Cmd+K
+router.get('/:id/search-index', async (req: Request, res: Response): Promise<void> => {
+  const workspaceId = req.params.id;
+  try {
+    const [dealsResult, repsResult, hypothesesResult] = await Promise.all([
+      query(
+        `SELECT id, name, amount, stage_normalized, owner, last_activity_date, close_date
+         FROM deals
+         WHERE workspace_id = $1
+           AND stage_normalized NOT IN ('closed_won', 'closed_lost')
+           AND amount > 0
+         ORDER BY last_activity_date ASC NULLS LAST
+         LIMIT 500`,
+        [workspaceId]
+      ),
+      query(
+        `SELECT u.email, u.name, wr.system_type AS role
+         FROM workspace_members wm
+         JOIN users u ON u.id = wm.user_id
+         JOIN workspace_roles wr ON wr.id = wm.role_id
+         WHERE wm.workspace_id = $1 AND wm.status = 'active'
+         ORDER BY u.name ASC`,
+        [workspaceId]
+      ),
+      query(
+        `SELECT id, hypothesis, metric, status
+         FROM standing_hypotheses
+         WHERE workspace_id = $1 AND status = 'active'
+         ORDER BY created_at ASC`,
+        [workspaceId]
+      ),
+    ]);
+
+    const products = await loadProductCatalog(workspaceId);
+    const now = Date.now();
+
+    const deals = dealsResult.rows.map((d: any) => ({
+      id: d.id,
+      name: expandDealName(d.name, products),
+      amount: parseFloat(d.amount ?? '0'),
+      stage: (d.stage_normalized ?? '').replace(/_/g, ' '),
+      ownerName: d.owner ?? '',
+      daysSinceActivity: d.last_activity_date
+        ? Math.floor((now - new Date(d.last_activity_date).getTime()) / 86400000)
+        : 999,
+      closeDate: d.close_date ?? null,
+    }));
+
+    const reps = repsResult.rows.map((r: any) => ({
+      email: r.email,
+      name: r.name || r.email,
+      role: r.role || 'member',
+    }));
+
+    const hypotheses = hypothesesResult.rows.map((h: any) => ({
+      id: h.id,
+      hypothesis: h.hypothesis,
+      metric: h.metric,
+      status: h.status,
+    }));
+
+    const registry = getSkillRegistry();
+    const skills = registry.listAll().map(s => ({
+      id: s.id,
+      name: s.name,
+      category: s.category,
+    }));
+
+    res.json({ deals, reps, hypotheses, skills });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     res.status(500).json({ error: msg });

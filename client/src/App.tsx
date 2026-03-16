@@ -6,6 +6,7 @@ import { useDemoMode } from './contexts/DemoModeContext';
 import { setApiCredentials, api } from './lib/api';
 import { PandoraRoleProvider } from './context/PandoraRoleContext';
 import Sidebar from './components/Sidebar';
+import CommandPalette from './components/CommandPalette';
 import TopBar from './components/TopBar';
 import NotificationBell from './components/notifications/NotificationBell';
 import Placeholder from './components/Placeholder';
@@ -165,6 +166,7 @@ export default function App() {
   const [chatWbrContributions, setChatWbrContributions] = useState<any[] | null>(null);
   const isMobile = useIsMobile();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try { return localStorage.getItem('sidebar_collapsed') === 'true'; } catch { return false; }
   });
@@ -182,6 +184,18 @@ export default function App() {
 
   // Close mobile menu on route change
   useEffect(() => { setMobileMenuOpen(false); }, [location.pathname]);
+
+  // Cmd+K / Ctrl+K — open command palette
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        setCommandPaletteOpen(v => !v);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
 
   // Open a specific chat session when navigated here via router state (e.g. from Agent Builder)
   const navigate = useNavigate();
@@ -467,6 +481,7 @@ export default function App() {
           )}
         </button>
       )}
+      <CommandPalette isOpen={commandPaletteOpen} onClose={() => setCommandPaletteOpen(false)} />
       <ChatPanel
         isOpen={chatOpen}
         onClose={() => { setChatOpen(false); setChatInitialSession(null); setChatPendingMessage(null); setChatConciergeContext(null); setChatForceNewThread(false); setChatWbrContributions(null); }}
