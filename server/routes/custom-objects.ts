@@ -13,7 +13,8 @@
 import { Router, type Request, type Response } from 'express';
 import { query } from '../db.js';
 import { createLogger } from '../utils/logger.js';
-import { getConnectorCredentials } from '../lib/credential-store.js';
+import { getConnectorCredentials, updateCredentialFields } from '../lib/credential-store.js';
+import { SalesforceClient, SalesforceSessionExpiredError } from '../connectors/salesforce/client.js';
 
 const router = Router();
 const logger = createLogger('CustomObjectRoutes');
@@ -46,18 +47,70 @@ const MAPPABLE_SF_TYPES = new Set([
   'percent', 'phone', 'email', 'url', 'reference', 'id', 'long', 'boolean',
 ]);
 
-async function describeObject(
-  accessToken: string,
-  instanceUrl: string,
+/**
+ * Build a SalesforceClient, refreshing the access token if it has expired.
+ * Persists refreshed token back to the credential store.
+ */
+async function buildClient(
+  creds: Record<string, any>,
+  workspaceId: string
+): Promise<SalesforceClient> {
+  return new SalesforceClient({
+    accessToken: creds.accessToken,
+    instanceUrl: creds.instanceUrl,
+    apiVersion: creds.apiVersion,
+  });
+}
+
+async function callWithRefresh<T>(
+  creds: Record<string, any>,
+  workspaceId: string,
+  fn: (client: SalesforceClient) => Promise<T>
+): Promise<T> {
+  const client = await buildClient(creds, workspaceId);
+  try {
+    return await fn(client);
+  } catch (err) {
+    if (err instanceof SalesforceSessionExpiredError) {
+      logger.info('[CustomObjects] Token expired, refreshing', { workspaceId });
+      const refreshed = await SalesforceClient.refreshAccessToken(
+        creds.refreshToken,
+        creds.clientId,
+        creds.clientSecret
+      );
+      await updateCredentialFields(workspaceId, 'salesforce', {
+        accessToken: refreshed.accessToken,
+        instanceUrl: refreshed.instanceUrl,
+      });
+      const fresh = new SalesforceClient({
+        accessToken: refreshed.accessToken,
+        instanceUrl: refreshed.instanceUrl,
+        apiVersion: creds.apiVersion,
+      });
+      return await fn(fresh);
+    }
+    throw err;
+  }
+}
+
+async function describeObjectFields(
+  client: SalesforceClient,
   objectName: string
 ): Promise<SalesforceFieldMeta[]> {
-  const url = `${instanceUrl}/services/data/v62.0/sobjects/${objectName}/describe`;
+  const url = `${(client as any).baseUrl}/sobjects/${objectName}/describe`;
   const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    headers: {
+      Authorization: `Bearer ${(client as any).accessToken}`,
+      'Content-Type': 'application/json',
+    },
   });
 
   if (!res.ok) {
     const text = await res.text();
+    if (res.status === 404 || text.includes('NOT_FOUND') || text.includes('INVALID_TYPE')) {
+      throw new Error(`Salesforce describe failed for ${objectName}: ${res.status} ${text}`);
+    }
+    if (res.status === 401) throw new SalesforceSessionExpiredError();
     throw new Error(`Salesforce describe failed for ${objectName}: ${res.status} ${text}`);
   }
 
@@ -110,6 +163,49 @@ async function saveCustomObjectsConfig(
 // ── Routes ────────────────────────────────────────────────────────────────────
 
 /**
+ * GET /:workspaceId/connectors/salesforce/objects
+ * Lists all custom objects in the connected Salesforce org.
+ * Used for discoverability when the exact API name isn't known.
+ */
+router.get(
+  '/:workspaceId/connectors/salesforce/objects',
+  async (req: Request, res: Response) => {
+    const { workspaceId } = req.params;
+    try {
+      const creds = await getConnectorCredentials(workspaceId, 'salesforce');
+      if (!creds) {
+        return res.status(400).json({ error: 'Salesforce not connected for this workspace' });
+      }
+
+      const objects = await callWithRefresh(creds, workspaceId, async (client) => {
+        const url = `${(client as any).baseUrl}/sobjects`;
+        const r = await fetch(url, {
+          headers: {
+            Authorization: `Bearer ${(client as any).accessToken}`,
+            'Content-Type': 'application/json',
+          },
+        });
+        if (!r.ok) {
+          if (r.status === 401) throw new SalesforceSessionExpiredError();
+          throw new Error(`Failed to list objects: ${r.status}`);
+        }
+        const data = await r.json() as { sobjects: any[] };
+        return (data.sobjects || [])
+          .filter((o: any) => o.custom || o.customSetting)
+          .map((o: any) => ({ name: o.name, label: o.label, custom: o.custom }))
+          .sort((a: any, b: any) => a.label.localeCompare(b.label));
+      });
+
+      res.json({ objects });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      logger.error('[CustomObjects] List objects failed', err as Error);
+      res.status(500).json({ error: msg });
+    }
+  }
+);
+
+/**
  * GET /:workspaceId/connectors/salesforce/objects/:objectName/fields
  * Describes a Salesforce object and returns its mappable fields.
  */
@@ -124,10 +220,8 @@ router.get(
         return res.status(400).json({ error: 'Salesforce not connected for this workspace' });
       }
 
-      const fields = await describeObject(
-        creds.credentials.access_token,
-        creds.credentials.instance_url,
-        objectName
+      const fields = await callWithRefresh(creds, workspaceId, (client) =>
+        describeObjectFields(client, objectName)
       );
 
       logger.info('[CustomObjects] Described SF object', { workspaceId, objectName, fieldCount: fields.length });
