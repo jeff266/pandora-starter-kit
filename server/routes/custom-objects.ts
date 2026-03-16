@@ -75,8 +75,8 @@ async function callWithRefresh<T>(
       logger.info('[CustomObjects] Token expired, refreshing', { workspaceId });
       const refreshed = await SalesforceClient.refreshAccessToken(
         creds.refreshToken,
-        creds.clientId,
-        creds.clientSecret
+        creds.clientId ?? process.env.SALESFORCE_CLIENT_ID!,
+        creds.clientSecret ?? process.env.SALESFORCE_CLIENT_SECRET!
       );
       await updateCredentialFields(workspaceId, 'salesforce', {
         accessToken: refreshed.accessToken,

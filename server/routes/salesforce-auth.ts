@@ -201,7 +201,7 @@ router.get("/callback", async (req: Request, res: Response) => {
     );
 
     logger.info("Stored Salesforce connection", { workspaceId });
-    res.redirect(`/workspaces/${workspaceId}/connectors`);
+    res.redirect(`/connectors?connected=salesforce`);
   } catch (err) {
     logger.error(`Token exchange error: ${err instanceof Error ? err.message : String(err)}`);
     res.redirect("/?error=salesforce_callback_failed");
