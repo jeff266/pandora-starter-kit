@@ -140,6 +140,7 @@ export type IntentCategory =
   | 'advisory_with_data_option' // Better with data, but answerable without — "what closed-lost reasons should I use?"
   | 'document_request'          // User wants a downloadable document — "create a framework", "build a report"
   | 'retrospective'             // Quarterly/period retrospective analysis — "why did we miss?", "how did Q1 go?"
+  | 'deal_deliberation'         // Prosecutor/Defense deliberation — "will this deal close?", "what's the risk?"
   | 'ambiguous';                // Unclear — fall through to existing path
 
 export interface IntentClassification {
@@ -151,6 +152,24 @@ export interface IntentClassification {
   tokens_used: number;          // 0 for fast path
   is_followup_doc?: boolean;    // true when user wants previous response converted to a doc
 }
+
+// Deliberation trigger patterns — only fire when chat is deal-scoped
+const DELIBERATION_PATTERNS = [
+  /will (this|the) deal close\b/i,
+  /should i be worried\b/i,
+  /what(\'s| is) the risk (here|on this|with this)\b/i,
+  /what are the (chances|odds)\b/i,
+  /is this deal going to close\b/i,
+  /what do you think about this deal\b/i,
+  /give me your honest assessment\b/i,
+  /prosecutor.{0,10}defense\b/i,
+  /devil.{0,5}advocate\b/i,
+  /\bhow (likely|probable) is (it|this) to close\b/i,
+  /\b(chance|probability|likelihood) (this|of this) (deal )?(closes?|closing)\b/i,
+  /\bwhat(\'s| is) (your|the) (call|take|read) on this deal\b/i,
+  /\bwill (we|it) close\b/i,
+  /\bshould (i|we) be (worried|concerned|nervous)\b/i,
+];
 
 // Retrospective intent patterns — route to 3-phase evidence-harvest architecture
 const RETROSPECTIVE_PATTERNS = [
@@ -338,6 +357,10 @@ function timeoutPromise(ms: number): Promise<never> {
   return new Promise((_, reject) => {
     setTimeout(() => reject(new Error('classifier_timeout')), ms);
   });
+}
+
+export function isDeliberationTrigger(message: string): boolean {
+  return DELIBERATION_PATTERNS.some(p => p.test(message));
 }
 
 export async function classifyIntent(

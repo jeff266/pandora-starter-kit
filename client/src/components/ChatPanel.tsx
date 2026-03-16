@@ -6,6 +6,7 @@ import { useDemoMode } from '../contexts/DemoModeContext';
 import { Icon } from './icons';
 import ChartRenderer from './shared/ChartRenderer';
 import type { ChartSpec } from './shared/ChartRenderer';
+import DeliberationCard from './DeliberationCard';
 import ChatDocBar from './ChatDocBar';
 import SaveAsAgentBanner from './chat/SaveAsAgentBanner';
 import { useSaveAsAgentTrigger } from '../hooks/useSaveAsAgentTrigger';
@@ -47,6 +48,7 @@ interface ChatMessage {
   tool_call_count?: number;
   latency_ms?: number;
   chart_specs?: ChartSpec[];
+  deliberation?: any;
 }
 
 interface ChatScope {
@@ -338,6 +340,7 @@ export default function ChatPanel({ isOpen, onClose, scope, initialSessionId, pe
         tool_call_count: msg.metadata?.tool_call_count,
         latency_ms: msg.metadata?.latency_ms,
         chart_specs: msg.metadata?.chart_specs,
+        deliberation: msg.metadata?.deliberation,
       }));
       setMessages(mapped);
       setSessionId(id);
@@ -449,6 +452,7 @@ export default function ChatPanel({ isOpen, onClose, scope, initialSessionId, pe
         tool_call_count: result.tool_call_count,
         latency_ms: result.latency_ms,
         chart_specs: result.chart_specs,
+        deliberation: result.deliberation,
       };
       setMessages(prev => [...prev, assistantMsg]);
       if (result.suggested_actions && result.suggested_actions.length > 0) {
@@ -660,6 +664,9 @@ export default function ChatPanel({ isOpen, onClose, scope, initialSessionId, pe
                     </div>
                   ))}
                 </div>
+              )}
+              {msg.role === 'assistant' && msg.deliberation && (
+                <DeliberationCard deliberation={msg.deliberation} />
               )}
               {msg.role === 'assistant' && isLongResponse && !alreadyHasDoc && !loading && (
                 <div style={{ marginTop: 10, borderTop: '1px solid #1e293b', paddingTop: 10 }}>

@@ -113,6 +113,7 @@ router.post('/:workspaceId/chat', async (req: Request, res: Response): Promise<v
       ...(result.evidence ? { evidence: result.evidence } : {}),
       ...(result.chart_specs?.length ? { chart_specs: result.chart_specs } : {}),
       ...(suggestedActions.length > 0 ? { suggested_actions: suggestedActions } : {}),
+      ...(result.deliberation ? { deliberation: result.deliberation } : {}),
     };
 
     // Persist to session (fire-and-forget to not slow response)
@@ -159,6 +160,7 @@ router.post('/:workspaceId/chat', async (req: Request, res: Response): Promise<v
       ...(result.inline_actions ? { inline_actions: result.inline_actions } : {}),
       ...(result.chart_specs?.length ? { chart_specs: result.chart_specs } : {}),
       ...(suggestedActions.length > 0 ? { suggested_actions: suggestedActions } : {}),
+      ...(result.deliberation ? { deliberation: result.deliberation } : {}),
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

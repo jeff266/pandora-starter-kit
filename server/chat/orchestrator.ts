@@ -26,6 +26,8 @@ import { recordFeedbackSignal } from '../feedback/signals.js';
 import { createAnnotation, getActiveAnnotations } from '../feedback/annotations.js';
 import { randomUUID } from 'crypto';
 import { runPandoraAgent, buildConversationHistory } from './pandora-agent.js';
+import { isDeliberationTrigger } from './intent-classifier.js';
+import { runDeliberation, type DeliberationResult } from './deliberation-engine.js';
 import { logChatMessage } from '../lib/chat-logger.js';
 import { estimateTokens } from './token-estimator.js';
 import { callLLM } from '../utils/llm-router.js';
@@ -94,6 +96,7 @@ export interface ConversationTurnResult {
     xlsxFilename: string;
   };
   inline_actions?: any[];
+  deliberation?: DeliberationResult;
 }
 
 const CONVERSATION_SIGNALS = [
@@ -751,6 +754,46 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
         } catch (err) {
           console.error('[Orchestrator] Failed to fetch divergent deals for context:', err);
           // Non-fatal: continue without divergent deals context
+        }
+      }
+
+      // Deliberation intercept — only for deal-scoped sessions with judgment queries
+      if (scopeType === 'deal' && entityId && isDeliberationTrigger(message)) {
+        try {
+          console.log(`[orchestrator] Deliberation triggered for deal ${entityId}`);
+          const deliberationResult = await runDeliberation(workspaceId, entityId, message);
+          const summaryAnswer = `Prosecutor close probability: ${deliberationResult.perspectives.prosecutor.closeProbability}%. Defense close probability: ${deliberationResult.perspectives.defense.closeProbability}%. Expected value: $${Math.round(deliberationResult.verdict.expectedValue).toLocaleString()}.`;
+
+          await appendMessage(workspaceId, channelId, threadId, {
+            role: 'assistant',
+            content: summaryAnswer,
+            timestamp: new Date().toISOString(),
+          });
+          await logChatMessage({
+            workspaceId, sessionId: threadId, surface: 'ask_pandora', role: 'assistant',
+            content: summaryAnswer,
+            scope: { type: scopeType, entity_id: entityId, rep_email: repEmail } as Record<string, unknown>,
+            tokenCost: deliberationResult.tokenCost,
+          });
+          await updateContext(workspaceId, channelId, threadId, {
+            last_scope: { type: scopeType, entity_id: entityId, rep_email: repEmail },
+          });
+          await updateTurnMetrics(workspaceId, channelId, threadId, deliberationResult.tokenCost);
+
+          return {
+            answer: summaryAnswer,
+            thread_id: threadId,
+            scope: { type: scopeType, entity_id: entityId, rep_email: repEmail },
+            router_decision: 'deliberation',
+            data_strategy: 'prosecutor_defense',
+            tokens_used: deliberationResult.tokenCost,
+            response_id: randomUUID(),
+            feedback_enabled: true,
+            deliberation: deliberationResult,
+          };
+        } catch (err) {
+          console.error('[orchestrator] Deliberation failed, falling through to pandora_agent:', err);
+          // Non-fatal — fall through to standard pandora_agent
         }
       }
 
