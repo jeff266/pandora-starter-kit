@@ -762,7 +762,7 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
         try {
           console.log(`[orchestrator] Deliberation triggered for deal ${entityId}`);
           const deliberationResult = await runDeliberation(workspaceId, entityId, message);
-          const summaryAnswer = `Prosecutor close probability: ${deliberationResult.perspectives.prosecutor.closeProbability}%. Defense close probability: ${deliberationResult.perspectives.defense.closeProbability}%. Expected value: $${Math.round(deliberationResult.verdict.expectedValue).toLocaleString()}.`;
+          const summaryAnswer = `Bull Case close probability: ${deliberationResult.perspectives.bull.closeProbability}%. Bear Case close probability: ${deliberationResult.perspectives.bear.closeProbability}%. Expected value: $${Math.round(deliberationResult.verdict.expectedValue).toLocaleString()}.`;
 
           await appendMessage(workspaceId, channelId, threadId, {
             role: 'assistant',
@@ -785,7 +785,7 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
             thread_id: threadId,
             scope: { type: scopeType, entity_id: entityId, rep_email: repEmail },
             router_decision: 'deliberation',
-            data_strategy: 'prosecutor_defense',
+            data_strategy: 'bull_bear',
             tokens_used: deliberationResult.tokenCost,
             response_id: randomUUID(),
             feedback_enabled: true,

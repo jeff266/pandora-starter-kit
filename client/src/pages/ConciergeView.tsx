@@ -6,6 +6,7 @@ import { usePandoraRole, type PandoraRole } from '../context/PandoraRoleContext'
 import BriefCard from '../components/BriefCard';
 import MathModal from '../components/MathModal';
 import StreamingGreeting from '../components/StreamingGreeting';
+import { PixelAvatarPandora } from '../components/PixelAvatar';
 import AskBar, { type ChipId } from '../components/AskBar';
 import { type ConciergeContext, formatConciergeContextPreamble } from '../types/concierge-context';
 import { colors as themeColors } from '../styles/theme';
@@ -723,11 +724,7 @@ export default function ConciergeView() {
           padding: '14px 0 10px', borderBottom: `0.5px solid ${S.border}`, marginBottom: 16, gap: 12, flexWrap: 'wrap',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{
-              width: 22, height: 22, borderRadius: 5, background: S.teal,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 11, fontWeight: 700, color: '#fff', flexShrink: 0,
-            }}>P</div>
+            <PixelAvatarPandora size={22} />
             <span style={{ fontSize: 14, fontWeight: 600, color: S.text }}>Pandora</span>
             {pandoraRole && (
               <span style={{
@@ -763,11 +760,14 @@ export default function ConciergeView() {
 
         {/* STREAMING GREETING */}
         {currentWorkspace?.id && (
-          <div style={{ marginBottom: 18, marginTop: 6 }}>
-            <StreamingGreeting
-              workspaceId={currentWorkspace.id}
-              onComplete={() => setGreetingDone(true)}
-            />
+          <div style={{ marginBottom: 18, marginTop: 6, display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+            <PixelAvatarPandora size={40} style={{ marginTop: 2, flexShrink: 0 }} />
+            <div style={{ flex: 1 }}>
+              <StreamingGreeting
+                workspaceId={currentWorkspace.id}
+                onComplete={() => setGreetingDone(true)}
+              />
+            </div>
           </div>
         )}
 

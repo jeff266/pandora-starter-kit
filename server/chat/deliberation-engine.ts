@@ -2,7 +2,20 @@ import { query } from '../db.js';
 import { callLLM } from '../utils/llm-router.js';
 import { PANDORA_VOICE_STANDARD } from '../lib/voice-standard.js';
 
-export interface ProsecutionEvidence {
+export interface BullEvidence {
+  contactCount: number;
+  seniorContactCount: number;
+  engagedContactCount: number;
+  conversationCount: number;
+  mostRecentCallDate: string | null;
+  behavioralStage: string | null;
+  behavioralConfidence: number | null;
+  multithreadingScore: number | null;
+  dealAmountVsIcpMedian: 'above' | 'at' | 'below' | null;
+  repHistoricalCloseRate: number | null;
+}
+
+export interface BearEvidence {
   daysSinceActivity: number | null;
   daysUntilClose: number;
   callCount: number;
@@ -17,21 +30,8 @@ export interface ProsecutionEvidence {
   forecastCategoryMismatch: boolean;
 }
 
-export interface DefenseEvidence {
-  contactCount: number;
-  seniorContactCount: number;
-  engagedContactCount: number;
-  conversationCount: number;
-  mostRecentCallDate: string | null;
-  behavioralStage: string | null;
-  behavioralConfidence: number | null;
-  multithreadingScore: number | null;
-  dealAmountVsIcpMedian: 'above' | 'at' | 'below' | null;
-  repHistoricalCloseRate: number | null;
-}
-
 export interface DeliberationPerspective {
-  role: 'prosecutor' | 'defense';
+  role: 'bull' | 'bear';
   output: string;
   closeProbability: number;
 }
@@ -51,13 +51,13 @@ export interface DeliberationResult {
   dealStage: string;
   ownerName: string;
   perspectives: {
-    prosecutor: DeliberationPerspective;
-    defense: DeliberationPerspective;
+    bull: DeliberationPerspective;
+    bear: DeliberationPerspective;
   };
   verdict: DeliberationVerdict;
   tokenCost: number;
-  prosecutionEvidence: ProsecutionEvidence;
-  defenseEvidence: DefenseEvidence;
+  bullEvidence: BullEvidence;
+  bearEvidence: BearEvidence;
 }
 
 function parseProbabilityFromOutput(output: string): number {
@@ -68,30 +68,51 @@ function parseProbabilityFromOutput(output: string): number {
   return 50;
 }
 
-function parseVerdictFields(rawOutput: string, dealAmount: number, prosecutorProb: number, defenseProb: number): DeliberationVerdict {
+function futureDate(label: string): string {
+  const parsed = new Date(label);
+  if (!isNaN(parsed.getTime()) && parsed > new Date()) return label;
+  const fallback = new Date();
+  fallback.setDate(fallback.getDate() + 7);
+  return fallback.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function parseVerdictFields(
+  rawOutput: string,
+  dealAmount: number,
+  bullProb: number,
+  bearProb: number
+): DeliberationVerdict {
   const evMatch = rawOutput.match(/expected value[:\s]*\$?([\d,]+)/i);
   const kvMatch = rawOutput.match(/key variable[:\s]*([^\n.]+)/i);
   const reevMatch = rawOutput.match(/re.?evaluat[e\w]* by[:\s]*([^\n.]+)/i);
   const actionMatch = rawOutput.match(/recommended action[:\s]*([^\n]+)/i);
 
-  const midpointProb = (prosecutorProb + defenseProb) / 2 / 100;
+  const midpointProb = (bullProb + bearProb) / 2 / 100;
   const expectedValue = evMatch
     ? parseFloat(evMatch[1].replace(/,/g, ''))
     : Math.round(dealAmount * midpointProb);
 
+  const rawReev = reevMatch ? reevMatch[1].trim() : '';
+  const reevaluateBy = rawReev ? futureDate(rawReev) : (() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 7);
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  })();
+
   return {
     expectedValue,
     keyVariable: kvMatch ? kvMatch[1].trim() : 'Engagement with economic buyer',
-    reevaluateBy: reevMatch ? reevMatch[1].trim() : 'Next call or check-in',
-    recommendedAction: actionMatch ? actionMatch[1].trim() : rawOutput.split('\n').filter(l => l.trim()).pop() || '',
+    reevaluateBy,
+    recommendedAction:
+      actionMatch ? actionMatch[1].trim() : rawOutput.split('\n').filter(l => l.trim()).pop() || '',
     rawOutput,
   };
 }
 
-async function gatherProsecutionEvidence(
+async function gatherBearEvidence(
   workspaceId: string,
   dealId: string
-): Promise<{ evidence: ProsecutionEvidence; deal: any }> {
+): Promise<{ evidence: BearEvidence; deal: any }> {
   const [dealResult, priorDealsResult, medianResult, contactRolesResult] = await Promise.all([
     query(
       `SELECT
@@ -166,12 +187,14 @@ async function gatherProsecutionEvidence(
     !expectedCategories.includes(deal.forecast_category);
 
   const medianDays = medianResult.rows[0]?.median_stage_days ?? null;
-  const stageAgeVsMedian = medianDays != null && deal.days_in_stage != null
-    ? parseInt(deal.days_in_stage, 10) - medianDays
-    : null;
+  const stageAgeVsMedian =
+    medianDays != null && deal.days_in_stage != null
+      ? parseInt(deal.days_in_stage, 10) - medianDays
+      : null;
 
-  const evidence: ProsecutionEvidence = {
-    daysSinceActivity: deal.days_since_activity != null ? parseInt(deal.days_since_activity, 10) : null,
+  const evidence: BearEvidence = {
+    daysSinceActivity:
+      deal.days_since_activity != null ? parseInt(deal.days_since_activity, 10) : null,
     daysUntilClose: parseInt(deal.days_until_close ?? '0', 10),
     callCount,
     missingRoles,
@@ -188,11 +211,11 @@ async function gatherProsecutionEvidence(
   return { evidence, deal };
 }
 
-async function gatherDefenseEvidence(
+async function gatherBullEvidence(
   workspaceId: string,
   dealId: string,
   deal: any
-): Promise<DefenseEvidence> {
+): Promise<BullEvidence> {
   const [contactsResult, convResult, icpResult, repResult] = await Promise.all([
     query(
       `SELECT
@@ -259,10 +282,13 @@ async function gatherDefenseEvidence(
     conversationCount: parseInt(convResult.rows[0]?.conversation_count || '0', 10),
     mostRecentCallDate: convResult.rows[0]?.most_recent_call_date ?? null,
     behavioralStage: deal.inferred_phase ?? null,
-    behavioralConfidence: deal.phase_confidence != null ? parseFloat(deal.phase_confidence) : null,
-    multithreadingScore: deal.rfm_threading_factor != null ? parseFloat(deal.rfm_threading_factor) : null,
+    behavioralConfidence:
+      deal.phase_confidence != null ? parseFloat(deal.phase_confidence) : null,
+    multithreadingScore:
+      deal.rfm_threading_factor != null ? parseFloat(deal.rfm_threading_factor) : null,
     dealAmountVsIcpMedian,
-    repHistoricalCloseRate: closeRate != null ? Math.round(parseFloat(closeRate) * 100) : null,
+    repHistoricalCloseRate:
+      closeRate != null ? Math.round(parseFloat(closeRate) * 100) : null,
   };
 }
 
@@ -271,72 +297,66 @@ export async function runDeliberation(
   dealId: string,
   triggerQuery: string
 ): Promise<DeliberationResult> {
-  const [{ evidence: prosecutionEvidence, deal }, ] = await Promise.all([
-    gatherProsecutionEvidence(workspaceId, dealId),
-  ]);
-
-  const defenseEvidence = await gatherDefenseEvidence(workspaceId, dealId, deal);
+  const { evidence: bearEvidence, deal } = await gatherBearEvidence(workspaceId, dealId);
+  const bullEvidence = await gatherBullEvidence(workspaceId, dealId, deal);
 
   const dealLabel = `${deal.name} — $${Number(deal.amount).toLocaleString()} — ${deal.stage} — Owner: ${deal.owner || 'Unknown'}`;
 
-  const [prosecutorResult, defenseResult] = await Promise.all([
-    callLLM(workspaceId, 'reason', {
-      systemPrompt: `${PANDORA_VOICE_STANDARD}
+  const bullResult = await callLLM(workspaceId, 'reason', {
+    systemPrompt: `${PANDORA_VOICE_STANDARD}
 
-You are building the case that this deal will NOT close this quarter.
-Use only the evidence provided in PROSECUTION EVIDENCE.
-Cite specific data points. No hedging. No editorializing.
+You are the Bull Case analyst. Build the case that this deal WILL close this quarter.
+Use only the evidence provided. Cite specific data points. No hedging. No editorializing.
 State 2-3 arguments. End with a close probability as a percentage.
 Format: numbered arguments, then "Close probability: X%"`,
-      messages: [{
-        role: 'user',
-        content: `DEAL: ${dealLabel}
-PROSECUTION EVIDENCE: ${JSON.stringify(prosecutionEvidence, null, 2)}`,
-      }],
-      maxTokens: 400,
-      temperature: 0.3,
-      _tracking: { workspaceId, phase: 'chat', stepName: 'deliberation-prosecutor' },
-    }),
-    callLLM(workspaceId, 'reason', {
-      systemPrompt: `${PANDORA_VOICE_STANDARD}
+    messages: [{
+      role: 'user',
+      content: `DEAL: ${dealLabel}
+BULL EVIDENCE: ${JSON.stringify(bullEvidence, null, 2)}`,
+    }],
+    maxTokens: 400,
+    temperature: 0.3,
+    _tracking: { workspaceId, phase: 'chat', stepName: 'deliberation-bull' },
+  });
 
-You are building the case that this deal WILL close this quarter.
-Use only the evidence provided in DEFENSE EVIDENCE.
-Cite specific data points. No hedging. No editorializing.
+  const bearResult = await callLLM(workspaceId, 'reason', {
+    systemPrompt: `${PANDORA_VOICE_STANDARD}
+
+You are the Bear Case analyst. Build the case that this deal will NOT close this quarter.
+Use only the evidence provided. Cite specific data points. No hedging. No editorializing.
 State 2-3 arguments. End with a close probability as a percentage.
 Format: numbered arguments, then "Close probability: X%"`,
-      messages: [{
-        role: 'user',
-        content: `DEAL: ${dealLabel}
-DEFENSE EVIDENCE: ${JSON.stringify(defenseEvidence, null, 2)}`,
-      }],
-      maxTokens: 400,
-      temperature: 0.3,
-      _tracking: { workspaceId, phase: 'chat', stepName: 'deliberation-defense' },
-    }),
-  ]);
+    messages: [{
+      role: 'user',
+      content: `DEAL: ${dealLabel}
+BEAR EVIDENCE: ${JSON.stringify(bearEvidence, null, 2)}`,
+    }],
+    maxTokens: 400,
+    temperature: 0.3,
+    _tracking: { workspaceId, phase: 'chat', stepName: 'deliberation-bear' },
+  });
 
-  const prosecutorOutput = prosecutorResult.content || '';
-  const defenseOutput = defenseResult.content || '';
-  const prosecutorProb = parseProbabilityFromOutput(prosecutorOutput);
-  const defenseProb = parseProbabilityFromOutput(defenseOutput);
+  const bullOutput = bullResult.content || '';
+  const bearOutput = bearResult.content || '';
+  const bullProb = parseProbabilityFromOutput(bullOutput);
+  const bearProb = parseProbabilityFromOutput(bearOutput);
 
   const verdictResult = await callLLM(workspaceId, 'reason', {
     systemPrompt: `${PANDORA_VOICE_STANDARD}
 
-You have heard both sides. Weigh the evidence.
+You have heard both the bull and bear cases. Weigh the evidence.
 State:
 1. Expected value (weighted midpoint of the two probabilities x deal amount)
 2. The key variable — the single factor that will determine the outcome
-3. Re-evaluate by — a specific date or trigger event, not a vague timeframe
+3. Re-evaluate by — a specific future date (must be in the future), not a vague timeframe
 4. Recommended action — one sentence, specific, actionable this week
 
 Do not repeat the arguments. Deliver a verdict only.`,
     messages: [{
       role: 'user',
       content: `DEAL: ${deal.name}
-PROSECUTOR SAID: ${prosecutorOutput}
-DEFENSE SAID: ${defenseOutput}`,
+BULL CASE SAID: ${bullOutput}
+BEAR CASE SAID: ${bearOutput}`,
     }],
     maxTokens: 350,
     temperature: 0.2,
@@ -344,27 +364,27 @@ DEFENSE SAID: ${defenseOutput}`,
   });
 
   const verdictOutput = verdictResult.content || '';
-  const verdict = parseVerdictFields(verdictOutput, parseFloat(deal.amount || '0'), prosecutorProb, defenseProb);
+  const verdict = parseVerdictFields(verdictOutput, parseFloat(deal.amount || '0'), bullProb, bearProb);
 
   const tokenCost =
-    (prosecutorResult.usage?.input_tokens ?? 0) +
-    (prosecutorResult.usage?.output_tokens ?? 0) +
-    (defenseResult.usage?.input_tokens ?? 0) +
-    (defenseResult.usage?.output_tokens ?? 0) +
+    (bullResult.usage?.input_tokens ?? 0) +
+    (bullResult.usage?.output_tokens ?? 0) +
+    (bearResult.usage?.input_tokens ?? 0) +
+    (bearResult.usage?.output_tokens ?? 0) +
     (verdictResult.usage?.input_tokens ?? 0) +
     (verdictResult.usage?.output_tokens ?? 0);
 
   await query(
     `INSERT INTO deliberation_runs
      (workspace_id, pattern, trigger_surface, trigger_query, entity_type, entity_id, perspectives, verdict, token_cost)
-     VALUES ($1, 'prosecutor_defense', 'ask_pandora', $2, 'deal', $3, $4, $5, $6)`,
+     VALUES ($1, 'bull_bear', 'ask_pandora', $2, 'deal', $3, $4, $5, $6)`,
     [
       workspaceId,
       triggerQuery.slice(0, 500),
       dealId,
       JSON.stringify({
-        prosecutor: { role: 'prosecutor', output: prosecutorOutput, closeProbability: prosecutorProb },
-        defense: { role: 'defense', output: defenseOutput, closeProbability: defenseProb },
+        bull: { role: 'bull', output: bullOutput, closeProbability: bullProb },
+        bear: { role: 'bear', output: bearOutput, closeProbability: bearProb },
       }),
       JSON.stringify(verdict),
       tokenCost,
@@ -378,12 +398,12 @@ DEFENSE SAID: ${defenseOutput}`,
     dealStage: deal.stage,
     ownerName: deal.owner || 'Unknown',
     perspectives: {
-      prosecutor: { role: 'prosecutor', output: prosecutorOutput, closeProbability: prosecutorProb },
-      defense: { role: 'defense', output: defenseOutput, closeProbability: defenseProb },
+      bull: { role: 'bull', output: bullOutput, closeProbability: bullProb },
+      bear: { role: 'bear', output: bearOutput, closeProbability: bearProb },
     },
     verdict,
     tokenCost,
-    prosecutionEvidence,
-    defenseEvidence,
+    bullEvidence,
+    bearEvidence,
   };
 }

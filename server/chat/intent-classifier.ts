@@ -140,7 +140,7 @@ export type IntentCategory =
   | 'advisory_with_data_option' // Better with data, but answerable without — "what closed-lost reasons should I use?"
   | 'document_request'          // User wants a downloadable document — "create a framework", "build a report"
   | 'retrospective'             // Quarterly/period retrospective analysis — "why did we miss?", "how did Q1 go?"
-  | 'deal_deliberation'         // Prosecutor/Defense deliberation — "will this deal close?", "what's the risk?"
+  | 'deal_deliberation'         // Bull/Bear Analysis — "will this deal close?", "what's the risk?"
   | 'ambiguous';                // Unclear — fall through to existing path
 
 export interface IntentClassification {
@@ -163,6 +163,7 @@ const DELIBERATION_PATTERNS = [
   /what do you think about this deal\b/i,
   /give me your honest assessment\b/i,
   /prosecutor.{0,10}defense\b/i,
+  /bull.{0,10}bear (case|analysis)\b/i,
   /devil.{0,5}advocate\b/i,
   /\bhow (likely|probable) is (it|this) to close\b/i,
   /\b(chance|probability|likelihood) (this|of this) (deal )?(closes?|closing)\b/i,
