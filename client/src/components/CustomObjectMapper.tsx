@@ -438,7 +438,10 @@ export default function CustomObjectMapper({ salesforceConnected }: CustomObject
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
   const load = useCallback(async () => {
-    if (!workspace?.id) return;
+    if (!workspace?.id) {
+      setLoading(false);
+      return;
+    }
     try {
       const data = await api.get(`/custom-objects`);
       setConfigs(data.custom_objects ?? []);
