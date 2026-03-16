@@ -412,7 +412,7 @@ export async function assembleOpeningBrief(
     query<{ deal_count: string; total_value: string; weighted_value: string }>(
       `SELECT COUNT(*) as deal_count,
               COALESCE(SUM(amount), 0)::numeric as total_value,
-              COALESCE(SUM(amount * COALESCE(probability, 0) / 100.0), 0)::numeric as weighted_value
+              COALESCE(SUM(amount * COALESCE(probability, 0)), 0)::numeric as weighted_value
        FROM deals
        WHERE workspace_id = $1
          AND stage_normalized NOT IN ('closed_won', 'closed_lost')
@@ -593,7 +593,11 @@ export async function assembleOpeningBrief(
   const pctAttained = targetAmount > 0 ? Math.round((closedWonValue / targetAmount) * 100) : null;
   const gap = targetAmount > 0 ? Math.max(0, targetAmount - closedWonValue) : null;
   const totalPipeline = Number(pipe?.total_value ?? 0);
-  const coverageRatio = gap && gap > 0 ? Math.round((totalPipeline / gap) * 10) / 10 : null;
+  const coverageRatio = gap == null
+    ? null
+    : gap > 0
+      ? Math.round((totalPipeline / gap) * 10) / 10
+      : targetAmount > 0 ? Math.round((totalPipeline / targetAmount) * 10) / 10 : null;
 
   const avgDealSize = Number(ds?.avg_amount ?? 0);
   const avgCycle = Number(ds?.avg_cycle ?? 30);

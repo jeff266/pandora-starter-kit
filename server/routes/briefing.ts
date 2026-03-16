@@ -388,7 +388,7 @@ router.get(
             `SELECT
                COALESCE(SUM(amount), 0)::numeric as total_value,
                COUNT(*)::text as deal_count,
-               COALESCE(SUM(amount * COALESCE(probability, 0) / 100.0), 0)::numeric as weighted_value
+               COALESCE(SUM(amount * COALESCE(probability, 0)), 0)::numeric as weighted_value
              FROM deals
              WHERE workspace_id = $1
                AND stage_normalized NOT IN ('closed_won', 'closed_lost')

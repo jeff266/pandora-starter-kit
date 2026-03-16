@@ -142,7 +142,7 @@ interface OpeningBriefData {
   movementAnchorLabel?: string;
   situationLine?: string;
   suggestedQuestion?: string;
-  estimatedQ2Coverage?: number | null;
+  estimatedQ2Coverage?: { estimatedQ2Coverage: number | null; openPipelineWeighted?: number; expectedRolloverValue?: number; rolloverDealCount?: number; q2Target?: number; confidence?: string; note?: string } | null;
   priorityFrame?: {
     frameLabel: string;
     primaryTopics: string[];
@@ -867,7 +867,7 @@ export default function ConciergeView() {
 
             {/* 4-COLUMN METRIC ROW */}
             {(() => {
-              const estQ2Raw = brief.estimatedQ2Coverage != null ? Number(brief.estimatedQ2Coverage) : null;
+              const estQ2Raw = brief.estimatedQ2Coverage?.estimatedQ2Coverage != null ? Number(brief.estimatedQ2Coverage.estimatedQ2Coverage) : null;
               const estQ2Valid = estQ2Raw !== null && !isNaN(estQ2Raw) && isFinite(estQ2Raw);
               const fallbackCoverage = brief.pipeline?.coverageRatio != null ? Number(brief.pipeline.coverageRatio) : null;
               const q2Display = estQ2Valid
@@ -1115,7 +1115,7 @@ export default function ConciergeView() {
               const priorityFrame = brief.priorityFrame ?? null;
               if (priorityFrame) {
                 const topics = priorityFrame.primaryTopics ?? [];
-                const estQ2 = brief.estimatedQ2Coverage != null ? Number(brief.estimatedQ2Coverage) : null;
+                const estQ2 = brief.estimatedQ2Coverage?.estimatedQ2Coverage != null ? Number(brief.estimatedQ2Coverage.estimatedQ2Coverage) : null;
                 let frameSentence = '';
                 if (topics.includes('q2_setup') && (estQ2 === null || isNaN(estQ2) || estQ2 < 3)) {
                   const coldTotal = riskDeals.reduce((s, d) => s + d.amount, 0);
