@@ -1,0 +1,362 @@
+**Replit Prompt: Surface 3 frontend — Red Team hypothesis card UI**
+
+Read these files first:
+1. `client/src/components/DeliberationCard.tsx` — read the full component. Understand how `deliberation: DeliberationData` prop is shaped and how the typewriter sequence works for Bull/Bear/Verdict
+2. `client/src/pages/Actions.tsx` — find where hypothesis cards render in the Hypotheses tab
+3. The hypothesis card component — find where the "No sprint actions linked" empty state renders
+4. The existing sprint action row component — understand how `hypothesis_id` is linked to actions
+
+---
+
+### What to build
+
+On breached hypothesis cards only, add a "Challenge this plan" button and an inline Red Team deliberation panel that expands the card downward.
+
+---
+
+### Step 1 — Button on breached hypothesis cards
+
+Find the hypothesis card in the Hypotheses tab. After the sprint actions list or empty state, add:
+
+```tsx
+{isBreached(hypothesis) && (
+  <div style={{
+    marginTop: '12px',
+    paddingTop: '12px',
+    borderTop: '0.5px solid var(--color-border-tertiary)'
+  }}>
+    {!redTeamResults.get(hypothesis.id) ? (
+      <button
+        onClick={() => triggerRedTeam(hypothesis.id)}
+        disabled={redTeamLoading.has(hypothesis.id)}
+        style={{
+          fontSize: '12px',
+          color: 'var(--color-text-danger)',
+          background: 'none',
+          border: '0.5px solid var(--color-border-tertiary)',
+          borderRadius: 'var(--border-radius-md)',
+          padding: '4px 10px',
+          cursor: redTeamLoading.has(hypothesis.id) ? 'wait' : 'pointer',
+          opacity: redTeamLoading.has(hypothesis.id) ? 0.6 : 1,
+        }}
+      >
+        {redTeamLoading.has(hypothesis.id) ? 'Challenging...' : '⚡ Challenge this plan'}
+      </button>
+    ) : (
+      <RedTeamPanel result={redTeamResults.get(hypothesis.id)!} />
+    )}
+  </div>
+)}
+```
+
+---
+
+### Step 2 — State management in the Hypotheses tab
+
+```tsx
+const [redTeamResults, setRedTeamResults] = useState
+  Map<string, any>
+>(new Map())
+const [redTeamLoading, setRedTeamLoading] = useState<Set<string>>(new Set())
+
+async function triggerRedTeam(hypothesisId: string) {
+  setRedTeamLoading(prev => new Set(prev).add(hypothesisId))
+  try {
+    const res = await fetch(
+      `/api/workspaces/${workspaceId}/deliberation/hypothesis/${hypothesisId}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        }
+      }
+    )
+    const data = await res.json()
+    if (data.success) {
+      setRedTeamResults(prev =>
+        new Map(prev).set(hypothesisId, data.deliberation)
+      )
+    }
+  } catch (err) {
+    console.error('[RedTeam] trigger failed:', err)
+  } finally {
+    setRedTeamLoading(prev => {
+      const next = new Set(prev)
+      next.delete(hypothesisId)
+      return next
+    })
+  }
+}
+
+function isBreached(hypothesis: any): boolean {
+  if (hypothesis.alertDirection === 'below' || hypothesis.alert_direction === 'below') {
+    return (hypothesis.currentValue ?? hypothesis.current_value) 
+           (hypothesis.alertThreshold ?? hypothesis.alert_threshold)
+  }
+  return (hypothesis.currentValue ?? hypothesis.current_value) >
+         (hypothesis.alertThreshold ?? hypothesis.alert_threshold)
+}
+```
+
+---
+
+### Step 3 — RedTeamPanel component
+
+Create `client/src/components/RedTeamPanel.tsx`:
+
+```tsx
+import { useState, useEffect, useRef } from 'react'
+
+interface RedTeamResult {
+  pattern: 'red_team'
+  hypothesisId: string
+  perspectives: {
+    agent: 'plan' | 'red_team'
+    label: string
+    output: string
+  }[]
+  verdict: {
+    planSufficiency: string
+    missingAction: string | null
+    watchMetric: string
+    raw: string
+  }
+  tokenCost: number
+}
+
+const AGENT_CONFIG = {
+  plan:     { label: 'Current Plan', monogram: 'P', bgColor: '#185FA5', textColor: '#fff' },
+  red_team: { label: 'Red Team',     monogram: 'R', bgColor: '#993C1D', textColor: '#fff' },
+}
+
+const SUFFICIENCY_COLORS = {
+  sufficient:    { bg: 'var(--color-background-success)', text: 'var(--color-text-success)' },
+  borderline:    { bg: 'var(--color-background-warning)', text: 'var(--color-text-warning)' },
+  insufficient:  { bg: 'var(--color-background-danger)',  text: 'var(--color-text-danger)'  },
+}
+
+function useTypewriter(text: string, active: boolean, speed = 18) {
+  const [displayed, setDisplayed] = useState('')
+  const [done, setDone] = useState(false)
+  const indexRef = useRef(0)
+
+  useEffect(() => {
+    if (!active || !text) return
+    indexRef.current = 0
+    setDisplayed('')
+    setDone(false)
+
+    function type() {
+      if (indexRef.current >= text.length) {
+        setDone(true)
+        return
+      }
+      const char = text[indexRef.current]
+      setDisplayed(prev => prev + char)
+      indexRef.current++
+      const delay = char === '.' ? 260 : char === ',' ? 100 : char === ' ' ? 22 : speed + Math.random() * 12
+      setTimeout(type, delay)
+    }
+
+    const start = setTimeout(type, 300)
+    return () => clearTimeout(start)
+  }, [text, active])
+
+  return { displayed, done }
+}
+
+export default function RedTeamPanel({ result }: { result: RedTeamResult }) {
+  const plan = result.perspectives.find(p => p.agent === 'plan')!
+  const redTeam = result.perspectives.find(p => p.agent === 'red_team')!
+
+  const planTyper = useTypewriter(plan.output, true)
+  const redTeamTyper = useTypewriter(redTeam.output, planTyper.done)
+  const [verdictVisible, setVerdictVisible] = useState(false)
+
+  useEffect(() => {
+    if (redTeamTyper.done) {
+      setTimeout(() => setVerdictVisible(true), 400)
+    }
+  }, [redTeamTyper.done])
+
+  const sufficiencyColors = SUFFICIENCY_COLORS[
+    result.verdict.planSufficiency as keyof typeof SUFFICIENCY_COLORS
+  ] ?? SUFFICIENCY_COLORS.borderline
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+
+      {/* Plan Defense */}
+      <AgentTurn
+        config={AGENT_CONFIG.plan}
+        text={planTyper.displayed}
+        isTyping={!planTyper.done}
+      />
+
+      {/* Red Team Attack — only renders after Plan finishes */}
+      {planTyper.done && (
+        <AgentTurn
+          config={AGENT_CONFIG.red_team}
+          text={redTeamTyper.displayed}
+          isTyping={!redTeamTyper.done}
+        />
+      )}
+
+      {/* Verdict — fades in after Red Team finishes */}
+      {verdictVisible && (
+        <div style={{
+          padding: '12px',
+          background: 'var(--color-background-secondary)',
+          borderRadius: 'var(--border-radius-md)',
+          border: '0.5px solid var(--color-border-tertiary)',
+          opacity: verdictVisible ? 1 : 0,
+          transition: 'opacity 0.4s ease',
+        }}>
+          <div style={{
+            fontSize: '10px',
+            fontWeight: 500,
+            letterSpacing: '0.08em',
+            textTransform: 'uppercase',
+            color: 'var(--color-text-tertiary)',
+            marginBottom: '8px',
+          }}>
+            Verdict
+          </div>
+
+          {/* Sufficiency badge */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+            <span style={{
+              padding: '2px 8px',
+              borderRadius: 'var(--border-radius-md)',
+              fontSize: '11px',
+              fontWeight: 500,
+              background: sufficiencyColors.bg,
+              color: sufficiencyColors.text,
+              textTransform: 'capitalize',
+            }}>
+              {result.verdict.planSufficiency}
+            </span>
+          </div>
+
+          {/* Missing action — only shown if plan is insufficient */}
+          {result.verdict.missingAction && (
+            <p style={{
+              fontSize: '13px',
+              color: 'var(--color-text-primary)',
+              marginBottom: '6px',
+              lineHeight: 1.5,
+            }}>
+              <strong>Missing:</strong> {result.verdict.missingAction}
+            </p>
+          )}
+
+          {/* Watch metric */}
+          <p style={{
+            fontSize: '13px',
+            color: 'var(--color-text-secondary)',
+            lineHeight: 1.5,
+            margin: 0,
+          }}>
+            <strong>Watch:</strong> {result.verdict.watchMetric}
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function AgentTurn({
+  config,
+  text,
+  isTyping,
+}: {
+  config: typeof AGENT_CONFIG.plan
+  text: string
+  isTyping: boolean
+}) {
+  return (
+    <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+      {/* Avatar */}
+      <div style={{
+        width: '28px',
+        height: '28px',
+        borderRadius: '50%',
+        background: config.bgColor,
+        color: config.textColor,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontSize: '11px',
+        fontWeight: 500,
+        flexShrink: 0,
+        marginTop: '2px',
+      }}>
+        {config.monogram}
+      </div>
+
+      <div style={{ flex: 1 }}>
+        {/* Agent label */}
+        <div style={{
+          fontSize: '10px',
+          fontWeight: 500,
+          letterSpacing: '0.06em',
+          textTransform: 'uppercase',
+          color: 'var(--color-text-tertiary)',
+          marginBottom: '4px',
+        }}>
+          {config.label}
+        </div>
+
+        {/* Text with cursor */}
+        <p style={{
+          fontSize: '13px',
+          lineHeight: 1.6,
+          color: 'var(--color-text-primary)',
+          margin: 0,
+        }}>
+          {text}
+          {isTyping && (
+            <span style={{
+              display: 'inline-block',
+              width: '2px',
+              height: '13px',
+              background: 'var(--color-text-tertiary)',
+              marginLeft: '2px',
+              verticalAlign: 'text-bottom',
+              animation: 'blink 0.8s step-end infinite',
+            }} />
+          )}
+        </p>
+      </div>
+    </div>
+  )
+}
+```
+
+Add the blink keyframe if not already globally defined:
+
+```css
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+```
+
+---
+
+### Verification
+
+1. Open Actions → Hypotheses tab
+2. Find the conversion_rate hypothesis — 32% current, 35% threshold — this is breached
+3. "⚡ Challenge this plan" button visible below sprint actions
+4. Pipeline coverage hypothesis (2.9x, above 2.5x threshold) — button NOT visible
+5. Click "Challenge this plan" — button shows "Challenging..." while API call runs
+6. Plan Defense types out with blue P avatar
+7. Red Team types out with coral R avatar after Plan finishes
+8. Verdict fades in with sufficiency badge, missing action (if any), watch metric
+9. Sufficiency badge is red (insufficient), amber (borderline), or green (sufficient) depending on verdict
+10. Panel expands the card inline — no modal, no navigation away
+11. Refreshing the page resets the panel — deliberation is not persisted in frontend state across sessions (it's in the DB, not localStorage)
+
+**Server must be clean. No regressions on the This Week or Backlog tabs.**
