@@ -23,6 +23,17 @@ import { scoreIcpFit, scoreMultithreading, scoreConversationSentiment } from './
 import { computeRepConversions, computeSourceConversion, detectProcessBlockers, detectBuyerSignals, checkStakeholderStatus, enrichMarketSignals } from './analysis-tools.js';
 import { queryDealOutcomes } from './query-deal-outcomes.js';
 import { loadProductCatalog, expandDealName } from './deal-lookup.js';
+import {
+  queryPriorDeals,
+  queryRepPerformance,
+  queryDealVelocity,
+  queryIcpFit,
+  queryCompetitorSignals,
+  searchDeals,
+  queryCalendarContext,
+  queryHypothesisHistory,
+  getPandoraCapabilities,
+} from './pandora-tools-extended.js';
 import { executeActionApproval } from '../workflow/action-approver.js';
 import { reverseWrite } from '../crm-writeback/write-reverser.js';
 
@@ -428,6 +439,41 @@ export async function executeDataTool(
         result = await getSkillRun(workspaceId, params); break;
       case 'get_skill_status':
         result = await getSkillStatus(workspaceId, params); break;
+
+      // ── Extended tools ──────────────────────────────────────────────────
+      case 'query_prior_deals':
+        result = await queryPriorDeals(workspaceId, params); break;
+      case 'query_rep_performance':
+        result = await queryRepPerformance(
+          workspaceId,
+          params,
+          params._userRole as string | undefined,
+          params._userEmail as string | undefined
+        ); break;
+      case 'query_deal_velocity':
+        result = await queryDealVelocity(workspaceId, params); break;
+      case 'query_icp_fit':
+        result = await queryIcpFit(workspaceId, params); break;
+      case 'query_competitor_signals':
+        result = await queryCompetitorSignals(workspaceId, params); break;
+      case 'search_deals':
+        result = await searchDeals(
+          workspaceId,
+          params,
+          params._userRole as string | undefined,
+          params._userEmail as string | undefined
+        ); break;
+      case 'query_calendar_context':
+        result = await queryCalendarContext(workspaceId, params); break;
+      case 'query_hypothesis_history':
+        result = await queryHypothesisHistory(workspaceId, params); break;
+      case 'get_pandora_capabilities':
+        result = await getPandoraCapabilities(
+          workspaceId,
+          params,
+          params._userRole as string | undefined
+        ); break;
+
       default:
         throw new Error(`Unknown tool: ${toolName}`);
     }

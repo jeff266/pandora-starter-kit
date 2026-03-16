@@ -999,6 +999,155 @@ const PANDORA_TOOLS: ToolDef[] = [
       required: [],
     },
   },
+
+  // ─── Extended tools (11 new) ─────────────────────────────────────────────
+
+  {
+    name: 'query_prior_deals',
+    description: 'Find prior closed deals (won or lost) for a specific account. Use when detecting second-attempt context, gathering Bull/Bear evidence, or answering "have we worked with this account before?" Always call this before deliberation when a deal has a recognizable account name.',
+    parameters: {
+      type: 'object',
+      properties: {
+        account_name: { type: 'string', description: 'Account name to search for — fuzzy match. Required.' },
+        exclude_deal_id: { type: 'string', description: 'Deal ID to exclude from results (exclude the current deal).' },
+        months_back: { type: 'number', description: 'How far back to look in months. Default 24, max 36.' },
+        include_closed_won: { type: 'boolean', description: 'Include closed-won deals. Default true.' },
+        include_closed_lost: { type: 'boolean', description: 'Include closed-lost deals. Default true.' },
+      },
+      required: ['account_name'],
+      additionalProperties: false,
+    },
+  },
+
+  {
+    name: 'query_rep_performance',
+    description: 'Historical close rate, pipeline pace, and performance metrics for a specific rep. Use for Bull/Bear Defense evidence ("Nate closes 29% at this size"), rep scorecards, and sprint action specificity. Reps can only query their own email.',
+    parameters: {
+      type: 'object',
+      properties: {
+        owner_email: { type: 'string', description: 'Rep email address (exact or close match). Required.' },
+        window_months: { type: 'number', description: 'Rolling window in months. Default 12, max 24.' },
+        min_amount: { type: 'number', description: 'Filter to deals above this size (for win rate by deal size).' },
+        max_amount: { type: 'number', description: 'Filter to deals below this size.' },
+      },
+      required: ['owner_email'],
+      additionalProperties: false,
+    },
+  },
+
+  {
+    name: 'query_deal_velocity',
+    description: 'Time in each stage vs. workspace median — is this deal fast, normal, slow, or stalled? Use for Prosecutor/Bear evidence when a deal has been in stage for an unusually long time, or when asked "is this deal moving at a normal pace?"',
+    parameters: {
+      type: 'object',
+      properties: {
+        deal_id: { type: 'string', description: 'Deal ID to analyze. Required.' },
+      },
+      required: ['deal_id'],
+      additionalProperties: false,
+    },
+  },
+
+  {
+    name: 'query_icp_fit',
+    description: 'How well a specific deal matches this workspace\'s ICP profile. Use for Bull/Bear evidence on deal quality. Gracefully degrades when ICP skill has not run — returns deal-size-vs-median signal instead.',
+    parameters: {
+      type: 'object',
+      properties: {
+        deal_id: { type: 'string', description: 'Deal ID to score. Required.' },
+      },
+      required: ['deal_id'],
+      additionalProperties: false,
+    },
+  },
+
+  {
+    name: 'query_competitor_signals',
+    description: 'Competitor mentions from conversations, notes, and CRM fields. Use for Bear case competitive evidence, win/loss pattern analysis, or "are CentralReach or Passage Health in the mix?" questions.',
+    parameters: {
+      type: 'object',
+      properties: {
+        deal_id: { type: 'string', description: 'Scope to one deal. Optional.' },
+        competitors: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Specific competitors to search for. Defaults to workspace competitor list.',
+        },
+        days_back: { type: 'number', description: 'How far back to look. Default 180, range 30–365.' },
+      },
+      required: [],
+      additionalProperties: false,
+    },
+  },
+
+  {
+    name: 'search_deals',
+    description: 'Fuzzy search for deals by partial name or account name. Use when the user refers to a deal by nickname or partial name ("the autism services deal", "Butterfly"). Call this FIRST to resolve the deal ID before calling deal-specific tools. Returns open deals by default.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Partial deal or account name. Min 2 chars, max 100. Required.' },
+        include_closed_deals: { type: 'boolean', description: 'Include closed won/lost. Default false.' },
+        owner_email: { type: 'string', description: 'Filter to one rep\'s deals.' },
+        min_amount: { type: 'number', description: 'Minimum deal amount filter.' },
+        stage_filter: { type: 'string', description: 'Filter by stage name (partial match).' },
+        limit: { type: 'number', description: 'Max results to return. Range 1–10, default 5.' },
+      },
+      required: ['query'],
+      additionalProperties: false,
+    },
+  },
+
+  {
+    name: 'query_calendar_context',
+    description: 'Calendar events linked to a deal\'s contacts — upcoming and recent meetings. Use when asked "do we have anything scheduled?", "when is the next touchpoint?", or to check meeting cadence as Bull/Bear evidence. Returns calendarNotConnected: true if Google Calendar is not configured.',
+    parameters: {
+      type: 'object',
+      properties: {
+        deal_id: { type: 'string', description: 'Match events via deal contacts. Optional.' },
+        contact_emails: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Explicit list of contact emails if deal not scoped.',
+        },
+        past_days: { type: 'number', description: 'Days of past meetings to include. Default 30, max 90.' },
+        future_days: { type: 'number', description: 'Days of upcoming meetings to include. Default 60, max 90.' },
+      },
+      required: [],
+      additionalProperties: false,
+    },
+  },
+
+  {
+    name: 'query_hypothesis_history',
+    description: 'Trend data for a standing hypothesis metric over time — the difference between "32% conversion rate" and "conversion rate that was 38% two months ago and has been declining." Use for Confidence Calibration, Pre-Mortem Panel, or "has our pipeline coverage been improving?"',
+    parameters: {
+      type: 'object',
+      properties: {
+        metric: { type: 'string', description: 'Metric name matching a standing_hypotheses.metric value. Required.' },
+        weeks_back: { type: 'number', description: 'Weeks of history to return. Range 4–24, default 12.' },
+      },
+      required: ['metric'],
+      additionalProperties: false,
+    },
+  },
+
+  {
+    name: 'get_pandora_capabilities',
+    description: 'Returns what Pandora can do, what skills are available, what data is connected, and example queries. Use when the user asks "what can you do?", "how do I use Pandora?", "what skills are available?", "what data do you have?", or any query implying the user is lost or new. This is the navigation tool.',
+    parameters: {
+      type: 'object',
+      properties: {
+        category: {
+          type: 'string',
+          enum: ['skills', 'data', 'actions', 'forecasting', 'deals', 'deliberation', 'navigation'],
+          description: 'Filter to one capability category. Omit for everything.',
+        },
+      },
+      required: [],
+      additionalProperties: false,
+    },
+  },
 ];
 
 // ─── System prompt ────────────────────────────────────────────────────────────
