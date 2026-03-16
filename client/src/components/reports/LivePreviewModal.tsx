@@ -68,7 +68,7 @@ export default function LivePreviewModal({
 
     try {
       // Use authenticated fetch to download the file
-      const token = localStorage.getItem('pandora_token');
+      const token = localStorage.getItem('pandora_session');
       console.log('Downloading:', fileInfo.download_url);
 
       const response = await fetch(fileInfo.download_url, {

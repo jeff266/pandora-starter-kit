@@ -433,6 +433,7 @@ export interface HypothesisRedTeamResult {
 function formatMetricValue(value: number, metric: string): string {
   const m = metric.toLowerCase();
   if (m.includes('ratio')) return `${value.toFixed(1)}x`;
+  if (m.includes('cohort')) return `${Math.round(value * 100)}%`;
   if (m.includes('rate') || m.includes('pct') || m.includes('win') || m.includes('conversion')) {
     return `${Math.round(value)}%`;
   }

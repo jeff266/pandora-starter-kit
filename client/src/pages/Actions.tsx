@@ -92,6 +92,7 @@ interface SprintData {
 function formatMetricValue(value: number, metric: string): string {
   const m = metric.toLowerCase();
   if (m.includes('ratio')) return `${value.toFixed(1)}x`;
+  if (m.includes('cohort')) return `${Math.round(value * 100)}%`;
   if (m.includes('rate') || m.includes('pct') || m.includes('win')) return `${Math.round(value)}%`;
   if (m.includes('days') || m.includes('cycle')) return `${Math.round(value)} days`;
   if (m.includes('count') || m.includes('closes')) return value.toFixed(1);
