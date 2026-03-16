@@ -279,8 +279,8 @@ export default function Sidebar({
             padding: '6px 16px 2px',
             display: 'flex', alignItems: 'center', gap: 5,
           }}>
-            <span style={{ fontSize: 10, color: '#2a3040', letterSpacing: '0.02em', userSelect: 'none' }}>⌘K</span>
-            <span style={{ fontSize: 10, color: '#2a3040', userSelect: 'none' }}>search</span>
+            <span style={{ fontSize: 12, color: '#5a6578', letterSpacing: '0.02em', userSelect: 'none' }}>⌘K</span>
+            <span style={{ fontSize: 12, color: '#5a6578', userSelect: 'none' }}>search</span>
           </div>
         )}
 
