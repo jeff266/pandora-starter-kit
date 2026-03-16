@@ -132,14 +132,14 @@ async function describeObjectFields(
 }
 
 async function getCustomObjectsConfig(workspaceId: string): Promise<CustomObjectConfig[]> {
-  const result = await query<{ definitions: any }>(
-    `SELECT definitions FROM workspace_definitions
-     WHERE workspace_id = $1 AND category = 'settings' AND key = 'workspace_config'
+  const result = await query<{ custom_objects: any }>(
+    `SELECT definitions->'workspace_config'->'custom_objects' as custom_objects
+     FROM context_layer
+     WHERE workspace_id = $1
      LIMIT 1`,
     [workspaceId]
   );
-  const defs = result.rows[0]?.definitions ?? {};
-  return defs.custom_objects ?? [];
+  return result.rows[0]?.custom_objects ?? [];
 }
 
 async function saveCustomObjectsConfig(
@@ -147,13 +147,19 @@ async function saveCustomObjectsConfig(
   customObjects: CustomObjectConfig[]
 ): Promise<void> {
   await query(
-    `INSERT INTO workspace_definitions (workspace_id, category, key, definitions, updated_at)
-     VALUES ($1, 'settings', 'workspace_config', jsonb_build_object('custom_objects', $2::jsonb), NOW())
-     ON CONFLICT (workspace_id, category, key) DO UPDATE
+    `INSERT INTO context_layer (workspace_id, definitions, updated_at)
+     VALUES ($1, jsonb_build_object('workspace_config', jsonb_build_object('custom_objects', $2::jsonb)), NOW())
+     ON CONFLICT (workspace_id) DO UPDATE
        SET definitions = jsonb_set(
-             COALESCE(workspace_definitions.definitions, '{}'::jsonb),
-             '{custom_objects}',
-             $2::jsonb
+             jsonb_set(
+               COALESCE(context_layer.definitions, '{}'),
+               '{workspace_config}',
+               COALESCE(context_layer.definitions->'workspace_config', '{}'),
+               true
+             ),
+             '{workspace_config,custom_objects}',
+             $2::jsonb,
+             true
            ),
            updated_at = NOW()`,
     [workspaceId, JSON.stringify(customObjects)]
