@@ -7,6 +7,7 @@ import Skeleton from '../components/Skeleton';
 import Toast from '../components/Toast';
 import { useWorkspace } from '../context/WorkspaceContext';
 import ConnectorLogo from '../components/ConnectorLogo';
+import CustomObjectMapper from '../components/CustomObjectMapper';
 
 const CONNECTORS_WITH_TRACKED_USERS = ['gong'];
 
@@ -966,6 +967,10 @@ export default function ConnectorsPage() {
       {isConsultant && <ConsultantConnectorSection addToast={addToast} />}
 
       {renderWorkspaceConnectors()}
+
+      <CustomObjectMapper
+        salesforceConnected={connectors.some(c => c.type === 'salesforce')}
+      />
 
       {showUsersModal && (
         <div style={{

@@ -30,6 +30,7 @@ import { createLogger } from '../../utils/logger.js';
 const logger = createLogger('Salesforce');
 import { query } from '../../db.js';
 import { updateCredentialFields } from '../../lib/credential-store.js';
+import { syncCustomObjects } from './custom-object-sync.js';
 import { inferAnalysisScopes, applyInferredScopes } from '../../config/scope-inference.js';
 import { stampAllDealsForWorkspace, stampDealScopes } from '../../config/scope-stamper.js';
 import { autoConfigurePipelineDefaults } from '../../chat/pipeline-resolver.js';
@@ -416,6 +417,11 @@ export class SalesforceAdapter implements CRMAdapter {
     // This runs automatically on first Salesforce sync to seamlessly upgrade workspaces
     await this.runUpgradeIfNeeded(workspaceId);
 
+    // Sync custom objects (e.g. Transcript__c → conversations) if configured
+    await syncCustomObjects(client, workspaceId).catch(err =>
+      logger.warn('[Salesforce Adapter] Custom object sync failed (non-fatal)', { workspaceId, error: err instanceof Error ? err.message : err })
+    );
+
     // Scope inference + stamping — run after all deals are written
     // Non-blocking: don't delay sync completion on inference errors
     if (deals.succeeded.length > 0) {
@@ -522,6 +528,11 @@ export class SalesforceAdapter implements CRMAdapter {
           logger.warn('[Salesforce Adapter] Incremental scope stamping failed', { workspaceId, error: err instanceof Error ? err.message : err });
         });
       }
+
+      // Sync custom objects (e.g. Transcript__c → conversations) - incremental
+      await syncCustomObjects(client, workspaceId, lastSyncTime).catch(err =>
+        logger.warn('[Salesforce Adapter] Custom object sync failed (non-fatal)', { workspaceId, error: err instanceof Error ? err.message : err })
+      );
 
       return { deals, contacts, accounts };
     } catch (error) {
