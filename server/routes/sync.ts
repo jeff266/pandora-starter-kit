@@ -321,7 +321,9 @@ router.get('/:id/connectors/health', async (req: Request, res: Response): Promis
          UNION ALL
          SELECT 'accounts', source, count(*)::text FROM accounts WHERE workspace_id = $1 GROUP BY source
          UNION ALL
-         SELECT 'conversations', source, count(*)::text FROM conversations WHERE workspace_id = $1 GROUP BY source`,
+         SELECT 'conversations',
+           CASE WHEN source LIKE '%:%' THEN split_part(source, ':', 1) ELSE source END as source,
+           count(*)::text FROM conversations WHERE workspace_id = $1 GROUP BY 2`,
         [workspaceId]
       ),
       query<{ error_count: string }>(
