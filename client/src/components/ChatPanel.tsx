@@ -14,6 +14,7 @@ import SuggestedActionsPanel from './assistant/SuggestedActionsPanel';
 import type { SuggestedAction } from './assistant/useConversationStream';
 import { type ConciergeContext, formatConciergeContextPreamble } from '../types/concierge-context';
 import { useCrmInfo } from '../lib/deeplinks';
+import { PixelAvatarPandora } from './PixelAvatar';
 
 interface ToolCall {
   tool: string;
@@ -650,8 +651,13 @@ export default function ChatPanel({ isOpen, onClose, scope, initialSessionId, pe
               onMouseEnter={() => setHoveredMsgIdx(idx)}
               onMouseLeave={() => setHoveredMsgIdx(null)}
             >
-              <div style={styles.messageRole}>
-                {msg.role === 'user' ? 'You' : 'Pandora'}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                {msg.role === 'assistant' && (
+                  <PixelAvatarPandora size={20} borderRadius={4} />
+                )}
+                <span style={styles.messageRole}>
+                  {msg.role === 'user' ? 'You' : 'Pandora'}
+                </span>
               </div>
               <div style={styles.messageContent}>
                 {formatMarkdown(anon.text(msg.content))}
@@ -847,7 +853,11 @@ export default function ChatPanel({ isOpen, onClose, scope, initialSessionId, pe
         )}
 
         {!isHistoryView && (
-          <div style={{ ...styles.inputContainer, ...(isMobile ? { padding: '10px 10px 14px' } : {}) }}>
+          <div style={{
+            ...styles.inputContainer,
+            ...(isMobile ? { paddingTop: 10, paddingLeft: 10, paddingRight: 10 } : {}),
+            paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 16px)' as unknown as number,
+          }}>
             <textarea
               ref={inputRef}
               style={styles.input}
@@ -953,7 +963,10 @@ function ThinkingBubble({ query }: { query: string }) {
 
   return (
     <div style={{ ...styles.messageBubble, ...styles.assistantBubble }}>
-      <div style={styles.messageRole}>Pandora</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+        <PixelAvatarPandora size={20} borderRadius={4} />
+        <span style={styles.messageRole}>Pandora</span>
+      </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {steps.slice(0, visibleSteps).map((step, i) => (
           <div
@@ -1734,7 +1747,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   panel: {
     maxWidth: '100vw',
-    height: '100vh',
+    height: '100%',
     backgroundColor: '#0f1117',
     borderLeft: '1px solid #1e2230',
     display: 'flex',
@@ -1880,7 +1893,10 @@ const styles: Record<string, React.CSSProperties> = {
     marginBottom: 12,
   },
   inputContainer: {
-    padding: '12px 20px 16px',
+    paddingTop: 12,
+    paddingLeft: 20,
+    paddingRight: 20,
+    paddingBottom: 16,
     borderTop: '1px solid #1e2230',
     display: 'flex',
     gap: 8,
