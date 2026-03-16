@@ -64,7 +64,6 @@ import GovernancePage from './pages/GovernancePage';
 import FiltersPage from './pages/FiltersPage';
 import SQLWorkspace from './pages/SQLWorkspace';
 import DataDictionary from './pages/DataDictionary';
-import ForecastPage from './pages/ForecastPage';
 import PipelinePage from './pages/PipelinePage';
 import PipelineMechanicsPage from './pages/PipelineMechanicsPage';
 import GTMPage from './pages/GTMPage';
@@ -419,7 +418,7 @@ export default function App() {
             <Route path="/dictionary" element={<DataDictionary />} />
             <Route path="/data" element={<DataDictionary />} />
             <Route path="/sql-workspace" element={<SQLWorkspace />} />
-            <Route path="/forecast" element={<ForecastPage />} />
+            <Route path="/forecast" element={<Navigate to="/gtm/forecast" replace />} />
             <Route path="/pipeline" element={<Navigate to="/gtm/pipeline" replace />} />
             <Route path="/gtm" element={<Navigate to="/gtm/pipeline" replace />} />
             <Route path="/gtm/:tab" element={<GTMPage />} />

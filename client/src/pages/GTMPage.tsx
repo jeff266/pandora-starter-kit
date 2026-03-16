@@ -6,6 +6,7 @@ import DealList from './DealList';
 import AccountList from './AccountList';
 import ConversationsPage from './ConversationsPage';
 import ProspectsPage from './ProspectsPage';
+import ForecastPage from './ForecastPage';
 
 const TABS = [
   { key: 'pipeline',      label: 'Pipeline' },
@@ -13,6 +14,7 @@ const TABS = [
   { key: 'accounts',      label: 'Accounts' },
   { key: 'conversations', label: 'Conversations' },
   { key: 'prospects',     label: 'Prospects' },
+  { key: 'forecast',      label: 'Forecast' },
 ] as const;
 
 type GTMTab = (typeof TABS)[number]['key'];
@@ -36,6 +38,7 @@ export default function GTMPage() {
       case 'accounts':      return <AccountList />;
       case 'conversations': return <ConversationsPage />;
       case 'prospects':     return <ProspectsPage />;
+      case 'forecast':      return <ForecastPage />;
     }
   };
 

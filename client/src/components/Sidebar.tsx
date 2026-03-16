@@ -29,10 +29,10 @@ interface NavDef {
 const NAV_ITEMS: NavDef[] = [
   { path: '/concierge', label: 'Concierge', icon: '◈', roles: 'all' },
   { path: '/gtm',       label: 'GTM',       icon: '◯', roles: ['admin', 'manager', 'cro', 'revops', null] },
-  { path: '/targets',   label: 'Targets',   icon: '◎', roles: ['admin', 'manager', 'cro', 'revops', null] },
   { path: '/actions',   label: 'Actions',   icon: '⚡', roles: 'all' },
   { path: '/agents',    label: 'Agents',    icon: '◎', roles: ['admin', 'cro', 'revops', null] },
   { path: '/data',      label: 'Data',      icon: '⬡', roles: ['admin', 'revops', null] },
+  { path: '/targets',   label: 'Targets',   icon: '◎', roles: ['admin', 'manager', 'cro', 'revops', null] },
   { path: '/settings',  label: 'Settings',  icon: '⚙', roles: ['admin', 'manager', 'cro', 'revops', null] },
 ];
 
