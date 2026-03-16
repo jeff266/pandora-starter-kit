@@ -9,9 +9,12 @@ import {
   assembleOpeningBrief,
   getOrAssembleBrief,
   logBriefInteraction,
+  classifyDealGroup,
+  groupDealFindings,
   type BriefInteraction,
   type OpeningBriefData,
   type TemporalContext,
+  type DealGroup,
 } from '../context/opening-brief.js';
 import { requireWorkspaceAccess } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/permissions.js';
@@ -299,11 +302,27 @@ router.get(
     const rawPipeline = (req.query.pipeline as string | undefined) || null;
     const pipelineFilter = rawPipeline === 'All Data' ? null : rawPipeline;
     const sessionId = (req.query.sessionId as string | undefined) ?? null;
+    const pipelineGroupFilter = (req.query.pipelineGroup as string | undefined) || null;
+    const repEmailFilter = (req.query.repEmail as string | undefined) || null;
 
     try {
-      const brief: OpeningBriefData = refresh
+      const baseBrief: OpeningBriefData = refresh
         ? await assembleOpeningBrief(workspaceId, userId)
         : await getOrAssembleBrief(workspaceId, userId);
+
+      // Apply concierge-specific filters as a shallow copy (preserves cache)
+      const brief: OpeningBriefData = { ...baseBrief };
+      if (pipelineGroupFilter || repEmailFilter) {
+        let deals = [...brief.bigDealsAtRisk];
+        if (repEmailFilter) {
+          deals = deals.filter(d => d.ownerEmail === repEmailFilter);
+        }
+        if (pipelineGroupFilter) {
+          deals = deals.filter(d => classifyDealGroup(d) === (pipelineGroupFilter as DealGroup));
+        }
+        brief.bigDealsAtRisk = deals;
+        brief.groupedDeals = groupDealFindings(deals);
+      }
 
       let hasTarget = false;
       try {

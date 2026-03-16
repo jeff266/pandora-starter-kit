@@ -132,7 +132,27 @@ interface OpeningBriefData {
     rfmLabel: string;
     daysSinceActivity: number;
     ownerEmail: string;
+    pipeline?: string;
+    scopeId?: string;
   }>;
+  groupedDeals?: Array<{
+    group: string;
+    label: string;
+    deals: Array<{
+      id: string;
+      name: string;
+      amount: number;
+      stage: string;
+      rfmGrade: string;
+      rfmLabel: string;
+      daysSinceActivity: number;
+      ownerEmail: string;
+      pipeline?: string;
+      scopeId?: string;
+    }>;
+    totalValue: number;
+    criticalCount: number;
+  }> | null;
   movement?: {
     dealsAdvanced?: number;
     dealsClosed?: number;
@@ -439,6 +459,124 @@ function deriveSituationLine(brief: OpeningBriefData): string {
   return parts.join(' ');
 }
 
+// ===== CONCIERGE FILTER DROPDOWN =====
+
+type ConciergeFilter = { id: string; label: string; pipelineGroup?: string; repEmail?: string };
+
+const BUILT_IN_PIPELINE_FILTERS: ConciergeFilter[] = [
+  { id: 'all', label: 'All Data' },
+  { id: 'renewal', label: 'Renewal Only', pipelineGroup: 'renewal' },
+  { id: 'expansion', label: 'Expansion Only', pipelineGroup: 'expansion' },
+  { id: 'new_business', label: 'New Business Only', pipelineGroup: 'new_business' },
+];
+
+function ConciergeFilterDropdown({
+  activeFilter,
+  onSelect,
+  reps,
+  colors: C,
+}: {
+  activeFilter: ConciergeFilter;
+  onSelect: (f: ConciergeFilter) => void;
+  reps: Array<{ name: string; email: string }>;
+  colors: typeof S;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const isFiltered = activeFilter.id !== 'all';
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          padding: '5px 10px', borderRadius: 7,
+          border: isFiltered ? '1px solid rgba(29,158,117,0.5)' : `1px solid ${C.border}`,
+          background: isFiltered ? 'rgba(29,158,117,0.08)' : 'rgba(255,255,255,0.04)',
+          color: isFiltered ? C.teal : C.textSub,
+          fontSize: 12, fontFamily: C.font, cursor: 'pointer', whiteSpace: 'nowrap',
+        }}
+      >
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+          <line x1="4" y1="6" x2="20" y2="6" /><line x1="8" y1="12" x2="16" y2="12" /><line x1="10" y1="18" x2="14" y2="18" />
+        </svg>
+        {activeFilter.label}
+        <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ opacity: 0.6 }}>
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 6px)', right: 0,
+          minWidth: 220, maxHeight: 340, overflowY: 'auto',
+          background: C.surface, border: `1px solid ${C.border}`,
+          borderRadius: 10, boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+          zIndex: 200, padding: 4,
+        }}>
+          <div style={{ padding: '6px 12px 4px', fontSize: 10, color: C.textMuted, textTransform: 'uppercase', letterSpacing: 1 }}>View by type</div>
+          {BUILT_IN_PIPELINE_FILTERS.map(f => (
+            <FilterOption key={f.id} label={f.label} selected={activeFilter.id === f.id} onClick={() => { onSelect(f); setOpen(false); }} colors={C} />
+          ))}
+
+          {reps.length > 0 && (
+            <>
+              <div style={{ margin: '4px 0', borderTop: `1px solid ${C.border}` }} />
+              <div style={{ padding: '6px 12px 4px', fontSize: 10, color: C.textMuted, textTransform: 'uppercase', letterSpacing: 1 }}>View by rep</div>
+              {reps.map(rep => {
+                const f: ConciergeFilter = { id: `rep_${rep.email}`, label: rep.name, repEmail: rep.email };
+                return <FilterOption key={f.id} label={rep.name} selected={activeFilter.id === f.id} onClick={() => { onSelect(f); setOpen(false); }} colors={C} />;
+              })}
+            </>
+          )}
+
+          <div style={{ margin: '4px 0', borderTop: `1px solid ${C.border}` }} />
+          <div style={{ padding: '6px 12px 8px', fontSize: 11, color: C.textMuted }}>
+            Custom views — <span style={{ opacity: 0.5 }}>coming soon</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FilterOption({ label, selected, onClick, colors: C }: { label: string; selected: boolean; onClick: () => void; colors: typeof S }) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 9, width: '100%',
+        padding: '7px 12px', borderRadius: 6, border: 'none',
+        background: selected ? 'rgba(29,158,117,0.1)' : hovered ? 'rgba(255,255,255,0.04)' : 'transparent',
+        color: selected ? C.teal : C.text,
+        fontSize: 13, fontFamily: C.font, cursor: 'pointer', textAlign: 'left',
+      }}
+    >
+      <div style={{
+        width: 14, height: 14, borderRadius: '50%', flexShrink: 0,
+        border: selected ? `2px solid ${C.teal}` : `2px solid ${C.border}`,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        {selected && <div style={{ width: 6, height: 6, borderRadius: '50%', background: C.teal }} />}
+      </div>
+      {label}
+    </button>
+  );
+}
+
 export default function ConciergeView() {
   const { currentWorkspace } = useWorkspace();
   const { pandoraRole, setPandoraRole } = usePandoraRole();
@@ -469,6 +607,25 @@ export default function ConciergeView() {
   const pageLoadTime = useRef(Date.now());
   const [greetingDone, setGreetingDone] = useState(false);
 
+  // Concierge filter — persisted in localStorage per workspace
+  const filterStorageKey = currentWorkspace?.id ? `pandora_concierge_filter_${currentWorkspace.id}` : null;
+  const [activeFilter, setActiveFilter] = useState<{ id: string; pipelineGroup?: string; repEmail?: string; label: string }>(() => {
+    if (filterStorageKey) {
+      try {
+        const saved = localStorage.getItem(filterStorageKey);
+        if (saved) return JSON.parse(saved);
+      } catch {}
+    }
+    return { id: 'all', label: 'All Data' };
+  });
+
+  const setAndPersistFilter = (f: typeof activeFilter) => {
+    setActiveFilter(f);
+    if (filterStorageKey) {
+      try { localStorage.setItem(filterStorageKey, JSON.stringify(f)); } catch {}
+    }
+  };
+
   const trackInteraction = useCallback((payload: Record<string, unknown>) => {
     if (!currentWorkspace?.id) return;
     void api.post('/briefing/interaction', { sessionId, ...payload }).catch(() => {});
@@ -497,7 +654,12 @@ export default function ConciergeView() {
     if (!silent) setLoading(true);
 
     try {
-      const raw = await api.get(`/briefing/concierge?sessionId=${sessionId}`) as any;
+      const filterParams = [
+        activeFilter.pipelineGroup ? `pipelineGroup=${encodeURIComponent(activeFilter.pipelineGroup)}` : '',
+        activeFilter.repEmail ? `repEmail=${encodeURIComponent(activeFilter.repEmail)}` : '',
+      ].filter(Boolean).join('&');
+      const filterSuffix = filterParams ? `&${filterParams}` : '';
+      const raw = await api.get(`/briefing/concierge?sessionId=${sessionId}${filterSuffix}`) as any;
       // Server returns { brief: OpeningBriefData, temporal: TemporalContext, ... }
       // Merge fresh temporal over the brief object so all fields are at the top level.
       const data: OpeningBriefData = {
@@ -530,7 +692,7 @@ export default function ConciergeView() {
     } finally {
       if (!silent) setLoading(false);
     }
-  }, [currentWorkspace?.id, setPandoraRole, sessionId]);
+  }, [currentWorkspace?.id, setPandoraRole, sessionId, activeFilter]);
 
   useEffect(() => {
     fetchBrief();
@@ -755,6 +917,22 @@ export default function ConciergeView() {
                 ↗ Projection
               </span>
             )}
+            <ConciergeFilterDropdown
+              activeFilter={activeFilter}
+              onSelect={f => { setAndPersistFilter(f); }}
+              reps={Array.from(
+                new Map(
+                  (brief?.bigDealsAtRisk ?? [])
+                    .filter(d => d.ownerEmail)
+                    .map(d => {
+                      const parts = (d.ownerEmail.split('@')[0] ?? '').split('.');
+                      const name = parts.map((p: string) => p.charAt(0).toUpperCase() + p.slice(1)).join(' ');
+                      return [d.ownerEmail, { name, email: d.ownerEmail }] as const;
+                    })
+                ).values()
+              )}
+              colors={S}
+            />
           </div>
         </div>
 
@@ -1188,93 +1366,96 @@ export default function ConciergeView() {
                     </div>
                   )}
 
-                  {/* Big Deals at Risk — always first */}
-                  {riskDeals.filter(d => !lostDealIds.has(d.id)).map((deal, i) => {
-                    const dormant = deal.daysSinceActivity > 120;
-                    const borderColor = dormant ? '#ef4444' : '#f87171';
-                    const eyebrow = dormant
-                      ? 'Big Deal at Risk · RFM · Long dormant'
-                      : 'Big Deal at Risk · RFM';
-                    const body = `${fmtCurrency(deal.amount)} · ${Math.round(deal.daysSinceActivity)} days no activity · ${fmtStage(deal.stage)} stage`;
-                    const dormantLine = dormant
-                      ? `Last activity was ${fmtDormantAge(deal.daysSinceActivity)} — consider closing or a re-engagement campaign before Q2.`
-                      : null;
-
-                    let soWhat: string | null = null;
-                    if (deal.amount != null && brief.targets != null) {
-                      if (_gap != null && _gap > 0) {
-                        const pctOfGap = Math.round(deal.amount / _gap * 100);
-                        soWhat = `Losing this deal costs ${pctOfGap}% of the remaining ${fmtCurrency(_gap)} gap.`;
-                      } else if ((_gap === 0 || _gap === null) && q2Coverage !== null && q2Coverage < 3 && _headlineAmt) {
-                        const isEarlyStage = ['awareness', 'evaluation', 'discovery', 'prospecting'].includes((deal.stage || '').toLowerCase());
-                        if (isEarlyStage) {
-                          soWhat = `Starting the conversation now seeds Q2 pipeline — not a Q2 close, but builds the buffer you need.`;
-                        } else {
-                          const pctOfQ2 = Math.round(deal.amount / (_headlineAmt * 3) * 100);
-                          soWhat = `At $0 gap this quarter, this deal closes in Q2. It represents ${pctOfQ2}% of 3× Q2 coverage.`;
+                  {/* Big Deals at Risk — grouped or flat */}
+                  {(() => {
+                    const renderDeal = (deal: NonNullable<typeof brief.bigDealsAtRisk>[0], i: number, rankOffset = 0) => {
+                      if (lostDealIds.has(deal.id)) return null;
+                      const dormant = deal.daysSinceActivity > 120;
+                      const borderColor = dormant ? '#ef4444' : '#f87171';
+                      const eyebrow = dormant ? 'Big Deal at Risk · RFM · Long dormant' : 'Big Deal at Risk · RFM';
+                      const body = `${fmtCurrency(deal.amount)} · ${Math.round(deal.daysSinceActivity)} days no activity · ${fmtStage(deal.stage)} stage`;
+                      const dormantLine = dormant ? `Last activity was ${fmtDormantAge(deal.daysSinceActivity)} — consider closing or a re-engagement campaign before Q2.` : null;
+                      let soWhat: string | null = null;
+                      if (deal.amount != null && brief.targets != null) {
+                        if (_gap != null && _gap > 0) {
+                          soWhat = `Losing this deal costs ${Math.round(deal.amount / _gap * 100)}% of the remaining ${fmtCurrency(_gap)} gap.`;
+                        } else if ((_gap === 0 || _gap === null) && q2Coverage !== null && q2Coverage < 3 && _headlineAmt) {
+                          const isEarly = ['awareness', 'evaluation', 'discovery', 'prospecting'].includes((deal.stage || '').toLowerCase());
+                          soWhat = isEarly
+                            ? `Starting the conversation now seeds Q2 pipeline — not a Q2 close, but builds the buffer you need.`
+                            : `At $0 gap this quarter, this deal closes in Q2. It represents ${Math.round(deal.amount / (_headlineAmt * 3) * 100)}% of 3× Q2 coverage.`;
+                        } else if ((_gap === 0 || _gap === null) && q2Coverage !== null && q2Coverage >= 3) {
+                          soWhat = `Q1 is won. Re-engaging this deal builds Q2 buffer above the 3× coverage threshold.`;
                         }
-                      } else if ((_gap === 0 || _gap === null) && q2Coverage !== null && q2Coverage >= 3) {
-                        soWhat = `Q1 is won. Re-engaging this deal builds Q2 buffer above the 3× coverage threshold.`;
                       }
+                      const isAssigned = assignedDealIds.has(deal.id);
+                      const riskActions: RiskCardAction[] = dormant
+                        ? [
+                            { label: isAssigned ? '✓ Assigned' : 'Re-engage', variant: 'primary', disabled: isAssigned, onClick: () => assignToRep(deal) },
+                            { label: 'Mark lost', variant: 'danger', onClick: () => markLost(deal) },
+                            { label: 'Ask →', variant: 'secondary', onClick: () => openAskPandora(deal) },
+                          ]
+                        : [
+                            { label: isAssigned ? '✓ Assigned' : 'Assign to rep', variant: 'primary', disabled: isAssigned, onClick: () => assignToRep(deal) },
+                            { label: 'Ask →', variant: 'secondary', onClick: () => openAskPandora(deal) },
+                          ];
+                      return (
+                        <RiskDealCard
+                          key={`risk-${deal.id}`}
+                          rank={rankOffset + i + 1}
+                          eyebrow={eyebrow}
+                          title={deal.name}
+                          body={body}
+                          dormantLine={dormantLine}
+                          soWhat={soWhat}
+                          borderColor={borderColor}
+                          surface={S.surface}
+                          border={S.border}
+                          borderLight={S.border2}
+                          textColor={S.text}
+                          textSub={S.textSub}
+                          textMuted={S.textMuted}
+                          textDim={S.textDim}
+                          font={S.font}
+                          actions={riskActions}
+                          onClick={() => trackInteraction({ cardsDrilledInto: [`risk-${deal.id}`] })}
+                        />
+                      );
+                    };
+
+                    if (brief.groupedDeals && brief.groupedDeals.length > 0) {
+                      let runningRank = 0;
+                      return brief.groupedDeals.map((group, gi) => {
+                        const groupDeals = group.deals.filter((d: any) => !lostDealIds.has(d.id));
+                        const groupStart = runningRank;
+                        runningRank += groupDeals.length;
+                        return (
+                          <div key={group.group}>
+                            <div style={{
+                              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                              padding: '6px 0', marginTop: gi === 0 ? 0 : 16, marginBottom: 6,
+                              borderBottom: `0.5px solid ${S.border}`,
+                            }}>
+                              <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: S.textMuted }}>
+                                {group.label}
+                              </span>
+                              <span style={{ fontSize: 11, color: S.textDim }}>
+                                {groupDeals.length} deal{groupDeals.length !== 1 ? 's' : ''} · {fmtCurrency(group.totalValue)}
+                                {group.criticalCount > 0 && (
+                                  <span style={{ marginLeft: 6, padding: '1px 6px', background: 'rgba(239,68,68,0.12)', color: '#f87171', borderRadius: 4, fontSize: 10, fontWeight: 500 }}>
+                                    {group.criticalCount} critical
+                                  </span>
+                                )}
+                              </span>
+                            </div>
+                            {groupDeals.map((deal: any, i: number) => renderDeal(deal, i, groupStart))}
+                          </div>
+                        );
+                      });
                     }
 
-                    const isAssigned = assignedDealIds.has(deal.id);
-                    const riskActions: RiskCardAction[] = dormant
-                      ? [
-                          {
-                            label: isAssigned ? '✓ Assigned' : 'Re-engage',
-                            variant: 'primary',
-                            disabled: isAssigned,
-                            onClick: () => assignToRep(deal),
-                          },
-                          {
-                            label: 'Mark lost',
-                            variant: 'danger',
-                            onClick: () => markLost(deal),
-                          },
-                          {
-                            label: 'Ask →',
-                            variant: 'secondary',
-                            onClick: () => openAskPandora(deal),
-                          },
-                        ]
-                      : [
-                          {
-                            label: isAssigned ? '✓ Assigned' : 'Assign to rep',
-                            variant: 'primary',
-                            disabled: isAssigned,
-                            onClick: () => assignToRep(deal),
-                          },
-                          {
-                            label: 'Ask →',
-                            variant: 'secondary',
-                            onClick: () => openAskPandora(deal),
-                          },
-                        ];
-
-                    return (
-                      <RiskDealCard
-                        key={`risk-${deal.id}`}
-                        rank={i + 1}
-                        eyebrow={eyebrow}
-                        title={deal.name}
-                        body={body}
-                        dormantLine={dormantLine}
-                        soWhat={soWhat}
-                        borderColor={borderColor}
-                        surface={S.surface}
-                        border={S.border}
-                        borderLight={S.border2}
-                        textColor={S.text}
-                        textSub={S.textSub}
-                        textMuted={S.textMuted}
-                        textDim={S.textDim}
-                        font={S.font}
-                        actions={riskActions}
-                        onClick={() => trackInteraction({ cardsDrilledInto: [`risk-${deal.id}`] })}
-                      />
-                    );
-                  })}
+                    return riskDeals.filter(d => !lostDealIds.has(d.id)).map((deal, i) => renderDeal(deal, i));
+                  })()}
 
                   {/* Findings — ranked after big deals */}
                   {topFindings.slice(0, 5).filter(f => !dismissedFindingIds.has(f.id ?? '')).map((finding, i) => {

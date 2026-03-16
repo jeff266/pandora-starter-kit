@@ -1,0 +1,351 @@
+**Replit Prompt: Concierge Deal Grouping by Pipeline Type + Custom View Filters**
+
+Read these files first:
+1. `client/src/pages/ConciergeView.tsx` — find where deal cards are rendered, specifically the `bigDealsAtRisk` section
+2. `server/briefing/opening-brief.ts` — find the query that fetches big deals at risk, understand what fields are available including `deal_type`, `pipeline`, `pipeline_id`
+3. The workspace config for Imubit — find how pipelines are defined, what their names are
+4. The `All Data` dropdown component in the Concierge header — find where it's defined and what it currently does
+5. The deals table schema — confirm `deal_type`, `pipeline`, `pipeline_id` fields exist
+
+---
+
+### Part 1 — Group findings by pipeline type in the opening brief
+
+In `server/briefing/opening-brief.ts`, extend the big deals at risk query to include pipeline/deal type grouping:
+
+```typescript
+// After fetching bigDealsAtRisk, group them by pipeline type
+// Pipeline type priority order for display:
+// 1. renewal (highest urgency — revenue at risk)
+// 2. expansion (existing customers)
+// 3. new_business (net new)
+// 4. other / unknown
+
+export type DealGroup = 'renewal' | 'expansion' | 'new_business' | 'other'
+
+export interface GroupedDealFindings {
+  group: DealGroup
+  label: string          // "Renewal", "Expansion", "New Business"
+  deals: BigDealAtRisk[]
+  totalValue: number
+  criticalCount: number
+}
+
+function classifyDealGroup(deal: BigDealAtRisk, workspaceConfig: WorkspaceConfig): DealGroup {
+  // 1. Check deal_type field directly if it exists
+  if (deal.deal_type) {
+    const t = deal.deal_type.toLowerCase()
+    if (t.includes('renewal') || t.includes('renew')) return 'renewal'
+    if (t.includes('expansion') || t.includes('expand') || t.includes('upsell')) return 'expansion'
+    if (t.includes('new') || t.includes('net new')) return 'new_business'
+  }
+
+  // 2. Check pipeline name from workspace config
+  if (deal.pipelineId && workspaceConfig.pipelines) {
+    const pipeline = workspaceConfig.pipelines.find(p => p.id === deal.pipelineId)
+    if (pipeline) {
+      const name = pipeline.name.toLowerCase()
+      if (name.includes('renewal')) return 'renewal'
+      if (name.includes('expansion')) return 'expansion'
+      if (name.includes('new') || name.includes('core')) return 'new_business'
+    }
+  }
+
+  // 3. Check deal name patterns as fallback
+  const name = deal.name.toLowerCase()
+  if (name.includes('renewal') || name.includes('renew')) return 'renewal'
+  if (name.includes('expansion') || name.includes('expand')) return 'expansion'
+
+  return 'other'
+}
+
+export function groupDealFindings(
+  deals: BigDealAtRisk[],
+  workspaceConfig: WorkspaceConfig
+): GroupedDealFindings[] {
+  const groupOrder: DealGroup[] = ['renewal', 'expansion', 'new_business', 'other']
+  const groupLabels: Record<DealGroup, string> = {
+    renewal: 'Renewal',
+    expansion: 'Expansion',
+    new_business: 'New Business',
+    other: 'Pipeline',
+  }
+
+  const groups = new Map<DealGroup, BigDealAtRisk[]>()
+
+  for (const deal of deals) {
+    const group = classifyDealGroup(deal, workspaceConfig)
+    if (!groups.has(group)) groups.set(group, [])
+    groups.get(group)!.push(deal)
+  }
+
+  // Only return groups that have deals, in priority order
+  return groupOrder
+    .filter(g => groups.has(g))
+    .map(g => ({
+      group: g,
+      label: groupLabels[g],
+      deals: groups.get(g)!,
+      totalValue: groups.get(g)!.reduce((sum, d) => sum + (d.amount ?? 0), 0),
+      criticalCount: groups.get(g)!.filter(d => d.severity === 'critical').length,
+    }))
+}
+```
+
+In the opening brief assembly, detect whether grouping is meaningful:
+
+```typescript
+// In assembleOpeningBrief():
+const grouped = groupDealFindings(bigDealsAtRisk, workspaceConfig)
+const shouldGroup = grouped.length > 1  // only group if multiple pipeline types exist
+
+return {
+  ...existingBriefFields,
+  bigDealsAtRisk,
+  groupedDeals: shouldGroup ? grouped : null,
+  // null = render flat list (single pipeline workspace)
+  // populated = render grouped (multi-pipeline workspace like Imubit)
+}
+```
+
+---
+
+### Part 2 — Render grouped deal cards in ConciergeView
+
+In `ConciergeView.tsx`, update the big deals section to render grouped when `groupedDeals` is present:
+
+```tsx
+{brief.groupedDeals ? (
+  // Grouped view — Imubit-style multi-pipeline
+  <div className="deals-grouped">
+    {brief.groupedDeals.map(group => (
+      <div key={group.group} className="deal-group">
+
+        {/* Group header */}
+        <div className="deal-group-header">
+          <span className="group-label">{group.label}</span>
+          <span className="group-meta">
+            {group.deals.length} deal{group.deals.length !== 1 ? 's' : ''}
+            {' · '}
+            {formatCurrency(group.totalValue)}
+            {group.criticalCount > 0 && (
+              <span className="critical-badge">
+                {group.criticalCount} critical
+              </span>
+            )}
+          </span>
+        </div>
+
+        {/* Deal cards within group — same existing card component */}
+        {group.deals.map((deal, index) => (
+          <DealRiskCard
+            key={deal.id}
+            deal={deal}
+            rank={index + 1}
+            onAsk={() => openAskPandora({
+              type: 'deal',
+              entity_id: deal.id,
+              entity_name: deal.name
+            })}
+            onAssign={() => handleAssignToRep(deal)}
+            onMarkLost={() => handleMarkLost(deal)}
+          />
+        ))}
+
+      </div>
+    ))}
+  </div>
+) : (
+  // Flat view — single pipeline workspace (Frontera, GrowthBook)
+  <div className="deals-flat">
+    {brief.bigDealsAtRisk.map((deal, index) => (
+      <DealRiskCard key={deal.id} deal={deal} rank={index + 1} ... />
+    ))}
+  </div>
+)}
+```
+
+**Group header styling:**
+
+```css
+.deal-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0;
+  margin: 1.5rem 0 0.5rem;
+  border-bottom: 0.5px solid var(--color-border-tertiary);
+}
+
+.deal-group-header:first-child {
+  margin-top: 0;  /* no top margin on first group */
+}
+
+.group-label {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+}
+
+.group-meta {
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+}
+
+.critical-badge {
+  margin-left: 6px;
+  padding: 1px 6px;
+  background: var(--color-background-danger);
+  color: var(--color-text-danger);
+  border-radius: var(--border-radius-md);
+  font-size: 11px;
+  font-weight: 500;
+}
+```
+
+The group header is intentionally minimal — it's a label, not a card. The deal cards are the content. Renewal, Expansion, New Business as section dividers, not tabs.
+
+---
+
+### Part 3 — Custom view filters via All Data dropdown
+
+Extend the All Data dropdown to support saved filter presets. This lives in the Concierge header.
+
+```typescript
+// types/concierge-filters.ts
+
+export interface ConciergeFilter {
+  id: string
+  label: string
+  type: 'built_in' | 'custom'
+  filters: {
+    repEmail?: string          // filter to specific rep
+    pipelineGroup?: DealGroup  // 'renewal' | 'expansion' | 'new_business'
+    pipelineId?: string        // specific HubSpot/SF pipeline
+    region?: string            // territory/region field value
+    minAmount?: number
+  }
+}
+
+// Built-in filters — always present
+const BUILT_IN_FILTERS: ConciergeFilter[] = [
+  {
+    id: 'all',
+    label: 'All Data',
+    type: 'built_in',
+    filters: {}
+  },
+  {
+    id: 'renewal',
+    label: 'Renewal Only',
+    type: 'built_in',
+    filters: { pipelineGroup: 'renewal' }
+  },
+  {
+    id: 'expansion',
+    label: 'Expansion Only',
+    type: 'built_in',
+    filters: { pipelineGroup: 'expansion' }
+  },
+  {
+    id: 'new_business',
+    label: 'New Business Only',
+    type: 'built_in',
+    filters: { pipelineGroup: 'new_business' }
+  },
+]
+```
+
+In the All Data dropdown, add these built-in filters plus any rep names from the workspace:
+
+```tsx
+// AllDataDropdown.tsx — extend existing component
+
+const repFilters: ConciergeFilter[] = reps.map(rep => ({
+  id: `rep_${rep.email}`,
+  label: rep.name,
+  type: 'built_in' as const,
+  filters: { repEmail: rep.email }
+}))
+
+// Dropdown sections:
+// ── View by type ──
+//   All Data (default)
+//   Renewal Only
+//   Expansion Only
+//   New Business Only
+// ── View by rep ──
+//   Nate Phillips
+//   Sara Bollman
+//   [other reps]
+// ── Custom views ──  (future — show "Coming soon" placeholder)
+//   + Create custom view
+```
+
+When a filter is selected, store it in local state and pass it to the opening brief API call:
+
+```typescript
+// In ConciergeView, pass active filter to brief endpoint:
+const { data: brief } = useQuery(
+  ['opening-brief', workspaceId, activeFilter],
+  () => fetchOpeningBrief(workspaceId, activeFilter.filters)
+)
+```
+
+The opening brief endpoint already accepts workspace_id — extend it to accept optional filter params:
+
+```
+GET /api/workspaces/:id/briefing/opening-brief
+  ?pipelineGroup=renewal
+  &repEmail=nate@fronterahealth.com
+  &pipelineId=abc123
+```
+
+In the server-side query, add WHERE clauses for each filter param that's present. All existing queries are workspace-scoped — this just adds additional optional filters on top.
+
+**Persist the last selected view in localStorage** so the user's view survives page refresh:
+
+```typescript
+// In ConciergeView:
+const [activeFilter, setActiveFilter] = useLocalStorage<ConciergeFilter>(
+  `pandora_concierge_filter_${workspaceId}`,
+  BUILT_IN_FILTERS[0]  // default: All Data
+)
+```
+
+---
+
+### Part 4 — Future: custom view creation
+
+Add a "Create custom view" placeholder at the bottom of the dropdown that routes to a simple form:
+
+```
+Name: [________________]
+Filter by: [Rep ▼] [Pipeline type ▼] [Min amount ▼]
+[ Save view ]
+```
+
+Custom views write to a `concierge_views` table per workspace. They appear in the dropdown alongside built-in filters with a delete option. This is the foundation for Region filtering once Region fields are mapped from Salesforce.
+
+Don't build the custom view creation form now — the placeholder is enough to signal the direction. Build the built-in type and rep filters first.
+
+---
+
+### Verification
+
+Test against Imubit workspace:
+
+1. Open Concierge — verify deal cards render in grouped sections with Renewal, Expansion, New Business headers
+2. Confirm the two Citgo Renewal deals appear under a "Renewal" header
+3. Confirm group headers show deal count and total value
+4. Open All Data dropdown — built-in pipeline type filters and rep filters appear
+5. Select "Renewal Only" — Concierge refreshes to show only renewal deals
+6. Select a specific rep — Concierge refreshes to show only that rep's deals
+7. Refresh the page — last selected filter persists
+
+Test against Frontera workspace:
+8. Grouped view should NOT appear — Frontera has a single pipeline type so `groupedDeals` should be null and the flat list renders as before. Grouping only activates when multiple pipeline types are detected.
+
+**Server must be clean. No regressions on Frontera.**

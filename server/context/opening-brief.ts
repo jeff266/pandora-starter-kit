@@ -12,6 +12,79 @@ import {
 } from './brief-priorities.js';
 import { loadProductCatalog, expandDealName } from '../chat/deal-lookup.js';
 
+// ===== DEAL GROUP TYPES =====
+
+export type DealGroup = 'renewal' | 'expansion' | 'new_business' | 'other';
+
+export interface BigDealAtRisk {
+  id: string;
+  name: string;
+  amount: number;
+  stage: string;
+  rfmGrade: string;
+  rfmLabel: string;
+  daysSinceActivity: number;
+  ownerEmail: string;
+  pipeline: string;
+  scopeId: string;
+}
+
+export interface GroupedDealFindings {
+  group: DealGroup;
+  label: string;
+  deals: BigDealAtRisk[];
+  totalValue: number;
+  criticalCount: number;
+}
+
+const GROUP_LABELS: Record<DealGroup, string> = {
+  renewal: 'Renewal',
+  expansion: 'Expansion',
+  new_business: 'New Business',
+  other: 'Pipeline',
+};
+
+const GROUP_ORDER: DealGroup[] = ['renewal', 'expansion', 'new_business', 'other'];
+
+export function classifyDealGroup(deal: { name: string; pipeline: string; scopeId: string }): DealGroup {
+  // 1. Check scope_id (most reliable — set by pipeline config)
+  const sid = (deal.scopeId ?? '').toLowerCase();
+  if (sid.includes('renewal') || sid.includes('renew')) return 'renewal';
+  if (sid.includes('expansion') || sid.includes('expand') || sid.includes('upsell')) return 'expansion';
+  if (sid.includes('new') || sid.includes('core') || sid.includes('nb')) return 'new_business';
+
+  // 2. Check pipeline name
+  const pname = (deal.pipeline ?? '').toLowerCase();
+  if (pname.includes('renewal') || pname.includes('renew')) return 'renewal';
+  if (pname.includes('expansion') || pname.includes('expand') || pname.includes('upsell')) return 'expansion';
+  if (pname.includes('new') || pname.includes('core')) return 'new_business';
+
+  // 3. Fall back to deal name keywords
+  const dname = (deal.name ?? '').toLowerCase();
+  if (dname.includes('renewal') || dname.includes('renew')) return 'renewal';
+  if (dname.includes('expansion') || dname.includes('expand') || dname.includes('upsell')) return 'expansion';
+
+  return 'other';
+}
+
+export function groupDealFindings(deals: BigDealAtRisk[]): GroupedDealFindings[] | null {
+  const groups = new Map<DealGroup, BigDealAtRisk[]>();
+  for (const deal of deals) {
+    const g = classifyDealGroup(deal);
+    if (!groups.has(g)) groups.set(g, []);
+    groups.get(g)!.push(deal);
+  }
+  const populated = GROUP_ORDER.filter(g => groups.has(g));
+  if (populated.length <= 1) return null; // single group → flat render
+  return populated.map(g => ({
+    group: g,
+    label: GROUP_LABELS[g],
+    deals: groups.get(g)!,
+    totalValue: groups.get(g)!.reduce((s, d) => s + d.amount, 0),
+    criticalCount: groups.get(g)!.filter(d => d.daysSinceActivity > 90).length,
+  }));
+}
+
 // ===== TYPES =====
 
 export interface TemporalContext {
@@ -96,16 +169,8 @@ export interface OpeningBriefData {
     unlinkedCalls: number;
   } | null;
   movementAnchorLabel: string;
-  bigDealsAtRisk: Array<{
-    id: string;
-    name: string;
-    amount: number;
-    stage: string;
-    rfmGrade: string;
-    rfmLabel: string;
-    daysSinceActivity: number;
-    ownerEmail: string;
-  }>;
+  bigDealsAtRisk: BigDealAtRisk[];
+  groupedDeals: GroupedDealFindings[] | null;
   pipelineMovement: {
     headline: string | null;
     netDelta: number | null;
@@ -621,21 +686,24 @@ export async function assembleOpeningBrief(
     rfm_label: string | null;
     rfm_recency_days: string | null;
     owner_email: string | null;
+    pipeline: string | null;
+    scope_id: string | null;
   }>(
     `SELECT d.id, d.name, d.amount, d.stage_normalized,
-            d.rfm_grade, d.rfm_label, d.rfm_recency_days, d.owner_email
+            d.rfm_grade, d.rfm_label, d.rfm_recency_days, d.owner_email,
+            d.pipeline, d.scope_id
      FROM deals d
      WHERE d.workspace_id = $1
        AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
        AND d.rfm_grade IN ('D', 'F')
        AND d.amount >= 10000
      ORDER BY d.amount DESC
-     LIMIT 5`,
+     LIMIT 10`,
     [workspaceId]
-  ).then(r => r.rows).catch(() => [] as { id: string; name: string; amount: string | null; stage_normalized: string | null; rfm_grade: string | null; rfm_label: string | null; rfm_recency_days: string | null; owner_email: string | null }[]);
+  ).then(r => r.rows).catch(() => [] as any[]);
 
   const _riskProductCatalog = await loadProductCatalog(workspaceId).catch(() => [] as import('../chat/deal-lookup.js').ProductEntry[]);
-  const bigDealsAtRisk = bigDealsAtRiskRows.map(r => ({
+  const bigDealsAtRisk: BigDealAtRisk[] = bigDealsAtRiskRows.map(r => ({
     id: r.id,
     name: expandDealName(r.name, _riskProductCatalog),
     amount: Number(r.amount ?? 0),
@@ -644,7 +712,11 @@ export async function assembleOpeningBrief(
     rfmLabel: r.rfm_label ?? '',
     daysSinceActivity: Math.round(Number(r.rfm_recency_days ?? 0)),
     ownerEmail: r.owner_email ?? '',
+    pipeline: r.pipeline ?? '',
+    scopeId: r.scope_id ?? '',
   }));
+
+  const groupedDeals = groupDealFindings(bigDealsAtRisk);
 
   // Product line breakdown (inferred from deal name suffix)
   const plRows = await query<{ product_line: string; count: string; total_value: string }>(
@@ -833,6 +905,7 @@ export async function assembleOpeningBrief(
     } : null,
     movementAnchorLabel,
     bigDealsAtRisk,
+    groupedDeals,
     pipelineMovement,
     estimatedQ2Coverage,
     priorityFrame,
