@@ -8800,7 +8800,7 @@ const checkConvIntelData: ToolDefinition = {
           COUNT(summary) FILTER (WHERE summary IS NOT NULL AND summary != '')::int as summarized_count
         FROM conversations
         WHERE workspace_id = $1
-          AND started_at >= NOW() - INTERVAL '14 days'
+          AND call_date >= NOW() - INTERVAL '14 days'
           AND (is_internal = false OR is_internal IS NULL)
       `, [context.workspaceId]);
 
@@ -8848,7 +8848,7 @@ const checkCompIntelData: ToolDefinition = {
         SELECT COUNT(*)::int as mention_count
         FROM conversations
         WHERE workspace_id = $1
-          AND started_at >= NOW() - INTERVAL '30 days'
+          AND call_date >= NOW() - INTERVAL '30 days'
           AND competitor_mentions IS NOT NULL
           AND competitor_mentions != '[]'
       `, [context.workspaceId]).catch(() => ({ rows: [{ mention_count: 0 }] }));

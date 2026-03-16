@@ -41,14 +41,14 @@ export const PANDORA_CONVERSATION_FIELDS = [
 
 async function getCustomObjectConfigs(workspaceId: string): Promise<CustomObjectConfig[]> {
   try {
-    const result = await dbQuery<{ definitions: any }>(
-      `SELECT definitions FROM workspace_definitions
-       WHERE workspace_id = $1 AND category = 'settings' AND key = 'workspace_config'
+    const result = await dbQuery<{ custom_objects: any }>(
+      `SELECT definitions->'workspace_config'->'custom_objects' AS custom_objects
+       FROM context_layer
+       WHERE workspace_id = $1
        LIMIT 1`,
       [workspaceId]
     );
-    const defs = result.rows[0]?.definitions ?? {};
-    const all: CustomObjectConfig[] = defs.custom_objects ?? [];
+    const all: CustomObjectConfig[] = result.rows[0]?.custom_objects ?? [];
     return all.filter(o => o.mode === 'map_to_entity' && o.target === 'conversations');
   } catch {
     return [];

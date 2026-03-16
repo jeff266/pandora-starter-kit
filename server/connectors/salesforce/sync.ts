@@ -7,6 +7,7 @@ import { createLogger } from '../../utils/logger.js';
 import { computeFields } from '../../computed-fields/engine.js';
 import { transformWithErrorCapture } from '../../utils/sync-helpers.js';
 import { updateCredentialFields } from '../../lib/credential-store.js';
+import { syncCustomObjects } from './custom-object-sync.js';
 
 const logger = createLogger('SalesforceSync');
 
@@ -658,6 +659,14 @@ async function runSync(
   // Sync Leads (with custom fields + FK resolution)
   await syncLeads(client, workspaceId, watermark).catch(err => {
     errors.push(`Leads sync failed: ${err.message}`);
+  });
+
+  // Sync Custom Objects (e.g. Transcript__c → conversations)
+  // Always full-pull (no watermark) — UPSERT handles deduplication, and custom
+  // objects are small enough that a full pull is safe and avoids missing records
+  // when the mapping is configured after the first sync.
+  await syncCustomObjects(client, workspaceId, undefined).catch(err => {
+    errors.push(`Custom objects sync failed: ${err.message}`);
   });
 
   let computedFields = null;
