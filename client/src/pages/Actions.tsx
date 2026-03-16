@@ -8,6 +8,7 @@ import SectionErrorBoundary from '../components/SectionErrorBoundary';
 import { useDemoMode } from '../contexts/DemoModeContext';
 import { useIsMobile } from '../hooks/useIsMobile';
 import ExecutionDialog from '../components/ExecutionDialog';
+import { openAskPandora } from '../lib/askPandora';
 
 // ── Interfaces ───────────────────────────────────────────────────────────────
 
@@ -725,6 +726,7 @@ function SprintActionRow({
   onStateChange: (id: string, state: string) => void;
   onSelectAction: (a: Action) => void;
 }) {
+  const navigate = useNavigate();
   const sc = sevColors[action.severity] || colors.textMuted;
   const currentState = action.state ?? 'pending';
   const isActive = currentState === 'in_progress';
@@ -757,9 +759,55 @@ function SprintActionRow({
         </div>
         <div style={{ display: 'flex', gap: 12, alignItems: 'center', paddingLeft: 14 }}>
           {action.expected_value_delta ? (
-            <span style={{ fontSize: 11, fontFamily: fonts.mono, color: colors.green, fontWeight: 600 }}>
-              +{formatCurrency(action.expected_value_delta)}
-            </span>
+            <>
+              <span style={{ fontSize: 11, fontFamily: fonts.mono, color: colors.green, fontWeight: 600 }}>
+                +{formatCurrency(action.expected_value_delta)}
+              </span>
+              {action.target_deal_id && action.deal_name && (
+                <button
+                  onClick={() => {
+                    openAskPandora(
+                      {
+                        source: 'finding_card',
+                        label: 'Expected Value',
+                        value: `+${formatCurrency(action.expected_value_delta!)}`,
+                        dealId: action.target_deal_id,
+                        dealName: action.deal_name,
+                        evidenceSummary: `Sprint action: ${action.title}`,
+                      },
+                      navigate,
+                      '/assistant'
+                    );
+                    // Open with prefill that triggers deliberation
+                    setTimeout(() => {
+                      const input = document.querySelector('input[type="text"]') as HTMLInputElement;
+                      if (input) {
+                        input.value = `Is the expected value on this action realistic? Bull bear case on ${action.deal_name}.`;
+                        input.dispatchEvent(new Event('input', { bubbles: true }));
+                      }
+                    }, 300);
+                  }}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    padding: 0,
+                    fontSize: 11,
+                    color: colors.textTertiary,
+                    cursor: 'pointer',
+                    fontFamily: fonts.sans,
+                    textDecoration: 'none',
+                  }}
+                  onMouseEnter={e => {
+                    (e.currentTarget as HTMLButtonElement).style.textDecoration = 'underline';
+                  }}
+                  onMouseLeave={e => {
+                    (e.currentTarget as HTMLButtonElement).style.textDecoration = 'none';
+                  }}
+                >
+                  Worth it?
+                </button>
+              )}
+            </>
           ) : null}
           {action.effort && (
             <span style={{ fontSize: 11, color: colors.textDim }}>

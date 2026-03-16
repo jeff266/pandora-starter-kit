@@ -155,21 +155,45 @@ export interface IntentClassification {
 
 // Deliberation trigger patterns — only fire when chat is deal-scoped
 const DELIBERATION_PATTERNS = [
+  // Close probability questions
   /will (this|the) deal close\b/i,
-  /should i be worried\b/i,
-  /what(\'s| is) the risk (here|on this|with this)\b/i,
-  /what are the (chances|odds)\b/i,
+  /will (we|it) close\b/i,
   /is this deal going to close\b/i,
-  /what do you think about this deal\b/i,
-  /give me your honest assessment\b/i,
-  /prosecutor.{0,10}defense\b/i,
-  /bull.{0,10}bear (case|analysis)\b/i,
-  /devil.{0,5}advocate\b/i,
   /\bhow (likely|probable) is (it|this) to close\b/i,
   /\b(chance|probability|likelihood) (this|of this) (deal )?(closes?|closing)\b/i,
-  /\bwhat(\'s| is) (your|the) (call|take|read) on this deal\b/i,
-  /\bwill (we|it) close\b/i,
-  /\bshould (i|we) be (worried|concerned|nervous)\b/i,
+
+  // Risk and concern questions
+  /should (i|we) be (worried|concerned|nervous)\b/i,
+  /what(\'s| is) the risk (here|on this|with this)\b/i,
+  /what are the (chances|odds)\b/i,
+
+  // Judgment and assessment requests
+  /what do you think about this deal\b/i,
+  /give me your honest assessment\b/i,
+  /what's your (call|take|read|honest|assessment|view) on this deal\b/i,
+  /what('s| is) your (honest )?(take|read|call|assessment|view)\b/i,
+
+  // Explicit deliberation requests
+  /bull.{0,10}bear (case|analysis|on this)\b/i,
+  /bear.{0,10}bull (case|analysis|on this)\b/i,
+  /prosecutor.{0,10}defense\b/i,
+  /devil.{0,5}advocate\b/i,
+  /argue (both|the other) side\b/i,
+  /steelman (this|the deal)\b/i,
+
+  // Deal viability questions
+  /is this (deal )?(worth|dead|salvageable|lost|over)\b/i,
+  /is it (worth|dead|too late|salvageable)\b/i,
+  /is there (still )?(a )?path (to close|forward|here)\b/i,
+  /is this (deal )?dead\b/i,
+
+  // Continuation judgment
+  /should we (keep|continue|pursue|cut|drop|walk away from|abandon)\b/i,
+
+  // Effort vs return
+  /are we wasting (our )?time\b/i,
+  /is this (deal )?worth (our |the )?effort\b/i,
+  /worth (pursuing|continuing|our time)\b/i,
 ];
 
 // Retrospective intent patterns — route to 3-phase evidence-harvest architecture
@@ -360,8 +384,40 @@ function timeoutPromise(ms: number): Promise<never> {
   });
 }
 
+// Helper function to check if a query is a deal judgment question
+function isDealJudgmentQuestion(query: string): boolean {
+  const q = query.toLowerCase().trim();
+
+  // Negative guard — these are data questions, not judgment questions
+  // Even if they contain trigger words, skip deliberation
+  const DATA_QUESTION_PREFIXES = [
+    'show me',
+    'what is the current',
+    'what are the contacts',
+    'how many',
+    'when did',
+    'what stage',
+    'who is',
+    'list',
+    'summarize',
+    'tell me about',  // factual — standard analysis, not deliberation
+  ];
+
+  if (DATA_QUESTION_PREFIXES.some(prefix => q.startsWith(prefix))) {
+    return false;
+  }
+
+  // Positive trigger check — any pattern matches
+  return DELIBERATION_PATTERNS.some(pattern => pattern.test(query));
+}
+
 export function isDeliberationTrigger(message: string): boolean {
-  return DELIBERATION_PATTERNS.some(p => p.test(message));
+  // Minimum query length guard — too short to be deliberation intent
+  if (message.trim().length < 12) {
+    return false;
+  }
+
+  return isDealJudgmentQuestion(message);
 }
 
 export async function classifyIntent(
