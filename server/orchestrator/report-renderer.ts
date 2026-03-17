@@ -5,7 +5,7 @@ import {
   PageNumber, Footer, convertInchesToTwip,
   Packer
 } from 'docx';
-import puppeteer from 'puppeteer';
+import PDFDocument from 'pdfkit';
 import type { ReportDocument } from './types.js';
 
 export interface RenderConfig {
@@ -320,65 +320,161 @@ export async function renderDocx(
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// PDF Renderer v2 — HTML→PDF via Puppeteer for professional typography
+// PDF Renderer — pdfkit (no system dependencies)
 // ══════════════════════════════════════════════════════════════════════════════
+
+const TEAL   = '#0D9488';
+const DARK   = '#1E293B';
+const MID    = '#374151';
+const MUTED  = '#94A3B8';
+const BORDER = '#E2E8F0';
+
+const URGENCY_LABELS: Record<string, string> = {
+  today:      'TODAY',
+  this_week:  'THIS WEEK',
+  this_month: 'THIS MONTH',
+};
+const URGENCY_COLORS: Record<string, string> = {
+  today:      '#DC2626',
+  this_week:  '#D97706',
+  this_month: '#6B7280',
+};
+
+function hexToRgb(hex: string): [number, number, number] {
+  const n = parseInt(hex.replace('#', ''), 16);
+  return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
+}
 
 export async function renderPdf(
   doc: ReportDocument,
   config: RenderConfig = {}
 ): Promise<Buffer> {
 
-  const html = buildReportHtml(doc, config);
-
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+  const pdf = new PDFDocument({
+    size: 'LETTER',
+    margins: { top: 72, bottom: 72, left: 90, right: 90 },
+    info: {
+      Title: doc.week_label || 'Pipeline Report',
+      Author: config.prepared_by || 'Pandora',
+    },
   });
 
-  try {
-    const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: 'networkidle0' });
+  const chunks: Buffer[] = [];
+  pdf.on('data', (c: Buffer) => chunks.push(c));
 
-    const pdfBuffer = await page.pdf({
-      format: 'Letter',
-      margin: {
-        top: '1in',
-        bottom: '1in',
-        left: '1.25in',
-        right: '1.25in',
-      },
-      printBackground: true,
-      displayHeaderFooter: true,
-      headerTemplate: '<div></div>',
-      footerTemplate: `
-        <div style="
-          font-size: 9px;
-          color: #94A3B8;
-          width: 100%;
-          text-align: center;
-          padding: 0 1.25in;
-          font-family: 'Georgia', serif;
-        ">
-          ${[
-            config.prepared_by
-              ? `Prepared by ${config.prepared_by}` : '',
-            config.for_company
-              ? `for ${config.for_company}` : '',
-            new Date().toLocaleDateString('en-US', {
-              month: 'long', year: 'numeric'
-            }),
-          ].filter(Boolean).join(' · ')}
-          · Page <span class="pageNumber"></span>
-          of <span class="totalPages"></span>
-        </div>
-      `,
-    }) as Buffer;
+  const done = new Promise<void>((resolve, reject) => {
+    pdf.on('end', resolve);
+    pdf.on('error', reject);
+  });
 
-    return pdfBuffer;
+  const W = pdf.page.width - 90 - 90;
 
-  } finally {
-    await browser.close();
+  // ── Cover ──────────────────────────────────────────────────────────────────
+  pdf.fillColor(hexToRgb(DARK)).font('Helvetica-Bold').fontSize(22)
+     .text(config.for_company || doc.week_label || '', 90, 72, { width: W });
+
+  pdf.moveDown(0.3);
+  pdf.fillColor(hexToRgb(MUTED)).font('Helvetica').fontSize(11)
+     .text(getReportTitle(doc.document_type));
+
+  pdf.moveDown(0.2);
+  pdf.fillColor(hexToRgb(MUTED)).fontSize(10).text(doc.week_label || '');
+
+  // Divider
+  pdf.moveDown(0.8);
+  pdf.strokeColor(hexToRgb(BORDER)).lineWidth(1)
+     .moveTo(90, pdf.y).lineTo(90 + W, pdf.y).stroke();
+  pdf.moveDown(0.8);
+
+  // Headline
+  pdf.fillColor(hexToRgb(DARK)).font('Helvetica-Bold').fontSize(14)
+     .text(doc.headline || '', { width: W });
+  pdf.moveDown(1.2);
+
+  // ── Sections ───────────────────────────────────────────────────────────────
+  for (const section of doc.sections) {
+    if (pdf.y > pdf.page.height - 180) pdf.addPage();
+
+    // Section accent bar
+    const barY = pdf.y;
+    pdf.fillColor(hexToRgb(TEAL))
+       .rect(90, barY, 3, 16).fill();
+
+    pdf.fillColor(hexToRgb(DARK)).font('Helvetica-Bold').fontSize(12)
+       .text(section.title, 99, barY, { width: W - 9 });
+    pdf.moveDown(0.5);
+
+    pdf.fillColor(hexToRgb(MID)).font('Helvetica').fontSize(10.5)
+       .text(section.content || '', { width: W, lineGap: 2 });
+    pdf.moveDown(1.2);
   }
+
+  // ── Actions ────────────────────────────────────────────────────────────────
+  if (config.include_actions !== false && doc.actions?.length) {
+    if (pdf.y > pdf.page.height - 180) pdf.addPage();
+
+    const barY = pdf.y;
+    pdf.fillColor(hexToRgb(TEAL)).rect(90, barY, 3, 16).fill();
+    pdf.fillColor(hexToRgb(DARK)).font('Helvetica-Bold').fontSize(12)
+       .text('Actions', 99, barY, { width: W - 9 });
+    pdf.moveDown(0.6);
+
+    for (const action of doc.actions) {
+      if (pdf.y > pdf.page.height - 100) pdf.addPage();
+
+      const label = URGENCY_LABELS[action.urgency] ?? action.urgency.toUpperCase();
+      const color = URGENCY_COLORS[action.urgency] ?? '#6B7280';
+      const cleanText = (action.text || '').replace(/\s*—?\s*Owned by:.*$/i, '').trim();
+
+      const rowY = pdf.y;
+      pdf.fillColor(hexToRgb(color)).font('Helvetica-Bold').fontSize(8.5)
+         .text(label, 90, rowY, { width: 72 });
+      pdf.fillColor(hexToRgb(MID)).font('Helvetica').fontSize(10)
+         .text(cleanText, 168, rowY, { width: W - 78 });
+      pdf.moveDown(0.2);
+      pdf.strokeColor(hexToRgb(BORDER)).lineWidth(0.5)
+         .moveTo(90, pdf.y).lineTo(90 + W, pdf.y).stroke();
+      pdf.moveDown(0.4);
+    }
+    pdf.moveDown(0.6);
+  }
+
+  // ── Recommended Next Steps ─────────────────────────────────────────────────
+  if (doc.recommended_next_steps) {
+    if (pdf.y > pdf.page.height - 140) pdf.addPage();
+
+    const barY = pdf.y;
+    pdf.fillColor(hexToRgb(TEAL)).rect(90, barY, 3, 16).fill();
+    pdf.fillColor(hexToRgb(DARK)).font('Helvetica-Bold').fontSize(12)
+       .text('Recommended Next Steps', 99, barY, { width: W - 9 });
+    pdf.moveDown(0.5);
+
+    pdf.fillColor(hexToRgb(MID)).font('Helvetica-Oblique').fontSize(10.5)
+       .text(doc.recommended_next_steps, { width: W, lineGap: 2 });
+  }
+
+  // ── Footer on every page ───────────────────────────────────────────────────
+  const footerParts = [
+    config.prepared_by  ? `Prepared by ${config.prepared_by}` : '',
+    config.for_company  ? `for ${config.for_company}` : '',
+    new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
+  ].filter(Boolean).join(' · ');
+
+  const totalPages = (pdf as any)._pageBuffer?.length ?? 1;
+  for (let i = 0; i < totalPages; i++) {
+    pdf.switchToPage(i);
+    const fy = pdf.page.height - 45;
+    pdf.strokeColor(hexToRgb(BORDER)).lineWidth(0.5)
+       .moveTo(90, fy - 8).lineTo(90 + W, fy - 8).stroke();
+    pdf.fillColor(hexToRgb(MUTED)).font('Helvetica').fontSize(8)
+       .text(`${footerParts}  ·  Page ${i + 1} of ${totalPages}`, 90, fy, {
+         width: W, align: 'center',
+       });
+  }
+
+  pdf.end();
+  await done;
+  return Buffer.concat(chunks);
 }
 
 function buildReportHtml(
