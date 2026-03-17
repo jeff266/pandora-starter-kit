@@ -68,7 +68,7 @@ export function unregisterCustomSkillCron(skillId: string): void {
 
 async function loadAndScheduleCustomSkills(): Promise<void> {
   try {
-    const rows = await query(
+    const rows = await query<CustomSkillCronRow>(
       `SELECT skill_id, workspace_id, schedule_cron, name
        FROM custom_skills
        WHERE status = 'active' AND schedule_cron IS NOT NULL`
@@ -642,7 +642,9 @@ export function startSkillScheduler(): void {
     '0 6 1 * *',
     async () => {
       console.log('[VoicePatterns] Monthly extraction triggered (1st of month, 6am UTC)');
-      const { runSkill } = await import('../skills/runtime.js');
+      const voiceSkill = getSkillRegistry().get('voice-pattern-extraction');
+      if (!voiceSkill) { console.error('[VoicePatterns] Skill not found in registry'); return; }
+      const voiceRuntime = getSkillRuntime();
 
       const workspacesResult = await query<{ id: string; name: string }>(
         `SELECT w.id, w.name
@@ -653,7 +655,7 @@ export function startSkillScheduler(): void {
 
       for (const workspace of workspacesResult.rows) {
         try {
-          await runSkill('voice-pattern-extraction', workspace.id, undefined, { triggeredBy: 'cron' });
+          await voiceRuntime.executeSkill(voiceSkill, workspace.id, { scopeId: 'default', scopeName: 'All Deals' });
         } catch (err: any) {
           console.error(`[VoicePatterns] Failed for ${workspace.name}:`, err?.message ?? err);
         }
@@ -673,7 +675,9 @@ export function startSkillScheduler(): void {
     '0 8 1 1,4,7,10 *',
     async () => {
       console.log('[QuarterlyPreMortem] Quarter-start pre-mortem triggered');
-      const { runSkill } = await import('../skills/runtime.js');
+      const preMortemSkill = getSkillRegistry().get('quarterly-pre-mortem');
+      if (!preMortemSkill) { console.error('[QuarterlyPreMortem] Skill not found in registry'); return; }
+      const preMortemRuntime = getSkillRuntime();
 
       const workspacesResult = await query<{ id: string; name: string }>(
         `SELECT DISTINCT w.id, w.name
@@ -686,7 +690,7 @@ export function startSkillScheduler(): void {
 
       for (const workspace of workspacesResult.rows) {
         try {
-          await runSkill('quarterly-pre-mortem', workspace.id, { trigger: 'cron' });
+          await preMortemRuntime.executeSkill(preMortemSkill, workspace.id, { scopeId: 'default', scopeName: 'All Deals' });
           console.log(`[QuarterlyPreMortem] ✓ ${workspace.name} (${workspace.id})`);
         } catch (err: any) {
           console.error(`[QuarterlyPreMortem] ✗ ${workspace.name}:`, err.message);

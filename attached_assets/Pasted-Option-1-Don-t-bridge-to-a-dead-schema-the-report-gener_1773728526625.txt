@@ -1,0 +1,449 @@
+Option 1. Don't bridge to a dead schema — the `report_generations` shape is being retired whether you do it now or later. Building a bridge just means dismantling it in Phase 5 when the renderer reads `ReportDocument` directly.
+
+The migration is the right move and it's cleaner than it looks. `ReportViewer.tsx` is already doing the hard work — fetching, rendering sections, displaying the timeline. The data shape change is the only real work.
+
+Phase 3a prompt needs a prerequisite block prepended:
+
+---
+
+```
+Replit: Phase 3a — Report Page Migration + Inline Annotation Layer
+
+Read before starting:
+1. client/components/ReportViewer.tsx — full component, understand
+   every data field it reads and every API call it makes
+2. client/pages/ReportsPage.tsx — how it lists reports and
+   selects which to display
+3. server/routes/agents.ts — the three new endpoints:
+   GET /:workspaceId/reports/latest
+   GET /:workspaceId/reports
+   GET /:workspaceId/reports/:reportId
+4. server/orchestrator/persistence.ts — what getLatestReportDocument()
+   and getAllReportsForWorkspace() actually return. This is the
+   shape the frontend will consume.
+5. server/orchestrator/types.ts — ReportDocument and ReportSection
+   interfaces. These are the canonical types.
+6. package.json — check if @tiptap/react and @tiptap/starter-kit
+   are installed. If not, install them before starting.
+
+Do not touch annotation code until the migration in Task 1 is
+complete and the Report page is rendering real report_documents
+data end-to-end.
+
+---
+
+## Task 1: Migrate ReportViewer to report_documents
+
+This is the prerequisite. Everything else depends on it.
+
+### 1a. Update ReportsPage.tsx
+
+Replace the call to GET /reports (which reads report_templates)
+with a call to the new endpoint:
+
+GET /api/workspaces/:workspaceId/reports?limit=20
+
+This returns report_documents rows for the timeline sidebar.
+
+Map the response to the timeline display. The relevant fields:
+- id → used to fetch individual report
+- document_type → display label ("Monday Pipeline Briefing")
+- week_label → display as timeline date ("Week of March 16")
+- generated_at → timestamp for the timeline entry
+- headline → subtitle under the date (optional, nice to have)
+- total_word_count → can show as metadata
+
+The existing timeline sidebar UI (dates + times on the left)
+can stay exactly as-is visually. Only the data source changes.
+
+### 1b. Update ReportViewer.tsx
+
+Replace the call to GET /generations/:generationId with:
+
+GET /api/workspaces/:workspaceId/reports/:reportId
+
+Replace the call to GET /generations-by-agent/:agentId with:
+
+GET /api/workspaces/:workspaceId/reports/latest?type=monday_briefing
+
+Map the new ReportDocument shape to the viewer's rendering:
+
+Old field → New field:
+opening_narrative → headline (displayed at top)
+[no equivalent] → sections[] (render each section)
+[no equivalent] → actions[] (render action cards)
+[no equivalent] → recommended_next_steps (render at bottom)
+triggered_by → skills_included[] (metadata display)
+version → orchestrator_run_id (metadata)
+
+### 1c. Section rendering
+
+ReportViewer currently renders a single narrative blob.
+Replace with section-by-section rendering:
+
+```typescript
+// For each section in reportDocument.sections:
+<div key={section.id} className="report-section">
+  <h2>{section.title}</h2>
+  <p>{section.content}</p>
+</div>
+```
+
+Keep existing styles. The H2 styling, body text, spacing —
+all stays the same. This is a data plumbing change, not
+a design change.
+
+### 1d. Action cards
+
+The existing action card components (TODAY / THIS WEEK etc.)
+should read from reportDocument.actions[] instead of wherever
+they currently come from.
+
+Map ActionSummary fields:
+- urgency → card label (today/this_week/this_month)
+- text → action description
+- deal_name → deal reference (if present)
+- rep_name → rep reference (if present)
+
+### 1e. Validation gate
+
+Before writing a single line of annotation code, verify:
+1. ReportsPage shows the timeline with real week_label entries
+   from report_documents (not report_templates)
+2. Clicking a timeline entry loads the correct report
+3. The headline "14 days left: $1.3M closed, $288K open —
+   what can realistically close?" appears in the viewer
+4. The three sections render with their content
+5. Action cards show the 3 actions from the document
+
+If any of these fail, fix before proceeding to Task 2.
+
+---
+
+## Task 2: report_annotations Migration
+
+Create the next migration after 186:
+
+```sql
+CREATE TABLE IF NOT EXISTS report_annotations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id)
+    ON DELETE CASCADE,
+  report_document_id UUID NOT NULL
+    REFERENCES report_documents(id) ON DELETE CASCADE,
+  section_id TEXT NOT NULL,
+  paragraph_index INTEGER NOT NULL DEFAULT 0,
+  annotation_type TEXT NOT NULL
+    CHECK (annotation_type IN ('note', 'override', 'flag')),
+  content TEXT NOT NULL DEFAULT '',
+  original_content TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_report_annotations_report
+  ON report_annotations(report_document_id);
+
+CREATE INDEX idx_report_annotations_workspace
+  ON report_annotations(workspace_id);
+```
+
+Add API endpoints in server/routes/agents.ts or a new
+server/routes/annotations.ts:
+
+```
+POST   /api/workspaces/:id/reports/:reportId/annotations
+GET    /api/workspaces/:id/reports/:reportId/annotations
+PATCH  /api/workspaces/:id/reports/:reportId/annotations/:annotationId
+DELETE /api/workspaces/:id/reports/:reportId/annotations/:annotationId
+```
+
+Each endpoint enforces workspace_id isolation —
+verify report belongs to workspace before read/write.
+
+---
+
+## Task 3: AnnotatableSection Component
+
+Create client/components/report/AnnotatableSection.tsx
+
+Props:
+```typescript
+interface AnnotatableSectionProps {
+  section: ReportSection;        // {id, title, content, word_count}
+  annotations: Annotation[];     // filtered to this section
+  isAnnotating: boolean;
+  onAnnotationSave: (
+    annotation: Omit<Annotation, 'id' | 'created_at' | 'updated_at'>
+  ) => Promise<void>;
+  onAnnotationDelete: (annotationId: string) => Promise<void>;
+}
+```
+
+Split section.content into paragraphs:
+```typescript
+const paragraphs = section.content
+  .split(/\n\n+/)
+  .filter(p => p.trim().length > 0);
+```
+
+Each paragraph renders as a <p> with:
+- data-section={section.id}
+- data-paragraph={index}
+- tabIndex={isAnnotating ? 0 : -1}
+
+READ MODE rendering per paragraph:
+- Has 'override' annotation → render annotation.content
+  instead, blue left border (border-left: 3px solid #3B82F6,
+  padding-left: 12px, background: #F0F7FF)
+- Has 'flag' annotation → wrap in callout box
+  (background: #EFF6FF, border: 1px solid #BFDBFE,
+  border-radius: 6px, padding: 12px)
+- Has 'note' annotation → render original content + small
+  yellow dot at right (●, color: #F59E0B, float: right,
+  font-size: 10px, margin-top: 4px)
+- No annotation → render content normally
+
+ANNOTATION MODE additional behavior per paragraph:
+- Hover: background #F8FAFC
+- Show 💬 icon at right edge on hover (opacity: 0 normally,
+  opacity: 1 on hover, transition: opacity 150ms)
+- onClick or onFocus → open FloatingBubble for this paragraph
+- If annotation exists → show type pill badge inline
+  (small rounded pill: "Note" yellow / "Override" blue /
+  "Flag" light blue)
+- onKeyDown: handle Tab (next paragraph) and Enter (open bubble)
+
+---
+
+## Task 4: FloatingBubble Component
+
+Create client/components/report/FloatingBubble.tsx
+
+NOT a modal. Renders inline, positioned below the clicked
+paragraph using getBoundingClientRect().
+
+```typescript
+interface FloatingBubbleProps {
+  paragraphText: string;
+  sectionId: string;
+  paragraphIndex: number;
+  existingAnnotation?: Annotation;
+  anchorRef: React.RefObject<HTMLElement>;
+  onSave: (
+    type: Annotation['annotation_type'],
+    content: string
+  ) => Promise<void>;
+  onDelete?: () => Promise<void>;
+  onClose: () => void;
+}
+```
+
+Layout:
+```
+┌──────────────────────────────────────────┐
+│  [ Note ]  [ Override ]  [ Flag ]        │
+├──────────────────────────────────────────┤
+│  [Override only] "Replacing:"            │
+│  [muted original text preview, 2 lines]  │
+├──────────────────────────────────────────┤
+│  [auto-growing textarea]                 │
+│                                          │
+├──────────────────────────────────────────┤
+│  [Delete]             [Cancel]  [Save]   │
+└──────────────────────────────────────────┘
+```
+
+Flag tab: no textarea — just "Flag this paragraph for
+client attention" label + Save button.
+
+Positioning:
+```typescript
+useEffect(() => {
+  if (anchorRef.current) {
+    const rect = anchorRef.current.getBoundingClientRect();
+    const bubbleHeight = 200; // approximate
+    const spaceBelow = window.innerHeight - rect.bottom;
+    
+    if (spaceBelow < bubbleHeight) {
+      // Position above
+      setBubbleStyle({
+        top: rect.top + window.scrollY - bubbleHeight - 8,
+        left: rect.left + window.scrollX,
+      });
+    } else {
+      // Position below
+      setBubbleStyle({
+        top: rect.bottom + window.scrollY + 8,
+        left: rect.left + window.scrollX,
+      });
+    }
+  }
+}, [anchorRef]);
+```
+
+Max-width: 480px. Z-index above report content.
+
+Keyboard:
+- Escape → onClose()
+- Cmd+Enter / Ctrl+Enter → save and close
+- Tab within bubble → cycles through type tabs then textarea
+  then buttons (standard browser behavior, don't override)
+
+Pre-fill if existingAnnotation: set type and content,
+show Delete button.
+
+---
+
+## Task 5: Tab Navigation Between Paragraphs
+
+In AnnotatableSection, handle Tab key on paragraph elements:
+
+```typescript
+const handleKeyDown = (
+  e: React.KeyboardEvent<HTMLParagraphElement>,
+  index: number
+) => {
+  if (!isAnnotating) return;
+
+  if (e.key === 'Tab' && !e.shiftKey) {
+    e.preventDefault();
+    const allParagraphs = document.querySelectorAll(
+      '[data-paragraph]'
+    );
+    const currentIndex = Array.from(allParagraphs)
+      .findIndex(el =>
+        el.getAttribute('data-section') === section.id &&
+        el.getAttribute('data-paragraph') === String(index)
+      );
+    const next = allParagraphs[currentIndex + 1] as HTMLElement;
+    if (next) next.focus();
+  }
+};
+```
+
+This navigates across section boundaries automatically
+because all paragraphs across all sections share the same
+[data-paragraph] selector.
+
+---
+
+## Task 6: Wire Into ReportViewer
+
+Replace the existing section rendering block in ReportViewer
+with AnnotatableSection components:
+
+```typescript
+const [annotations, setAnnotations] = useState<Annotation[]>([]);
+const [isAnnotating, setIsAnnotating] = useState(false);
+
+// Load annotations when report loads
+useEffect(() => {
+  if (reportDocument?.id && workspaceId) {
+    fetch(`/api/workspaces/${workspaceId}/reports/
+      ${reportDocument.id}/annotations`)
+      .then(r => r.json())
+      .then(setAnnotations);
+  }
+}, [reportDocument?.id]);
+
+// Replace section rendering:
+{reportDocument.sections.map(section => (
+  <AnnotatableSection
+    key={section.id}
+    section={section}
+    annotations={annotations.filter(
+      a => a.section_id === section.id
+    )}
+    isAnnotating={isAnnotating}
+    onAnnotationSave={async (annotation) => {
+      const res = await fetch(
+        `/api/workspaces/${workspaceId}/reports/
+          ${reportDocument.id}/annotations`,
+        {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(annotation),
+        }
+      );
+      const saved = await res.json();
+      setAnnotations(prev => [
+        ...prev.filter(a =>
+          !(a.section_id === annotation.section_id &&
+            a.paragraph_index === annotation.paragraph_index)
+        ),
+        saved,
+      ]);
+    }}
+    onAnnotationDelete={async (annotationId) => {
+      await fetch(
+        `/api/workspaces/${workspaceId}/reports/
+          ${reportDocument.id}/annotations/${annotationId}`,
+        { method: 'DELETE' }
+      );
+      setAnnotations(prev =>
+        prev.filter(a => a.id !== annotationId)
+      );
+    }}
+  />
+))}
+```
+
+Wire the existing "Annotate" button to toggle isAnnotating.
+Keep the blue banner exactly as-is.
+Keep Exit button: setIsAnnotating(false).
+
+Annotation count badge near report title:
+```typescript
+{annotations.length > 0 && (
+  <button
+    onClick={() => setIsAnnotating(true)}
+    className="text-sm text-gray-500 hover:text-gray-700"
+  >
+    📝 {annotations.length} annotation
+    {annotations.length !== 1 ? 's' : ''}
+  </button>
+)}
+```
+
+---
+
+## What NOT to change:
+- Anonymize button behavior
+- PDF / DOCX / PPTX / Share export buttons
+- Timeline sidebar layout
+- Report title and metadata display
+- Existing action card components
+- The blue ANNOTATION MODE banner text
+- The Edit Report button (leave as-is)
+
+---
+
+## Acceptance Criteria:
+
+Task 1 (Migration — validate before Task 2):
+1. ReportsPage timeline shows "Week of March 16, 2026" entry
+   from report_documents (not report_templates)
+2. Clicking it loads the report with headline:
+   "14 days left: $1.3M closed, $288K open —
+   what can realistically close?"
+3. Three sections render with their content
+4. Action cards show the 3 actions
+
+Tasks 2–6 (Annotation layer):
+5. Clicking "Annotate" keeps report fully rendered —
+   no textarea anywhere
+6. Hovering a paragraph shows 💬 icon
+7. Clicking paragraph opens FloatingBubble
+8. Save Note → yellow dot on paragraph, row in
+   report_annotations table
+9. Save Override → paragraph content replaced,
+   blue left border
+10. Save Flag → blue callout box on paragraph
+11. Tab moves focus to next paragraph across sections
+12. Cmd+Enter saves, Escape closes without saving
+13. Re-entering annotation mode shows all prior
+    annotations persisted
+14. 📝 N annotations badge appears when annotations exist
+15. Zero regressions on PDF/DOCX/Share/Anonymize buttons
+```
