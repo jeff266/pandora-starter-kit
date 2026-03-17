@@ -1,0 +1,89 @@
+Wire export buttons to the annotation-aware export endpoint.
+
+Read before starting:
+1. client/src/components/ReportViewer.tsx — find the PDF,
+   DOCX, and PPTX buttons. Check what they currently do
+   on click (likely nothing, or calling an old endpoint).
+2. server/routes/agents.ts — find the export endpoint:
+   POST /:workspaceId/reports/:reportId/export
+   Confirm it exists and accepts { format } in the body.
+
+---
+
+In ReportViewer.tsx, add this function:
+
+async function handleExport(format: 'pdf' | 'docx' | 'pptx') {
+  if (!reportDocument?.id || !workspaceId) return;
+
+  try {
+    const res = await fetch(
+      `/api/workspaces/${workspaceId}/reports/` +
+      `${reportDocument.id}/export`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ format }),
+      }
+    );
+
+    if (!res.ok) {
+      console.error('Export failed:', await res.text());
+      return;
+    }
+
+    const data = await res.json();
+    console.log('[Export] Merged document:', data);
+    // Phase 5 will handle actual file download here
+    // For now this confirms annotations are merged correctly
+
+  } catch (err) {
+    console.error('[Export] Error:', err);
+  }
+}
+
+Wire to each export button:
+- PDF button → onClick={() => handleExport('pdf')}
+- DOCX button → onClick={() => handleExport('docx')}
+- PPTX button → onClick={() => handleExport('pptx')}
+
+If the export endpoint doesn't exist in agents.ts, add it:
+
+router.post(
+  '/:workspaceId/reports/:reportId/export',
+  async (req, res) => {
+    const { workspaceId, reportId } = req.params;
+    const { format = 'pdf' } = req.body;
+
+    // Verify ownership
+    const doc = await getReportDocumentById(reportId, workspaceId);
+    if (!doc) return res.status(404).json({ error: 'Not found' });
+
+    // Merge annotations
+    const { mergeAnnotationsForExport } = await import(
+      '../orchestrator/annotation-merge'
+    );
+    const merged = await mergeAnnotationsForExport(doc, workspaceId);
+
+    res.json({
+      report_document: merged,
+      format,
+      annotations_applied: 'merged',
+    });
+  }
+);
+
+---
+
+Acceptance criteria:
+1. Click PDF button → Network tab shows POST to
+   /api/workspaces/:id/reports/:id/export with {format:'pdf'}
+2. Response returns 200 with report_document containing sections
+3. If an Override annotation exists on "This Week" paragraph 0,
+   the response sections[].content for "this_week" contains
+   the override text, not the original AI text
+4. DOCX and PPTX buttons both call the same endpoint with
+   their respective format values
+5. Console logs "[Export] Merged document:" with the response

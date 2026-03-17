@@ -271,6 +271,31 @@ export default function ReportViewer() {
     }
   }
 
+  async function handleExport(format: 'pdf' | 'docx' | 'pptx') {
+    if (!reportDocument?.id) return;
+    const wid = currentWorkspace?.id || workspaceId;
+    if (!wid) return;
+    const token = localStorage.getItem('pandora_session');
+    try {
+      const res = await fetch(
+        `/api/workspaces/${wid}/reports/${reportDocument.id}/export`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ format }),
+        }
+      );
+      if (!res.ok) {
+        console.error('[Export] Failed:', await res.text());
+        return;
+      }
+      const data = await res.json();
+      console.log('[Export] Merged document:', data);
+    } catch (err) {
+      console.error('[Export] Error:', err);
+    }
+  }
+
   const handleContextMenu = useCallback((e: React.MouseEvent, target: ReportContextTarget) => {
     e.preventDefault();
     setContextMenu({ x: e.clientX, y: e.clientY, target });
@@ -708,6 +733,25 @@ export default function ReportViewer() {
                     >
                       <Download style={{ width: 14, height: 14 }} />
                       {format.toUpperCase()} (V2)
+                    </button>
+                  ))}
+                </>
+              )}
+              {reportDocument && (
+                <>
+                  {(['pdf', 'docx', 'pptx'] as const).map(format => (
+                    <button
+                      key={`doc-export-${format}`}
+                      onClick={() => handleExport(format)}
+                      style={{
+                        padding: '8px 12px', borderRadius: 8, fontSize: 13, fontWeight: 500,
+                        display: 'flex', alignItems: 'center', gap: 6,
+                        background: colors.accentSoft, color: colors.accent,
+                        border: `1px solid ${colors.accent}44`, cursor: 'pointer', fontFamily: fonts.sans,
+                      }}
+                    >
+                      <Download style={{ width: 14, height: 14 }} />
+                      {format.toUpperCase()}
                     </button>
                   ))}
                 </>
