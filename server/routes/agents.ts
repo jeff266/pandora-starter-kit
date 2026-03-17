@@ -449,4 +449,236 @@ agentsWorkspaceRouter.get('/:workspaceId/reports/:reportId', requirePermission('
   }
 });
 
+// ── Report Annotation Endpoints (Phase 3a) ───────────────────────────────────
+
+// Helper: Verify report belongs to workspace
+async function verifyReportOwnership(workspaceId: string, reportId: string): Promise<boolean> {
+  const result = await query(
+    'SELECT id FROM report_documents WHERE id = $1 AND workspace_id = $2',
+    [reportId, workspaceId]
+  );
+  return result.rows.length > 0;
+}
+
+agentsWorkspaceRouter.get('/:workspaceId/reports/:reportId/annotations', requirePermission('agents.view'), async (req: Request, res: Response) => {
+  const workspaceId = req.params.workspaceId as string;
+  const reportId = req.params.reportId as string;
+
+  try {
+    // Verify ownership
+    if (!await verifyReportOwnership(workspaceId, reportId)) {
+      return res.status(404).json({ error: 'Report not found' });
+    }
+
+    const result = await query(
+      `SELECT * FROM report_annotations
+       WHERE report_document_id = $1
+       ORDER BY section_id, paragraph_index`,
+      [reportId]
+    );
+
+    res.json(result.rows);
+  } catch (err: any) {
+    console.error('[Annotations] Failed to get annotations:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+agentsWorkspaceRouter.post('/:workspaceId/reports/:reportId/annotations', requirePermission('agents.view'), async (req: Request, res: Response) => {
+  const workspaceId = req.params.workspaceId as string;
+  const reportId = req.params.reportId as string;
+  const { section_id, paragraph_index, annotation_type, content, original_content } = req.body;
+
+  try {
+    // Verify ownership
+    if (!await verifyReportOwnership(workspaceId, reportId)) {
+      return res.status(404).json({ error: 'Report not found' });
+    }
+
+    // Validate required fields
+    if (!section_id || paragraph_index == null || !annotation_type) {
+      return res.status(400).json({ error: 'Missing required fields: section_id, paragraph_index, annotation_type' });
+    }
+
+    if (!['note', 'override', 'flag'].includes(annotation_type)) {
+      return res.status(400).json({ error: 'Invalid annotation_type. Must be: note, override, or flag' });
+    }
+
+    // Upsert behavior: check if annotation already exists for this location
+    const existing = await query(
+      `SELECT id FROM report_annotations
+       WHERE report_document_id = $1
+         AND section_id = $2
+         AND paragraph_index = $3`,
+      [reportId, section_id, paragraph_index]
+    );
+
+    let result;
+    if (existing.rows.length > 0) {
+      // Update existing annotation
+      result = await query(
+        `UPDATE report_annotations
+         SET annotation_type = $1,
+             content = $2,
+             original_content = $3,
+             updated_at = NOW()
+         WHERE id = $4
+         RETURNING *`,
+        [annotation_type, content || '', original_content || null, existing.rows[0].id]
+      );
+    } else {
+      // Insert new annotation
+      result = await query(
+        `INSERT INTO report_annotations (
+           workspace_id, report_document_id, section_id,
+           paragraph_index, annotation_type, content, original_content
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING *`,
+        [workspaceId, reportId, section_id, paragraph_index, annotation_type, content || '', original_content || null]
+      );
+    }
+
+    res.json(result.rows[0]);
+  } catch (err: any) {
+    console.error('[Annotations] Failed to save annotation:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+agentsWorkspaceRouter.patch('/:workspaceId/reports/:reportId/annotations/:annotationId', requirePermission('agents.view'), async (req: Request, res: Response) => {
+  const workspaceId = req.params.workspaceId as string;
+  const reportId = req.params.reportId as string;
+  const annotationId = req.params.annotationId as string;
+  const { content, annotation_type } = req.body;
+
+  try {
+    // Verify ownership
+    if (!await verifyReportOwnership(workspaceId, reportId)) {
+      return res.status(404).json({ error: 'Report not found' });
+    }
+
+    // Build update fields
+    const updates: string[] = [];
+    const values: any[] = [];
+    let paramCount = 0;
+
+    if (content !== undefined) {
+      updates.push(`content = $${++paramCount}`);
+      values.push(content);
+    }
+
+    if (annotation_type !== undefined) {
+      if (!['note', 'override', 'flag'].includes(annotation_type)) {
+        return res.status(400).json({ error: 'Invalid annotation_type' });
+      }
+      updates.push(`annotation_type = $${++paramCount}`);
+      values.push(annotation_type);
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'No fields to update' });
+    }
+
+    updates.push(`updated_at = NOW()`);
+    values.push(annotationId, reportId, workspaceId);
+
+    const result = await query(
+      `UPDATE report_annotations
+       SET ${updates.join(', ')}
+       WHERE id = $${++paramCount}
+         AND report_document_id = $${++paramCount}
+         AND workspace_id = $${++paramCount}
+       RETURNING *`,
+      values
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Annotation not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (err: any) {
+    console.error('[Annotations] Failed to update annotation:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+agentsWorkspaceRouter.delete('/:workspaceId/reports/:reportId/annotations/:annotationId', requirePermission('agents.view'), async (req: Request, res: Response) => {
+  const workspaceId = req.params.workspaceId as string;
+  const reportId = req.params.reportId as string;
+  const annotationId = req.params.annotationId as string;
+
+  try {
+    // Verify ownership
+    if (!await verifyReportOwnership(workspaceId, reportId)) {
+      return res.status(404).json({ error: 'Report not found' });
+    }
+
+    const result = await query(
+      `DELETE FROM report_annotations
+       WHERE id = $1
+         AND report_document_id = $2
+         AND workspace_id = $3
+       RETURNING id`,
+      [annotationId, reportId, workspaceId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Annotation not found' });
+    }
+
+    res.json({ deleted: true });
+  } catch (err: any) {
+    console.error('[Annotations] Failed to delete annotation:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Report Export Endpoint (Phase 3b) ────────────────────────────────────────
+
+agentsWorkspaceRouter.post('/:workspaceId/reports/:reportId/export', requirePermission('agents.view'), async (req: Request, res: Response) => {
+  const workspaceId = req.params.workspaceId as string;
+  const reportId = req.params.reportId as string;
+  const { format = 'pdf' } = req.body;
+
+  try {
+    // 1. Load the report document
+    const { getReportDocumentById } = await import('../orchestrator/persistence.js');
+    const reportDoc = await getReportDocumentById(workspaceId, reportId);
+
+    if (!reportDoc) {
+      return res.status(404).json({ error: 'Report not found' });
+    }
+
+    // 2. MERGE ANNOTATIONS before rendering
+    //    This is the Phase 3b addition — always runs before export
+    const { mergeAnnotationsForExport } = await import('../orchestrator/annotation-merge.js');
+    const mergedDoc = await mergeAnnotationsForExport(reportDoc, workspaceId);
+
+    // 3. Pass merged document to renderer
+    // (Phase 5 renderer v2 consumes this — for now, return merged JSON
+    //  so Phase 3c Prepare for Client modal can preview it)
+
+    // Determine if annotations were applied
+    const annotationsApplied = reportDoc.sections.some((section, idx) => {
+      const mergedSection = mergedDoc.sections[idx];
+      return (
+        section.content !== mergedSection.content ||
+        section.flagged_for_client !== mergedSection.flagged_for_client
+      );
+    });
+
+    // Temporary: return the merged document as JSON
+    // Phase 5 will replace this with actual file stream
+    res.json({
+      report_document: mergedDoc,
+      format,
+      annotations_applied: annotationsApplied ? 'sections_modified' : 'no_changes',
+    });
+  } catch (err: any) {
+    console.error('[Reports] Failed to export report:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export { agentsGlobalRouter, agentsWorkspaceRouter };
