@@ -449,29 +449,56 @@ export async function runHypothesisRedTeam(
   hypothesisId: string
 ): Promise<HypothesisRedTeamResult> {
 
-  // COMPUTE — gather evidence
-  const hypothesisResult = await query(
-    `SELECT * FROM standing_hypotheses
-     WHERE workspace_id = $1 AND id = $2`,
-    [workspaceId, hypothesisId]
-  );
+  // COMPUTE — gather evidence in parallel
+  const [hypothesisResult, pipelineResult] = await Promise.all([
+    query(
+      `SELECT * FROM standing_hypotheses WHERE workspace_id = $1 AND id = $2`,
+      [workspaceId, hypothesisId]
+    ),
+    query(
+      `SELECT
+         COUNT(CASE WHEN stage_normalized NOT IN ('closed_won','closed_lost') THEN 1 END)::int AS open_deals,
+         COALESCE(SUM(CASE WHEN stage_normalized NOT IN ('closed_won','closed_lost') THEN amount ELSE 0 END), 0)::numeric AS pipeline_value,
+         COALESCE(SUM(CASE WHEN stage_normalized = 'closed_won'
+                      AND close_date >= date_trunc('quarter', NOW())
+                      THEN amount ELSE 0 END), 0)::numeric AS qtd_closed,
+         COALESCE(SUM(CASE WHEN stage_normalized NOT IN ('closed_won','closed_lost')
+                      AND close_date >= date_trunc('quarter', NOW())
+                      AND close_date < date_trunc('quarter', NOW()) + INTERVAL '3 months'
+                      THEN amount ELSE 0 END), 0)::numeric AS pipeline_this_quarter
+       FROM deals
+       WHERE workspace_id = $1`,
+      [workspaceId]
+    ),
+  ]);
 
   if (hypothesisResult.rows.length === 0) {
     throw new Error(`Hypothesis ${hypothesisId} not found`);
   }
 
   const hyp = hypothesisResult.rows[0];
+  const pipe = pipelineResult.rows[0] ?? {};
 
-  const sprintActionsResult = await query(
-    `SELECT title, expected_value_delta, effort, state
-     FROM actions
-     WHERE workspace_id = $1
-       AND hypothesis_id = $2
-       AND sprint_week = date_trunc('week', NOW())
-       AND state IN ('pending', 'in_progress')
-     ORDER BY expected_value_delta DESC NULLS LAST`,
-    [workspaceId, hypothesisId]
-  );
+  // Sprint actions + sibling hypotheses in parallel
+  const [sprintActionsResult, siblingsResult] = await Promise.all([
+    query(
+      `SELECT title, expected_value_delta, effort, state
+       FROM actions
+       WHERE workspace_id = $1
+         AND hypothesis_id = $2
+         AND sprint_week = date_trunc('week', NOW())
+         AND state IN ('pending', 'in_progress')
+       ORDER BY expected_value_delta DESC NULLS LAST`,
+      [workspaceId, hypothesisId]
+    ),
+    query(
+      `SELECT metric, current_value, alert_threshold, alert_direction
+       FROM standing_hypotheses
+       WHERE workspace_id = $1 AND id != $2
+       ORDER BY metric`,
+      [workspaceId, hypothesisId]
+    ),
+  ]);
 
   const totalSprintEV = sprintActionsResult.rows.reduce(
     (sum: number, a: any) => sum + (parseFloat(a.expected_value_delta) || 0),
@@ -486,12 +513,45 @@ export async function runHypothesisRedTeam(
   const thresholdLabel = formatMetricValue(threshold, hyp.metric);
   const direction = hyp.alert_direction === 'below' ? '≥' : '≤';
 
+  // Quarter week context
+  const now = new Date();
+  const quarterStart = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1);
+  const weeksIntoQuarter = Math.floor((now.getTime() - quarterStart.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1;
+  const weeksLeftInQuarter = 13 - weeksIntoQuarter;
+
+  // Pipeline snapshot string
+  const pipelineValue = parseFloat(pipe.pipeline_value || '0');
+  const qtdClosed = parseFloat(pipe.qtd_closed || '0');
+  const pipelineThisQ = parseFloat(pipe.pipeline_this_quarter || '0');
+  const pipelineBlock = pipelineValue > 0
+    ? `PIPELINE SNAPSHOT:
+- Open pipeline: ${formatCurrency(pipelineValue)} across ${pipe.open_deals} deals
+- QTD closed: ${formatCurrency(qtdClosed)}
+- Pipeline closing this quarter: ${formatCurrency(pipelineThisQ)}
+- Week ${weeksIntoQuarter} of 13 (${weeksLeftInQuarter} weeks remaining)`
+    : `PIPELINE SNAPSHOT: No pipeline data available. Week ${weeksIntoQuarter} of 13.`;
+
+  // Other hypotheses snapshot
+  const siblingsBlock = siblingsResult.rows.length > 0
+    ? `OTHER TRACKED HYPOTHESES (context):\n${siblingsResult.rows.map((s: any) => {
+        const cur = formatMetricValue(parseFloat(s.current_value || '0'), s.metric);
+        const thr = formatMetricValue(parseFloat(s.alert_threshold || '0'), s.metric);
+        const dir = s.alert_direction === 'below' ? '≥' : '≤';
+        const breached = s.alert_direction === 'below'
+          ? parseFloat(s.current_value) < parseFloat(s.alert_threshold)
+          : parseFloat(s.current_value) > parseFloat(s.alert_threshold);
+        return `- ${s.metric}: ${cur} (target: ${dir}${thr})${breached ? ' ⚠ BREACHED' : ''}`;
+      }).join('\n')}`
+    : '';
+
   const contextBlock = `
 HYPOTHESIS: ${hyp.hypothesis}
 METRIC: ${hyp.metric}
 CURRENT VALUE: ${currentLabel}
 THRESHOLD: ${direction} ${thresholdLabel}
 GAP TO CLOSE: ${gapLabel}
+
+${pipelineBlock}
 
 CURRENT SPRINT ACTIONS (${sprintActionsResult.rows.length} actions, ${formatCurrency(totalSprintEV)} total expected value):
 ${
@@ -502,8 +562,9 @@ ${
             `- ${a.title} | EV: ${a.expected_value_delta ? formatCurrency(parseFloat(a.expected_value_delta)) : 'unknown'} | ${a.effort} | ${a.state}`
         )
         .join('\n')
-    : '(no sprint actions linked to this hypothesis)'
+    : '(no sprint actions have been linked to this hypothesis — the team has not explicitly assigned work to close this gap)'
 }
+${siblingsBlock ? '\n' + siblingsBlock : ''}
 `.trim();
 
   let tokenCost = 0;
@@ -522,7 +583,7 @@ Cite specific action titles and their expected values.
     temperature: 0.3,
     _tracking: { workspaceId, phase: 'chat', stepName: 'red-team-plan' },
   });
-  tokenCost += (planResult.usage?.input ?? 0) + (planResult.usage?.output ?? 0);
+  tokenCost += (planResult.usage?.input_tokens ?? 0) + (planResult.usage?.output_tokens ?? 0);
 
   // CALL 2 — Red team attack
   const redTeamResult = await callLLM(workspaceId, 'reason', {
@@ -539,7 +600,7 @@ Be specific. Cite the gap between sprint expected value and the threshold gap.
     temperature: 0.3,
     _tracking: { workspaceId, phase: 'chat', stepName: 'red-team-attack' },
   });
-  tokenCost += (redTeamResult.usage?.input ?? 0) + (redTeamResult.usage?.output ?? 0);
+  tokenCost += (redTeamResult.usage?.input_tokens ?? 0) + (redTeamResult.usage?.output_tokens ?? 0);
 
   // CALL 3 — Verdict
   const verdictResult = await callLLM(workspaceId, 'reason', {
@@ -572,7 +633,7 @@ HYPOTHESIS GAP: ${gapLabel} remaining to close.
     temperature: 0.2,
     _tracking: { workspaceId, phase: 'chat', stepName: 'red-team-verdict' },
   });
-  tokenCost += (verdictResult.usage?.input ?? 0) + (verdictResult.usage?.output ?? 0);
+  tokenCost += (verdictResult.usage?.input_tokens ?? 0) + (verdictResult.usage?.output_tokens ?? 0);
 
   // Parse structured verdict
   const verdictText = verdictResult.content || '';
