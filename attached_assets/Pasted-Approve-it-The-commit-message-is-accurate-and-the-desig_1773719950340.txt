@@ -1,0 +1,53 @@
+Approve it. The commit message is accurate and the design decisions section documents the key choices correctly — especially the non-fatal fallback and has_signal filtering.
+
+Hit **1** to commit, then run the validation sequence before moving to Phase 3:
+
+---
+
+**Validation steps after commit:**
+
+**Step 1 — Apply migration:**
+```sql
+-- Verify report_documents table exists
+SELECT column_name, data_type 
+FROM information_schema.columns
+WHERE table_name = 'report_documents'
+ORDER BY ordinal_position;
+```
+
+**Step 2 — Trigger full cycle:**
+```bash
+curl -s -X POST \
+"https://$REPLIT_DEV_DOMAIN/api/workspaces/4160191d-73bc-414b-97dd-5a1853190378/agents/4f8309a9-f959-44c8-ba90-9fd03939bce8/run-now" \
+-H "Content-Type: application/json" \
+-H "Authorization: Bearer <token>" \
+-d '{"phase": "both"}' | jq .
+```
+
+**Step 3 — Verify the document:**
+```bash
+curl -s \
+"https://$REPLIT_DEV_DOMAIN/api/workspaces/4160191d-73bc-414b-97dd-5a1853190378/reports/latest?type=monday_briefing" \
+-H "Authorization: Bearer <token>" | jq '{
+  headline: .headline,
+  word_count: .total_word_count,
+  tokens: .tokens_used,
+  sections: [.sections[].id],
+  skills_omitted: .skills_omitted
+}'
+```
+
+**What you're looking for:**
+- `headline` — one sentence, reads like something a VP would actually say in a standup
+- `total_word_count` — under 550
+- `tokens_used` — under 3,000
+- `sections` — should be `["the_number", "the_story", "deals_requiring_action", "rep_status"]` in that order
+- `skills_omitted` — any skills that found no signal this week
+
+**The honest quality check:**
+
+Read the full `recommended_next_steps` and the `the_story` section content. If they read like a consultant wrote them — specific names, specific amounts, direct voice — Phase 2 is working. If they read like a template with variables filled in, the playbook needs calibration before Phase 3.
+
+One thing to watch for with Frontera specifically: the `weekly-recap` skill was 200h stale in the example report. If it's still that stale, it'll appear in `skills_omitted` or trigger a conflict with `pipeline-waterfall`. That's correct behavior — just note it.
+
+Ready to write Phase 3a (annotation UX) while you validate, or wait for results first?
