@@ -1,0 +1,80 @@
+Replit: Migrate Report Page to report_documents
+
+Read before starting:
+1. client/components/ReportViewer.tsx — every API call and
+   every data field it reads
+2. client/pages/ReportsPage.tsx — how it lists reports and
+   populates the timeline sidebar
+3. The three existing backend endpoints in server/routes/agents.ts:
+   GET /:workspaceId/reports/latest
+   GET /:workspaceId/reports
+   GET /:workspaceId/reports/:reportId
+   Understand what they return before touching the frontend.
+
+This is a data plumbing change only. Do not change any UI
+layout, styling, or component structure.
+
+---
+
+## What to change
+
+### ReportsPage.tsx
+
+Replace the call that reads report_templates with:
+GET /api/workspaces/:workspaceId/reports?limit=20
+
+Map response fields to the timeline sidebar:
+- generated_at → timestamp (existing display format)
+- week_label → primary label ("Week of March 16, 2026")
+- document_type → secondary label ("Monday Pipeline Briefing")
+- id → used to load individual report on click
+
+### ReportViewer.tsx
+
+Replace GET /generations/:generationId with:
+GET /api/workspaces/:workspaceId/reports/:reportId
+
+Replace GET /generations-by-agent/:agentId with:
+GET /api/workspaces/:workspaceId/reports/latest?type=monday_briefing
+
+Map new ReportDocument fields to existing display:
+
+Old field             → New field
+opening_narrative     → headline
+(no equivalent)       → sections[] — render each as:
+                          <h2>{section.title}</h2>
+                          <p>{section.content}</p>
+(no equivalent)       → recommended_next_steps — render
+                          at bottom of report body
+triggered_by          → skills_included[] joined as string
+version               → orchestrator_run_id (metadata only)
+
+Action cards: read from reportDocument.actions[] instead
+of wherever they currently come from. Map:
+- urgency → card label (today / this_week / this_month)
+- text → action description
+- deal_name → deal reference if present
+- rep_name → rep reference if present
+
+Keep ALL existing styles, layout, and component structure
+exactly as-is. This is field remapping only.
+
+---
+
+## Acceptance Criteria — validate all 4 before stopping:
+
+1. Timeline sidebar shows "Week of March 16, 2026" entry
+   (from report_documents, not report_templates)
+
+2. Clicking that entry loads the report and the headline
+   "14 days left: $1.3M closed, $288K open —
+   what can realistically close?"
+   appears at the top of the viewer
+
+3. The three sections render with their content
+   (section titles as H2, content as body text)
+
+4. Action cards show the 3 actions from the document
+   with correct urgency labels
+
+Stop after these 4 pass. Do not build anything else.
