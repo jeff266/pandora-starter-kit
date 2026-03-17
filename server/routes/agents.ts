@@ -634,4 +634,51 @@ agentsWorkspaceRouter.delete('/:workspaceId/reports/:reportId/annotations/:annot
   }
 });
 
+// ── Report Export Endpoint (Phase 3b) ────────────────────────────────────────
+
+agentsWorkspaceRouter.post('/:workspaceId/reports/:reportId/export', requirePermission('agents.view'), async (req: Request, res: Response) => {
+  const workspaceId = req.params.workspaceId as string;
+  const reportId = req.params.reportId as string;
+  const { format = 'pdf' } = req.body;
+
+  try {
+    // 1. Load the report document
+    const { getReportDocumentById } = await import('../orchestrator/persistence.js');
+    const reportDoc = await getReportDocumentById(workspaceId, reportId);
+
+    if (!reportDoc) {
+      return res.status(404).json({ error: 'Report not found' });
+    }
+
+    // 2. MERGE ANNOTATIONS before rendering
+    //    This is the Phase 3b addition — always runs before export
+    const { mergeAnnotationsForExport } = await import('../orchestrator/annotation-merge.js');
+    const mergedDoc = await mergeAnnotationsForExport(reportDoc, workspaceId);
+
+    // 3. Pass merged document to renderer
+    // (Phase 5 renderer v2 consumes this — for now, return merged JSON
+    //  so Phase 3c Prepare for Client modal can preview it)
+
+    // Determine if annotations were applied
+    const annotationsApplied = reportDoc.sections.some((section, idx) => {
+      const mergedSection = mergedDoc.sections[idx];
+      return (
+        section.content !== mergedSection.content ||
+        section.flagged_for_client !== mergedSection.flagged_for_client
+      );
+    });
+
+    // Temporary: return the merged document as JSON
+    // Phase 5 will replace this with actual file stream
+    res.json({
+      report_document: mergedDoc,
+      format,
+      annotations_applied: annotationsApplied ? 'sections_modified' : 'no_changes',
+    });
+  } catch (err: any) {
+    console.error('[Reports] Failed to export report:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export { agentsGlobalRouter, agentsWorkspaceRouter };
