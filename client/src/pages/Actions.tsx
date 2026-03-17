@@ -9,7 +9,7 @@ import { useDemoMode } from '../contexts/DemoModeContext';
 import { useIsMobile } from '../hooks/useIsMobile';
 import ExecutionDialog from '../components/ExecutionDialog';
 import { openAskPandora } from '../lib/askPandora';
-import RedTeamPanel, { type RedTeamResult } from '../components/RedTeamPanel';
+import DeliberationPanel, { type DeliberationUIOutput } from '../components/DeliberationPanel';
 import { getAuthToken, getWorkspaceId } from '../lib/api';
 
 // ── Interfaces ───────────────────────────────────────────────────────────────
@@ -908,7 +908,8 @@ function HypothesesView({
   onSelectAction: (a: Action) => void;
   onStateChange: (id: string, state: string) => void;
 }) {
-  const [redTeamResults, setRedTeamResults] = useState<Map<string, RedTeamResult>>(new Map());
+  const navigate = useNavigate();
+  const [redTeamResults, setRedTeamResults] = useState<Map<string, DeliberationUIOutput>>(new Map());
   const [redTeamLoading, setRedTeamLoading] = useState<Set<string>>(new Set());
 
   async function triggerRedTeam(hypothesisId: string) {
@@ -925,7 +926,7 @@ function HypothesesView({
         }
       );
       const data = await res.json();
-      if (data.success) {
+      if (data.success && data.deliberation) {
         setRedTeamResults(prev => new Map(prev).set(hypothesisId, data.deliberation));
       }
     } catch (err) {
@@ -937,6 +938,27 @@ function HypothesesView({
         return next;
       });
     }
+  }
+
+  function dismissRedTeam(hypothesisId: string) {
+    setRedTeamResults(prev => {
+      const next = new Map(prev);
+      next.delete(hypothesisId);
+      return next;
+    });
+  }
+
+  function askPandoraAboutHypothesis(hyp: StandingHypothesis) {
+    openAskPandora(
+      {
+        source: 'metric_tile',
+        label: hyp.metric,
+        value: hyp.current_value ?? '',
+        section: 'Hypothesis Challenge',
+        evidenceSummary: `Hypothesis challenge ran for ${hyp.metric}: current ${hyp.current_value} vs threshold ${hyp.alert_threshold}. Review the Skeptic and Advocate arguments and help me decide the next action.`,
+      },
+      navigate
+    );
   }
 
   if (loading) {
@@ -1073,7 +1095,12 @@ function HypothesesView({
                     {redTeamLoading.has(hyp.id) ? 'Challenging...' : '\u26A1 Challenge this plan'}
                   </button>
                 ) : (
-                  <RedTeamPanel result={redTeamResults.get(hyp.id)!} />
+                  <DeliberationPanel
+                    result={redTeamResults.get(hyp.id)!}
+                    metric={hyp.metric}
+                    onDismiss={() => dismissRedTeam(hyp.id)}
+                    onAskPandora={() => askPandoraAboutHypothesis(hyp)}
+                  />
                 )}
               </div>
             )}

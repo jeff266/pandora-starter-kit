@@ -3,6 +3,7 @@ import { requirePermission, requireAnyPermission } from '../middleware/permissio
 import dbPool, { query as dbQuery } from '../db.js';
 import { executeAction } from '../actions/executor.js';
 import { runHypothesisRedTeam } from '../chat/deliberation-engine.js';
+import { formatDeliberationForUI } from '../renderers/deliberation-renderer.js';
 
 const router = Router();
 
@@ -729,11 +730,56 @@ router.post(
 
     try {
       console.log(`[RedTeam] Triggering hypothesis deliberation for ${hypothesisId}`);
-      const result = await runHypothesisRedTeam(workspaceId, hypothesisId);
-      res.json({ success: true, deliberation: result });
+      await runHypothesisRedTeam(workspaceId, hypothesisId);
+
+      // Fetch the just-inserted run so we can return its ID and formatted output
+      const runResult = await dbQuery<any>(
+        `SELECT * FROM deliberation_runs
+         WHERE workspace_id = $1 AND hypothesis_id = $2
+         ORDER BY created_at DESC LIMIT 1`,
+        [workspaceId, hypothesisId]
+      );
+      const run = runResult.rows[0] ?? null;
+      const deliberation = run ? formatDeliberationForUI(run) : null;
+
+      res.json({
+        success: true,
+        deliberation_run_id: run?.id ?? null,
+        deliberation,
+      });
     } catch (err) {
       console.error('[RedTeam] Error:', err);
       res.status(500).json({ error: 'Deliberation failed', message: (err as Error).message });
+    }
+  }
+);
+
+// GET /api/workspaces/:workspaceId/deliberations/:deliberationRunId
+// Fetch a completed deliberation run by ID, scoped to workspace
+router.get(
+  '/:workspaceId/deliberations/:deliberationRunId',
+  requirePermission('read'),
+  async (req: Request<WorkspaceParams & { deliberationRunId: string }>, res: Response) => {
+    const { workspaceId, deliberationRunId } = req.params;
+
+    try {
+      const result = await dbQuery<any>(
+        `SELECT id, hypothesis_id, pattern, trigger_surface,
+                perspectives, verdict, token_cost, created_at
+         FROM deliberation_runs
+         WHERE id = $1 AND workspace_id = $2`,
+        [deliberationRunId, workspaceId]
+      );
+
+      if (!result.rows.length) {
+        return res.status(404).json({ error: 'Deliberation run not found' });
+      }
+
+      const deliberation = formatDeliberationForUI(result.rows[0]);
+      return res.json({ deliberation });
+    } catch (err) {
+      console.error('[Deliberation] GET error:', err);
+      return res.status(500).json({ error: 'Failed to fetch deliberation run' });
     }
   }
 );
