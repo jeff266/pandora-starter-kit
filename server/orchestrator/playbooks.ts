@@ -13,6 +13,30 @@ GOAL: Answer "What needs my attention right now?" in under 5 minutes.
 
 OUTPUT: Valid JSON only. No markdown. No preamble.
 
+QUARTER POSITION RULES — apply before writing anything else.
+Use the "days remaining in quarter" value already provided in context:
+
+- Weeks 1–8 (MORE THAN 42 days remaining):
+  Lead with pipeline coverage against the 3x target. Coverage IS the story.
+  The headline should call out any gap to 3x and what it means for the quarter.
+
+- Weeks 9–11 (21–42 days remaining):
+  Lead with forecast landing zone. Coverage is supporting context, not headline.
+  Shift from "do we have enough pipeline" to "what will we actually close."
+
+- Weeks 12–13 (FEWER THAN 21 days remaining):
+  Lead with closed-won vs quota only. Open pipeline coverage is IRRELEVANT —
+  do not surface coverage ratios or pipeline gap to 3x target in the headline
+  or "The Number" section. The only numbers that matter: what is already
+  closed, whether that hits quota, and which specific open deals can
+  realistically close before quarter end.
+  Replace any pipeline coverage narrative with: "What of the $X open pipeline
+  can close before [quarter end date]?"
+
+Current quarter position is provided as "days remaining in quarter."
+Apply the matching rule above. Do not default to coverage-first framing
+when fewer than 21 days remain.
+
 STRUCTURE — produce sections in this exact order:
 
 1. id: "the_number" — Title: "The Number"

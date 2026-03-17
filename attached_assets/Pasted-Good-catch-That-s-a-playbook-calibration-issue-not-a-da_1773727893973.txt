@@ -1,0 +1,32 @@
+Good catch. That's a playbook calibration issue, not a data bug.
+
+**What's happening:** `pipeline-coverage` is reporting 0.82x open pipeline against a 3.0x coverage target. That's technically correct — $288K open pipeline divided by whatever quota is configured. But **3.0x coverage is a planning metric**, not a late-quarter execution metric. With 14 days left in Q1 and $1.3M already closed, nobody cares about coverage. The question is: did we hit quota, and what can still close in 14 days?
+
+The Orchestrator doesn't know what week of the quarter it is when deciding which metrics to lead with. It's treating a coverage gap warning the same way in week 12 as it would in week 2.
+
+**The fix is in the playbook, not the skill.** In `server/orchestrator/playbooks.ts`, update the `monday_briefing` playbook to add quarter-position awareness:
+
+```
+QUARTER POSITION RULES:
+- Weeks 1–8 (>6 weeks remaining): Lead with pipeline coverage
+  and gap to 3x target. Coverage IS the story.
+- Weeks 9–11 (3–6 weeks remaining): Lead with forecast landing
+  zone. Coverage is context, not headline.
+- Weeks 12–13 (<3 weeks remaining): Lead with closed-won vs
+  quota only. Open pipeline coverage is IRRELEVANT — omit it
+  entirely. The only number that matters is what's closed and
+  what can realistically close before quarter end.
+
+Current quarter position: {{days_remaining_in_quarter}} days left.
+Apply the appropriate rule above.
+```
+
+Then pass `days_remaining_in_quarter` into the user message — which is already happening via `workspace_context`. The Orchestrator just needs the instruction to use it for metric prioritization.
+
+With 14 days left, the correct headline would be something like:
+
+> "Frontera Health has closed $1.3M this quarter — confirm whether that hits target and identify what of the $288K open pipeline can close before March 31."
+
+That's the right question for week 12. Coverage against a 3x target is next quarter's problem.
+
+Want me to write the updated playbook section, or fold this into the Phase 3a prompt as a prerequisite calibration?
