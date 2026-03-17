@@ -121,6 +121,8 @@ export default function ReportViewer() {
   const [isAnnotating, setIsAnnotating] = useState(false);
   const [docAnnotations, setDocAnnotations] = useState<DocAnnotation[]>([]);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [exportingFormat, setExportingFormat] = useState<string | null>(null);
+  const [exportSuccess, setExportSuccess] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; target: ReportContextTarget } | null>(null);
   const { canAnnotateReports } = usePermissions();
   const { currentWorkspace } = useWorkspace();
@@ -272,10 +274,12 @@ export default function ReportViewer() {
   }
 
   async function handleExport(format: 'pdf' | 'docx' | 'pptx') {
-    if (!reportDocument?.id) return;
+    if (!reportDocument?.id || exportingFormat) return;
     const wid = currentWorkspace?.id || workspaceId;
     if (!wid) return;
     const token = localStorage.getItem('pandora_session');
+    setExportingFormat(format);
+    setExportSuccess(null);
     try {
       const res = await fetch(
         `/api/workspaces/${wid}/reports/${reportDocument.id}/export`,
@@ -291,8 +295,12 @@ export default function ReportViewer() {
       }
       const data = await res.json();
       console.log('[Export] Merged document:', data);
+      setExportSuccess(format);
+      setTimeout(() => setExportSuccess(null), 2500);
     } catch (err) {
       console.error('[Export] Error:', err);
+    } finally {
+      setExportingFormat(null);
     }
   }
 
@@ -380,6 +388,7 @@ export default function ReportViewer() {
 
   return (
     <div style={{ display: 'flex', height: '100vh', background: colors.bg }}>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       {/* Context Menu */}
       {contextMenu && (
         <ReportContextMenu
@@ -739,21 +748,46 @@ export default function ReportViewer() {
               )}
               {reportDocument && (
                 <>
-                  {(['pdf', 'docx', 'pptx'] as const).map(format => (
-                    <button
-                      key={`doc-export-${format}`}
-                      onClick={() => handleExport(format)}
-                      style={{
-                        padding: '8px 12px', borderRadius: 8, fontSize: 13, fontWeight: 500,
-                        display: 'flex', alignItems: 'center', gap: 6,
-                        background: colors.accentSoft, color: colors.accent,
-                        border: `1px solid ${colors.accent}44`, cursor: 'pointer', fontFamily: fonts.sans,
-                      }}
-                    >
-                      <Download style={{ width: 14, height: 14 }} />
-                      {format.toUpperCase()}
-                    </button>
-                  ))}
+                  {(['pdf', 'docx', 'pptx'] as const).map(format => {
+                    const isLoading = exportingFormat === format;
+                    const isSuccess = exportSuccess === format;
+                    return (
+                      <button
+                        key={`doc-export-${format}`}
+                        onClick={() => handleExport(format)}
+                        disabled={!!exportingFormat}
+                        style={{
+                          padding: '8px 12px', borderRadius: 8, fontSize: 13, fontWeight: 500,
+                          display: 'flex', alignItems: 'center', gap: 6,
+                          background: isSuccess ? '#16a34a22' : colors.accentSoft,
+                          color: isSuccess ? '#16a34a' : colors.accent,
+                          border: `1px solid ${isSuccess ? '#16a34a44' : colors.accent + '44'}`,
+                          cursor: exportingFormat ? 'not-allowed' : 'pointer',
+                          opacity: exportingFormat && !isLoading ? 0.5 : 1,
+                          fontFamily: fonts.sans,
+                          transition: 'all 0.2s',
+                        }}
+                      >
+                        {isLoading ? (
+                          <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span style={{
+                              width: 12, height: 12, border: `2px solid ${colors.accent}44`,
+                              borderTopColor: colors.accent, borderRadius: '50%',
+                              display: 'inline-block', animation: 'spin 0.7s linear infinite',
+                            }} />
+                            Exporting…
+                          </span>
+                        ) : isSuccess ? (
+                          <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>✓ {format.toUpperCase()}</span>
+                        ) : (
+                          <>
+                            <Download style={{ width: 14, height: 14 }} />
+                            {format.toUpperCase()}
+                          </>
+                        )}
+                      </button>
+                    );
+                  })}
                 </>
               )}
               {!reportDocument && Object.keys(generation?.formats_generated || {}).map((format) => (
