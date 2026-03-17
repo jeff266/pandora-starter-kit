@@ -10,6 +10,8 @@ import OverallBriefingFeedback from '../components/reports/OverallBriefingFeedba
 import SankeyChart from '../components/reports/SankeyChart';
 import ReportAnnotationEditor, { type Annotation } from '../components/reports/ReportAnnotationEditor';
 import AnnotatableSection, { type Annotation as DocAnnotation } from '../components/report/AnnotatableSection';
+import PrepareForClientModal from '../components/report/PrepareForClientModal';
+import type { ExportConfig } from '../types/export';
 import ReportContextMenu, { type ReportContextTarget } from '../components/reports/ReportContextMenu';
 import { openAskPandora } from '../lib/askPandora';
 import { usePermissions } from '../hooks/usePermissions';
@@ -121,8 +123,8 @@ export default function ReportViewer() {
   const [isAnnotating, setIsAnnotating] = useState(false);
   const [docAnnotations, setDocAnnotations] = useState<DocAnnotation[]>([]);
   const [saveSuccess, setSaveSuccess] = useState(false);
-  const [exportingFormat, setExportingFormat] = useState<string | null>(null);
-  const [exportSuccess, setExportSuccess] = useState<string | null>(null);
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportModalFormat, setExportModalFormat] = useState<'pdf' | 'docx' | 'pptx'>('pdf');
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; target: ReportContextTarget } | null>(null);
   const { canAnnotateReports } = usePermissions();
   const { currentWorkspace } = useWorkspace();
@@ -273,43 +275,34 @@ export default function ReportViewer() {
     }
   }
 
-  async function handleExport(format: 'pdf' | 'docx' | 'pptx') {
-    if (!reportDocument?.id || exportingFormat) return;
+  async function handleExportWithConfig(config: ExportConfig) {
+    if (!reportDocument?.id) return;
     const wid = currentWorkspace?.id || workspaceId;
     if (!wid) return;
     const token = localStorage.getItem('pandora_session');
-    setExportingFormat(format);
-    setExportSuccess(null);
-    try {
-      const res = await fetch(
-        `/api/workspaces/${wid}/reports/${reportDocument.id}/export`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ format }),
-        }
-      );
-      if (!res.ok) {
-        console.error('[Export] Failed:', await res.text());
-        return;
+    const res = await fetch(
+      `/api/workspaces/${wid}/reports/${reportDocument.id}/export`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(config),
       }
-      const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      const slug = (reportDocument.week_label || 'report').replace(/\s+/g, '-').replace(/[^a-z0-9-]/gi, '');
-      a.href = url;
-      a.download = `${slug}.${format}`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      window.URL.revokeObjectURL(url);
-      setExportSuccess(format);
-      setTimeout(() => setExportSuccess(null), 2500);
-    } catch (err) {
-      console.error('[Export] Error:', err);
-    } finally {
-      setExportingFormat(null);
+    );
+    if (!res.ok) {
+      console.error('[Export] Failed:', await res.text());
+      return;
     }
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const slug = (reportDocument.week_label || 'report').replace(/\s+/g, '-').replace(/[^a-z0-9-]/gi, '');
+    a.href = url;
+    a.download = `${slug}.${config.format}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+    setShowExportModal(false);
   }
 
   const handleContextMenu = useCallback((e: React.MouseEvent, target: ReportContextTarget) => {
@@ -406,6 +399,17 @@ export default function ReportViewer() {
           onAskPandora={handleAskPandora}
           onCopy={(val) => { navigator.clipboard.writeText(val).catch(() => {}); }}
           onClose={() => setContextMenu(null)}
+        />
+      )}
+
+      {/* Export Modal */}
+      {showExportModal && reportDocument && (
+        <PrepareForClientModal
+          reportDocument={reportDocument}
+          defaultFormat={exportModalFormat}
+          workspaceName={currentWorkspace?.name}
+          onExport={handleExportWithConfig}
+          onClose={() => setShowExportModal(false)}
         />
       )}
 
@@ -756,46 +760,22 @@ export default function ReportViewer() {
               )}
               {reportDocument && (
                 <>
-                  {(['pdf', 'docx', 'pptx'] as const).map(format => {
-                    const isLoading = exportingFormat === format;
-                    const isSuccess = exportSuccess === format;
-                    return (
-                      <button
-                        key={`doc-export-${format}`}
-                        onClick={() => handleExport(format)}
-                        disabled={!!exportingFormat}
-                        style={{
-                          padding: '8px 12px', borderRadius: 8, fontSize: 13, fontWeight: 500,
-                          display: 'flex', alignItems: 'center', gap: 6,
-                          background: isSuccess ? '#16a34a22' : colors.accentSoft,
-                          color: isSuccess ? '#16a34a' : colors.accent,
-                          border: `1px solid ${isSuccess ? '#16a34a44' : colors.accent + '44'}`,
-                          cursor: exportingFormat ? 'not-allowed' : 'pointer',
-                          opacity: exportingFormat && !isLoading ? 0.5 : 1,
-                          fontFamily: fonts.sans,
-                          transition: 'all 0.2s',
-                        }}
-                      >
-                        {isLoading ? (
-                          <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <span style={{
-                              width: 12, height: 12, border: `2px solid ${colors.accent}44`,
-                              borderTopColor: colors.accent, borderRadius: '50%',
-                              display: 'inline-block', animation: 'spin 0.7s linear infinite',
-                            }} />
-                            Exporting…
-                          </span>
-                        ) : isSuccess ? (
-                          <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>✓ {format.toUpperCase()}</span>
-                        ) : (
-                          <>
-                            <Download style={{ width: 14, height: 14 }} />
-                            {format.toUpperCase()}
-                          </>
-                        )}
-                      </button>
-                    );
-                  })}
+                  {(['pdf', 'docx', 'pptx'] as const).map(format => (
+                    <button
+                      key={`doc-export-${format}`}
+                      onClick={() => { setExportModalFormat(format); setShowExportModal(true); }}
+                      style={{
+                        padding: '8px 12px', borderRadius: 8, fontSize: 13, fontWeight: 500,
+                        display: 'flex', alignItems: 'center', gap: 6,
+                        background: colors.accentSoft, color: colors.accent,
+                        border: `1px solid ${colors.accent}44`,
+                        cursor: 'pointer', fontFamily: fonts.sans,
+                      }}
+                    >
+                      <Download style={{ width: 14, height: 14 }} />
+                      {format.toUpperCase()}
+                    </button>
+                  ))}
                 </>
               )}
               {!reportDocument && Object.keys(generation?.formats_generated || {}).map((format) => (
@@ -1407,7 +1387,7 @@ function ActionItemComponent({ action, index, isStruck, noteText }: {
             fontSize: 14, color: colors.text, fontFamily: fonts.sans,
             textDecoration: isStruck ? 'line-through' : 'none',
             textDecorationColor: '#f87171',
-          }}>{action.action}</span>
+          }}>{action.action.replace(/\s*—?\s*Owned by:.*$/i, '').trim()}</span>
         </div>
         {action.owner && (
           <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 4, fontFamily: fonts.sans }}>Owned by: {action.owner}</div>

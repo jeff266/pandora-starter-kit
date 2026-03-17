@@ -639,7 +639,17 @@ agentsWorkspaceRouter.delete('/:workspaceId/reports/:reportId/annotations/:annot
 agentsWorkspaceRouter.post('/:workspaceId/reports/:reportId/export', requirePermission('agents.view'), async (req: Request, res: Response) => {
   const workspaceId = req.params.workspaceId as string;
   const reportId = req.params.reportId as string;
-  const { format = 'pdf' } = req.body;
+
+  const config = {
+    format:            (req.body.format || 'pdf') as 'pdf' | 'docx' | 'pptx',
+    audience:          (req.body.audience || 'internal') as 'internal' | 'client',
+    included_sections: (req.body.included_sections as string[] | null) || null,
+    prepared_by:       (req.body.prepared_by as string) || 'RevOps Impact',
+    for_company:       (req.body.for_company as string) || '',
+    anonymize:         Boolean(req.body.anonymize),
+    link_target:       (req.body.link_target || 'command_center') as 'hubspot' | 'command_center',
+    include_actions:   req.body.include_actions !== false,
+  };
 
   try {
     const { getReportDocumentById } = await import('../orchestrator/persistence.js');
@@ -647,38 +657,102 @@ agentsWorkspaceRouter.post('/:workspaceId/reports/:reportId/export', requirePerm
     if (!reportDoc) return res.status(404).json({ error: 'Report not found' });
 
     const { mergeAnnotationsForExport } = await import('../orchestrator/annotation-merge.js');
-    const mergedDoc = await mergeAnnotationsForExport(reportDoc, workspaceId);
+    let finalDoc = await mergeAnnotationsForExport(reportDoc, workspaceId);
+
+    // Filter sections
+    if (config.included_sections && config.included_sections.length > 0) {
+      finalDoc = { ...finalDoc, sections: finalDoc.sections.filter(s => config.included_sections!.includes(s.id)) };
+    }
+
+    // Strip actions if not included
+    if (!config.include_actions) {
+      finalDoc = { ...finalDoc, actions: [] };
+    }
+
+    // Anonymize rep names
+    if (config.anonymize) {
+      finalDoc = anonymizeRepNames(finalDoc);
+    }
+
+    // Clean action text and format urgency
+    finalDoc = {
+      ...finalDoc,
+      actions: finalDoc.actions.map(a => ({
+        ...a,
+        text: a.text.replace(/\s*—?\s*Owned by:.*$/i, '').trim(),
+      })),
+    };
 
     const { renderPdf, renderDocx, renderPptx } = await import('../orchestrator/report-renderer.js');
+    const slug = (finalDoc.week_label || 'report').replace(/\s+/g, '-').replace(/[^a-z0-9-]/gi, '');
 
-    const slug = (mergedDoc.week_label || 'report').replace(/\s+/g, '-').replace(/[^a-z0-9-]/gi, '');
-
-    if (format === 'pdf') {
-      const buf = await renderPdf(mergedDoc);
+    if (config.format === 'pdf') {
+      const buf = await renderPdf(finalDoc, config);
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="${slug}.pdf"`);
       return res.send(buf);
     }
 
-    if (format === 'docx') {
-      const buf = await renderDocx(mergedDoc);
+    if (config.format === 'docx') {
+      const buf = await renderDocx(finalDoc);
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
       res.setHeader('Content-Disposition', `attachment; filename="${slug}.docx"`);
       return res.send(buf);
     }
 
-    if (format === 'pptx') {
-      const buf = await renderPptx(mergedDoc);
+    if (config.format === 'pptx') {
+      const buf = await renderPptx(finalDoc);
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.presentationml.presentation');
       res.setHeader('Content-Disposition', `attachment; filename="${slug}.pptx"`);
       return res.send(buf);
     }
 
-    return res.status(400).json({ error: `Unsupported format: ${format}` });
+    return res.status(400).json({ error: `Unsupported format: ${config.format}` });
   } catch (err: any) {
     console.error('[Reports] Failed to export report:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
+
+function anonymizeRepNames(doc: any): any {
+  const repNames = new Set<string>();
+  (doc.actions || []).forEach((a: any) => {
+    if (a.rep_name) repNames.add(a.rep_name);
+    if (a.owner_email) {
+      const name = a.owner_email.split('@')[0]
+        .replace(/[._]/g, ' ')
+        .replace(/\b\w/g, (c: string) => c.toUpperCase());
+      repNames.add(name);
+    }
+  });
+
+  const nameList = Array.from(repNames);
+  const nameMap = new Map<string, string>();
+  nameList.forEach((name, i) => nameMap.set(name, `Rep ${i + 1}`));
+
+  if (nameMap.size === 0) return doc;
+
+  const sections = (doc.sections || []).map((section: any) => {
+    let content = section.content;
+    nameMap.forEach((alias, realName) => {
+      content = content.replace(new RegExp(realName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), alias);
+    });
+    return { ...section, content };
+  });
+
+  const actions = (doc.actions || []).map((action: any) => {
+    let text = action.text;
+    nameMap.forEach((alias, realName) => {
+      text = text.replace(new RegExp(realName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), alias);
+    });
+    return {
+      ...action,
+      text,
+      rep_name: action.rep_name ? (nameMap.get(action.rep_name) || action.rep_name) : action.rep_name,
+    };
+  });
+
+  return { ...doc, sections, actions };
+}
 
 export { agentsGlobalRouter, agentsWorkspaceRouter };

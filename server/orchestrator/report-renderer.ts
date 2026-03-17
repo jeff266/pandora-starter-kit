@@ -1,6 +1,12 @@
 import type { ReportDocument } from './types.js';
 
-export async function renderPdf(doc: ReportDocument): Promise<Buffer> {
+interface RenderConfig {
+  prepared_by?: string;
+  for_company?: string;
+  audience?: string;
+}
+
+export async function renderPdf(doc: ReportDocument, config?: RenderConfig): Promise<Buffer> {
   const PDFDocument = (await import('pdfkit')).default;
 
   return new Promise((resolve, reject) => {
@@ -92,15 +98,15 @@ export async function renderPdf(doc: ReportDocument): Promise<Buffer> {
         .text(doc.recommended_next_steps, { lineGap: 3 });
     }
 
+    const brandingParts: string[] = [];
+    if (config?.prepared_by) brandingParts.push(`Prepared by ${config.prepared_by}`);
+    if (config?.for_company) brandingParts.push(`for ${config.for_company}`);
+    brandingParts.push(`Generated ${new Date(doc.generated_at).toLocaleDateString('en-US', { dateStyle: 'long' })}`);
+
     pdf
       .fontSize(9)
       .fillColor(MUTED)
-      .text(
-        `Generated ${new Date(doc.generated_at).toLocaleDateString('en-US', { dateStyle: 'long' })}`,
-        56,
-        pdf.page.height - 36,
-        { align: 'left' }
-      );
+      .text(brandingParts.join('  ·  '), 56, pdf.page.height - 36, { align: 'left' });
 
     pdf.end();
   });
