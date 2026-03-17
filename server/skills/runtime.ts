@@ -1226,7 +1226,7 @@ Important:
             skillId,
             workspaceId,
             status,
-            methodologyConfigId || null,
+            (methodologyConfigId && methodologyConfigId !== 'system_default') ? methodologyConfigId : null,
             methodologyConfigVersion || null,
             methodologyContextSnapshot ? JSON.stringify(methodologyContextSnapshot) : null
           ]

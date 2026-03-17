@@ -1,0 +1,46 @@
+Run the Phase 2 end-to-end first. Phase 3 annotates the ReportDocument — if the document quality isn't right, you're building annotation on a broken foundation.
+
+**Run this now:**
+
+```bash
+curl -s -X POST \
+"https://$REPLIT_DEV_DOMAIN/api/workspaces/4160191d-73bc-414b-97dd-5a1853190378/agents/4f8309a9-f959-44c8-ba90-9fd03939bce8/run-now" \
+-H "Content-Type: application/json" \
+-H "Authorization: Bearer <token>" \
+-d '{"phase": "both"}' | jq .
+```
+
+Then check the document:
+
+```bash
+curl -s \
+"https://$REPLIT_DEV_DOMAIN/api/workspaces/4160191d-73bc-414b-97dd-5a1853190378/reports/latest?type=monday_briefing" \
+-H "Authorization: Bearer <token>" | jq '{
+  headline: .headline,
+  word_count: .total_word_count,
+  tokens: .tokens_used,
+  section_ids: [.sections[].id],
+  story: .sections[] | select(.id == "the_story") | .content,
+  next_steps: .recommended_next_steps,
+  omitted: .skills_omitted
+}'
+```
+
+**Three things that determine whether to proceed to Phase 3 or calibrate first:**
+
+**1. Does the headline land?**
+It should read like something a VP would say in a standup — specific, not generic. 
+
+✅ `"Sara's 71-deal pipeline is 92% behaviorally dead — the quarter depends on 3 active opportunities"`
+
+❌ `"This week's pipeline shows several areas requiring attention across multiple dimensions"`
+
+**2. Is the_story section one narrative or a list?**
+The playbook explicitly says one dominant narrative. If Claude returned bullet points or covered 4 separate topics, the temperature needs to drop to 0.1 and the playbook instruction needs strengthening.
+
+**3. Does recommended_next_steps sound like you wrote it?**
+Read it out loud. If you'd send it to a client as-is — even if you'd tweak a word — Phase 3 is ready. If it sounds like AI filler, the playbook voice instruction needs a rewrite with a concrete example of your actual voice.
+
+---
+
+Share the output and I'll make the call on whether to proceed to Phase 3a or adjust the playbook first. The calibration takes 10 minutes — Phase 3 takes an hour. Worth checking now.

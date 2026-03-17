@@ -518,35 +518,36 @@ export async function buildSkillSummaries(
     let ranAt: string | null = null;
 
     // Preferred: skill run from THIS agent's run batch
+    // result column = full step-by-step data (what summarizers need)
     const linked = await query(`
-      SELECT sr.result_data, sr.started_at
+      SELECT sr.result, sr.started_at
       FROM agent_skill_runs asr
-      JOIN skill_runs sr ON sr.id = asr.skill_run_id
+      JOIN skill_runs sr ON sr.run_id = asr.skill_run_id
       WHERE asr.agent_run_id = $1
         AND asr.workspace_id = $2
         AND asr.skill_id = $3
-        AND sr.status = 'completed'
+        AND sr.status IN ('completed', 'partial')
       LIMIT 1
     `, [agentRunId, workspaceId, skillId]);
 
     if (linked.rows.length > 0) {
-      resultData = linked.rows[0].result_data;
+      resultData = linked.rows[0].result;
       ranAt = linked.rows[0].started_at;
     } else {
       // Fallback: most recent successful run within 12h
       const fallback = await query(`
-        SELECT result_data, started_at
+        SELECT result, started_at
         FROM skill_runs
         WHERE workspace_id = $1
           AND skill_id = $2
-          AND status = 'completed'
+          AND status IN ('completed', 'partial')
           AND started_at > NOW() - INTERVAL '12 hours'
         ORDER BY started_at DESC
         LIMIT 1
       `, [workspaceId, skillId]);
 
       if (fallback.rows.length > 0) {
-        resultData = fallback.rows[0].result_data;
+        resultData = fallback.rows[0].result;
         ranAt = fallback.rows[0].started_at;
       }
     }

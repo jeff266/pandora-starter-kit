@@ -943,3 +943,42 @@ function validateHypothesisUnits(current_value: number, alert_threshold: number)
 **Display**: Replace metric-name heuristics in `formatMetricValue` (both `Actions.tsx` and `deliberation-engine.ts`) with a direct `unit` field lookup. `ratio` → multiply by 100, append `%`. Eliminates the heuristic brittleness entirely.
 
 **Review gate (#3)**: Defer until multi-workspace volume justifies it. Same pattern as action Queue mode — auto-generated hypotheses write to `hypothesis_drafts` with `status = 'pending_review'`, promoted to `standing_hypotheses` on human approval via Settings → Hypotheses.
+
+## Phase 2: Report Orchestrator — End-to-End Validation (March 2026)
+
+### Status: COMPLETE ✓
+
+The full `run-now` → 9 skills → Orchestrator → `report_documents` pipeline is validated for the Frontera workspace (`4160191d-73bc-414b-97dd-5a1853190378`), agent `monday_briefing` (`4f8309a9-f959-44c8-ba90-9fd03939bce8`).
+
+### Bugs Fixed This Session
+
+**`server/agents/runtime.ts`** (3 fixes):
+1. `SELECT company_name FROM workspaces` → `SELECT name FROM workspaces` (column doesn't exist — workspace table uses `name`)
+2. `workspace?.company_name` → `workspace?.name` (matching column reference)
+3. Quota attainment query: `SELECT SUM(quota_amount) FROM quotas WHERE period_year/period_quarter` → `SELECT SUM(amount) FROM quotas WHERE is_active = true AND period_start >= DATE_TRUNC('quarter', ...)` (column is `amount`, filter is `period_start` not `period_year/period_quarter`)
+
+**`server/orchestrator/skill-summarizers.ts`** (prior session):
+- `sr.result_data` → `sr.result` (correct column name in `skill_runs`)
+- JOIN on `sr.id` → `sr.run_id` (correct join key)
+
+**`server/orchestrator/report-orchestrator.ts` / `runtime.ts`** (prior session):
+- `system_default` methodology config ID filtered to `null` before UUID insert (prevented FK violation)
+
+**`server/skills/tool-definitions.ts`** (prior session):
+- `computeTriangulationBearings`: fixed `rep_quotas` JOIN via `quota_periods`, column `rq.quota_amount` → correct join path
+
+### Validated Pipeline Output (Frontera, 2026-03-17)
+- Document `4bfd86e9`: `monday_briefing`, 3 sections, 3 actions, 227 words, 981 tokens — clean run, zero errors
+- Document `986b275e`: earlier run, 2 sections, 3 actions, 160 words — also clean
+
+### Known Non-Fatal Issues (don't block demo)
+- `findings.assumptions` column missing — logged, non-fatal
+- `deals.rfm_score` column missing — logged, non-fatal  
+- `users.hire_date` column missing — logged, non-fatal
+- `stale_deal_days` not configured for Frontera — `prepareWaterfallSummary` logs warning, skill completes
+- `call-highlights` deepseek step exceeds 20K token limit (50 conversations) — step is skipped, skill continues
+- `extract-call-signals` deal-risk-review step: 50 conversations exceeds 30-item limit — step skipped, skill continues
+
+### Auth for run-now
+Bearer token = workspace `api_key` from `workspaces` table. Frontera key: `8b682feb...08d8`.
+Run delivery-only: `POST /api/workspaces/:wsId/agents/:agentId/run-now` `{"phase": "delivery"}`

@@ -317,12 +317,12 @@ export class AgentRuntime {
         try {
           // 1. Load workspace context
           const workspaceResult = await query(
-            `SELECT company_name, timezone FROM workspaces WHERE id = $1`,
+            `SELECT name, timezone FROM workspaces WHERE id = $1`,
             [workspaceId]
           );
           const workspace = workspaceResult.rows[0];
           const timezone = workspace?.timezone || dbAgent?.delivery_timezone || 'America/Los_Angeles';
-          const companyName = workspace?.company_name || 'Your Company';
+          const companyName = workspace?.name || 'Your Company';
 
           // 2. Calculate quarter context
           const now = new Date();
@@ -336,13 +336,14 @@ export class AgentRuntime {
           let attainmentPct: number | null = null;
           try {
             const quotaResult = await query(
-              `SELECT SUM(quota_amount) as total_quota
+              `SELECT SUM(amount) as total_quota
                FROM quotas
                WHERE workspace_id = $1
                  AND period_type = 'quarterly'
-                 AND period_year = $2
-                 AND period_quarter = $3`,
-              [workspaceId, now.getFullYear(), currentQuarter]
+                 AND is_active = true
+                 AND period_start >= DATE_TRUNC('quarter', CURRENT_DATE)
+                 AND period_start < DATE_TRUNC('quarter', CURRENT_DATE) + INTERVAL '3 months'`,
+              [workspaceId]
             );
             const totalQuota = quotaResult.rows[0]?.total_quota;
 

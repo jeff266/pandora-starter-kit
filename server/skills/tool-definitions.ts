@@ -9810,10 +9810,12 @@ export const toolRegistry = new Map<string, ToolDefinition>([
       const repRollupResult = await query<{ owner_email: string; forecast_amount: number; quota: number }>(
         `SELECT d.owner_email,
                 COALESCE(SUM(d.amount), 0) AS forecast_amount,
-                COALESCE(MAX(rq.period_quota), 0) AS quota
+                COALESCE(MAX(rq.quota_amount), 0) AS quota
          FROM deals d
-         LEFT JOIN rep_quotas rq ON rq.rep_email = d.owner_email AND rq.workspace_id = d.workspace_id
-           AND rq.period_start <= $2 AND rq.period_end >= $3
+         LEFT JOIN rep_quotas rq ON rq.rep_email = d.owner_email
+         LEFT JOIN quota_periods qp ON qp.id = rq.period_id
+           AND qp.workspace_id = d.workspace_id
+           AND qp.start_date <= $2 AND qp.end_date >= $3
          WHERE d.workspace_id = $1
            AND d.close_date >= $3 AND d.close_date <= $2
            AND d.forecast_category IN ('commit','Commit','forecast','Forecast')
