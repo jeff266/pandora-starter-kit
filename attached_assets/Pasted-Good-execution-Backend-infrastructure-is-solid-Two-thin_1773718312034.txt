@@ -1,0 +1,62 @@
+Good execution. Backend infrastructure is solid. Two things to do before moving to Phase 2.
+
+---
+
+**Right now — unblock the 🟡 pending item:**
+
+The Monday Pipeline Operator needs `report_type = 'monday_briefing'` set. Either run this directly against the Frontera workspace DB, or add it to the seed:
+
+```sql
+UPDATE agents 
+SET report_type = 'monday_briefing',
+    delivery_hour = 5,
+    delivery_day_of_week = 1,
+    delivery_timezone = 'America/Los_Angeles'
+WHERE workspace_id = '4160191d-73bc-414b-97dd-5a1853190378'
+  AND name ILIKE '%monday%pipeline%';
+```
+
+Then restart the server and confirm the log shows:
+
+```
+[ReportScheduler] Agent xxx (monday_briefing): 
+Skills: Sunday 7:00 UTC | Delivery: Monday 5:00 AM America/Los_Angeles
+```
+
+If that log appears, the scheduler is wired correctly.
+
+---
+
+**Then validate end-to-end before Phase 2:**
+
+```bash
+# Trigger full cycle manually
+curl -X POST \
+  http://localhost:3000/api/workspaces/4160191d.../agents/{agentId}/run-now \
+  -H "Content-Type: application/json" \
+  -d '{"phase": "skills"}'
+```
+
+Watch for:
+- 9 rows in `agent_skill_runs` for that agent_run_id
+- 9 rows in `skill_runs` with `trigger_source = 'scheduled'`
+- Skills staggered in logs (30s gaps)
+- No duplicate runs if you hit it twice
+
+---
+
+**The two 🔴 items (Skills page API + Agent Settings UI) are not blockers for Phase 2.** They're polish. The Orchestrator doesn't need them — it reads from `skill_runs` and `agent_skill_runs` directly.
+
+---
+
+**Phase 2 readiness check:**
+
+| Requirement for Orchestrator | Status |
+|---|---|
+| Skills run on Sunday and populate `skill_runs` | ✅ after DB update + test |
+| `agent_skill_runs` links agent run to skill evidence | ✅ |
+| `report_type` on agent tells Orchestrator which playbook | ✅ after DB update |
+| `agent_run_id` passed to Orchestrator so it finds the right skill_runs | ✅ |
+| `workspace.timezone` stored for context | ✅ |
+
+Once the manual run-now test passes cleanly, you're ready for the Orchestrator prompt. Want me to write Phase 2 now so it's ready when validation completes?
