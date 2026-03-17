@@ -125,6 +125,7 @@ export default function ReportViewer() {
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportModalFormat, setExportModalFormat] = useState<'pdf' | 'docx' | 'pptx'>('pdf');
+  const [exportLoading, setExportLoading] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; target: ReportContextTarget } | null>(null);
   const { canAnnotateReports } = usePermissions();
   const { currentWorkspace } = useWorkspace();
@@ -276,33 +277,49 @@ export default function ReportViewer() {
   }
 
   async function handleExportWithConfig(config: ExportConfig) {
-    if (!reportDocument?.id) return;
-    const wid = currentWorkspace?.id || workspaceId;
-    if (!wid) return;
-    const token = localStorage.getItem('pandora_session');
-    const res = await fetch(
-      `/api/workspaces/${wid}/reports/${reportDocument.id}/export`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify(config),
-      }
-    );
-    if (!res.ok) {
-      console.error('[Export] Failed:', await res.text());
+    if (!reportDocument?.id) {
+      alert('Report document not loaded — please refresh the page and try again.');
       return;
     }
-    const blob = await res.blob();
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    const slug = (reportDocument.week_label || 'report').replace(/\s+/g, '-').replace(/[^a-z0-9-]/gi, '');
-    a.href = url;
-    a.download = `${slug}.${config.format}`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    window.URL.revokeObjectURL(url);
-    setShowExportModal(false);
+    const wid = currentWorkspace?.id || workspaceId;
+    if (!wid) {
+      alert('No workspace selected.');
+      return;
+    }
+    setExportLoading(true);
+    try {
+      const token = localStorage.getItem('pandora_session');
+      const res = await fetch(
+        `/api/workspaces/${wid}/reports/${reportDocument.id}/export`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify(config),
+        }
+      );
+      if (!res.ok) {
+        const errText = await res.text();
+        console.error('[Export] Failed:', errText);
+        alert(`Export failed: ${errText}`);
+        return;
+      }
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const slug = (reportDocument.week_label || 'report').replace(/\s+/g, '-').replace(/[^a-z0-9-]/gi, '');
+      a.href = url;
+      a.download = `${slug}.${config.format}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+      setShowExportModal(false);
+    } catch (err) {
+      console.error('[Export] Network error:', err);
+      alert(`Export failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setExportLoading(false);
+    }
   }
 
   const handleContextMenu = useCallback((e: React.MouseEvent, target: ReportContextTarget) => {

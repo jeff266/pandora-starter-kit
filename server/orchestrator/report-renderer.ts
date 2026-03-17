@@ -453,24 +453,18 @@ export async function renderPdf(
        .text(doc.recommended_next_steps, { width: W, lineGap: 2 });
   }
 
-  // ── Footer on every page ───────────────────────────────────────────────────
+  // ── Footer (last page) ─────────────────────────────────────────────────────
   const footerParts = [
     config.prepared_by  ? `Prepared by ${config.prepared_by}` : '',
     config.for_company  ? `for ${config.for_company}` : '',
     new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
   ].filter(Boolean).join(' · ');
 
-  const totalPages = (pdf as any)._pageBuffer?.length ?? 1;
-  for (let i = 0; i < totalPages; i++) {
-    pdf.switchToPage(i);
-    const fy = pdf.page.height - 45;
-    pdf.strokeColor(hexToRgb(BORDER)).lineWidth(0.5)
-       .moveTo(90, fy - 8).lineTo(90 + W, fy - 8).stroke();
-    pdf.fillColor(hexToRgb(MUTED)).font('Helvetica').fontSize(8)
-       .text(`${footerParts}  ·  Page ${i + 1} of ${totalPages}`, 90, fy, {
-         width: W, align: 'center',
-       });
-  }
+  const fy = pdf.page.height - 45;
+  pdf.strokeColor(hexToRgb(BORDER)).lineWidth(0.5)
+     .moveTo(90, fy - 8).lineTo(90 + W, fy - 8).stroke();
+  pdf.fillColor(hexToRgb(MUTED)).font('Helvetica').fontSize(8)
+     .text(footerParts, 90, fy, { width: W, align: 'center' });
 
   pdf.end();
   await done;
