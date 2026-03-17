@@ -814,87 +814,47 @@ export default function ReportViewer() {
                 </div>
 
                 {/* Sections */}
-                {isAnnotating ? (
-                  reportDocument.sections.map((section) => (
-                    <div key={section.id} style={{ background: colors.surface, borderRadius: 8, border: `1px solid ${colors.border}`, padding: 24 }}>
-                      <AnnotatableSection
-                        section={section}
-                        annotations={docAnnotations.filter(a => a.section_id === section.id)}
-                        isAnnotating={isAnnotating}
-                        onAnnotationSave={async (data) => {
-                          const token = localStorage.getItem('pandora_session');
-                          const docId = reportDocument!.id;
-                          const wid = currentWorkspace?.id || workspaceId;
-                          const res = await fetch(
-                            `/api/workspaces/${wid}/reports/${docId}/annotations`,
-                            {
-                              method: 'POST',
-                              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                              body: JSON.stringify(data),
-                            }
-                          );
-                          if (!res.ok) {
-                            const err = await res.json().catch(() => ({}));
-                            console.error('[Annotations] Save failed:', res.status, err);
-                            throw new Error(err.error || `Save failed (${res.status})`);
+                {reportDocument.sections.map((section) => (
+                  <div key={section.id} style={{ background: colors.surface, borderRadius: 8, border: `1px solid ${colors.border}`, padding: 24 }}>
+                    <AnnotatableSection
+                      section={section}
+                      annotations={docAnnotations.filter(a => a.section_id === section.id)}
+                      isAnnotating={isAnnotating}
+                      onAnnotationSave={async (data) => {
+                        const token = localStorage.getItem('pandora_session');
+                        const docId = reportDocument!.id;
+                        const wid = currentWorkspace?.id || workspaceId;
+                        const res = await fetch(
+                          `/api/workspaces/${wid}/reports/${docId}/annotations`,
+                          {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                            body: JSON.stringify(data),
                           }
-                          const saved: DocAnnotation = await res.json();
-                          setDocAnnotations(prev => [
-                            ...prev.filter(a => !(a.section_id === data.section_id && a.paragraph_index === data.paragraph_index)),
-                            saved,
-                          ]);
-                        }}
-                        onAnnotationDelete={async (annotationId) => {
-                          const token = localStorage.getItem('pandora_session');
-                          const wid = currentWorkspace?.id || workspaceId;
-                          await fetch(
-                            `/api/workspaces/${wid}/reports/${reportDocument!.id}/annotations/${annotationId}`,
-                            { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } }
-                          );
-                          setDocAnnotations(prev => prev.filter(a => a.id !== annotationId));
-                        }}
-                      />
-                    </div>
-                  ))
-                ) : (
-                  reportDocument.sections.map((section) => {
-                    const isCollapsed = collapsedSections.has(section.id);
-                    return (
-                      <div key={section.id} style={{ background: colors.surface, borderRadius: 8, border: `1px solid ${colors.border}`, overflow: 'hidden' }}>
-                        <button
-                          onClick={() => toggleSection(section.id)}
-                          style={{
-                            width: '100%',
-                            padding: '16px 24px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            background: 'transparent',
-                            border: 'none',
-                            cursor: 'pointer',
-                          }}
-                          onMouseEnter={(e) => (e.currentTarget.style.background = colors.surfaceRaised)}
-                          onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-                        >
-                          <h2 style={{ fontSize: 20, fontWeight: 700, color: colors.text, fontFamily: fonts.sans, margin: 0 }}>{section.title}</h2>
-                          {isCollapsed
-                            ? <ChevronRight style={{ width: 20, height: 20, color: colors.textMuted }} />
-                            : <ChevronLeft style={{ width: 20, height: 20, color: colors.textMuted }} />
-                          }
-                        </button>
-                        {!isCollapsed && (
-                          <div style={{ padding: '0 24px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
-                            <div style={{ color: colors.textSecondary, lineHeight: 1.7, fontFamily: fonts.sans, fontSize: 14 }}>
-                              {section.content.split('\n\n').map((para, i) => (
-                                <p key={i} style={{ marginBottom: 12 }}>{renderMarkdown(para)}</p>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })
-                )}
+                        );
+                        if (!res.ok) {
+                          const err = await res.json().catch(() => ({}));
+                          console.error('[Annotations] Save failed:', res.status, err);
+                          throw new Error(err.error || `Save failed (${res.status})`);
+                        }
+                        const saved: DocAnnotation = await res.json();
+                        setDocAnnotations(prev => [
+                          ...prev.filter(a => !(a.section_id === data.section_id && a.paragraph_index === data.paragraph_index)),
+                          saved,
+                        ]);
+                      }}
+                      onAnnotationDelete={async (annotationId) => {
+                        const token = localStorage.getItem('pandora_session');
+                        const wid = currentWorkspace?.id || workspaceId;
+                        await fetch(
+                          `/api/workspaces/${wid}/reports/${reportDocument!.id}/annotations/${annotationId}`,
+                          { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } }
+                        );
+                        setDocAnnotations(prev => prev.filter(a => a.id !== annotationId));
+                      }}
+                    />
+                  </div>
+                ))}
 
                 {/* Actions */}
                 {reportDocument.actions.length > 0 && (
