@@ -740,6 +740,14 @@ function anonymizeRepNames(doc: any): any {
   const nameMap = new Map<string, string>();
   nameList.forEach((name, i) => nameMap.set(name, `Rep ${i + 1}`));
 
+  // Also map first names so standalone "Sara" matches as well as "Sara Bollman"
+  nameList.forEach((fullName, i) => {
+    const firstName = fullName.split(' ')[0];
+    if (firstName && firstName.length > 3 && !nameMap.has(firstName)) {
+      nameMap.set(firstName, `Rep ${i + 1}`);
+    }
+  });
+
   if (nameMap.size === 0) return doc;
 
   const sections = (doc.sections || []).map((section: any) => ({
