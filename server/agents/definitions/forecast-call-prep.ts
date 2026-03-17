@@ -5,7 +5,7 @@ export const forecastCallPrepAgent: AgentDefinition = {
   name: 'Forecast Call Prep',
   description: 'Pre-meeting brief for forecast reviews combining forecast data, deal risks, rep performance, and scoring into a cheat sheet.',
   skills: [
-    { skillId: 'forecast-rollup', required: true, outputKey: 'forecast', timeout_seconds: 120 },
+    { skillId: 'forecast-rollup', required: true, outputKey: 'forecast', timeout_seconds: 300 },
     { skillId: 'deal-risk-review', required: true, outputKey: 'risks', timeout_seconds: 180 },
     { skillId: 'rep-scorecard', required: false, outputKey: 'scorecard', timeout_seconds: 120 },
     { skillId: 'lead-scoring', required: false, outputKey: 'scores', timeout_seconds: 120 },

@@ -355,30 +355,76 @@ function summarizeSingleThreadAlert(resultData: any): Omit<SkillSummary, 'ran_at
 }
 
 function summarizePipelineCoverage(resultData: any): Omit<SkillSummary, 'ran_at' | 'data_age_hours'> {
-  const coverage_ratio = safeGet(resultData, 'coverage_ratio', 0) || 0;
-  const target_ratio = safeGet(resultData, 'target_ratio', 3) || 3;
-  const gap_amount = safeGet(resultData, 'gap_amount', 0) || 0;
-  const reps_below_target = safeGet(resultData, 'reps_below_target', []) || [];
+  // Data lives under coverage_data.team (flat keys on old runs, nested on new runs)
+  const total_pipeline =
+    safeGet(resultData, 'coverage_data.team.totalPipeline', null) ??
+    safeGet(resultData, 'total_pipeline', 0) ?? 0;
+  const total_quota =
+    safeGet(resultData, 'coverage_data.team.totalQuota', null) ??
+    safeGet(resultData, 'total_quota', 0) ?? 0;
+  const target_ratio =
+    safeGet(resultData, 'coverage_data.team.coverageTarget', null) ??
+    safeGet(resultData, 'target_ratio', 3) ?? 3;
+  const days_remaining = safeGet(resultData, 'coverage_data.team.daysRemaining', null);
+  const closed_won =
+    safeGet(resultData, 'coverage_data.team.closedWon', null) ??
+    safeGet(resultData, 'closed_won', 0) ?? 0;
+  const deal_count = safeGet(resultData, 'coverage_data.team.dealCount', 0) ?? 0;
+  const reps: any[] = safeGet(resultData, 'coverage_data.reps', []) ?? [];
 
+  // coverageRatio may be null when rep-level quotas are absent — compute from totals
+  const stored_ratio = safeGet(resultData, 'coverage_data.team.coverageRatio', null);
+  const coverage_ratio: number =
+    stored_ratio != null ? stored_ratio
+    : (total_quota > 0 ? total_pipeline / total_quota : 0);
+
+  // Gap to coverage target (not just quota)
+  const gap_amount = total_quota > 0
+    ? Math.max(0, (total_quota * target_ratio) - total_pipeline)
+    : safeGet(resultData, 'gap_amount', 0) ?? 0;
+
+  const has_data = (total_pipeline as number) > 0 || (closed_won as number) > 0;
   const above_target = coverage_ratio >= target_ratio;
-  const headline = `${coverage_ratio.toFixed(1)}x pipeline coverage — ${above_target ? 'above' : 'below'} ${target_ratio.toFixed(1)}x target`;
+
+  const headline = has_data
+    ? `${coverage_ratio.toFixed(2)}x pipeline coverage — ${above_target ? 'above' : 'below'} ${target_ratio.toFixed(1)}x target`
+    : 'No pipeline data available';
 
   const top_findings: string[] = [];
-  if (!above_target) {
-    top_findings.push(`${formatCurrency(gap_amount)} pipeline gap to reach ${target_ratio.toFixed(1)}x coverage`);
+  if (has_data) {
+    top_findings.push(`${formatCurrency(total_pipeline as number)} open pipeline, ${deal_count} deals`);
+    if ((total_quota as number) > 0) {
+      top_findings.push(`${formatCurrency(gap_amount)} gap to ${target_ratio.toFixed(1)}x coverage target`);
+    }
+    if ((closed_won as number) > 0) {
+      top_findings.push(`${formatCurrency(closed_won as number)} closed-won this quarter`);
+    }
+    if (days_remaining !== null) {
+      top_findings.push(`${days_remaining} days remaining in quarter`);
+    }
+    reps.slice(0, 2).forEach((rep: any) => {
+      if (rep.pipeline > 0 || rep.closedWon > 0) {
+        top_findings.push(`${rep.name}: ${formatCurrency(rep.pipeline || 0)} pipeline, ${formatCurrency(rep.closedWon || 0)} closed-won`);
+      }
+    });
   }
-  reps_below_target.slice(0, 3).forEach((rep: any) => {
-    top_findings.push(`${rep.name}: ${rep.coverage?.toFixed(1) || '?'}x coverage (below minimum)`);
-  });
 
   const top_actions: ActionSummary[] = [];
-  reps_below_target.slice(0, 3).forEach((rep: any) => {
+  if (!above_target && (total_quota as number) > 0) {
     top_actions.push({
       urgency: 'this_week',
-      text: `Build pipeline with ${rep.name} (needs ${formatCurrency(rep.gap_amount || 0)})`,
-      rep_name: rep.name,
-      owner_email: rep.email,
+      text: `Close pipeline gap — need ${formatCurrency(gap_amount)} more to reach ${target_ratio.toFixed(1)}x coverage`,
     });
+  }
+  reps.slice(0, 2).forEach((rep: any) => {
+    if (rep.pipeline > 0) {
+      top_actions.push({
+        urgency: 'this_week',
+        text: `Review ${rep.name}: ${formatCurrency(rep.pipeline)} open pipeline`,
+        rep_name: rep.name,
+        owner_email: rep.email,
+      });
+    }
   });
 
   return {
@@ -387,12 +433,15 @@ function summarizePipelineCoverage(resultData: any): Omit<SkillSummary, 'ran_at'
     key_metrics: {
       coverage_ratio,
       target_ratio,
+      total_pipeline,
+      total_quota,
       gap_amount,
-      reps_below_target: reps_below_target.length,
+      closed_won,
+      deal_count,
     },
     top_findings: top_findings.slice(0, 5),
     top_actions: top_actions.slice(0, 3),
-    has_signal: !above_target || reps_below_target.length > 0,
+    has_signal: has_data,
   };
 }
 

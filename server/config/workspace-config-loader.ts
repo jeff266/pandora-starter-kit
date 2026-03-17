@@ -213,6 +213,12 @@ export class WorkspaceConfigLoader {
     const config = await this.getConfig(workspaceId);
     const t = config.thresholds;
 
+    // Canonical lookup chain for workspace config reads:
+    //   1. Primary path   — the authoritative location (e.g. thresholds.coverage_target)
+    //   2. Fallback path  — legacy or alternate location (e.g. goals_and_targets.pipeline_coverage_target)
+    //   3. Hardcoded default — always present, never throws
+    // Follow this pattern for all workspace config reads so skills degrade
+    // gracefully on workspaces that haven't completed onboarding.
     if (!t || t.coverage_target === undefined || t.coverage_target === null) {
       return (config as any)?.goals_and_targets?.pipeline_coverage_target ?? 3.0;
     }

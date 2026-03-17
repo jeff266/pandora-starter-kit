@@ -67,6 +67,7 @@ export interface OrchestratorInput {
     attainment_pct: number | null;
     has_quota: boolean;
     prior_report_headline?: string;
+    timezone?: string;
   };
   skill_summaries: SkillSummary[];
   word_budget: number;

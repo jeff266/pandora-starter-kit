@@ -71,7 +71,7 @@ export class AgentRuntime {
           skillId,
           required: true,
           outputKey: skillId,
-          cacheTtlMinutes: 30,
+          cacheTtlMinutes: 480,
         })),
         synthesis: {
           enabled: true,
@@ -246,7 +246,7 @@ export class AgentRuntime {
           const result = await this.runSkill(
             step.skillId,
             workspaceId,
-            step.timeout_seconds || 120,
+            step.timeout_seconds || 300,
             step.params
           );
 

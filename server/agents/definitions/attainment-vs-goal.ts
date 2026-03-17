@@ -6,7 +6,7 @@ export const attainmentVsGoalAgent: AgentDefinition = {
   description: 'Are we going to hit the number? Quota tracking with forecast context.',
   skills: [
     { skillId: 'pipeline-goals', required: true, outputKey: 'goals', timeout_seconds: 120 },
-    { skillId: 'forecast-rollup', required: true, outputKey: 'forecast', timeout_seconds: 120 },
+    { skillId: 'forecast-rollup', required: true, outputKey: 'forecast', timeout_seconds: 300 },
     { skillId: 'pipeline-coverage', required: false, outputKey: 'coverage', timeout_seconds: 120 },
     { skillId: 'rep-scorecard', required: false, outputKey: 'reps', timeout_seconds: 120 },
   ],

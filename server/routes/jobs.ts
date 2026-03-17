@@ -33,4 +33,19 @@ router.get('/:workspaceId/jobs/:jobId', async (req: Request, res: Response): Pro
   }
 });
 
+// Trigger retro-accuracy bootstrap for a workspace
+// POST /:workspaceId/jobs/retro-accuracy-bootstrap
+router.post('/:workspaceId/jobs/retro-accuracy-bootstrap', async (req: Request, res: Response): Promise<void> => {
+  const workspaceId = req.params.workspaceId as string;
+  try {
+    const { retroAccuracyBootstrap } = await import('../jobs/retro-accuracy-bootstrap.js');
+    const result = await retroAccuracyBootstrap(workspaceId);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[jobs] retro-accuracy-bootstrap error:', msg);
+    res.status(500).json({ error: msg });
+  }
+});
+
 export default router;
