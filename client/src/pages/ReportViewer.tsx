@@ -544,7 +544,7 @@ export default function ReportViewer() {
                       })}
                     </span>
                     <span>•</span>
-                    <span>{reportDocument.skills_included.length} skills</span>
+                    <span>{reportDocument.skills_included.length} skill{reportDocument.skills_included.length !== 1 ? 's' : ''}</span>
                   </>
                 ) : (
                   <>
@@ -561,7 +561,7 @@ export default function ReportViewer() {
                     <span>•</span>
                     <span>{generation!.generation_duration_ms ?? '—'}ms</span>
                     <span>•</span>
-                    <span>{generation!.skills_run?.length ?? 0} skills</span>
+                    <span>{(generation!.skills_run?.length ?? 0)} skill{(generation!.skills_run?.length ?? 0) !== 1 ? 's' : ''}</span>
                     {isV2 && generation!.parent_generation_id && (
                       <>
                         <span>•</span>
