@@ -18,10 +18,10 @@ interface ReportSection {
   id: string;
   title: string;
   content: string;
-  word_count: number;
-  source_skills: string[];
-  severity: 'critical' | 'warning' | 'info';
-  flagged_for_client: boolean;
+  word_count?: number;
+  source_skills?: string[];
+  severity?: 'critical' | 'warning' | 'info';
+  flagged_for_client?: boolean;
 }
 
 interface AnnotatableSectionProps {

@@ -6,7 +6,7 @@ interface FloatingBubbleProps {
   sectionId: string;
   paragraphIndex: number;
   existingAnnotation?: Annotation;
-  anchorRef: React.RefObject<HTMLElement>;
+  anchorRef: React.RefObject<HTMLElement | null>;
   onSave: (
     type: Annotation['annotation_type'],
     content: string

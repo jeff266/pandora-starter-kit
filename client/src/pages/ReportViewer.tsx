@@ -9,6 +9,7 @@ import SectionFeedback from '../components/reports/SectionFeedback';
 import OverallBriefingFeedback from '../components/reports/OverallBriefingFeedback';
 import SankeyChart from '../components/reports/SankeyChart';
 import ReportAnnotationEditor, { type Annotation } from '../components/reports/ReportAnnotationEditor';
+import AnnotatableSection, { type Annotation as DocAnnotation } from '../components/report/AnnotatableSection';
 import ReportContextMenu, { type ReportContextTarget } from '../components/reports/ReportContextMenu';
 import { openAskPandora } from '../lib/askPandora';
 import { usePermissions } from '../hooks/usePermissions';
@@ -117,6 +118,8 @@ export default function ReportViewer() {
   const [anonymizeMode, setAnonymizeMode] = useState(false);
   const [feedbackSummary, setFeedbackSummary] = useState<any>(null);
   const [annotateMode, setAnnotateMode] = useState(false);
+  const [isAnnotating, setIsAnnotating] = useState(false);
+  const [docAnnotations, setDocAnnotations] = useState<DocAnnotation[]>([]);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; target: ReportContextTarget } | null>(null);
   const { canAnnotateReports } = usePermissions();
@@ -130,6 +133,17 @@ export default function ReportViewer() {
       loadGenerations();
     }
   }, [workspaceId, reportId, generationId]);
+
+  useEffect(() => {
+    if (!reportDocument?.id || !workspaceId) return;
+    const token = localStorage.getItem('pandora_session');
+    fetch(`/api/workspaces/${workspaceId}/reports/${reportDocument.id}/annotations`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(r => r.json())
+      .then(data => setDocAnnotations(Array.isArray(data) ? data : []))
+      .catch(err => console.error('Failed to load annotations:', err));
+  }, [reportDocument?.id, workspaceId]);
 
   async function loadDirectGeneration() {
     try {
@@ -506,6 +520,27 @@ export default function ReportViewer() {
           </div>
         )}
 
+        {/* Doc Annotation Mode Banner */}
+        {isAnnotating && reportDocument && (
+          <div style={{
+            background: colors.accent,
+            color: '#fff',
+            padding: '10px 24px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexShrink: 0,
+          }}>
+            <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: '0.08em', fontFamily: fonts.sans }}>
+              ✏️ ANNOTATION MODE — Click any paragraph to add notes, overrides, or flags.
+            </span>
+            <button
+              onClick={() => setIsAnnotating(false)}
+              style={{ background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff', borderRadius: 6, padding: '4px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}
+            >Exit</button>
+          </div>
+        )}
+
         {/* Save success toast */}
         {saveSuccess && (
           <div style={{
@@ -599,6 +634,33 @@ export default function ReportViewer() {
                 >
                   <Edit3 style={{ width: 15, height: 15 }} />
                   Annotate
+                </button>
+              )}
+              {canAnnotateReports && !isAnnotating && reportDocument && (
+                <button
+                  onClick={() => setIsAnnotating(true)}
+                  style={{
+                    padding: '8px 14px',
+                    borderRadius: 8,
+                    fontSize: 14,
+                    fontWeight: 600,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    background: colors.accentSoft,
+                    color: colors.accent,
+                    border: `1px solid ${colors.accent}44`,
+                    cursor: 'pointer',
+                    fontFamily: fonts.sans,
+                  }}
+                >
+                  <Edit3 style={{ width: 15, height: 15 }} />
+                  Annotate
+                  {docAnnotations.length > 0 && (
+                    <span style={{ fontSize: 11, background: colors.accent, color: '#fff', borderRadius: 10, padding: '1px 6px' }}>
+                      {docAnnotations.length}
+                    </span>
+                  )}
                 </button>
               )}
               <button
@@ -751,43 +813,79 @@ export default function ReportViewer() {
                 </div>
 
                 {/* Sections */}
-                {reportDocument.sections.map((section) => {
-                  const isCollapsed = collapsedSections.has(section.id);
-                  return (
-                    <div key={section.id} style={{ background: colors.surface, borderRadius: 8, border: `1px solid ${colors.border}`, overflow: 'hidden' }}>
-                      <button
-                        onClick={() => toggleSection(section.id)}
-                        style={{
-                          width: '100%',
-                          padding: '16px 24px',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          background: 'transparent',
-                          border: 'none',
-                          cursor: 'pointer',
+                {isAnnotating ? (
+                  reportDocument.sections.map((section) => (
+                    <div key={section.id} style={{ background: colors.surface, borderRadius: 8, border: `1px solid ${colors.border}`, padding: 24 }}>
+                      <AnnotatableSection
+                        section={section}
+                        annotations={docAnnotations.filter(a => a.section_id === section.id)}
+                        isAnnotating={isAnnotating}
+                        onAnnotationSave={async (data) => {
+                          const token = localStorage.getItem('pandora_session');
+                          const res = await fetch(
+                            `/api/workspaces/${workspaceId}/reports/${reportDocument.id}/annotations`,
+                            {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                              body: JSON.stringify(data),
+                            }
+                          );
+                          const saved: DocAnnotation = await res.json();
+                          setDocAnnotations(prev => [
+                            ...prev.filter(a => !(a.section_id === data.section_id && a.paragraph_index === data.paragraph_index)),
+                            saved,
+                          ]);
                         }}
-                        onMouseEnter={(e) => (e.currentTarget.style.background = colors.surfaceRaised)}
-                        onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-                      >
-                        <h2 style={{ fontSize: 20, fontWeight: 700, color: colors.text, fontFamily: fonts.sans, margin: 0 }}>{section.title}</h2>
-                        {isCollapsed
-                          ? <ChevronRight style={{ width: 20, height: 20, color: colors.textMuted }} />
-                          : <ChevronLeft style={{ width: 20, height: 20, color: colors.textMuted }} />
-                        }
-                      </button>
-                      {!isCollapsed && (
-                        <div style={{ padding: '0 24px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
-                          <div style={{ color: colors.textSecondary, lineHeight: 1.7, fontFamily: fonts.sans, fontSize: 14 }}>
-                            {section.content.split('\n\n').map((para, i) => (
-                              <p key={i} style={{ marginBottom: 12 }}>{renderMarkdown(para)}</p>
-                            ))}
-                          </div>
-                        </div>
-                      )}
+                        onAnnotationDelete={async (annotationId) => {
+                          const token = localStorage.getItem('pandora_session');
+                          await fetch(
+                            `/api/workspaces/${workspaceId}/reports/${reportDocument.id}/annotations/${annotationId}`,
+                            { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } }
+                          );
+                          setDocAnnotations(prev => prev.filter(a => a.id !== annotationId));
+                        }}
+                      />
                     </div>
-                  );
-                })}
+                  ))
+                ) : (
+                  reportDocument.sections.map((section) => {
+                    const isCollapsed = collapsedSections.has(section.id);
+                    return (
+                      <div key={section.id} style={{ background: colors.surface, borderRadius: 8, border: `1px solid ${colors.border}`, overflow: 'hidden' }}>
+                        <button
+                          onClick={() => toggleSection(section.id)}
+                          style={{
+                            width: '100%',
+                            padding: '16px 24px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            background: 'transparent',
+                            border: 'none',
+                            cursor: 'pointer',
+                          }}
+                          onMouseEnter={(e) => (e.currentTarget.style.background = colors.surfaceRaised)}
+                          onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                        >
+                          <h2 style={{ fontSize: 20, fontWeight: 700, color: colors.text, fontFamily: fonts.sans, margin: 0 }}>{section.title}</h2>
+                          {isCollapsed
+                            ? <ChevronRight style={{ width: 20, height: 20, color: colors.textMuted }} />
+                            : <ChevronLeft style={{ width: 20, height: 20, color: colors.textMuted }} />
+                          }
+                        </button>
+                        {!isCollapsed && (
+                          <div style={{ padding: '0 24px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+                            <div style={{ color: colors.textSecondary, lineHeight: 1.7, fontFamily: fonts.sans, fontSize: 14 }}>
+                              {section.content.split('\n\n').map((para, i) => (
+                                <p key={i} style={{ marginBottom: 12 }}>{renderMarkdown(para)}</p>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
 
                 {/* Actions */}
                 {reportDocument.actions.length > 0 && (
