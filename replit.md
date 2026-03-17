@@ -915,3 +915,31 @@ Calibration stored at `context_layer.definitions->'bearing_calibration'` (JSONB)
 - All 3 methods systematically under-predict by 88–91% (Frontera is in early ramp with ARR below model baselines).
 - `narrativeGuidance`: "No bearing has sufficient history — present all available bearings with equal weight."
 - 4 methods unavailable: category_weighted_ev, behavioral_adjusted_ev, manager_rollup, capacity_model.
+
+## Standing Hypotheses — Locked Conventions (post-demo session prerequisite)
+
+### Storage convention (DECIDED, do not re-debate)
+**Ratios store as 0–1. Display layer multiplies by 100 to render as percentage. No exceptions.**
+- `conversion_rate = 0.356`, threshold `= 0.36` — never `35.6` and `36`
+- `large_deal_win_rate = 0.32`, threshold `= 0.28`
+- Storing as whole-number percentages (e.g. `60` instead of `0.60`) is what caused the `large_deal_cohort` unit mismatch bug
+
+### Post-demo build: `unit` field + write-time validation (do together, one session)
+
+**Migration**: Add `unit text NOT NULL DEFAULT 'ratio'` to `standing_hypotheses`. Backfill based on metric name pattern: `*_rate`, `*_ratio`, `*_pct`, `*_cohort` → `ratio`; `*_days`, `*_cycle` → `days`; `*_count`, `*_closes` → `count`; `*_arr`, `*_revenue`, `*_amount` → `currency`; `*_coverage` → `multiple`.
+
+**Schema** (`StandingHypothesis`): Add required `unit: 'ratio' | 'percentage' | 'count' | 'days' | 'currency' | 'multiple'` — no default, no nullable, generator must declare it.
+
+**Validation** (add before every `INSERT INTO standing_hypotheses`):
+```typescript
+function validateHypothesisUnits(current_value: number, alert_threshold: number) {
+  if (current_value >= 0 && current_value <= 1 && alert_threshold > 1)
+    throw new Error(`Unit mismatch: current_value ${current_value} is a ratio but alert_threshold ${alert_threshold} is a count.`);
+  if (current_value > 1 && alert_threshold >= 0 && alert_threshold <= 1)
+    throw new Error(`Unit mismatch: current_value ${current_value} is a count but alert_threshold ${alert_threshold} is a ratio.`);
+}
+```
+
+**Display**: Replace metric-name heuristics in `formatMetricValue` (both `Actions.tsx` and `deliberation-engine.ts`) with a direct `unit` field lookup. `ratio` → multiply by 100, append `%`. Eliminates the heuristic brittleness entirely.
+
+**Review gate (#3)**: Defer until multi-workspace volume justifies it. Same pattern as action Queue mode — auto-generated hypotheses write to `hypothesis_drafts` with `status = 'pending_review'`, promoted to `standing_hypotheses` on human approval via Settings → Hypotheses.
