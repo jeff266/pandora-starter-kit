@@ -78,6 +78,7 @@ import { gongAdapter } from "./connectors/gong/adapter.js";
 import { firefliesAdapter } from "./connectors/fireflies/adapter.js";
 import { startScheduler } from "./sync/scheduler.js";
 import { startSkillScheduler, stopSkillScheduler } from "./sync/skill-scheduler.js";
+import { startReportScheduler, stopReportScheduler } from "./sync/report-scheduler.js";
 import { registerBuiltInSkills, loadCustomSkills } from "./skills/index.js";
 import { getSkillRegistry } from "./skills/registry.js";
 import { startJobQueue } from "./jobs/queue.js";
@@ -647,6 +648,7 @@ async function initializeAfterStart(t0: number, tDb: number): Promise<void> {
   startJobQueue();
   startScheduler();
   startSkillScheduler();
+  startReportScheduler();
   startPushTriggers().catch(err => {
     console.warn('[server] Push trigger system failed to start (non-fatal):', err instanceof Error ? err.message : err);
   });
@@ -736,6 +738,7 @@ async function initializeAfterStart(t0: number, tDb: number): Promise<void> {
 process.on('SIGTERM', () => {
   console.log('[server] SIGTERM received, shutting down gracefully');
   stopSkillScheduler();
+  stopReportScheduler();
   stopPushTriggers();
   stopWorkflowMonitor();
   process.exit(0);
@@ -744,6 +747,7 @@ process.on('SIGTERM', () => {
 process.on('SIGINT', () => {
   console.log('[server] SIGINT received, shutting down gracefully');
   stopSkillScheduler();
+  stopReportScheduler();
   stopPushTriggers();
   stopWorkflowMonitor();
   process.exit(0);

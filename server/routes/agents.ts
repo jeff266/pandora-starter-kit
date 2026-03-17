@@ -135,6 +135,30 @@ agentsWorkspaceRouter.post('/:workspaceId/agents/:agentId/run', requirePermissio
   }
 });
 
+// Manual trigger for reports-first scheduling (testing flow without waiting for schedule)
+agentsWorkspaceRouter.post('/:workspaceId/agents/:agentId/run-now', requirePermission('skills.run_manual'), async (req: Request, res: Response) => {
+  const workspaceId = req.params.workspaceId as string;
+  const agentId = req.params.agentId as string;
+  const { phase = 'both' } = req.body || {};
+
+  if (!['skills', 'delivery', 'both'].includes(phase)) {
+    return res.status(400).json({ error: 'Invalid phase. Must be: skills, delivery, or both' });
+  }
+
+  try {
+    const { triggerAgentRunNow } = await import('../sync/report-scheduler.js');
+    const result = await triggerAgentRunNow(agentId, workspaceId, phase as 'skills' | 'delivery' | 'both');
+    res.json(result);
+  } catch (err: any) {
+    console.error(`[Agent Route] run-now failed for ${agentId}:`, err.message);
+    res.status(500).json({
+      error: err.message,
+      agentId,
+      workspaceId,
+    });
+  }
+});
+
 agentsWorkspaceRouter.get('/:workspaceId/agents/:agentId/runs', async (req: Request, res: Response) => {
   const workspaceId = req.params.workspaceId as string;
   const agentId = req.params.agentId as string;

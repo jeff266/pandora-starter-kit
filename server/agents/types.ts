@@ -34,6 +34,12 @@ export interface AgentDefinition {
   post_action_playbook?: PlaybookEntry[];
   autonomy_tier?: 1 | 2 | 3;
   promotion_history?: PromotionRecord[];
+
+  // Reports-First Scheduling fields
+  report_type?: 'monday_briefing' | 'weekly_business_review' | 'qbr' | 'board_deck';
+  delivery_hour?: number;         // Local hour, e.g. 5 for 5am
+  delivery_day_of_week?: number;  // 0-6, 0=Sunday, 1=Monday
+  delivery_timezone?: string;     // IANA timezone
 }
 
 export interface AgentSkillStep {

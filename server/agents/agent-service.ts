@@ -60,6 +60,10 @@ export interface Agent {
   seed_conversation_id: string | null;
   execution_mode?: 'pipeline' | 'loop' | 'auto';
   loop_config?: Record<string, any>;
+  report_type?: string | null;
+  delivery_hour?: number | null;
+  delivery_day_of_week?: number | null;
+  delivery_timezone?: string | null;
 }
 
 export interface AgentPerformance {
