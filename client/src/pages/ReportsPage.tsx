@@ -6,13 +6,22 @@ import { api } from '../lib/api';
 import AvatarDisplay from '../components/avatars/AvatarDisplay';
 import IntelligenceNav from '../components/IntelligenceNav';
 
+interface ReportDocSection {
+  id: string;
+  title: string;
+  content: string;
+  word_count?: number;
+  source_skills?: string[];
+  severity?: 'critical' | 'warning' | 'info';
+}
+
 interface ReportDocument {
   id: string;
   document_type: string;
   week_label: string;
   headline: string;
   generated_at: string;
-  sections: any[];
+  sections: ReportDocSection[];
   skills_included?: string[];
 }
 

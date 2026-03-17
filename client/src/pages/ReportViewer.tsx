@@ -392,7 +392,7 @@ export default function ReportViewer() {
                     <span style={{ fontSize: 13 }}>{doc.week_label}</span>
                   </div>
                   <div style={{ fontSize: 12, color: colors.textMuted, marginLeft: 16, marginTop: 2 }}>
-                    {date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                    {date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} · {date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
                   </div>
                 </button>
               );
@@ -794,36 +794,18 @@ export default function ReportViewer() {
                   <div style={{ background: colors.surface, borderRadius: 8, border: `1px solid ${colors.border}`, padding: 24 }}>
                     <h2 style={{ fontSize: 20, fontWeight: 700, color: colors.text, fontFamily: fonts.sans, margin: '0 0 16px' }}>Actions</h2>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      {reportDocument.actions.map((action, idx) => {
-                        const urgencyColors: Record<string, string> = {
-                          today: '#dc2626',
-                          this_week: '#f59e0b',
-                          this_month: '#22c55e',
-                        };
-                        const urgencyLabels: Record<string, string> = {
-                          today: 'TODAY',
-                          this_week: 'THIS WEEK',
-                          this_month: 'THIS MONTH',
-                        };
-                        return (
-                          <div key={idx} style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: 12, background: colors.surfaceRaised, borderRadius: 8 }}>
-                            <input type="checkbox" style={{ marginTop: 4 }} />
-                            <div style={{ flex: 1 }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                <span style={{ fontSize: 12, fontWeight: 700, color: urgencyColors[action.urgency] || colors.textSecondary, fontFamily: fonts.sans }}>
-                                  {urgencyLabels[action.urgency] || 'ACTION'}
-                                </span>
-                                <span style={{ fontSize: 14, color: colors.text, fontFamily: fonts.sans }}>{action.text}</span>
-                              </div>
-                              {(action.deal_name || action.rep_name) && (
-                                <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 4, fontFamily: fonts.sans }}>
-                                  {[action.deal_name, action.rep_name].filter(Boolean).join(' · ')}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
+                      {reportDocument.actions.map((action, idx) => (
+                        <ActionItemComponent
+                          key={idx}
+                          action={{
+                            urgency: action.urgency,
+                            action: action.text,
+                            owner: [action.deal_name, action.rep_name].filter(Boolean).join(' · ') || '',
+                            related_deal: action.deal_name,
+                          }}
+                          index={idx}
+                        />
+                      ))}
                     </div>
                   </div>
                 )}
