@@ -714,6 +714,16 @@ agentsWorkspaceRouter.post('/:workspaceId/reports/:reportId/export', requirePerm
   }
 });
 
+function anonymizeText(text: string, nameMap: Map<string, string>): string {
+  let result = text;
+  nameMap.forEach((alias, realName) => {
+    // Bug 3 fix: handle possessives — "Nate Phillips'" and "Nate Phillips's"
+    const escaped = realName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    result = result.replace(new RegExp(escaped + "'?s?", 'g'), alias);
+  });
+  return result;
+}
+
 function anonymizeRepNames(doc: any): any {
   const repNames = new Set<string>();
   (doc.actions || []).forEach((a: any) => {
@@ -732,27 +742,21 @@ function anonymizeRepNames(doc: any): any {
 
   if (nameMap.size === 0) return doc;
 
-  const sections = (doc.sections || []).map((section: any) => {
-    let content = section.content;
-    nameMap.forEach((alias, realName) => {
-      content = content.replace(new RegExp(realName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), alias);
-    });
-    return { ...section, content };
-  });
+  const sections = (doc.sections || []).map((section: any) => ({
+    ...section,
+    content: anonymizeText(section.content, nameMap),
+  }));
 
-  const actions = (doc.actions || []).map((action: any) => {
-    let text = action.text;
-    nameMap.forEach((alias, realName) => {
-      text = text.replace(new RegExp(realName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), alias);
-    });
-    return {
-      ...action,
-      text,
-      rep_name: action.rep_name ? (nameMap.get(action.rep_name) || action.rep_name) : action.rep_name,
-    };
-  });
+  const actions = (doc.actions || []).map((action: any) => ({
+    ...action,
+    text: anonymizeText(action.text, nameMap),
+    rep_name: action.rep_name ? (nameMap.get(action.rep_name) || action.rep_name) : action.rep_name,
+  }));
 
-  return { ...doc, sections, actions };
+  // Bug 1 fix: also anonymize recommended_next_steps
+  const recommended_next_steps = anonymizeText(doc.recommended_next_steps || '', nameMap);
+
+  return { ...doc, sections, actions, recommended_next_steps };
 }
 
 export { agentsGlobalRouter, agentsWorkspaceRouter };
