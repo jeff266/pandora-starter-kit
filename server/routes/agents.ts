@@ -642,39 +642,39 @@ agentsWorkspaceRouter.post('/:workspaceId/reports/:reportId/export', requirePerm
   const { format = 'pdf' } = req.body;
 
   try {
-    // 1. Load the report document
     const { getReportDocumentById } = await import('../orchestrator/persistence.js');
     const reportDoc = await getReportDocumentById(workspaceId, reportId);
+    if (!reportDoc) return res.status(404).json({ error: 'Report not found' });
 
-    if (!reportDoc) {
-      return res.status(404).json({ error: 'Report not found' });
-    }
-
-    // 2. MERGE ANNOTATIONS before rendering
-    //    This is the Phase 3b addition — always runs before export
     const { mergeAnnotationsForExport } = await import('../orchestrator/annotation-merge.js');
     const mergedDoc = await mergeAnnotationsForExport(reportDoc, workspaceId);
 
-    // 3. Pass merged document to renderer
-    // (Phase 5 renderer v2 consumes this — for now, return merged JSON
-    //  so Phase 3c Prepare for Client modal can preview it)
+    const { renderPdf, renderDocx, renderPptx } = await import('../orchestrator/report-renderer.js');
 
-    // Determine if annotations were applied
-    const annotationsApplied = reportDoc.sections.some((section, idx) => {
-      const mergedSection = mergedDoc.sections[idx];
-      return (
-        section.content !== mergedSection.content ||
-        section.flagged_for_client !== mergedSection.flagged_for_client
-      );
-    });
+    const slug = (mergedDoc.week_label || 'report').replace(/\s+/g, '-').replace(/[^a-z0-9-]/gi, '');
 
-    // Temporary: return the merged document as JSON
-    // Phase 5 will replace this with actual file stream
-    res.json({
-      report_document: mergedDoc,
-      format,
-      annotations_applied: annotationsApplied ? 'sections_modified' : 'no_changes',
-    });
+    if (format === 'pdf') {
+      const buf = await renderPdf(mergedDoc);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${slug}.pdf"`);
+      return res.send(buf);
+    }
+
+    if (format === 'docx') {
+      const buf = await renderDocx(mergedDoc);
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+      res.setHeader('Content-Disposition', `attachment; filename="${slug}.docx"`);
+      return res.send(buf);
+    }
+
+    if (format === 'pptx') {
+      const buf = await renderPptx(mergedDoc);
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.presentationml.presentation');
+      res.setHeader('Content-Disposition', `attachment; filename="${slug}.pptx"`);
+      return res.send(buf);
+    }
+
+    return res.status(400).json({ error: `Unsupported format: ${format}` });
   } catch (err: any) {
     console.error('[Reports] Failed to export report:', err.message);
     res.status(500).json({ error: err.message });

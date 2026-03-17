@@ -293,8 +293,16 @@ export default function ReportViewer() {
         console.error('[Export] Failed:', await res.text());
         return;
       }
-      const data = await res.json();
-      console.log('[Export] Merged document:', data);
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const slug = (reportDocument.week_label || 'report').replace(/\s+/g, '-').replace(/[^a-z0-9-]/gi, '');
+      a.href = url;
+      a.download = `${slug}.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
       setExportSuccess(format);
       setTimeout(() => setExportSuccess(null), 2500);
     } catch (err) {
