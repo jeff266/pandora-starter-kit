@@ -135,15 +135,16 @@ export default function ReportViewer() {
   }, [workspaceId, reportId, generationId]);
 
   useEffect(() => {
-    if (!reportDocument?.id || !workspaceId) return;
+    const wid = currentWorkspace?.id;
+    if (!reportDocument?.id || !wid) return;
     const token = localStorage.getItem('pandora_session');
-    fetch(`/api/workspaces/${workspaceId}/reports/${reportDocument.id}/annotations`, {
+    fetch(`/api/workspaces/${wid}/reports/${reportDocument.id}/annotations`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then(r => r.json())
       .then(data => setDocAnnotations(Array.isArray(data) ? data : []))
       .catch(err => console.error('Failed to load annotations:', err));
-  }, [reportDocument?.id, workspaceId]);
+  }, [reportDocument?.id, currentWorkspace?.id]);
 
   async function loadDirectGeneration() {
     try {
@@ -823,8 +824,9 @@ export default function ReportViewer() {
                         onAnnotationSave={async (data) => {
                           const token = localStorage.getItem('pandora_session');
                           const docId = reportDocument!.id;
+                          const wid = currentWorkspace?.id || workspaceId;
                           const res = await fetch(
-                            `/api/workspaces/${workspaceId}/reports/${docId}/annotations`,
+                            `/api/workspaces/${wid}/reports/${docId}/annotations`,
                             {
                               method: 'POST',
                               headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -844,8 +846,9 @@ export default function ReportViewer() {
                         }}
                         onAnnotationDelete={async (annotationId) => {
                           const token = localStorage.getItem('pandora_session');
+                          const wid = currentWorkspace?.id || workspaceId;
                           await fetch(
-                            `/api/workspaces/${workspaceId}/reports/${reportDocument.id}/annotations/${annotationId}`,
+                            `/api/workspaces/${wid}/reports/${reportDocument!.id}/annotations/${annotationId}`,
                             { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } }
                           );
                           setDocAnnotations(prev => prev.filter(a => a.id !== annotationId));
