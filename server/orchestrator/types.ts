@@ -36,6 +36,16 @@ export interface ReportSection {
   flagged_for_client?: boolean;  // Set by annotation merge later
 }
 
+export interface ChartSuggestion {
+  section_id: string;
+  chart_type: 'bar' | 'line' | 'pie' | 'doughnut' | 'horizontalBar';
+  title: string;
+  data_labels: string[];
+  data_values: number[];
+  reasoning: string;        // Why this chart makes sense (1 sentence)
+  priority: 'high' | 'medium' | 'low';
+}
+
 export interface ReportDocument {
   id?: string;               // Set after DB insert
   document_type: DocumentType;
@@ -48,6 +58,7 @@ export interface ReportDocument {
   sections: ReportSection[];
   actions: ActionSummary[];  // Max 5, sorted urgency then impact
   recommended_next_steps: string;  // ≤80 words, consulting voice
+  chart_suggestions: ChartSuggestion[];  // AI-suggested charts per section
 
   skills_included: string[];
   skills_omitted: string[];  // No meaningful signal this week

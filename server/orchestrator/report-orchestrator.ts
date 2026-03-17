@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto';
 import { query } from '../db.js';
 import { callLLM } from '../utils/llm-router.js';
 import { DOCUMENT_PLAYBOOKS, WORD_BUDGETS } from './playbooks.js';
-import { OrchestratorInput, ReportDocument, ReportSection, SkillSummary } from './types.js';
+import { OrchestratorInput, ReportDocument, ReportSection, SkillSummary, ChartSuggestion } from './types.js';
 
 export async function runReportOrchestrator(
   input: OrchestratorInput
@@ -149,6 +149,9 @@ Word budget: ${input.word_budget} words total across all sections.
 
   const totalWords = sections.reduce((sum, s) => sum + s.word_count, 0);
 
+  // Generate chart suggestions based on skill summaries
+  const chartSuggestions = generateChartSuggestions(sections, activeSkills);
+
   return {
     document_type: input.document_type,
     workspace_id: input.workspace_id,
@@ -159,6 +162,7 @@ Word budget: ${input.word_budget} words total across all sections.
     sections,
     actions: (parsed.actions || []).slice(0, 5),
     recommended_next_steps: parsed.recommended_next_steps || '',
+    chart_suggestions: chartSuggestions,
     skills_included: activeSkills.map(s => s.skill_id),
     skills_omitted: [
       ...omittedSkills,
@@ -228,4 +232,104 @@ function deriveSectionSeverity(
   if (hasZeroSignal) return 'critical';
   if (relevant.length > 0) return 'warning';
   return 'info';
+}
+
+function generateChartSuggestions(
+  sections: ReportSection[],
+  skillSummaries: SkillSummary[]
+): ChartSuggestion[] {
+  const suggestions: ChartSuggestion[] = [];
+
+  // Create a map of skill summaries by skill_id for quick lookup
+  const skillMap = new Map(skillSummaries.map(s => [s.skill_id, s]));
+
+  for (const section of sections) {
+    const relevantSkills = section.source_skills
+      .map(skillId => skillMap.get(skillId))
+      .filter(Boolean) as SkillSummary[];
+
+    if (relevantSkills.length === 0) continue;
+
+    // Generate chart suggestions based on section and skill data
+    if (section.id === 'the_number') {
+      // Forecast rollup: show landing zone bear/base/bull
+      const forecastSkill = relevantSkills.find(s => s.skill_id === 'forecast-rollup');
+      if (forecastSkill && forecastSkill.key_metrics.bear && forecastSkill.key_metrics.bull) {
+        suggestions.push({
+          section_id: section.id,
+          chart_type: 'bar',
+          title: 'Forecast Landing Zone',
+          data_labels: ['Bear', 'Base', 'Bull'],
+          data_values: [
+            Number(forecastSkill.key_metrics.bear) || 0,
+            Number(forecastSkill.key_metrics.base) || Number(forecastSkill.key_metrics.closed_won) + Number(forecastSkill.key_metrics.best_case) / 2 || 0,
+            Number(forecastSkill.key_metrics.bull) || 0,
+          ],
+          reasoning: 'Shows forecast range for quarter-end landing zone',
+          priority: 'high',
+        });
+      }
+    }
+
+    if (section.id === 'the_story') {
+      // Pipeline waterfall: show movement (created, advanced, regressed, won, lost)
+      const waterfallSkill = relevantSkills.find(s => s.skill_id === 'pipeline-waterfall');
+      if (waterfallSkill) {
+        suggestions.push({
+          section_id: section.id,
+          chart_type: 'bar',
+          title: 'Pipeline Movement This Week',
+          data_labels: ['Created', 'Advanced', 'Regressed', 'Won', 'Lost'],
+          data_values: [
+            Number(waterfallSkill.key_metrics.created) || 0,
+            Number(waterfallSkill.key_metrics.advanced) || 0,
+            Number(waterfallSkill.key_metrics.regressed) || 0,
+            Number(waterfallSkill.key_metrics.closed_won_count) || 0,
+            Number(waterfallSkill.key_metrics.closed_lost_count) || 0,
+          ],
+          reasoning: 'Visualizes deal flow and pipeline velocity',
+          priority: 'high',
+        });
+      }
+    }
+
+    if (section.id === 'deals_requiring_action') {
+      // Deal risk: pie chart of risk types
+      const riskSkill = relevantSkills.find(s => s.skill_id === 'deal-risk-review');
+      if (riskSkill && Number(riskSkill.key_metrics.deals_at_risk) > 0) {
+        suggestions.push({
+          section_id: section.id,
+          chart_type: 'doughnut',
+          title: 'Deals at Risk by Type',
+          data_labels: ['At Risk', 'Healthy'],
+          data_values: [
+            Number(riskSkill.key_metrics.deals_at_risk) || 0,
+            Math.max(0, 20 - (Number(riskSkill.key_metrics.deals_at_risk) || 0)), // Assume ~20 total deals
+          ],
+          reasoning: 'Shows proportion of deals requiring attention',
+          priority: 'medium',
+        });
+      }
+    }
+
+    if (section.id === 'pipeline_health') {
+      // Pipeline coverage: show coverage ratio vs target
+      const coverageSkill = relevantSkills.find(s => s.skill_id === 'pipeline-coverage');
+      if (coverageSkill) {
+        const coverageRatio = Number(coverageSkill.key_metrics.coverage_ratio) || 0;
+        const targetRatio = Number(coverageSkill.key_metrics.target_ratio) || 3;
+        suggestions.push({
+          section_id: section.id,
+          chart_type: 'horizontalBar',
+          title: 'Pipeline Coverage vs Target',
+          data_labels: ['Current Coverage', 'Target Coverage'],
+          data_values: [coverageRatio, targetRatio],
+          reasoning: 'Compares current coverage to 3x target',
+          priority: coverageRatio < targetRatio ? 'high' : 'medium',
+        });
+      }
+    }
+  }
+
+  return suggestions.slice(0, 6); // Max 6 charts per report
 }

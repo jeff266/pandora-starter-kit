@@ -634,6 +634,149 @@ agentsWorkspaceRouter.delete('/:workspaceId/reports/:reportId/annotations/:annot
   }
 });
 
+// ── Report Charts API (Build B) ──────────────────────────────────────────────
+
+// GET chart suggestions for a report
+agentsWorkspaceRouter.get('/:workspaceId/reports/:reportId/chart-suggestions', requirePermission('agents.view'), async (req: Request, res: Response) => {
+  try {
+    const { workspaceId, reportId } = req.params;
+    const result = await query(`
+      SELECT section_id, chart_type, title, data_labels, data_values, reasoning, priority
+      FROM report_chart_suggestions
+      WHERE workspace_id = $1 AND report_document_id = $2
+      ORDER BY priority DESC, created_at ASC
+    `, [workspaceId, reportId]);
+    res.json({ suggestions: result.rows });
+  } catch (err: any) {
+    console.error('[Charts] Failed to get chart suggestions:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET all charts for a report
+agentsWorkspaceRouter.get('/:workspaceId/reports/:reportId/charts', requirePermission('agents.view'), async (req: Request, res: Response) => {
+  try {
+    const { workspaceId, reportId } = req.params;
+    const result = await query(`
+      SELECT id, section_id, chart_type, title, data_labels, data_values,
+             chart_options, position_in_section, created_at, updated_at
+      FROM report_charts
+      WHERE workspace_id = $1 AND report_document_id = $2
+      ORDER BY section_id, position_in_section ASC
+    `, [workspaceId, reportId]);
+    res.json({ charts: result.rows });
+  } catch (err: any) {
+    console.error('[Charts] Failed to get charts:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST create a chart from suggestion or custom
+agentsWorkspaceRouter.post('/:workspaceId/reports/:reportId/charts', requirePermission('agents.edit'), async (req: Request, res: Response) => {
+  try {
+    const { workspaceId, reportId } = req.params;
+    const { section_id, chart_type, title, data_labels, data_values, chart_options, position_in_section } = req.body;
+
+    // Render chart to PNG using chartjs-node-canvas
+    const { renderChartToPNG } = await import('../orchestrator/chart-renderer.js');
+    const chartPNG = await renderChartToPNG({
+      chart_type,
+      title,
+      data_labels,
+      data_values,
+      chart_options,
+    });
+
+    // Insert chart with PNG data
+    const result = await query(`
+      INSERT INTO report_charts (
+        workspace_id, report_document_id, section_id, chart_type,
+        title, data_labels, data_values, chart_options, chart_png,
+        position_in_section, created_by
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+      RETURNING id, section_id, chart_type, title, data_labels, data_values,
+                chart_options, position_in_section, created_at, updated_at
+    `, [
+      workspaceId,
+      reportId,
+      section_id,
+      chart_type,
+      title,
+      JSON.stringify(data_labels),
+      JSON.stringify(data_values),
+      JSON.stringify(chart_options || {}),
+      chartPNG,
+      position_in_section || 0,
+      (req as any).user?.id || null,
+    ]);
+
+    res.status(201).json({ chart: result.rows[0] });
+  } catch (err: any) {
+    console.error('[Charts] Failed to create chart:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET chart PNG image
+agentsWorkspaceRouter.get('/:workspaceId/reports/:reportId/charts/:chartId/image', requirePermission('agents.view'), async (req: Request, res: Response) => {
+  try {
+    const { workspaceId, chartId } = req.params;
+    const result = await query(`
+      SELECT chart_png FROM report_charts
+      WHERE workspace_id = $1 AND id = $2
+    `, [workspaceId, chartId]);
+
+    if (!result.rows[0] || !result.rows[0].chart_png) {
+      return res.status(404).json({ error: 'Chart image not found' });
+    }
+
+    res.setHeader('Content-Type', 'image/png');
+    res.send(result.rows[0].chart_png);
+  } catch (err: any) {
+    console.error('[Charts] Failed to get chart image:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE a chart
+agentsWorkspaceRouter.delete('/:workspaceId/reports/:reportId/charts/:chartId', requirePermission('agents.edit'), async (req: Request, res: Response) => {
+  try {
+    const { workspaceId, chartId } = req.params;
+    await query(`
+      DELETE FROM report_charts
+      WHERE workspace_id = $1 AND id = $2
+    `, [workspaceId, chartId]);
+    res.json({ deleted: true });
+  } catch (err: any) {
+    console.error('[Charts] Failed to delete chart:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET companion XLSX file with chart data
+agentsWorkspaceRouter.get('/:workspaceId/reports/:reportId/charts-data.xlsx', requirePermission('agents.view'), async (req: Request, res: Response) => {
+  try {
+    const { workspaceId, reportId } = req.params;
+
+    // Verify report exists
+    const { getReportDocumentById } = await import('../orchestrator/persistence.js');
+    const reportDoc = await getReportDocumentById(workspaceId, reportId);
+    if (!reportDoc) return res.status(404).json({ error: 'Report not found' });
+
+    // Generate XLSX with chart data
+    const { generateChartDataXLSX } = await import('../orchestrator/chart-xlsx-generator.js');
+    const xlsxBuffer = await generateChartDataXLSX(reportId);
+
+    const filename = `${reportDoc.week_label.replace(/[^a-z0-9]/gi, '-')}-chart-data.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(xlsxBuffer);
+  } catch (err: any) {
+    console.error('[Charts] Failed to generate XLSX:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Report Export Endpoint (Phase 3b) ────────────────────────────────────────
 
 agentsWorkspaceRouter.post('/:workspaceId/reports/:reportId/export', requirePermission('agents.view'), async (req: Request, res: Response) => {

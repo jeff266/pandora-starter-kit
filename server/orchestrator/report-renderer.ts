@@ -3,10 +3,11 @@ import {
   AlignmentType, BorderStyle, ShadingType,
   Table, TableRow, TableCell, WidthType,
   PageNumber, Footer, convertInchesToTwip,
-  Packer
+  Packer, ImageRun
 } from 'docx';
 import PDFDocument from 'pdfkit';
 import type { ReportDocument } from './types.js';
+import { query } from '../db.js';
 
 export interface RenderConfig {
   prepared_by?: string;
@@ -106,6 +107,22 @@ export async function renderDocx(
 
   // ── Sections ─────────────────────────────────────────
 
+  // Fetch all charts for this report
+  const chartsResult = doc.id ? await query(`
+    SELECT section_id, chart_png, title
+    FROM report_charts
+    WHERE report_document_id = $1
+    ORDER BY section_id, position_in_section ASC
+  `, [doc.id]) : { rows: [] };
+
+  const chartsBySection = new Map<string, any[]>();
+  for (const chart of chartsResult.rows) {
+    if (!chartsBySection.has(chart.section_id)) {
+      chartsBySection.set(chart.section_id, []);
+    }
+    chartsBySection.get(chart.section_id)!.push(chart);
+  }
+
   for (const section of doc.sections) {
     // Section title as H2
     children.push(new Paragraph({
@@ -155,6 +172,38 @@ export async function renderDocx(
       }
 
       children.push(new Paragraph(paraProps));
+    }
+
+    // Embed charts for this section
+    const sectionCharts = chartsBySection.get(section.id) || [];
+    for (const chart of sectionCharts) {
+      if (chart.chart_png) {
+        children.push(new Paragraph({
+          children: [
+            new ImageRun({
+              data: chart.chart_png,
+              transformation: {
+                width: 500,
+                height: 333,
+              },
+            }),
+          ],
+          spacing: { before: 240, after: 240 },
+          alignment: AlignmentType.CENTER,
+        }));
+
+        // Chart caption
+        children.push(new Paragraph({
+          children: [new TextRun({
+            text: chart.title,
+            size: 18,
+            color: '64748B',
+            italics: true,
+          })],
+          alignment: AlignmentType.CENTER,
+          spacing: { after: 240 },
+        }));
+      }
     }
   }
 
@@ -392,6 +441,23 @@ export async function renderPdf(
   pdf.moveDown(1.2);
 
   // ── Sections ───────────────────────────────────────────────────────────────
+
+  // Fetch all charts for this report
+  const pdfChartsResult = doc.id ? await query(`
+    SELECT section_id, chart_png, title
+    FROM report_charts
+    WHERE report_document_id = $1
+    ORDER BY section_id, position_in_section ASC
+  `, [doc.id]) : { rows: [] };
+
+  const pdfChartsBySection = new Map<string, any[]>();
+  for (const chart of pdfChartsResult.rows) {
+    if (!pdfChartsBySection.has(chart.section_id)) {
+      pdfChartsBySection.set(chart.section_id, []);
+    }
+    pdfChartsBySection.get(chart.section_id)!.push(chart);
+  }
+
   for (const section of doc.sections) {
     if (pdf.y > pdf.page.height - 180) pdf.addPage();
 
@@ -407,6 +473,26 @@ export async function renderPdf(
     pdf.fillColor(hexToRgb(MID)).font('Helvetica').fontSize(10.5)
        .text(section.content || '', { width: W, lineGap: 2 });
     pdf.moveDown(1.2);
+
+    // Embed charts for this section
+    const pdfSectionCharts = pdfChartsBySection.get(section.id) || [];
+    for (const chart of pdfSectionCharts) {
+      if (chart.chart_png) {
+        if (pdf.y > pdf.page.height - 250) pdf.addPage();
+
+        // Embed PNG chart image
+        pdf.image(chart.chart_png, 90, pdf.y, {
+          fit: [W, 200],
+          align: 'center',
+        });
+        pdf.moveDown(10.5);
+
+        // Chart caption
+        pdf.fillColor(hexToRgb(MUTED)).font('Helvetica-Oblique').fontSize(9)
+           .text(chart.title, 90, pdf.y, { width: W, align: 'center' });
+        pdf.moveDown(1.2);
+      }
+    }
   }
 
   // ── Actions ────────────────────────────────────────────────────────────────

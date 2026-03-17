@@ -1,5 +1,26 @@
 import { query } from '../db.js';
-import { ReportDocument } from './types.js';
+import { ReportDocument, ChartSuggestion } from './types.js';
+
+async function getChartSuggestionsForReport(
+  reportDocumentId: string
+): Promise<ChartSuggestion[]> {
+  const result = await query(`
+    SELECT section_id, chart_type, title, data_labels, data_values, reasoning, priority
+    FROM report_chart_suggestions
+    WHERE report_document_id = $1
+    ORDER BY priority DESC, created_at ASC
+  `, [reportDocumentId]);
+
+  return result.rows.map(row => ({
+    section_id: row.section_id,
+    chart_type: row.chart_type,
+    title: row.title,
+    data_labels: row.data_labels,
+    data_values: row.data_values,
+    reasoning: row.reasoning,
+    priority: row.priority,
+  }));
+}
 
 export async function persistReportDocument(
   doc: ReportDocument
@@ -29,7 +50,31 @@ export async function persistReportDocument(
     doc.generated_at,
   ]);
 
-  return result.rows[0].id;
+  const reportDocumentId = result.rows[0].id;
+
+  // Persist chart suggestions
+  if (doc.chart_suggestions && doc.chart_suggestions.length > 0) {
+    for (const suggestion of doc.chart_suggestions) {
+      await query(`
+        INSERT INTO report_chart_suggestions (
+          workspace_id, report_document_id, section_id, chart_type,
+          title, data_labels, data_values, reasoning, priority
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      `, [
+        doc.workspace_id,
+        reportDocumentId,
+        suggestion.section_id,
+        suggestion.chart_type,
+        suggestion.title,
+        JSON.stringify(suggestion.data_labels),
+        JSON.stringify(suggestion.data_values),
+        suggestion.reasoning,
+        suggestion.priority,
+      ]);
+    }
+  }
+
+  return reportDocumentId;
 }
 
 export async function getLatestReportDocument(
@@ -47,6 +92,8 @@ export async function getLatestReportDocument(
   if (!result.rows[0]) return null;
 
   const row = result.rows[0];
+  const chartSuggestions = await getChartSuggestionsForReport(row.id);
+
   return {
     id: row.id,
     document_type: row.document_type,
@@ -58,6 +105,7 @@ export async function getLatestReportDocument(
     sections: row.sections,
     actions: row.actions,
     recommended_next_steps: row.recommended_next_steps,
+    chart_suggestions: chartSuggestions,
     skills_included: row.skills_included,
     skills_omitted: row.skills_omitted,
     total_word_count: row.total_word_count,
@@ -92,22 +140,26 @@ export async function getAllReportsForWorkspace(
     LIMIT $2
   `, [workspaceId, limit]);
 
-  return result.rows.map(row => ({
-    id: row.id,
-    document_type: row.document_type,
-    workspace_id: row.workspace_id,
-    agent_run_id: row.agent_run_id,
-    generated_at: row.generated_at,
-    week_label: row.week_label,
-    headline: row.headline,
-    sections: row.sections,
-    actions: row.actions,
-    recommended_next_steps: row.recommended_next_steps,
-    skills_included: row.skills_included,
-    skills_omitted: row.skills_omitted,
-    total_word_count: row.total_word_count,
-    tokens_used: row.tokens_used,
-    orchestrator_run_id: row.orchestrator_run_id,
+  return Promise.all(result.rows.map(async row => {
+    const chartSuggestions = await getChartSuggestionsForReport(row.id);
+    return {
+      id: row.id,
+      document_type: row.document_type,
+      workspace_id: row.workspace_id,
+      agent_run_id: row.agent_run_id,
+      generated_at: row.generated_at,
+      week_label: row.week_label,
+      headline: row.headline,
+      sections: row.sections,
+      actions: row.actions,
+      recommended_next_steps: row.recommended_next_steps,
+      chart_suggestions: chartSuggestions,
+      skills_included: row.skills_included,
+      skills_omitted: row.skills_omitted,
+      total_word_count: row.total_word_count,
+      tokens_used: row.tokens_used,
+      orchestrator_run_id: row.orchestrator_run_id,
+    };
   }));
 }
 
@@ -125,6 +177,8 @@ export async function getReportDocumentById(
   if (!result.rows[0]) return null;
 
   const row = result.rows[0];
+  const chartSuggestions = await getChartSuggestionsForReport(row.id);
+
   return {
     id: row.id,
     document_type: row.document_type,
@@ -136,6 +190,7 @@ export async function getReportDocumentById(
     sections: row.sections,
     actions: row.actions,
     recommended_next_steps: row.recommended_next_steps,
+    chart_suggestions: chartSuggestions,
     skills_included: row.skills_included,
     skills_omitted: row.skills_omitted,
     total_word_count: row.total_word_count,
