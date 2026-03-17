@@ -8138,6 +8138,12 @@ const mcWritePortfolioCompositionHypothesis: ToolDefinition = {
         currentValue = total > 0 ? Math.round((won / total) * 1000) / 10 : 0;
         alertThreshold = currentValue > 0 ? Math.round((currentValue + 5) * 10) / 10 : 35;
       } else {
+        // NOTE: for large_deal_cohort, currentExpected is a probability-weighted close count (e.g. 0.6)
+        // and requiredForQuota is an absolute close count (e.g. 236). These are intentionally comparable
+        // (both in "deal closes") but the units differ — formatMetricValue handles this with a ≤1/> 1
+        // heuristic: values ≤1 display as a probability %, values >1 display as a plain count.
+        // TODO: refactor to store a ratio of large-deal pipeline vs total pipeline so both values use the
+        // same unit and display cleanly as a percentage.
         const swingSegment = composition.requiredClosesForQuota?.[0] ?? null;
         currentValue = swingSegment?.currentExpected ?? baseP50;
         alertThreshold = swingSegment?.requiredForQuota ?? (quota ? quota * 0.85 : null);

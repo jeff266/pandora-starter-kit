@@ -94,7 +94,9 @@ interface SprintData {
 function formatMetricValue(value: number, metric: string): string {
   const m = metric.toLowerCase();
   if (m.includes('ratio')) return `${value.toFixed(1)}x`;
-  if (m.includes('cohort')) return `${Math.round(value * 100)}%`;
+  // cohort metrics store either a ratio (≤1, e.g. 0.6 = 60%) or a deal-close count (>1, e.g. 236).
+  // Apply × 100 only for ratio values to avoid e.g. 236.1 → "23610%".
+  if (m.includes('cohort')) return value <= 1 ? `${Math.round(value * 100)}%` : `${Math.round(value)}`;
   if (m.includes('rate') || m.includes('pct') || m.includes('win')) return `${Math.round(value)}%`;
   if (m.includes('days') || m.includes('cycle')) return `${Math.round(value)} days`;
   if (m.includes('count') || m.includes('closes')) return value.toFixed(1);
