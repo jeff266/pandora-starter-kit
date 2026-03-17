@@ -1,0 +1,44 @@
+Correct diagnosis. Three targeted null guards, no architectural changes needed.
+
+Write the fix:
+
+```typescript
+// 1. getCoverageTarget() — line ~212
+function getCoverageTarget(config: any): number {
+  return config?.thresholds?.coverage_target 
+    ?? config?.goals_and_targets?.pipeline_coverage_target 
+    ?? 3.0;  // default 3x coverage target
+}
+
+// 2. getStaleThreshold() — same pattern
+function getStaleThreshold(config: any): number {
+  return config?.thresholds?.stale_deal_days 
+    ?? config?.goals_and_targets?.stale_deal_days 
+    ?? 14;  // default 14 days
+}
+
+// 3. checkQuotaConfig — line ~2454
+const goals = contextLayer?.goals_and_targets ?? {};
+const coverageTarget = (goals as any).pipeline_coverage_target 
+  ?? config?.thresholds?.coverage_target 
+  ?? 3.0;
+```
+
+**The lookup order matters.** Check `thresholds` first (the old path), fall back to `goals_and_targets` (where Frontera might have it), then hardcode the sensible default. This way neither Frontera nor any future workspace with a different config shape crashes — they just get the default until their config is populated.
+
+After the fix, run the skill in isolation to confirm it hits the SQL before touching the full Orchestrator cycle:
+
+```bash
+curl -s -X POST \
+"https://$REPLIT_DEV_DOMAIN/api/workspaces/4160191d-73bc-414b-97dd-5a1853190378/skills/pipeline-coverage/run" \
+-H "Authorization: Bearer <token>" | jq '{
+  status: .status,
+  coverage_ratio: .result_data.coverage_ratio,
+  deal_count: .result_data.deal_count,
+  pipeline_value: .result_data.pipeline_value
+}'
+```
+
+You should see `$288K`, 19 deals, and a real coverage ratio before re-running the Orchestrator. Once that returns real data, the next `run-now` will produce a proper Monday briefing instead of the data visibility crisis narrative.
+
+This is also a signal to audit `forecast-rollup`, `rep-scorecard`, and `pipeline-hygiene` for the same `config?.thresholds` access pattern — they likely have the same null guard gap. Fix them all in the same pass rather than discovering each one on the next run.

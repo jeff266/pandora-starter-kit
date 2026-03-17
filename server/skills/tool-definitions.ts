@@ -2451,7 +2451,7 @@ const checkQuotaConfig: ToolDefinition = {
   execute: async (params, context) => {
     return safeExecute('checkQuotaConfig', async () => {
       const goals = await getGoals(context.workspaceId);
-      const coverageTarget = (goals as any).pipeline_coverage_target ?? await configLoader.getCoverageTarget(context.workspaceId);
+      const coverageTarget = (goals != null ? (goals as any).pipeline_coverage_target : undefined) ?? await configLoader.getCoverageTarget(context.workspaceId);
 
       // ── Priority 1: targets table (authoritative new source, is_active = true only) ──
       // This must run before quota_periods so stale quota_periods rows never win.
