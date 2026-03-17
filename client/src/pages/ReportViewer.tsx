@@ -55,6 +55,48 @@ interface GenerationSummary {
   generation_duration_ms: number;
 }
 
+interface ReportDocSection {
+  id: string;
+  title: string;
+  content: string;
+  word_count: number;
+  source_skills: string[];
+  severity?: 'critical' | 'warning' | 'info';
+}
+
+interface ReportDocAction {
+  urgency: 'today' | 'this_week' | 'this_month';
+  text: string;
+  deal_name?: string;
+  rep_name?: string;
+}
+
+interface ReportDocumentData {
+  id: string;
+  document_type: string;
+  week_label: string;
+  headline: string;
+  sections: ReportDocSection[];
+  actions: ReportDocAction[];
+  recommended_next_steps: string;
+  skills_included: string[];
+  tokens_used: number;
+  generated_at: string;
+}
+
+interface DocListEntry {
+  id: string;
+  generated_at: string;
+  week_label: string;
+}
+
+const DOC_TYPE_LABELS: Record<string, string> = {
+  monday_briefing: 'Monday Briefing',
+  weekly_business_review: 'Weekly Business Review',
+  qbr: 'Quarterly Business Review',
+  board_deck: 'Board Deck',
+};
+
 export default function ReportViewer() {
   const { workspaceId, reportId, generationId } = useParams<{
     workspaceId: string;
@@ -69,6 +111,8 @@ export default function ReportViewer() {
   const [generation, setGeneration] = useState<ReportGeneration | null>(null);
   const [template, setTemplate] = useState<ReportTemplate | null>(null);
   const [generations, setGenerations] = useState<GenerationSummary[]>([]);
+  const [reportDocument, setReportDocument] = useState<ReportDocumentData | null>(null);
+  const [docList, setDocList] = useState<DocListEntry[]>([]);
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
   const [anonymizeMode, setAnonymizeMode] = useState(false);
   const [feedbackSummary, setFeedbackSummary] = useState<any>(null);
@@ -90,30 +134,22 @@ export default function ReportViewer() {
   async function loadDirectGeneration() {
     try {
       setLoading(true);
-      const genData = await api.get(`/generations/${generationId}`);
-      setGeneration(genData);
-
-      if (genData.agent_name) {
-        setTemplate({ id: '', name: genData.agent_name, description: '', workspace_id: workspaceId || '' });
-      }
-
-      if (genData.agent_id) {
-        loadFeedbackSummary(genData.id, genData.agent_id);
-        loadAgentGenerations(genData.agent_id);
-      }
+      const doc = await api.get(`/reports/${generationId}`);
+      setReportDocument(doc);
+      loadDocumentList();
     } catch (err) {
-      console.error('Failed to load briefing:', err);
+      console.error('Failed to load report document:', err);
     } finally {
       setLoading(false);
     }
   }
 
-  async function loadAgentGenerations(agentId: string) {
+  async function loadDocumentList() {
     try {
-      const data = await api.get(`/generations-by-agent/${agentId}?limit=20`);
-      setGenerations(data.generations || []);
+      const data = await api.get('/reports?limit=20');
+      setDocList(data.reports || []);
     } catch (err) {
-      console.error('Failed to load agent generations:', err);
+      console.error('Failed to load document list:', err);
     }
   }
 
@@ -253,19 +289,11 @@ export default function ReportViewer() {
     setSaveSuccess(true);
     setAnnotateMode(false);
     setTimeout(() => setSaveSuccess(false), 4000);
-    if (isDirectBriefing && generation.agent_id) {
-      loadAgentGenerations(generation.agent_id);
-    } else {
-      loadGenerations();
-    }
+    loadGenerations();
     if (data.generation?.id) {
-      if (isDirectBriefing) {
-        navigate(`/workspace/${workspaceId}/briefing/${data.generation.id}`);
-      } else {
-        navigate(`/workspace/${workspaceId}/reports/${reportId}/generations/${data.generation.id}`);
-      }
+      navigate(`/workspace/${workspaceId}/reports/${reportId}/generations/${data.generation.id}`);
     }
-  }, [generation, reportId, workspaceId, isDirectBriefing, currentWorkspace]);
+  }, [generation, reportId, workspaceId, currentWorkspace]);
 
   async function shareReport() {
     if (!generation) return;
@@ -295,7 +323,7 @@ export default function ReportViewer() {
     );
   }
 
-  if (!generation) {
+  if (!generation && !reportDocument) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: colors.bg }}>
         <div style={{ color: colors.textMuted, fontFamily: fonts.sans }}>Report not found</div>
@@ -303,10 +331,12 @@ export default function ReportViewer() {
     );
   }
 
-  const displayName = template?.name || generation.agent_name || 'Agent Briefing';
-  const sections = generation.sections_content || generation.sections_snapshot || [];
-  const isV2 = (generation.version || 1) > 1;
-  const annotations = generation.human_annotations || [];
+  const displayName = reportDocument
+    ? (DOC_TYPE_LABELS[reportDocument.document_type] || reportDocument.document_type)
+    : (template?.name || generation?.agent_name || 'Agent Briefing');
+  const sections = generation?.sections_content || generation?.sections_snapshot || [];
+  const isV2 = (generation?.version || 1) > 1;
+  const annotations = generation?.human_annotations || [];
 
   return (
     <div style={{ display: 'flex', height: '100vh', background: colors.bg }}>
@@ -328,67 +358,108 @@ export default function ReportViewer() {
           <h3 style={{ fontWeight: 600, fontSize: 14, color: colors.text, fontFamily: fonts.sans, margin: 0 }}>Timeline</h3>
         </div>
         <div style={{ flex: 1, overflowY: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {generations.map((gen: any) => {
-            const isActive = gen.id === generation.id;
-            const date = new Date(gen.created_at);
-            const genVersion = gen.version || 1;
-            const isEdited = genVersion > 1;
-            return (
-              <button
-                key={gen.id}
-                onClick={() => {
-                  if (isDirectBriefing) {
-                    navigate(`/workspace/${workspaceId}/briefing/${gen.id}`);
-                  } else {
-                    navigate(`/workspace/${workspaceId}/reports/${reportId}/generations/${gen.id}`);
-                  }
-                }}
-                style={{
-                  width: '100%',
-                  textAlign: 'left',
-                  padding: '8px 12px',
-                  borderRadius: 8,
-                  fontSize: 14,
-                  transition: 'background 0.2s, border-color 0.2s',
-                  background: isActive ? colors.surfaceRaised : 'transparent',
-                  color: isActive ? colors.text : colors.textSecondary,
-                  fontWeight: isActive ? 600 : 400,
-                  border: isActive ? `1px solid ${colors.accent}` : '1px solid transparent',
-                  cursor: 'pointer',
-                  fontFamily: fonts.sans,
-                }}
-                onMouseEnter={(e) => {
-                  if (!isActive) e.currentTarget.style.background = colors.surfaceRaised;
-                }}
-                onMouseLeave={(e) => {
-                  if (!isActive) e.currentTarget.style.background = 'transparent';
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div
-                    style={{
-                      width: 8,
-                      height: 8,
-                      borderRadius: '50%',
-                      background: isActive ? colors.accent : colors.border,
-                    }}
-                  />
-                  <span>{date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
-                  {isEdited && (
-                    <span style={{
-                      fontSize: 10, fontWeight: 700, padding: '1px 5px',
-                      background: colors.accentSoft, color: colors.accent,
-                      borderRadius: 4, letterSpacing: '0.04em',
-                    }}>V{genVersion}</span>
-                  )}
-                </div>
-                <div style={{ fontSize: 12, color: colors.textMuted, marginLeft: 16, marginTop: 2 }}>
-                  {date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
-                  {isEdited && <span style={{ marginLeft: 4 }}>✎</span>}
-                </div>
-              </button>
-            );
-          })}
+          {isDirectBriefing && docList.length > 0 ? (
+            docList.map((doc) => {
+              const isActive = doc.id === generationId;
+              const date = new Date(doc.generated_at);
+              return (
+                <button
+                  key={doc.id}
+                  onClick={() => navigate(`/workspace/${workspaceId}/briefing/${doc.id}`)}
+                  style={{
+                    width: '100%',
+                    textAlign: 'left',
+                    padding: '8px 12px',
+                    borderRadius: 8,
+                    fontSize: 14,
+                    transition: 'background 0.2s, border-color 0.2s',
+                    background: isActive ? colors.surfaceRaised : 'transparent',
+                    color: isActive ? colors.text : colors.textSecondary,
+                    fontWeight: isActive ? 600 : 400,
+                    border: isActive ? `1px solid ${colors.accent}` : '1px solid transparent',
+                    cursor: 'pointer',
+                    fontFamily: fonts.sans,
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isActive) e.currentTarget.style.background = colors.surfaceRaised;
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isActive) e.currentTarget.style.background = 'transparent';
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: isActive ? colors.accent : colors.border }} />
+                    <span style={{ fontSize: 13 }}>{doc.week_label}</span>
+                  </div>
+                  <div style={{ fontSize: 12, color: colors.textMuted, marginLeft: 16, marginTop: 2 }}>
+                    {date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                  </div>
+                </button>
+              );
+            })
+          ) : (
+            generations.map((gen: any) => {
+              const isActive = gen.id === generation?.id;
+              const date = new Date(gen.created_at);
+              const genVersion = gen.version || 1;
+              const isEdited = genVersion > 1;
+              return (
+                <button
+                  key={gen.id}
+                  onClick={() => {
+                    if (isDirectBriefing) {
+                      navigate(`/workspace/${workspaceId}/briefing/${gen.id}`);
+                    } else {
+                      navigate(`/workspace/${workspaceId}/reports/${reportId}/generations/${gen.id}`);
+                    }
+                  }}
+                  style={{
+                    width: '100%',
+                    textAlign: 'left',
+                    padding: '8px 12px',
+                    borderRadius: 8,
+                    fontSize: 14,
+                    transition: 'background 0.2s, border-color 0.2s',
+                    background: isActive ? colors.surfaceRaised : 'transparent',
+                    color: isActive ? colors.text : colors.textSecondary,
+                    fontWeight: isActive ? 600 : 400,
+                    border: isActive ? `1px solid ${colors.accent}` : '1px solid transparent',
+                    cursor: 'pointer',
+                    fontFamily: fonts.sans,
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isActive) e.currentTarget.style.background = colors.surfaceRaised;
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isActive) e.currentTarget.style.background = 'transparent';
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div
+                      style={{
+                        width: 8,
+                        height: 8,
+                        borderRadius: '50%',
+                        background: isActive ? colors.accent : colors.border,
+                      }}
+                    />
+                    <span>{date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                    {isEdited && (
+                      <span style={{
+                        fontSize: 10, fontWeight: 700, padding: '1px 5px',
+                        background: colors.accentSoft, color: colors.accent,
+                        borderRadius: 4, letterSpacing: '0.04em',
+                      }}>V{genVersion}</span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 12, color: colors.textMuted, marginLeft: 16, marginTop: 2 }}>
+                    {date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                    {isEdited && <span style={{ marginLeft: 4 }}>✎</span>}
+                  </div>
+                </button>
+              );
+            })
+          )}
         </div>
         <div style={{ padding: 16, borderTop: `1px solid ${colors.border}` }}>
           <button
@@ -441,7 +512,7 @@ export default function ReportViewer() {
             background: '#065f46', color: '#d1fae5',
             padding: '10px 24px', fontSize: 13, fontWeight: 500, fontFamily: fonts.sans, flexShrink: 0,
           }}>
-            ✓ V{(generation.version || 1) + 1} saved — annotations recorded and feedback signals captured
+            ✓ V{(generation?.version || 1) + 1} saved — annotations recorded and feedback signals captured
           </div>
         )}
 
@@ -451,7 +522,7 @@ export default function ReportViewer() {
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <h1 style={{ fontSize: 24, fontWeight: 700, color: colors.text, fontFamily: fonts.sans, margin: 0 }}>{displayName}</h1>
-                {isV2 && (
+                {isV2 && generation && (
                   <span style={{
                     fontSize: 11, fontWeight: 700, padding: '3px 10px',
                     background: colors.accentSoft, color: colors.accent,
@@ -462,36 +533,53 @@ export default function ReportViewer() {
                 )}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 4, fontSize: 14, color: colors.textMuted, fontFamily: fonts.sans }}>
-                <span>
-                  Generated {new Date(generation.created_at).toLocaleDateString('en-US', {
-                    weekday: 'long',
-                    month: 'long',
-                    day: 'numeric',
-                    year: 'numeric',
-                    hour: 'numeric',
-                    minute: '2-digit',
-                  })}
-                </span>
-                <span>•</span>
-                <span>{generation.generation_duration_ms ?? '—'}ms</span>
-                <span>•</span>
-                <span>{generation.skills_run?.length ?? 0} skills</span>
-                {isV2 && generation.parent_generation_id && (
+                {reportDocument ? (
                   <>
+                    <span>
+                      Generated {new Date(reportDocument.generated_at).toLocaleDateString('en-US', {
+                        weekday: 'long',
+                        month: 'long',
+                        day: 'numeric',
+                        year: 'numeric',
+                      })}
+                    </span>
                     <span>•</span>
-                    <button
-                      onClick={() => {
-                        if (isDirectBriefing) navigate(`/workspace/${workspaceId}/briefing/${generation.parent_generation_id}`);
-                        else navigate(`/workspace/${workspaceId}/reports/${reportId}/generations/${generation.parent_generation_id}`);
-                      }}
-                      style={{ background: 'none', border: 'none', color: colors.accent, fontSize: 13, cursor: 'pointer', padding: 0, fontFamily: fonts.sans }}
-                    >View original (V1) →</button>
+                    <span>{reportDocument.skills_included.length} skills</span>
+                  </>
+                ) : (
+                  <>
+                    <span>
+                      Generated {new Date(generation!.created_at).toLocaleDateString('en-US', {
+                        weekday: 'long',
+                        month: 'long',
+                        day: 'numeric',
+                        year: 'numeric',
+                        hour: 'numeric',
+                        minute: '2-digit',
+                      })}
+                    </span>
+                    <span>•</span>
+                    <span>{generation!.generation_duration_ms ?? '—'}ms</span>
+                    <span>•</span>
+                    <span>{generation!.skills_run?.length ?? 0} skills</span>
+                    {isV2 && generation!.parent_generation_id && (
+                      <>
+                        <span>•</span>
+                        <button
+                          onClick={() => {
+                            if (isDirectBriefing) navigate(`/workspace/${workspaceId}/briefing/${generation!.parent_generation_id}`);
+                            else navigate(`/workspace/${workspaceId}/reports/${reportId}/generations/${generation!.parent_generation_id}`);
+                          }}
+                          style={{ background: 'none', border: 'none', color: colors.accent, fontSize: 13, cursor: 'pointer', padding: 0, fontFamily: fonts.sans }}
+                        >View original (V1) →</button>
+                      </>
+                    )}
                   </>
                 )}
               </div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              {canAnnotateReports && !annotateMode && (
+              {canAnnotateReports && !annotateMode && !reportDocument && (
                 <button
                   onClick={() => setAnnotateMode(true)}
                   style={{
@@ -545,7 +633,7 @@ export default function ReportViewer() {
                     <button
                       key={`annotated-${format}`}
                       onClick={() => {
-                        const url = `/api/${workspaceId}/reports/${reportId}/generations/${generation.id}/export/${format}`;
+                        const url = `/api/${workspaceId}/reports/${reportId}/generations/${generation?.id}/export/${format}`;
                         window.open(url, '_blank');
                       }}
                       style={{
@@ -561,7 +649,7 @@ export default function ReportViewer() {
                   ))}
                 </>
               )}
-              {Object.keys(generation.formats_generated || {}).map((format) => (
+              {!reportDocument && Object.keys(generation?.formats_generated || {}).map((format) => (
                 <button
                   key={format}
                   onClick={() => downloadFormat(format)}
@@ -586,26 +674,28 @@ export default function ReportViewer() {
                   {format.toUpperCase()}
                 </button>
               ))}
-              <button
-                onClick={shareReport}
-                style={{
-                  padding: '8px 12px',
-                  background: colors.accent,
-                  borderRadius: 8,
-                  fontSize: 14,
-                  fontWeight: 500,
-                  color: '#fff',
-                  border: 'none',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  cursor: 'pointer',
-                  fontFamily: fonts.sans,
-                }}
-              >
-                <Share2 style={{ width: 16, height: 16 }} />
-                Share
-              </button>
+              {!reportDocument && (
+                <button
+                  onClick={shareReport}
+                  style={{
+                    padding: '8px 12px',
+                    background: colors.accent,
+                    borderRadius: 8,
+                    fontSize: 14,
+                    fontWeight: 500,
+                    color: '#fff',
+                    border: 'none',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    cursor: 'pointer',
+                    fontFamily: fonts.sans,
+                  }}
+                >
+                  <Share2 style={{ width: 16, height: 16 }} />
+                  Share
+                </button>
+              )}
               {reportId && (
                 <Link
                   to={`/workspace/${workspaceId}/reports/${reportId}/edit`}
@@ -638,9 +728,120 @@ export default function ReportViewer() {
         <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
           <div style={{ maxWidth: 1024, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 24 }}>
 
-            {annotateMode && sections && sections.length > 0 ? (
+            {reportDocument ? (
+              /* ── New path: ReportDocument from orchestrator ── */
+              <>
+                {/* Headline */}
+                <div style={{
+                  background: colors.surface,
+                  borderRadius: 8,
+                  border: `1px solid ${colors.border}`,
+                  padding: 24,
+                }}>
+                  <p style={{
+                    fontSize: 16,
+                    lineHeight: 1.6,
+                    color: colors.text,
+                    fontFamily: fonts.sans,
+                    margin: 0,
+                    fontWeight: 500,
+                  }}>
+                    {reportDocument.headline}
+                  </p>
+                </div>
+
+                {/* Sections */}
+                {reportDocument.sections.map((section) => {
+                  const isCollapsed = collapsedSections.has(section.id);
+                  return (
+                    <div key={section.id} style={{ background: colors.surface, borderRadius: 8, border: `1px solid ${colors.border}`, overflow: 'hidden' }}>
+                      <button
+                        onClick={() => toggleSection(section.id)}
+                        style={{
+                          width: '100%',
+                          padding: '16px 24px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          background: 'transparent',
+                          border: 'none',
+                          cursor: 'pointer',
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = colors.surfaceRaised)}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                      >
+                        <h2 style={{ fontSize: 20, fontWeight: 700, color: colors.text, fontFamily: fonts.sans, margin: 0 }}>{section.title}</h2>
+                        {isCollapsed
+                          ? <ChevronRight style={{ width: 20, height: 20, color: colors.textMuted }} />
+                          : <ChevronLeft style={{ width: 20, height: 20, color: colors.textMuted }} />
+                        }
+                      </button>
+                      {!isCollapsed && (
+                        <div style={{ padding: '0 24px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+                          <div style={{ color: colors.textSecondary, lineHeight: 1.7, fontFamily: fonts.sans, fontSize: 14 }}>
+                            {section.content.split('\n\n').map((para, i) => (
+                              <p key={i} style={{ marginBottom: 12 }}>{renderMarkdown(para)}</p>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {/* Actions */}
+                {reportDocument.actions.length > 0 && (
+                  <div style={{ background: colors.surface, borderRadius: 8, border: `1px solid ${colors.border}`, padding: 24 }}>
+                    <h2 style={{ fontSize: 20, fontWeight: 700, color: colors.text, fontFamily: fonts.sans, margin: '0 0 16px' }}>Actions</h2>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {reportDocument.actions.map((action, idx) => {
+                        const urgencyColors: Record<string, string> = {
+                          today: '#dc2626',
+                          this_week: '#f59e0b',
+                          this_month: '#22c55e',
+                        };
+                        const urgencyLabels: Record<string, string> = {
+                          today: 'TODAY',
+                          this_week: 'THIS WEEK',
+                          this_month: 'THIS MONTH',
+                        };
+                        return (
+                          <div key={idx} style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: 12, background: colors.surfaceRaised, borderRadius: 8 }}>
+                            <input type="checkbox" style={{ marginTop: 4 }} />
+                            <div style={{ flex: 1 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <span style={{ fontSize: 12, fontWeight: 700, color: urgencyColors[action.urgency] || colors.textSecondary, fontFamily: fonts.sans }}>
+                                  {urgencyLabels[action.urgency] || 'ACTION'}
+                                </span>
+                                <span style={{ fontSize: 14, color: colors.text, fontFamily: fonts.sans }}>{action.text}</span>
+                              </div>
+                              {(action.deal_name || action.rep_name) && (
+                                <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 4, fontFamily: fonts.sans }}>
+                                  {[action.deal_name, action.rep_name].filter(Boolean).join(' · ')}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Recommended Next Steps */}
+                {reportDocument.recommended_next_steps && (
+                  <div style={{ background: colors.surface, borderRadius: 8, border: `1px solid ${colors.border}`, padding: 24 }}>
+                    <h2 style={{ fontSize: 16, fontWeight: 700, color: colors.text, fontFamily: fonts.sans, margin: '0 0 12px' }}>Recommended Next Steps</h2>
+                    <p style={{ fontSize: 14, color: colors.textSecondary, lineHeight: 1.7, fontFamily: fonts.sans, margin: 0 }}>
+                      {reportDocument.recommended_next_steps}
+                    </p>
+                  </div>
+                )}
+              </>
+            ) : annotateMode && sections && sections.length > 0 ? (
+              /* ── Legacy annotate mode ── */
               <ReportAnnotationEditor
-                generationId={generation.id}
+                generationId={generation!.id}
                 sectionsContent={sections as any}
                 existingAnnotations={annotations}
                 userId={currentWorkspace?.id || 'unknown'}
@@ -648,9 +849,10 @@ export default function ReportViewer() {
                 onCancel={() => setAnnotateMode(false)}
               />
             ) : (
+              /* ── Legacy render path ── */
               <>
                 {/* Opening Narrative (for editorial briefings) */}
-                {generation.opening_narrative && (
+                {generation?.opening_narrative && (
                   <div style={{
                     background: colors.surface,
                     borderRadius: 8,
@@ -680,8 +882,8 @@ export default function ReportViewer() {
                       onToggle={() => toggleSection(sectionId)}
                       anonymizeMode={anonymizeMode}
                       workspaceId={workspaceId}
-                      agentId={generation.agent_id}
-                      generationId={generation.id}
+                      agentId={generation?.agent_id}
+                      generationId={generation?.id}
                       existingSignal={feedbackSummary?.sections?.[section.section_id]?.signals?.[0] || null}
                       onContextMenu={handleContextMenu}
                       humanAnnotations={annotations}
@@ -690,7 +892,7 @@ export default function ReportViewer() {
                 })}
 
                 {/* Overall Briefing Feedback (only for agent-generated briefings) */}
-                {generation.agent_id && workspaceId && (
+                {generation?.agent_id && workspaceId && (
                   <OverallBriefingFeedback
                     workspaceId={workspaceId}
                     agentId={generation.agent_id}
@@ -707,11 +909,17 @@ export default function ReportViewer() {
         {/* Footer */}
         <div style={{ background: colors.surface, borderTop: `1px solid ${colors.border}`, padding: '12px 24px', fontSize: 12, color: colors.textMuted, fontFamily: fonts.sans }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            {reportDocument ? (
+              <span>
+                Skills: {reportDocument.skills_included.join(', ') || 'none'} • {reportDocument.tokens_used ?? 0} tokens
+              </span>
+            ) : (
+              <span>
+                Skills: {generation?.skills_run?.join(', ') || 'none'} • {generation?.total_tokens ?? 0} tokens
+              </span>
+            )}
             <span>
-              Skills: {generation.skills_run?.join(', ') || 'none'} • {generation.total_tokens ?? 0} tokens
-            </span>
-            <span>
-              {generation.data_as_of ? `Data as of ${new Date(generation.data_as_of).toLocaleString('en-US')} • ` : ''}Powered by Pandora
+              {generation?.data_as_of ? `Data as of ${new Date(generation.data_as_of).toLocaleString('en-US')} • ` : ''}Powered by Pandora
             </span>
           </div>
         </div>
