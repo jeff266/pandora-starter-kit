@@ -394,4 +394,59 @@ Return JSON: { "suggested": [{ "skill_id": "...", "reason": "..." }] }`;
   }
 });
 
+// ── Report Document Endpoints (Phase 2) ──────────────────────────────────────
+
+agentsWorkspaceRouter.get('/:workspaceId/reports/latest', requirePermission('agents.view'), async (req: Request, res: Response) => {
+  const workspaceId = req.params.workspaceId as string;
+  const documentType = (req.query.type as string) || 'monday_briefing';
+
+  try {
+    const { getLatestReportDocument } = await import('../orchestrator/persistence.js');
+    const report = await getLatestReportDocument(workspaceId, documentType);
+
+    if (!report) {
+      return res.status(404).json({ error: 'No reports found for this workspace and type' });
+    }
+
+    res.json(report);
+  } catch (err: any) {
+    console.error('[Reports] Failed to get latest report:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+agentsWorkspaceRouter.get('/:workspaceId/reports', requirePermission('agents.view'), async (req: Request, res: Response) => {
+  const workspaceId = req.params.workspaceId as string;
+  const limit = Math.min(parseInt(req.query.limit as string) || 10, 50);
+
+  try {
+    const { getAllReportsForWorkspace } = await import('../orchestrator/persistence.js');
+    const reports = await getAllReportsForWorkspace(workspaceId, limit);
+
+    res.json({ reports, count: reports.length });
+  } catch (err: any) {
+    console.error('[Reports] Failed to get reports:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+agentsWorkspaceRouter.get('/:workspaceId/reports/:reportId', requirePermission('agents.view'), async (req: Request, res: Response) => {
+  const workspaceId = req.params.workspaceId as string;
+  const reportId = req.params.reportId as string;
+
+  try {
+    const { getReportDocumentById } = await import('../orchestrator/persistence.js');
+    const report = await getReportDocumentById(workspaceId, reportId);
+
+    if (!report) {
+      return res.status(404).json({ error: 'Report not found' });
+    }
+
+    res.json(report);
+  } catch (err: any) {
+    console.error('[Reports] Failed to get report by ID:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export { agentsGlobalRouter, agentsWorkspaceRouter };

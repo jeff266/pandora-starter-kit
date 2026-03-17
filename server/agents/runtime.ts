@@ -31,6 +31,10 @@ import { deliverToChannels, type DeliveryChannel } from './channels.js';
 import { getConsultantContext } from '../skills/consultant-context.js';
 import { getAgent } from './agent-service.js';
 import { sanitizeForPrompt } from '../utils/sanitize-for-prompt.js';
+import { buildSkillSummaries } from '../orchestrator/skill-summarizers.js';
+import { runReportOrchestrator } from '../orchestrator/report-orchestrator.js';
+import { persistReportDocument, getPriorReportHeadline } from '../orchestrator/persistence.js';
+import { WORD_BUDGETS, type DocumentType } from '../orchestrator/playbooks.js';
 
 export class AgentRuntime {
   private static instance: AgentRuntime;
@@ -298,8 +302,121 @@ export class AgentRuntime {
       let synthesizedOutput: string | null = null;
       let synthesisTokens = { input: 0, output: 0 };
       let synthesisMode: 'goal_aware' | 'findings_dump' = 'findings_dump';
+      let reportDocument: any = null;
 
-      if (agent.synthesis.enabled && Object.keys(skillOutputs).length > 0) {
+      // Report Orchestrator path (Phase 2)
+      // If agent has report_type, run orchestrator instead of normal synthesis
+      let orchestratorAttempted = false;
+      const dbAgent = await getAgent(agentId, workspaceId);
+      const reportType = dbAgent?.report_type as DocumentType | null;
+
+      if (reportType && Object.keys(skillOutputs).length > 0) {
+        orchestratorAttempted = true;
+        console.log(`[Agent ${agentId}] Running report orchestrator for ${reportType}`);
+
+        try {
+          // 1. Load workspace context
+          const workspaceResult = await query(
+            `SELECT company_name, timezone FROM workspaces WHERE id = $1`,
+            [workspaceId]
+          );
+          const workspace = workspaceResult.rows[0];
+          const timezone = workspace?.timezone || dbAgent?.delivery_timezone || 'America/Los_Angeles';
+          const companyName = workspace?.company_name || 'Your Company';
+
+          // 2. Calculate quarter context
+          const now = new Date();
+          const currentQuarter = Math.floor(now.getMonth() / 3) + 1;
+          const quarterEndMonth = currentQuarter * 3;
+          const quarterEnd = new Date(now.getFullYear(), quarterEndMonth, 0);
+          const daysRemaining = Math.ceil((quarterEnd.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+
+          // 3. Calculate attainment (if quota configured)
+          let hasQuota = false;
+          let attainmentPct: number | null = null;
+          try {
+            const quotaResult = await query(
+              `SELECT SUM(quota_amount) as total_quota
+               FROM quotas
+               WHERE workspace_id = $1
+                 AND period_type = 'quarterly'
+                 AND period_year = $2
+                 AND period_quarter = $3`,
+              [workspaceId, now.getFullYear(), currentQuarter]
+            );
+            const totalQuota = quotaResult.rows[0]?.total_quota;
+
+            if (totalQuota && totalQuota > 0) {
+              hasQuota = true;
+              // Get closed-won in quarter
+              const closedResult = await query(
+                `SELECT COALESCE(SUM(amount), 0) as closed_won
+                 FROM deals
+                 WHERE workspace_id = $1
+                   AND stage_category = 'closed_won'
+                   AND close_date >= DATE_TRUNC('quarter', CURRENT_DATE)
+                   AND close_date < DATE_TRUNC('quarter', CURRENT_DATE) + INTERVAL '3 months'`,
+                [workspaceId]
+              );
+              const closedWon = closedResult.rows[0]?.closed_won || 0;
+              attainmentPct = Math.round((closedWon / totalQuota) * 100);
+            }
+          } catch (err) {
+            console.warn(`[Agent ${agentId}] Failed to calculate quota attainment:`, err);
+          }
+
+          // 4. Get week label
+          const weekLabel = `Week of ${now.toISOString().split('T')[0]}`;
+
+          // 5. Get prior report headline for continuity
+          const priorHeadline = await getPriorReportHeadline(workspaceId, reportType);
+
+          // 6. Build skill summaries from agent_skill_runs
+          const skillSummaries = await buildSkillSummaries(
+            workspaceId,
+            runId,
+            agent.skills.map(s => s.skillId)
+          );
+
+          // 7. Run orchestrator
+          reportDocument = await runReportOrchestrator({
+            workspace_id: workspaceId,
+            agent_run_id: runId,
+            document_type: reportType,
+            word_budget: WORD_BUDGETS[reportType] || 500,
+            skill_summaries: skillSummaries,
+            workspace_context: {
+              company_name: companyName,
+              week_label: weekLabel,
+              timezone,
+              days_remaining_in_quarter: daysRemaining,
+              has_quota: hasQuota,
+              attainment_pct: attainmentPct,
+              prior_report_headline: priorHeadline,
+            },
+          });
+
+          // 8. Persist report
+          const reportId = await persistReportDocument(reportDocument);
+          console.log(`[Agent ${agentId}] Report document persisted: ${reportId}`);
+
+          // 9. Format report as markdown for delivery
+          synthesizedOutput = this.formatReportAsMarkdown(reportDocument);
+          synthesisTokens = {
+            input: 0, // Tracked in orchestrator
+            output: reportDocument.tokens_used || 0,
+          };
+          synthesisMode = 'goal_aware'; // Report mode
+
+          console.log(`[Agent ${agentId}] Report orchestrator completed: ${reportDocument.total_word_count} words, ${reportDocument.tokens_used} tokens`);
+        } catch (orchestratorErr: any) {
+          console.error(`[Agent ${agentId}] Report orchestrator failed (non-fatal), falling back to normal synthesis:`, orchestratorErr.message);
+          // Fall through to normal synthesis
+        }
+      }
+
+      // Normal synthesis path (existing behavior or fallback)
+      if (!synthesizedOutput && agent.synthesis.enabled && Object.keys(skillOutputs).length > 0) {
         console.log(`[Agent ${agentId}] Synthesizing ${Object.keys(skillOutputs).length} skill outputs`);
         const synthesisResult = await this.synthesize(agent, skillOutputs, workspaceId, runId);
         synthesizedOutput = synthesisResult.output;
@@ -629,6 +746,51 @@ export class AgentRuntime {
     if (typeof output === 'string') return output.slice(0, 500);
     const json = JSON.stringify(output);
     return json.slice(0, 500);
+  }
+
+  private formatReportAsMarkdown(report: any): string {
+    const lines: string[] = [];
+
+    // Headline
+    lines.push(`# ${report.headline}`);
+    lines.push('');
+
+    // Sections
+    for (const section of report.sections) {
+      lines.push(`## ${section.title}`);
+      lines.push('');
+      lines.push(section.content);
+      lines.push('');
+    }
+
+    // Actions (if any)
+    if (report.actions && report.actions.length > 0) {
+      lines.push('## This Week\'s Actions');
+      lines.push('');
+      for (let i = 0; i < report.actions.length; i++) {
+        const action = report.actions[i];
+        const urgencyLabel = action.urgency === 'today' ? '🔴 TODAY' : action.urgency === 'this_week' ? '🟡 THIS WEEK' : '🟢 THIS MONTH';
+        lines.push(`${i + 1}. **${urgencyLabel}**: ${action.text}`);
+        if (action.deal_name) {
+          lines.push(`   *Deal: ${action.deal_name}*`);
+        }
+      }
+      lines.push('');
+    }
+
+    // Recommended next steps
+    if (report.recommended_next_steps) {
+      lines.push('## Recommended Next Steps');
+      lines.push('');
+      lines.push(report.recommended_next_steps);
+      lines.push('');
+    }
+
+    // Footer
+    lines.push('---');
+    lines.push(`*Generated by Pandora Report Orchestrator | ${report.total_word_count} words | ${report.skills_included.length} skills analyzed*`);
+
+    return lines.join('\n');
   }
 
   private async logAgentRun(
