@@ -822,14 +822,20 @@ export default function ReportViewer() {
                         isAnnotating={isAnnotating}
                         onAnnotationSave={async (data) => {
                           const token = localStorage.getItem('pandora_session');
+                          const docId = reportDocument!.id;
                           const res = await fetch(
-                            `/api/workspaces/${workspaceId}/reports/${reportDocument.id}/annotations`,
+                            `/api/workspaces/${workspaceId}/reports/${docId}/annotations`,
                             {
                               method: 'POST',
                               headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
                               body: JSON.stringify(data),
                             }
                           );
+                          if (!res.ok) {
+                            const err = await res.json().catch(() => ({}));
+                            console.error('[Annotations] Save failed:', res.status, err);
+                            throw new Error(err.error || `Save failed (${res.status})`);
+                          }
                           const saved: DocAnnotation = await res.json();
                           setDocAnnotations(prev => [
                             ...prev.filter(a => !(a.section_id === data.section_id && a.paragraph_index === data.paragraph_index)),

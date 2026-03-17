@@ -97,7 +97,12 @@ export default function FloatingBubble({
         {(['note', 'override', 'flag'] as const).map(type => (
           <button
             key={type}
-            onClick={() => setSelectedType(type)}
+            onClick={() => {
+              setSelectedType(type);
+              if (type === 'override' && !content) {
+                setContent(paragraphText);
+              }
+            }}
             style={{
               padding: '6px 12px',
               fontSize: '13px',
@@ -109,29 +114,14 @@ export default function FloatingBubble({
               borderBottom: selectedType === type
                 ? '2px solid #3B82F6' : '2px solid transparent',
               cursor: 'pointer',
-              textTransform: 'capitalize',
             }}
           >
-            {type}
+            {type === 'override' ? 'Edit' : type.charAt(0).toUpperCase() + type.slice(1)}
           </button>
         ))}
       </div>
 
       <div style={{ padding: '12px' }}>
-        {/* Override: show original text preview */}
-        {selectedType === 'override' && (
-          <div style={{
-            fontSize: '12px',
-            color: '#94A3B8',
-            marginBottom: '8px',
-            fontStyle: 'italic',
-          }}>
-            <span style={{ fontWeight: 600 }}>Replacing: </span>
-            {paragraphText.slice(0, 120)}
-            {paragraphText.length > 120 ? '…' : ''}
-          </div>
-        )}
-
         {/* Flag: no textarea */}
         {selectedType === 'flag' ? (
           <p style={{ fontSize: '13px', color: '#475569', margin: 0 }}>

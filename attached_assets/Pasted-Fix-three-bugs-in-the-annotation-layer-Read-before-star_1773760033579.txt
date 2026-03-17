@@ -1,0 +1,69 @@
+Fix three bugs in the annotation layer:
+
+Read before starting:
+1. client/src/components/ReportViewer.tsx — how docAnnotations
+   state is managed and how the save API call is made
+2. client/src/components/report/AnnotatableSection.tsx — how
+   annotations prop is used to render visual indicators
+3. client/src/components/report/FloatingBubble.tsx — the save
+   flow and tab/content logic
+4. server/routes/agents.ts — the annotation POST endpoint,
+   verify it's mounted and returning the saved row correctly
+
+---
+
+Bug 1: Save not persisting
+The POST to /reports/:reportId/annotations is either failing
+silently or the saved annotation isn't being added to
+docAnnotations state. 
+
+Check:
+- Is the endpoint mounted correctly and returning 200 + saved row?
+- After onAnnotationSave resolves, is the returned annotation
+  being appended to docAnnotations in ReportViewer?
+- Is report_document_id being sent correctly in the POST body?
+  It should be reportDocument.id, not undefined.
+- Add console.log at the start of onAnnotationSave and after
+  the fetch to confirm what's being sent and received.
+Fix whatever is broken in the save flow.
+
+Bug 2: Blue border not appearing after save
+The Override visual indicator (blue left border) only renders
+when docAnnotations contains a matching annotation for that
+section_id + paragraph_index. If save is broken, this won't
+show. But also check:
+- In AnnotatableSection, is the annotations prop actually
+  being filtered correctly from docAnnotations?
+- Is the paragraph_index matching? The index used when saving
+  must match the index used when rendering.
+- After fix to Bug 1, verify border appears without additional
+  changes. If it still doesn't appear after save works,
+  the annotations filter or visual render logic needs fixing.
+
+Bug 3: Override UX — pre-fill textarea with original text
+Currently the Override tab shows a "Replacing:" preview above
+an empty textarea. Change this:
+- Remove the "Replacing:" preview div entirely
+- When Override tab is selected, pre-fill the textarea with
+  the original paragraph text so the user can edit in place
+- When type changes to 'override', set content to paragraphText
+  if content is currently empty (don't overwrite existing edits)
+- Rename "Override" tab label to "Edit" everywhere it appears
+  in FloatingBubble.tsx (tab label only — keep annotation_type
+  value as 'override' in the database)
+
+---
+
+Acceptance Criteria:
+1. Click paragraph → type Note → type text → Save →
+   yellow dot appears on paragraph immediately
+2. Click paragraph → type Edit → textarea pre-filled with
+   paragraph text → edit it → Save → paragraph shows
+   edited text with blue left border immediately  
+3. Click paragraph → Flag → Save → blue callout box appears
+4. Exit annotation mode and re-enter → all three annotations
+   still visible
+5. Check report_annotations table → 3 rows exist with correct
+   section_id and paragraph_index values
+6. Network tab shows POST returning 200 with saved annotation
+   including id field
