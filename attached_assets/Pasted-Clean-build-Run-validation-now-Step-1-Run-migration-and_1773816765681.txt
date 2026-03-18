@@ -1,0 +1,84 @@
+Clean build. Run validation now:
+
+**Step 1 — Run migration and seed:**
+```bash
+psql $DATABASE_URL -f migrations/191_hypothesis_confidence_tracking.sql
+psql $DATABASE_URL -f server/orchestrator/seed-frontera-hypotheses.sql
+```
+
+**Step 2 — Verify seed:**
+```bash
+curl -s \
+"https://$REPLIT_DEV_DOMAIN/api/workspaces/\
+4160191d-73bc-414b-97dd-5a1853190378/hypotheses" \
+-H "Authorization: Bearer <token>" | jq \
+'[.[] | {metric: .metric_key, confidence: .confidence, threshold: .threshold, unit: .unit}]'
+```
+
+Expect 4 rows: coverage_ratio (0.60), closed_won (0.65), win_rate (0.55), rep_concentration (0.80).
+
+**Step 3 — Trigger a run and watch logs:**
+```bash
+curl -s -X POST \
+"https://$REPLIT_DEV_DOMAIN/api/workspaces/\
+4160191d.../agents/4f8309a9.../run-now" \
+-H "Authorization: Bearer <token>" \
+-H "Content-Type: application/json" \
+-d '{"phase": "both"}'
+```
+
+Watch for:
+```
+[HypothesisUpdater] pipeline-coverage.coverage_ratio:
+  60% → 52% (contradicted, weakening)
+[HypothesisUpdater] Updated 3 hypotheses for workspace...
+```
+
+Coverage ratio at 0.82x against a 3.0x threshold should be contradicted every time until it crosses 3.0x. That's the right behavior — the hypothesis confidence should be declining steadily given current pipeline state.
+
+**Step 4 — Verify updates in the report:**
+```bash
+curl -s \
+"https://$REPLIT_DEV_DOMAIN/api/workspaces/\
+4160191d.../reports/latest?type=monday_briefing" \
+-H "Authorization: Bearer <token>" | jq '{
+  hypothesis_count: (.hypothesis_updates | length),
+  updates: [.hypothesis_updates[] | {
+    metric: .metric_key,
+    old: .old_confidence,
+    new: .new_confidence,
+    direction: .direction,
+    summary: .summary
+  }]
+}'
+```
+
+**Step 5 — Check standing_hypotheses updated:**
+```sql
+SELECT metric_key, confidence, current_value, updated_at
+FROM standing_hypotheses
+WHERE workspace_id = '4160191d-73bc-414b-97dd-5a1853190378'
+ORDER BY updated_at DESC;
+```
+
+Confidence values should have shifted from the seed values.
+
+---
+
+**The full learning loop is now wired:**
+
+```
+Week 1: Hypothesis seeded at 60% confidence
+Week 2: Coverage 0.82x < 3.0x threshold → contradicted
+        Confidence drops to 48%
+Week 3: Coverage 0.82x again → contradicted
+        Confidence drops to 36%
+Week 4: Coverage 1.1x (Q2 starts) → still contradicted
+        Confidence drops to 24% → approaching refuted
+Week 8: Coverage 3.2x → validated
+        Confidence rises to 32% → weakening reversed
+```
+
+After 6+ weeks of consistent validation the direction shifts to 'confirmed' and the Orchestrator treats it as a background assumption rather than a finding. That's the pattern confirmation loop completing.
+
+Share the log output and hypothesis values after the run.
