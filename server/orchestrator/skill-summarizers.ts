@@ -45,7 +45,7 @@ function formatCurrency(amount: number): string {
 // Summarizers
 // ============================================================================
 
-function summarizeForecastRollup(resultData: any): Omit<SkillSummary, 'ran_at' | 'data_age_hours'> {
+function summarizeForecastRollup(resultData: any, outputData?: any): Omit<SkillSummary, 'ran_at' | 'data_age_hours'> {
   // Result may be wrapped under forecast_data.team (new format) or flat (old format)
   const team = safeGet(resultData, 'forecast_data.team', null) ?? safeGet(resultData, 'team', null) ?? {};
 
@@ -153,7 +153,7 @@ function summarizeForecastRollup(resultData: any): Omit<SkillSummary, 'ran_at' |
   };
 }
 
-function summarizePipelineWaterfall(resultData: any): Omit<SkillSummary, 'ran_at' | 'data_age_hours'> {
+function summarizePipelineWaterfall(resultData: any, outputData?: any): Omit<SkillSummary, 'ran_at' | 'data_age_hours'> {
   const created = safeGet(resultData, 'created.count', 0) || 0;
   const advanced = safeGet(resultData, 'advanced.count', 0) || 0;
   const regressed = safeGet(resultData, 'regressed.count', 0) || 0;
@@ -207,7 +207,7 @@ function summarizePipelineWaterfall(resultData: any): Omit<SkillSummary, 'ran_at
   };
 }
 
-function summarizeDealRiskReview(resultData: any): Omit<SkillSummary, 'ran_at' | 'data_age_hours'> {
+function summarizeDealRiskReview(resultData: any, outputData?: any): Omit<SkillSummary, 'ran_at' | 'data_age_hours'> {
   const flagged_deals = safeGet(resultData, 'flagged_deals', []) || [];
   const total_risk_value = flagged_deals.reduce((sum: number, d: any) => sum + (d.amount || 0), 0);
   const critical_count = flagged_deals.filter((d: any) => d.risk_severity === 'critical').length;
@@ -244,6 +244,37 @@ function summarizeDealRiskReview(resultData: any): Omit<SkillSummary, 'ran_at' |
     });
   });
 
+  // Extract at-risk deals from output column for Orchestrator named deals block
+  let at_risk_deals: any[] = [];
+  try {
+    if (outputData) {
+      // output column may contain JSON string or already-parsed object
+      let parsed = typeof outputData === 'string' ? JSON.parse(outputData) : outputData;
+      // narrative field may contain the deal array
+      const narrative = parsed?.narrative || parsed?.risk_assessment || parsed;
+      const deals = Array.isArray(narrative) ? narrative : [];
+
+      at_risk_deals = deals
+        .filter((d: any) => d.risk === 'high' || d.risk === 'medium' || d.riskScore >= 60)
+        .sort((a: any, b: any) => (b.riskScore || 0) - (a.riskScore || 0))
+        .slice(0, 5)
+        .map((d: any) => ({
+          name: d.dealName || d.name,
+          amount: Number(d.amount) || 0,
+          owner: d.owner || 'Unknown',
+          stage: d.currentStage || d.stage || 'Unknown',
+          risk_score: d.riskScore || 0,
+          risk_factors: (d.factors || d.risk_factors || []).slice(0, 2),
+          days_in_stage: d.days_in_stage || 0,
+          close_date: d.closeDate || d.close_date || '',
+          recommended_action: d.recommendedAction || d.recommended_action,
+        }));
+    }
+  } catch (err) {
+    console.warn('[DealRiskReview Summarizer] Failed to parse output column:', err);
+    // Non-fatal: continue with empty at_risk_deals
+  }
+
   return {
     skill_id: 'deal-risk-review',
     headline,
@@ -256,10 +287,11 @@ function summarizeDealRiskReview(resultData: any): Omit<SkillSummary, 'ran_at' |
     top_findings: top_findings.slice(0, 5),
     top_actions: top_actions.slice(0, 3),
     has_signal: flagged_deals.length > 0,
+    at_risk_deals: at_risk_deals.length > 0 ? at_risk_deals : undefined,
   };
 }
 
-function summarizeRepScorecard(resultData: any): Omit<SkillSummary, 'ran_at' | 'data_age_hours'> {
+function summarizeRepScorecard(resultData: any, outputData?: any): Omit<SkillSummary, 'ran_at' | 'data_age_hours'> {
   const flagged_reps = safeGet(resultData, 'flagged_reps', []) || [];
 
   const gap_types: Record<string, number> = {};
@@ -304,14 +336,17 @@ function summarizeRepScorecard(resultData: any): Omit<SkillSummary, 'ran_at' | '
   };
 }
 
-function summarizePipelineHygiene(resultData: any): Omit<SkillSummary, 'ran_at' | 'data_age_hours'> {
-  const stale_deals = safeGet(resultData, 'stale_deals', []) || [];
+function summarizePipelineHygiene(resultData: any, outputData?: any): Omit<SkillSummary, 'ran_at' | 'data_age_hours'> {
+  // Try to extract stale deals from multiple possible locations in result_data
+  let stale_deals = safeGet(resultData, 'stale_deals', []) ||
+                    safeGet(resultData, 'stale_deals_agg.topDeals', []) || [];
+
   const stale_count = stale_deals.length;
   const stale_value = stale_deals.reduce((sum: number, d: any) => sum + (d.amount || 0), 0);
 
   const missing_amounts = safeGet(resultData, 'missing_amounts.count', 0) || 0;
   const closing_soon_stale = stale_deals.filter((d: any) => {
-    const daysToClose = d.days_to_close || 999;
+    const daysToClose = d.days_to_close || d.daysToClose || 999;
     return daysToClose < 30;
   }).length;
 
@@ -324,19 +359,29 @@ function summarizePipelineHygiene(resultData: any): Omit<SkillSummary, 'ran_at' 
     top_findings.push(`${closing_soon_stale} stale deals closing within 30 days — high risk`);
   }
   stale_deals.slice(0, 3).forEach((deal: any) => {
-    top_findings.push(`${deal.name}: ${deal.days_stale || '?'} days stale, closes ${deal.close_date || 'unknown'}`);
+    top_findings.push(`${deal.name || deal.dealName}: ${deal.days_stale || deal.daysStale || '?'} days stale, closes ${deal.close_date || deal.closeDate || 'unknown'}`);
   });
 
   const top_actions: ActionSummary[] = [];
   stale_deals.slice(0, 3).forEach((deal: any) => {
     top_actions.push({
-      urgency: (deal.days_to_close || 999) < 30 ? 'today' : 'this_week',
-      text: `Re-engage ${deal.name} (${deal.days_stale || '?'} days stale)`,
-      deal_name: deal.name,
-      deal_id: deal.id,
-      source_id: deal.source_id,
+      urgency: (deal.days_to_close || deal.daysToClose || 999) < 30 ? 'today' : 'this_week',
+      text: `Re-engage ${deal.name || deal.dealName} (${deal.days_stale || deal.daysStale || '?'} days stale)`,
+      deal_name: deal.name || deal.dealName,
+      deal_id: deal.id || deal.dealId,
+      source_id: deal.source_id || deal.sourceId,
     });
   });
+
+  // Extract stale deals for Orchestrator named deals block
+  const stale_deals_formatted = stale_deals.slice(0, 5).map((d: any) => ({
+    name: d.name || d.dealName || 'Unknown',
+    amount: Number(d.amount) || 0,
+    owner: d.owner || 'Unknown',
+    stage: d.stage || 'Unknown',
+    days_stale: d.days_stale || d.daysStale || 0,
+    last_activity_date: d.last_activity_date || d.lastActivityDate || '',
+  }));
 
   return {
     skill_id: 'pipeline-hygiene',
@@ -350,10 +395,11 @@ function summarizePipelineHygiene(resultData: any): Omit<SkillSummary, 'ran_at' 
     top_findings: top_findings.slice(0, 5),
     top_actions: top_actions.slice(0, 3),
     has_signal: stale_count > 0 || missing_amounts > 0,
+    stale_deals: stale_deals_formatted.length > 0 ? stale_deals_formatted : undefined,
   };
 }
 
-function summarizeSingleThreadAlert(resultData: any): Omit<SkillSummary, 'ran_at' | 'data_age_hours'> {
+function summarizeSingleThreadAlert(resultData: any, outputData?: any): Omit<SkillSummary, 'ran_at' | 'data_age_hours'> {
   const single_threaded = safeGet(resultData, 'single_threaded_deals', []) || [];
   const value_at_risk = single_threaded.reduce((sum: number, d: any) => sum + (d.amount || 0), 0);
 
@@ -390,7 +436,7 @@ function summarizeSingleThreadAlert(resultData: any): Omit<SkillSummary, 'ran_at
   };
 }
 
-function summarizePipelineCoverage(resultData: any): Omit<SkillSummary, 'ran_at' | 'data_age_hours'> {
+function summarizePipelineCoverage(resultData: any, outputData?: any): Omit<SkillSummary, 'ran_at' | 'data_age_hours'> {
   // Data lives under coverage_data.team (flat keys on old runs, nested on new runs)
   const total_pipeline =
     safeGet(resultData, 'coverage_data.team.totalPipeline', null) ??
@@ -502,7 +548,7 @@ function summarizePipelineCoverage(resultData: any): Omit<SkillSummary, 'ran_at'
   };
 }
 
-function summarizeDataQualityAudit(resultData: any): Omit<SkillSummary, 'ran_at' | 'data_age_hours'> {
+function summarizeDataQualityAudit(resultData: any, outputData?: any): Omit<SkillSummary, 'ran_at' | 'data_age_hours'> {
   const issues = safeGet(resultData, 'issues', []) || [];
   const deals_affected = safeGet(resultData, 'deals_affected', 0) || 0;
 
@@ -545,7 +591,7 @@ function summarizeDataQualityAudit(resultData: any): Omit<SkillSummary, 'ran_at'
   };
 }
 
-function summarizeWeeklyRecap(resultData: any): Omit<SkillSummary, 'ran_at' | 'data_age_hours'> {
+function summarizeWeeklyRecap(resultData: any, outputData?: any): Omit<SkillSummary, 'ran_at' | 'data_age_hours'> {
   const wins = safeGet(resultData, 'wins', []) || [];
   const losses = safeGet(resultData, 'losses', []) || [];
   const activities_count = safeGet(resultData, 'activities_count', 0) || 0;
@@ -597,7 +643,7 @@ function summarizeWeeklyRecap(resultData: any): Omit<SkillSummary, 'ran_at' | 'd
 // Dispatcher
 // ============================================================================
 
-const SUMMARIZER_MAP: Record<string, (data: any) => Omit<SkillSummary, 'ran_at' | 'data_age_hours'>> = {
+const SUMMARIZER_MAP: Record<string, (data: any, output?: any) => Omit<SkillSummary, 'ran_at' | 'data_age_hours'>> = {
   'forecast-rollup':      summarizeForecastRollup,
   'pipeline-waterfall':   summarizePipelineWaterfall,
   'deal-risk-review':     summarizeDealRiskReview,
@@ -625,8 +671,9 @@ export async function buildSkillSummaries(
 
     // Preferred: skill run from THIS agent's run batch
     // result column = full step-by-step data (what summarizers need)
+    // output column = final narrative/synthesis output (for deal-risk-review)
     const linked = await query(`
-      SELECT sr.result, sr.started_at
+      SELECT sr.result, sr.output, sr.started_at
       FROM agent_skill_runs asr
       JOIN skill_runs sr ON sr.run_id = asr.skill_run_id
       WHERE asr.agent_run_id = $1
@@ -636,15 +683,18 @@ export async function buildSkillSummaries(
       LIMIT 1
     `, [agentRunId, workspaceId, skillId]);
 
+    let outputData: any = null;
+
     if (linked.rows.length > 0) {
       resultData = linked.rows[0].result;
+      outputData = linked.rows[0].output;
       ranAt = linked.rows[0].started_at;
     } else {
       // Fallback: most recent successful run within 7 days
       // Weekly-scheduled skills run once per week; 12h window misses them when the
       // agent fires before the skill's scheduled slot completes.
       const fallback = await query(`
-        SELECT result, started_at
+        SELECT result, output, started_at
         FROM skill_runs
         WHERE workspace_id = $1
           AND skill_id = $2
@@ -656,6 +706,7 @@ export async function buildSkillSummaries(
 
       if (fallback.rows.length > 0) {
         resultData = fallback.rows[0].result;
+        outputData = fallback.rows[0].output;
         ranAt = fallback.rows[0].started_at;
       }
     }
@@ -668,7 +719,7 @@ export async function buildSkillSummaries(
     const summarizer = SUMMARIZER_MAP[skillId];
     if (!summarizer) continue;
 
-    const partial = summarizer(resultData);
+    const partial = summarizer(resultData, outputData);
     const ageHours = Math.round(
       (Date.now() - new Date(ranAt).getTime()) / 3_600_000
     );

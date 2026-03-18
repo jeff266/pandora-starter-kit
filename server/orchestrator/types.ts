@@ -4,6 +4,27 @@ export type DocumentType =
   | 'qbr'
   | 'board_deck';
 
+export interface AtRiskDeal {
+  name: string;
+  amount: number;
+  owner: string;
+  stage: string;
+  risk_score: number;
+  risk_factors: string[];
+  days_in_stage: number;
+  close_date: string;
+  recommended_action?: string;
+}
+
+export interface StaleDeal {
+  name: string;
+  amount: number;
+  owner: string;
+  stage: string;
+  days_stale: number;
+  last_activity_date: string;
+}
+
 export interface SkillSummary {
   skill_id: string;
   ran_at: string;
@@ -14,6 +35,8 @@ export interface SkillSummary {
   top_actions: ActionSummary[];  // Max 3
   conflicts_with?: string[]; // skill_ids this contradicts
   has_signal: boolean;       // false = nominal, omit from Orchestrator
+  at_risk_deals?: AtRiskDeal[];  // Deal-risk-review: top 5 at-risk deals
+  stale_deals?: StaleDeal[];     // Pipeline-hygiene: stale deals needing action
 }
 
 export interface ActionSummary {

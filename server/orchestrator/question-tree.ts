@@ -41,12 +41,30 @@ export async function generateReasoningTree(
   );
 
   // Build evidence block from relevant skill summaries
-  const evidenceBlock = relevantSkills.map(s => `
-### ${s.skill_id}
-Key metrics: ${JSON.stringify(s.key_metrics, null, 0)}
-Top findings:
-${s.top_findings.map(f => `- ${f}`).join('\n')}
-  `.trim()).join('\n\n');
+  const evidenceBlock = relevantSkills.map(s => {
+    const parts: string[] = [
+      `### ${s.skill_id}`,
+      `Key metrics: ${JSON.stringify(s.key_metrics, null, 0)}`,
+      `Top findings:`,
+      s.top_findings.map(f => `- ${f}`).join('\n'),
+    ];
+
+    // Add at-risk deals if present
+    if (s.at_risk_deals?.length) {
+      parts.push(`At-risk deals (${s.at_risk_deals.length}): ${s.at_risk_deals.map(d =>
+        `${d.name} $${Math.round(d.amount / 1000)}K risk:${d.risk_score} — ${d.risk_factors[0]}`
+      ).join(', ')}`);
+    }
+
+    // Add stale deals if present
+    if (s.stale_deals?.length) {
+      parts.push(`Stale deals: ${s.stale_deals.slice(0, 3).map(d =>
+        `${d.name} $${Math.round(d.amount / 1000)}K ${d.days_stale}d dark`
+      ).join(', ')}`);
+    }
+
+    return parts.join('\n');
+  }).join('\n\n');
 
   const systemPrompt = `
 You are a McKinsey-trained revenue operations analyst.

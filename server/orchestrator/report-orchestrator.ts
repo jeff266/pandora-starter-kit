@@ -114,6 +114,15 @@ ADDITIONAL RULES:
 - Omit any section where you have no meaningful data.
   Return fewer sections rather than padding with empty content.
 
+NAMED DEALS RULES:
+- When named deals are provided, cite them specifically in the relevant section
+- Use deal names, amounts, and owner names directly — do not paraphrase to aggregates
+- Actions must reference specific deals: "Re-engage Action Behavior Centers ($300K)"
+  not "re-engage at-risk deals"
+- If a deal appears in both AT-RISK and STALE lists, mention it once in the most
+  relevant section with both signals
+- Named deals are more authoritative than aggregate metrics — prefer them
+
 REQUIRED OUTPUT FORMAT — respond with ONLY valid JSON:
 {
   "headline": "string",
@@ -141,6 +150,8 @@ REQUIRED OUTPUT FORMAT — respond with ONLY valid JSON:
 }
 `.trim();
 
+  const namedDealsBlock = buildNamedDealsBlock(activeSkills);
+
   const userMessage = `
 COMPANY: ${input.workspace_context.company_name}
 PERIOD: ${input.workspace_context.week_label}
@@ -160,6 +171,7 @@ ${staleWarnings.length
 
 SKILL SUMMARIES:
 ${summariesBlock}
+${namedDealsBlock}
 
 Word budget: ${input.word_budget} words total across all sections.
 `.trim();
@@ -295,6 +307,48 @@ function formatSummariesForClaude(summaries: SkillSummary[]): string {
       .filter(Boolean)
       .join('\n');
   }).join('\n\n');
+}
+
+function buildNamedDealsBlock(skillSummaries: SkillSummary[]): string {
+  const parts: string[] = [];
+
+  // At-risk deals from deal-risk-review
+  const riskSummary = skillSummaries.find(s => s.skill_id === 'deal-risk-review');
+  if (riskSummary?.at_risk_deals?.length) {
+    parts.push('AT-RISK DEALS (by risk score):');
+    for (const deal of riskSummary.at_risk_deals) {
+      const amount = deal.amount >= 1000
+        ? `$${Math.round(deal.amount / 1000)}K`
+        : `$${deal.amount}`;
+      parts.push(
+        `  ${deal.name} — ${amount}, ${deal.stage}, owned by ${deal.owner}, ` +
+        `risk ${deal.risk_score}/100, ${deal.days_in_stage} days in stage` +
+        `\n    Factors: ${deal.risk_factors.join('; ')}` +
+        (deal.recommended_action
+          ? `\n    Action: ${deal.recommended_action}`
+          : '')
+      );
+    }
+  }
+
+  // Stale deals from pipeline-hygiene
+  const hygieneSummary = skillSummaries.find(s => s.skill_id === 'pipeline-hygiene');
+  if (hygieneSummary?.stale_deals?.length) {
+    parts.push('\nSTALE DEALS (no activity 14+ days):');
+    for (const deal of hygieneSummary.stale_deals.slice(0, 5)) {
+      const amount = deal.amount >= 1000
+        ? `$${Math.round(deal.amount / 1000)}K`
+        : `$${deal.amount}`;
+      parts.push(
+        `  ${deal.name} — ${amount}, ${deal.stage}, owned by ${deal.owner}, ` +
+        `${deal.days_stale} days dark`
+      );
+    }
+  }
+
+  if (parts.length === 0) return '';
+
+  return '\nNAMED DEALS:\n' + parts.join('\n');
 }
 
 function deriveSectionSeverity(
