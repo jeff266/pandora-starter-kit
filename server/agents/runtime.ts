@@ -366,8 +366,11 @@ export class AgentRuntime {
             console.warn(`[Agent ${agentId}] Failed to calculate quota attainment:`, err);
           }
 
-          // 4. Get week label
-          const weekLabel = `Week of ${now.toISOString().split('T')[0]}`;
+          // 4. Get week label (anchored to Monday of current week)
+          const monday = new Date(now);
+          const day = now.getDay();
+          monday.setDate(now.getDate() + (day === 0 ? -6 : 1 - day));
+          const weekLabel = `Week of ${monday.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`;
 
           // 5. Get prior report headline for continuity
           const priorHeadline = await getPriorReportHeadline(workspaceId, reportType);
