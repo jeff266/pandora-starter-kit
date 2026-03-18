@@ -80,12 +80,39 @@ export interface ReportDocument {
   actions: ActionSummary[];  // Max 5, sorted urgency then impact
   recommended_next_steps: string;  // ≤80 words, consulting voice
   chart_suggestions: ChartSuggestion[];  // AI-suggested charts per section
+  hypothesis_updates?: HypothesisUpdate[];  // Hypothesis confidence changes this week
 
   skills_included: string[];
   skills_omitted: string[];  // No meaningful signal this week
   total_word_count: number;
   tokens_used: number;
   orchestrator_run_id: string;
+}
+
+export interface PriorContext {
+  hypotheses: Array<{
+    hypothesis_text: string;
+    confidence: number;
+    metric_key: string;
+    current_value: number;
+    threshold: number;
+    unit: string;
+    trend?: string;
+  }>;
+}
+
+export interface HypothesisUpdate {
+  metric_key: string;
+  hypothesis_text: string;
+  old_confidence: number;
+  new_confidence: number;
+  confidence_delta: number;
+  direction: 'holding' | 'strengthening' | 'weakening' | 'confirmed' | 'refuted';
+  current_value: number;
+  threshold: number;
+  unit: string;
+  evidence_skill: string | null;
+  summary: string;  // human-readable summary for report display
 }
 
 export interface OrchestratorInput {
@@ -103,4 +130,5 @@ export interface OrchestratorInput {
   };
   skill_summaries: SkillSummary[];
   word_budget: number;
+  prior_context?: PriorContext;
 }

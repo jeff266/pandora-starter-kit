@@ -449,6 +449,38 @@ agentsWorkspaceRouter.get('/:workspaceId/reports/:reportId', requirePermission('
   }
 });
 
+// ── Hypothesis Tracking Endpoint ─────────────────────────────────────────────
+
+agentsWorkspaceRouter.get('/:workspaceId/hypotheses', requirePermission('agents.view'), async (req: Request, res: Response) => {
+  const workspaceId = req.params.workspaceId as string;
+
+  try {
+    const result = await query(`
+      SELECT
+        metric_key,
+        hypothesis_text,
+        confidence,
+        current_value,
+        threshold,
+        unit,
+        updated_at
+      FROM standing_hypotheses
+      WHERE workspace_id = $1
+        AND status = 'active'
+        AND metric_key IS NOT NULL
+      ORDER BY confidence DESC
+    `, [workspaceId]);
+
+    res.json({
+      hypotheses: result.rows,
+      count: result.rows.length
+    });
+  } catch (err: any) {
+    console.error('[Hypotheses] Failed to get hypotheses:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Report Annotation Endpoints (Phase 3a) ───────────────────────────────────
 
 // Helper: Verify report belongs to workspace

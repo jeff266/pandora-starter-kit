@@ -475,6 +475,13 @@ function summarizePipelineCoverage(resultData: any): Omit<SkillSummary, 'ran_at'
       }))
   );
 
+  // Calculate rep concentration — fraction of pipeline held by top rep (0-1)
+  const sortedReps = [...reps].sort((a, b) => (b.pipeline || 0) - (a.pipeline || 0));
+  const topRepPipeline = sortedReps[0]?.pipeline || 0;
+  const rep_concentration = (total_pipeline as number) > 0
+    ? topRepPipeline / (total_pipeline as number)
+    : 0;
+
   return {
     skill_id: 'pipeline-coverage',
     headline,
@@ -487,6 +494,7 @@ function summarizePipelineCoverage(resultData: any): Omit<SkillSummary, 'ran_at'
       closed_won,
       deal_count,
       rep_pipeline_json,
+      rep_concentration,
     },
     top_findings: top_findings.slice(0, 5),
     top_actions: top_actions.slice(0, 3),

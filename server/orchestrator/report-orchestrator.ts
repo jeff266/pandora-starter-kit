@@ -2,7 +2,45 @@ import { randomUUID } from 'crypto';
 import { query } from '../db.js';
 import { callLLM } from '../utils/llm-router.js';
 import { DOCUMENT_PLAYBOOKS, WORD_BUDGETS } from './playbooks.js';
-import { OrchestratorInput, ReportDocument, ReportSection, SkillSummary, ChartSuggestion } from './types.js';
+import { OrchestratorInput, ReportDocument, ReportSection, SkillSummary, ChartSuggestion, HypothesisUpdate, PriorContext } from './types.js';
+import { updateHypotheses } from './hypothesis-updater.js';
+
+/**
+ * Loads active hypotheses from standing_hypotheses table
+ */
+async function loadHypotheses(workspaceId: string): Promise<PriorContext['hypotheses']> {
+  try {
+    const result = await query(`
+      SELECT
+        metric_key,
+        hypothesis_text,
+        confidence,
+        current_value,
+        threshold,
+        unit
+      FROM standing_hypotheses
+      WHERE workspace_id = $1
+        AND status = 'active'
+        AND metric_key IS NOT NULL
+        AND hypothesis_text IS NOT NULL
+        AND confidence IS NOT NULL
+      ORDER BY confidence DESC
+    `, [workspaceId]);
+
+    return result.rows.map(row => ({
+      metric_key: row.metric_key,
+      hypothesis_text: row.hypothesis_text,
+      confidence: Number(row.confidence),
+      current_value: Number(row.current_value || 0),
+      threshold: Number(row.threshold || 0),
+      unit: row.unit || '$',
+      trend: undefined,
+    }));
+  } catch (err) {
+    console.error('[Orchestrator] Failed to load hypotheses:', err);
+    return [];
+  }
+}
 
 export async function runReportOrchestrator(
   input: OrchestratorInput
@@ -159,6 +197,23 @@ Word budget: ${input.word_budget} words total across all sections.
     // Non-fatal — continue without suggestions
   }
 
+  // Update hypothesis confidence scores based on this week's skill data
+  let hypothesisUpdates: HypothesisUpdate[] = [];
+  try {
+    const hypotheses = await loadHypotheses(input.workspace_id);
+    if (hypotheses.length > 0) {
+      hypothesisUpdates = await updateHypotheses(
+        input.workspace_id,
+        hypotheses,
+        activeSkills
+      );
+      console.log(`[Orchestrator] Updated ${hypothesisUpdates.length} hypotheses`);
+    }
+  } catch (err) {
+    console.error('[Orchestrator] Hypothesis update failed:', err);
+    // Non-fatal — continue without hypothesis updates
+  }
+
   return {
     document_type: input.document_type,
     workspace_id: input.workspace_id,
@@ -170,6 +225,7 @@ Word budget: ${input.word_budget} words total across all sections.
     actions: (parsed.actions || []).slice(0, 5),
     recommended_next_steps: parsed.recommended_next_steps || '',
     chart_suggestions: chartSuggestions,
+    hypothesis_updates: hypothesisUpdates,
     skills_included: activeSkills.map(s => s.skill_id),
     skills_omitted: [
       ...omittedSkills,
