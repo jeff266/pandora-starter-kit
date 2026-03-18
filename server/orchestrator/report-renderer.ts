@@ -653,7 +653,7 @@ export async function renderPdf(
             fit: [W - 12, chartH],
             align: 'center',
           });
-          pdf.y = chartStartY + chartH + 28;  // force cursor past chart + bottom margin
+          pdf.y = chartStartY + chartH + 48;  // force cursor past chart + bottom margin (48pt gap)
         }
 
         // Data gap note
@@ -690,7 +690,7 @@ export async function renderPdf(
           fit: [W, sectionChartH],
           align: 'center',
         });
-        pdf.y = sectionChartStartY + sectionChartH + 32;  // force cursor past chart + bottom margin
+        pdf.y = sectionChartStartY + sectionChartH + 48;  // force cursor past chart + bottom margin (48pt gap)
       }
     }
   }

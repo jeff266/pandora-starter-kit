@@ -218,28 +218,22 @@ function buildChartJsConfig(chart: ChartSuggestion): object {
     ? { display: true, text: yAxisTitleText, color: '#94A3B8', font: { size: 10 } }
     : { display: false };
 
-  // Y-axis ticks: force integers for count charts
-  const yTicks = isCount
-    ? { color: '#64748B', font: { size: 11 }, precision: 0, stepSize: 1 }
-    : { color: '#64748B', font: { size: 11 } };
-
+  // Chart.js v2 format (QuickChart default): legend/title at top-level of options,
+  // NOT nested under plugins (plugins.* is v3 syntax and is ignored by QuickChart v2)
   const baseOptions = {
-    plugins: {
-      legend: { display: false },
-      title: { display: false },  // Title rendered externally by PDF/docx renderer
-    },
+    legend: { display: false },   // v2: top-level
+    title: { display: false },    // v2: top-level — renderer adds title above the image
     scales: {
-      x: {
-        grid: { display: false },
-        ticks: { color: '#64748B', font: { size: 11 } },
-      },
-      y: {
-        min: isCount ? 0 : undefined,
-        grid: { color: 'rgba(0,0,0,0.06)' },
-        border: { display: false },
-        title: yAxisTitle,
-        ticks: yTicks,
-      },
+      xAxes: [{ gridLines: { display: false }, ticks: { fontColor: '#64748B', fontSize: 11 } }],
+      yAxes: [{
+        ticks: {
+          fontColor: '#64748B',
+          fontSize: 11,
+          ...(isCount ? { precision: 0, stepSize: 1, beginAtZero: true } : {}),
+        },
+        gridLines: { color: 'rgba(0,0,0,0.06)', drawBorder: false },
+        ...(yAxisTitleText ? { scaleLabel: { display: true, labelString: yAxisTitleText, fontColor: '#94A3B8', fontSize: 10 } } : {}),
+      }],
     },
   };
 
@@ -253,7 +247,6 @@ function buildChartJsConfig(chart: ChartSuggestion): object {
             label: chart.title,
             data: normalized,
             backgroundColor: colors,
-            borderRadius: 4,
           }],
         },
         options: baseOptions,
@@ -261,38 +254,30 @@ function buildChartJsConfig(chart: ChartSuggestion): object {
 
     case 'horizontalBar': {
       const xAxisTitleText = suffix || (isCount ? 'Deals' : '');
-      const xAxisTitle = xAxisTitleText
-        ? { display: true, text: xAxisTitleText, color: '#94A3B8', font: { size: 10 } }
-        : { display: false };
-      const xTicks = isCount
-        ? { color: '#64748B', font: { size: 11 }, precision: 0, stepSize: 1 }
-        : { color: '#64748B', font: { size: 11 } };
       return {
-        type: 'bar',
+        type: 'horizontalBar',  // v2: distinct type, not type:'bar'+indexAxis:'y'
         data: {
           labels,
           datasets: [{
             label: chart.title,
             data: normalized,
             backgroundColor: colors,
-            borderRadius: 4,
           }],
         },
         options: {
-          ...baseOptions,
-          indexAxis: 'y',
+          legend: { display: false },
+          title: { display: false },
           scales: {
-            x: {
-              min: isCount ? 0 : undefined,
-              grid: { color: 'rgba(0,0,0,0.06)' },
-              border: { display: false },
-              title: xAxisTitle,
-              ticks: xTicks,
-            },
-            y: {
-              grid: { display: false },
-              ticks: { color: '#64748B', font: { size: 11 } },
-            },
+            xAxes: [{
+              ticks: {
+                fontColor: '#64748B',
+                fontSize: 11,
+                ...(isCount ? { precision: 0, stepSize: 1, beginAtZero: true } : { beginAtZero: true }),
+              },
+              gridLines: { color: 'rgba(0,0,0,0.06)', drawBorder: false },
+              ...(xAxisTitleText ? { scaleLabel: { display: true, labelString: xAxisTitleText, fontColor: '#94A3B8', fontSize: 10 } } : {}),
+            }],
+            yAxes: [{ gridLines: { display: false }, ticks: { fontColor: '#64748B', fontSize: 11 } }],
           },
         },
       };
@@ -311,7 +296,7 @@ function buildChartJsConfig(chart: ChartSuggestion): object {
             borderWidth: 2,
             pointRadius: 4,
             fill: true,
-            tension: 0.3,
+            lineTension: 0.3,  // v2: lineTension (not tension which is v3)
           }],
         },
         options: baseOptions,
@@ -332,24 +317,14 @@ function buildChartJsConfig(chart: ChartSuggestion): object {
           }],
         },
         options: {
-          plugins: {
-            legend: {
-              display: true,
-              position: 'right',
-              labels: {
-                color: '#374151',
-                font: { size: 11 },
-                padding: 16,
-              },
-            },
-            title: {
-              display: true,
-              text: chart.title,
-              font: { size: 13, weight: 'bold' },
-              color: '#1E293B',
-            },
+          // v2 format: legend/title at top-level, not under plugins
+          legend: {
+            display: true,
+            position: 'right',
+            labels: { fontColor: '#374151', fontSize: 11, padding: 16 },
           },
-          cutout: chart.chart_type === 'doughnut' ? '65%' : '0%',
+          title: { display: false },  // renderer adds title above image
+          cutoutPercentage: chart.chart_type === 'doughnut' ? 65 : 0,  // v2 uses percentage int
         },
       };
 
@@ -426,27 +401,22 @@ function buildChartJsConfigFromSpec(
     ? { display: true, text: yAxisTitleText, color: '#94A3B8', font: { size: 10 } }
     : { display: false };
 
-  const yTicks = isCount
-    ? { color: '#64748B', font: { size: 11 }, precision: 0, stepSize: 1 }
-    : { color: '#64748B', font: { size: 11 } };
-
+  // Chart.js v2 format (QuickChart default): legend/title at top-level of options,
+  // NOT nested under plugins (plugins.* is v3 syntax, silently ignored by QuickChart v2)
   const baseOptions = {
-    plugins: {
-      legend: { display: false },
-      title: { display: false },  // Title rendered externally by PDF/docx renderer
-    },
+    legend: { display: false },   // v2: top-level
+    title: { display: false },    // v2: top-level — renderer adds title above the image
     scales: {
-      x: {
-        grid: { display: false },
-        ticks: { color: '#64748B', font: { size: 11 } },
-      },
-      y: {
-        min: isCount ? 0 : undefined,
-        grid: { color: 'rgba(0,0,0,0.06)' },
-        border: { display: false },
-        title: yAxisTitle,
-        ticks: yTicks,
-      },
+      xAxes: [{ gridLines: { display: false }, ticks: { fontColor: '#64748B', fontSize: 11 } }],
+      yAxes: [{
+        ticks: {
+          fontColor: '#64748B',
+          fontSize: 11,
+          ...(isCount ? { precision: 0, stepSize: 1, beginAtZero: true } : {}),
+        },
+        gridLines: { color: 'rgba(0,0,0,0.06)', drawBorder: false },
+        ...(yAxisTitle.display ? { scaleLabel: { display: true, labelString: (yAxisTitle as any).text, fontColor: '#94A3B8', fontSize: 10 } } : {}),
+      }],
     },
   };
 
@@ -460,7 +430,6 @@ function buildChartJsConfigFromSpec(
             label: title,
             data: normalized,
             backgroundColor: colors,
-            borderRadius: 4,
           }],
         },
         options: baseOptions,
@@ -468,38 +437,31 @@ function buildChartJsConfigFromSpec(
 
     case 'horizontalBar': {
       const xAxisTitleText = suffix || (isCount ? 'Deals' : '');
-      const xAxisTitle = xAxisTitleText
-        ? { display: true, text: xAxisTitleText, color: '#94A3B8', font: { size: 10 } }
-        : { display: false };
-      const xTicks = isCount
-        ? { color: '#64748B', font: { size: 11 }, precision: 0, stepSize: 1 }
-        : { color: '#64748B', font: { size: 11 } };
       return {
-        type: 'bar',
+        type: 'horizontalBar',  // v2: distinct type (not type:'bar'+indexAxis:'y' which is v3)
         data: {
           labels,
           datasets: [{
             label: title,
             data: normalized,
             backgroundColor: colors,
-            borderRadius: 4,
           }],
         },
         options: {
-          ...baseOptions,
-          indexAxis: 'y',
+          legend: { display: false },
+          title: { display: false },
           scales: {
-            x: {
-              min: isCount ? 0 : undefined,
-              grid: { color: 'rgba(0,0,0,0.06)' },
-              border: { display: false },
-              title: xAxisTitle,
-              ticks: xTicks,
-            },
-            y: {
-              grid: { display: false },
-              ticks: { color: '#64748B', font: { size: 11 } },
-            },
+            xAxes: [{
+              ticks: {
+                fontColor: '#64748B',
+                fontSize: 11,
+                beginAtZero: true,
+                ...(isCount ? { precision: 0, stepSize: 1 } : {}),
+              },
+              gridLines: { color: 'rgba(0,0,0,0.06)', drawBorder: false },
+              ...(xAxisTitleText ? { scaleLabel: { display: true, labelString: xAxisTitleText, fontColor: '#94A3B8', fontSize: 10 } } : {}),
+            }],
+            yAxes: [{ gridLines: { display: false }, ticks: { fontColor: '#64748B', fontSize: 11 } }],
           },
         },
       };
@@ -518,7 +480,7 @@ function buildChartJsConfigFromSpec(
             borderWidth: 2,
             pointRadius: 4,
             fill: true,
-            tension: 0.3,
+            lineTension: 0.3,  // v2: lineTension (not tension which is v3)
           }],
         },
         options: baseOptions,
@@ -538,11 +500,14 @@ function buildChartJsConfigFromSpec(
           }],
         },
         options: {
-          plugins: {
-            legend: { display: false },  // Title rendered above by PDF/docx renderer
-            title: { display: false },   // Segment labels visible inside the doughnut
+          // Doughnut keeps legend visible — segment names are the key data
+          legend: {
+            display: true,
+            position: 'right',
+            labels: { fontColor: '#374151', fontSize: 11, padding: 16 },
           },
-          cutout: '65%',
+          title: { display: false },        // renderer adds title above image
+          cutoutPercentage: 65,            // v2: integer percentage (not cutout:'65%' which is v3)
         },
       };
 

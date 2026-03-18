@@ -212,15 +212,23 @@ function buildChartNodeSpec(decision: ChartDecision): ChartNodeSpec | null {
     return null;
   }
 
-  // Apply orientation rules
+  // Apply orientation rules — unconditional for all non-doughnut, non-line charts.
+  // Label length is the canonical signal: any label > 12 chars → horizontalBar.
+  // Conversely, if ALL labels are ≤ 12 chars the chart should be vertical regardless
+  // of what DeepSeek suggested (prevents "ALWAYS horizontalBar for rep comparisons"
+  // from breaking short-label charts like Nate vs Sara).
   let chart_type = decision.chart_type;
   let orientation_rationale: string | undefined;
 
-  if (chart_type === 'bar' || chart_type === 'horizontalBar') {
-    const maxLabelLength = Math.max(...data_points.map(dp => dp.label.length));
-    if (maxLabelLength > 12 && chart_type === 'bar') {
+  if (chart_type !== 'doughnut' && chart_type !== 'line') {
+    const hasLongLabel = data_points.some(dp => dp.label.length > 12);
+    if (hasLongLabel) {
       chart_type = 'horizontalBar';
       orientation_rationale = 'Horizontal orientation for long labels';
+    } else if (chart_type === 'horizontalBar') {
+      // Short labels don't need horizontal orientation — vertical is cleaner
+      chart_type = 'bar';
+      orientation_rationale = 'Vertical bar: all labels ≤ 12 chars';
     }
   }
 

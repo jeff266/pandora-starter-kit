@@ -6,3 +6,9 @@ id = "1905xqk9LgclW4oNkI7jz"
 uri = "file://pandora-report.pdf"
 type = "pdf"
 title = "Monday Briefing — Mar 18 (Legend + Chart bleeding fixes)"
+
+[[outputs]]
+id = "ae_JibsH0Hf2DXYia8Za_"
+uri = "file://pandora-final.pdf"
+type = "pdf"
+title = "Monday Briefing — Final Polish (v2 charts, horizontal bars, doughnut legend)"

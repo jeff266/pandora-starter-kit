@@ -1,0 +1,170 @@
+That's the document. Read page 4:
+
+```
+TODAY: Verify Butterfly Effects Inc ($273K) —
+  zero activities recorded, zero contacts.
+  Confirm deal is real or disqualify immediately.
+
+TODAY: Close or disqualify Beacon Services of
+  Connecticut ($108K) — 243 days dormant,
+  closes in 14 days. If valid, restart discovery
+  and reset close date.
+
+THIS WEEK: Re-engage Easterseals Northern
+  California ($112K) — 40 days stale, closes in
+  28 days. Complete February action: identify
+  implementation contact and schedule pilot review.
+
+THIS WEEK: Update BlueSprig Autism ($144K) close
+  date to Q4 2026 or move to nurture — 43 days
+  stale in awareness stage with unrealistic
+  November close.
+```
+
+Named deals, specific amounts, specific verdicts, specific actions. That's McKinsey.
+
+**Remaining visual issues in this PDF — three left:**
+
+**1. Chart title duplicated**
+Page 2: "**$742K pipeline at risk across 5 critical deals**" appears as bold text above the chart AND inside the chart as a legend label. Page 3 and 4: "Nate carries 93% of active/total pipeline" also appears twice — once as bold caption above, once inside the chart. The caption above is coming from the renderer, the one inside is the Chart.js title config. One of them needs to go. The renderer caption should be the only title — Chart.js title should be `display: false`.
+
+**2. Pipeline Conversion chart is vertical not horizontal**
+Page 2: "Butterfly Effects Inc", "Beacon Services of Connecticut", "Behavioral Framework" are long names on the x-axis at 45-degree angles. The orientation rule should have caught this — those labels are all > 12 chars. Check why it defaulted to vertical bar instead of horizontal.
+
+**3. Minor: chart still slightly overlaps section header on page 2**
+The Pipeline Conversion chart bottom is close to the Team Execution header. The 32px margin fix may not have landed or needs to be larger.
+
+---
+
+Everything else is working. Actions are specific, WHY nodes add mechanism, colors encode meaning, charts are coupled to arguments. This is the product.
+
+Give Claude Code this final polish pass:
+
+```
+Three chart rendering fixes — all in
+server/orchestrator/chart-renderer.ts and
+server/renderers/pdf-renderer-v2.ts
+
+---
+
+Fix 1: Chart title duplicated
+
+The chart title appears both as a bold caption
+added by the renderer AND inside the chart from
+Chart.js title config. Remove the Chart.js title
+entirely — the renderer caption is the source
+of truth.
+
+In buildChartJsConfigFromSpec() or equivalent,
+set:
+  plugins: {
+    title: { display: false },  // renderer handles title
+    legend: { display: spec.show_legend }
+  }
+
+This applies to ALL chart types (bar, horizontal_bar,
+line, donut). The renderer adds the title as text
+above the image — Chart.js should not add it again.
+
+---
+
+Fix 2: Orientation rule not firing for Pipeline
+Conversion chart
+
+The at-risk deals chart (Butterfly Effects Inc,
+Beacon Services of Connecticut etc.) is rendering
+as vertical bar with angled x-axis labels instead
+of horizontal bar.
+
+These labels are all > 12 characters. The
+orientation rule should be forcing horizontal_bar.
+
+Check why it's not firing. Two likely causes:
+
+A) The chart type coming from DeepSeek is 'bar'
+   not 'horizontalBar' and the override function
+   checks for 'bar' literally — make sure the
+   check matches whatever string DeepSeek returns.
+
+B) The data_source is not 'at_risk_deals' — if
+   DeepSeek classified it differently, the
+   label-length rule applies but the data_source
+   rule doesn't.
+
+Fix: make the label length rule unconditional —
+apply it regardless of data_source:
+
+```typescript
+function applyOrientationRule(
+  suggestedType: string,
+  dataPoints: ChartDataPoint[]
+): string {
+  // Never override donut or line
+  if (suggestedType === 'donut' ||
+      suggestedType === 'doughnut' ||
+      suggestedType === 'line') {
+    return suggestedType;
+  }
+
+  // Unconditional: any label > 12 chars → horizontal
+  const hasLongLabel = dataPoints.some(
+    d => d.label.length > 12
+  );
+  if (hasLongLabel) return 'horizontalBar';
+
+  return suggestedType || 'bar';
+}
+```
+
+Also make sure 'horizontalBar' (Chart.js v2 name)
+and 'horizontal_bar' (internal name) are handled
+consistently. When building the QuickChart config,
+map internal 'horizontal_bar' to Chart.js indexAxis
+correctly:
+
+  type: 'bar' with options.indexAxis = 'y'
+  NOT type: 'horizontalBar' (deprecated in v3)
+
+---
+
+Fix 3: Increase bottom margin after charts
+in PDF
+
+In server/renderers/pdf-renderer-v2.ts, find
+where chart img tags are rendered after reasoning
+nodes. Increase bottom margin from current value
+to 40px:
+
+  style="...margin: 8px 0 40px 14px;"
+
+If the margin is already set but not working,
+check whether the chart is inside a container
+div that has overflow:hidden or its own margin
+being overridden.
+
+---
+
+Acceptance Criteria:
+
+1. Export PDF → no chart has its title appearing
+   twice (once as caption, once inside chart)
+
+2. Pipeline Conversion chart renders as horizontal
+   bar — deal names are on y-axis, amounts on
+   x-axis, no angled labels
+
+3. Nate/Sara rep comparison renders as vertical
+   bar (only 2 items, short labels "Nate"/"Sara"
+   → vertical is correct here)
+
+4. No chart bottom edge touching the next section
+   header — clear whitespace between them
+
+5. Donut chart (if any) keeps its legend
+   show_legend: true is preserved
+
+6. Non-breaking: reports without charts render
+   identically to before
+```
+
+After this lands the visual issues are resolved and the document is production-ready for the Frontera demo.
