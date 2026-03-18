@@ -1,0 +1,51 @@
+Three Skills Updated                     
+                                           
+  1. forecast-rollup                       
+  (server/skills/tool-definitions.ts:3068) 
+  - Loads forecast/non-forecast pipelines  
+  at execution start                       
+  - Filters closed-won queries: AND        
+  pipeline = ANY($forecastPipelineNames)   
+  - Queries non-forecast pipelines         
+  separately and returns as                
+  nonForecastPipelines in result           
+  - Updated comments explaining Fellowship 
+  Pipeline exclusion                       
+                                           
+  2. pipeline-waterfall                    
+  (server/skills/tool-definitions.ts:4135) 
+  - Loads forecast pipelines using         
+  configLoader.getForecastPipelines()      
+  - Passes first forecast pipeline to      
+  waterfallAnalysis() via filterParams     
+  - Added TODO for multi-pipeline support  
+                                           
+  3. monte-carlo (mcLoadOpenDeals tool)    
+  (server/skills/tool-definitions.ts:7703) 
+  - Loads forecast pipelines at start      
+  - Defaults pipelineFilter to first       
+  forecast pipeline when not specified     
+  - Returns simulationScope metadata       
+  explaining which pipelines are included  
+  - Added TODO for multi-pipeline support  
+                                           
+  Frontera Workspace Impact                
+                                           
+  Before: Fellowship Pipeline ($2.4M open, 
+  42 deals) contaminated:                  
+  - Forecast rollup attainment (counted    
+  toward quota)                            
+  - Waterfall analysis (showed in stage    
+  flow)                                    
+  - Monte Carlo simulation (included in    
+  P10-P90 range)                           
+                                           
+  After: Fellowship Pipeline correctly:    
+  - ✅ Excluded from forecast attainment   
+  (only Core Sales counts)                 
+  - ✅ Excluded from waterfall stage flow  
+  (only Core Sales shown)                  
+  - ✅ Excluded from Monte Carlo simulation
+   (only Core Sales simulated)             
+  - ✅ Visible separately in               
+  forecastRollup.nonForecastPipelines

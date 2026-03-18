@@ -1,0 +1,97 @@
+Good. The contamination is fixed. Fellowship is correctly excluded from the three skills that matter most for quota math.
+
+**Validate before moving on:**
+
+Trigger a fresh run and check two numbers:
+
+```bash
+curl -s -X POST \
+"https://$REPLIT_DEV_DOMAIN/api/workspaces/\
+4160191d.../agents/4f8309a9.../run-now" \
+-H "Authorization: Bearer <token>" \
+-H "Content-Type: application/json" \
+-d '{"phase": "both"}'
+```
+
+After it completes, check the skill outputs directly:
+
+```sql
+-- forecast-rollup result
+SELECT result_data->'closedWon' as closed_won,
+       result_data->'nonForecastPipelines' as non_forecast
+FROM skill_runs
+WHERE workspace_id = '4160191d-73bc-414b-97dd-5a1853190378'
+  AND skill_id = 'forecast-rollup'
+  AND status = 'completed'
+ORDER BY started_at DESC LIMIT 1;
+
+-- monte-carlo result
+SELECT result_data->'simulationScope' as scope,
+       result_data->'p50' as p50
+FROM skill_runs
+WHERE workspace_id = '4160191d-73bc-414b-97dd-5a1853190378'
+  AND skill_id = 'monte-carlo-forecast'
+  AND status = 'completed'
+ORDER BY started_at DESC LIMIT 1;
+```
+
+**What you're looking for:**
+
+```
+forecast-rollup:
+  closed_won should be ~$487K (Core Sales only)
+  non_forecast should show Fellowship $840K separately
+
+monte-carlo:
+  simulationScope: "Core Sales Pipeline"
+  p50: different from the old $1.17M
+       (Fellowship's $2.4M was inflating it)
+```
+
+---
+
+**On Task #101 (resolveValue for custom fields):**
+
+Defer it. Here's why:
+
+Frontera uses `amount` as their value field. Every current design partner likely does too. The resolveValue() infrastructure is built and ready — skills can adopt it incrementally when a workspace actually needs `ARR` or `ACV`. Doing it now across 15 instances per skill is refactor work with zero immediate business impact.
+
+The `d.amount` references are not bugs — they're technical debt that becomes relevant when a specific workspace needs custom value fields. Build it reactively when that workspace comes.
+
+---
+
+**Current state of the build:**
+
+```
+CLOSED OUT:
+✅ MECE issue tree driving Orchestrator
+✅ Question tree (WHY/WHAT THIS MEANS/ACTION)
+✅ Hypothesis tracking (confidence evolution)
+✅ Prior context (trend injection)
+✅ Charts (AI-suggested + manual)
+✅ Export pipeline (DOCX/PDF/XLSX)
+✅ Fellowship pipeline contamination fixed
+✅ Pipeline value scope infrastructure
+
+KNOWN GAPS (not blocking):
+⚠️  New Orchestrator path not producing
+    report_documents on every run
+    (timing race condition — 12h→7d fix
+    helps but needs verification)
+⚠️  resolveValue() not yet used in skills
+    (no current workspace needs it)
+⚠️  Multi-pipeline waterfall/Monte Carlo
+    (TODO documented, single pipeline works)
+
+McKINSEY GAP BUILDS (next session):
+🔲 Deal-level evidence pipeline
+   (named deals in Orchestrator input)
+🔲 Chart-argument coupling
+   (chart title = conclusion, not description)
+🔲 Revenue Retention skills
+   (expansion + churn — entire MECE quadrant)
+```
+
+The most important remaining validation is whether the new Orchestrator path (report_documents) is running reliably on scheduled runs. That's the core product path — everything else depends on it producing consistent output.
+
+Stop here for tonight or keep going?
