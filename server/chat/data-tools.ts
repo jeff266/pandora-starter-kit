@@ -4579,7 +4579,7 @@ async function runMeddicCoverageSkill(workspaceId: string, params: Record<string
 
   // Get deal details for preview
   const dealResult = await query(
-    `SELECT id, name, stage, amount, owner_name
+    `SELECT id, name, stage, amount, owner AS owner_name
      FROM deals
      WHERE workspace_id = $1 AND id = $2`,
     [workspaceId, deal_id]

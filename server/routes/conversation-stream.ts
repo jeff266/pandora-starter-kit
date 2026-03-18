@@ -262,7 +262,12 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
     }
 
     // ── Brief resolver — cache-first, zero tokens ─────────────────────────────
-    const briefAnswer = await resolveFromBrief(workspaceId, message).catch(() => null);
+    // Skip brief resolver for pandora operational questions (pending actions, rules,
+    // findings, CRM writes, thresholds, MEDDIC) — these must hit live data tools.
+    const preClassifyTier = await classifyComplexity(message).then(c => c.tier).catch(() => null);
+    const briefAnswer = preClassifyTier === 'pandora_action'
+      ? null
+      : await resolveFromBrief(workspaceId, message).catch(() => null);
     if (briefAnswer) {
       const briefResponseId = randomUUID();
       console.log(JSON.stringify({ event: 'brief_resolver_hit', workspace_id: workspaceId, section: briefAnswer.section, tokens_used: 0, timestamp: new Date().toISOString() }));
@@ -399,6 +404,73 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
       }
 
       // Data query couldn't be parsed — fall through to Tier 1 logic
+    }
+
+    // ── Pandora Action Tier: Route directly to tool-calling agent ────────────
+    // Questions about pending actions, workflow rules, findings, CRM write history,
+    // action thresholds, MEDDIC, or skill execution bypass skill-run synthesis.
+    if (complexity.tier === 'pandora_action') {
+      sse(res, { type: 'synthesis_start' });
+      const pandoraAction = await runPandoraAgent(
+        workspaceId,
+        message,
+        (history as Array<{ role: string; content: string }>)
+          .filter(m => m.role && m.content)
+          .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+        (toolName, _label) => {
+          sse(res, { type: 'tool_call', agent_id: 'ask-pandora', tool_name: toolName, label: toolName, ts: Date.now() });
+        },
+        sessionContext,
+        (ev) => sse(res, ev),
+      );
+      assistantResponse = pandoraAction.answer;
+      if (pandoraAction.sessionContext) {
+        await updateContext(workspaceId, CHANNEL_ID, workingThreadId, { sessionContext: pandoraAction.sessionContext }).catch(() => null);
+        const crossSignalFindings = pandoraAction.sessionContext.sessionFindings.filter((f: any) => f.category === 'cross_signal');
+        if (crossSignalFindings.length > 0) {
+          sse(res, { type: 'cross_signal_findings', findings: crossSignalFindings });
+        }
+      }
+      if (pandoraAction.chart_specs && pandoraAction.chart_specs.length > 0) {
+        sse(res, { type: 'chart_specs', specs: pandoraAction.chart_specs });
+      }
+      sse(res, { type: 'synthesis_chunk', text: pandoraAction.answer });
+      sse(res, { type: 'synthesis_done', full_text: pandoraAction.answer, response_id: randomUUID() });
+      if (pandoraAction.suggested_actions && pandoraAction.suggested_actions.length > 0) {
+        sse(res, { type: 'suggested_actions', actions: pandoraAction.suggested_actions });
+      }
+      if (pandoraAction.inline_actions && pandoraAction.inline_actions.length > 0) {
+        sse(res, { type: 'inline_actions', items: pandoraAction.inline_actions });
+      }
+      if (pandoraAction.evidence.cited_records.length > 0) {
+        const dealRecs = pandoraAction.evidence.cited_records.filter((r: any) => r.type === 'deal');
+        if (dealRecs.length > 0) {
+          const total = dealRecs.reduce((s: number, r: any) => s + (Number(r.key_fields?.amount) || 0), 0);
+          const fmtK = (n: number) => n >= 1000 ? `$${Math.round(n / 1000)}K` : `$${n}`;
+          sse(res, {
+            type: 'evidence',
+            cards: [{
+              id: `pandora-deals-${randomUUID().slice(0, 8)}`,
+              title: `${dealRecs.length} deal${dealRecs.length !== 1 ? 's' : ''} · ${fmtK(total)}`,
+              severity: 'info',
+              operator_name: 'Pandora',
+              operator_icon: '✦',
+              operator_color: '#48af9b',
+              body: `Live query · ${dealRecs.length} records`,
+              records: dealRecs.map((r: any) => ({
+                Name: r.name || '—',
+                Amount: r.key_fields?.amount != null ? `$${Number(r.key_fields.amount).toLocaleString()}` : '—',
+                Stage: r.key_fields?.stage || '—',
+                'Close Date': r.key_fields?.close_date || '—',
+              })),
+            }],
+          });
+        }
+      }
+      await persistExchange(workspaceId, workingThreadId, message, assistantResponse);
+      sse(res, { type: 'done', thread_id: workingThreadId });
+      res.end();
+      return;
     }
 
     // ── Tier 1: Lookup — single skill, cache-first, lightweight synthesis ────

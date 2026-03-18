@@ -1,7 +1,7 @@
 import { SkillRegistry } from '../skills/registry.js';
 import { hasFuturePeriod } from '../chat/temporal-resolver.js';
 
-export type QuestionComplexity = 'data_query' | 'lookup' | 'focused' | 'investigation';
+export type QuestionComplexity = 'data_query' | 'lookup' | 'focused' | 'investigation' | 'pandora_action';
 
 export interface ComplexityResult {
   tier: QuestionComplexity;
@@ -144,6 +144,40 @@ export async function classifyComplexity(
       max_skills: 1,
       allow_fresh_runs: false,
       reasoning: 'Direct metric amount question — single skill lookup',
+    };
+  }
+
+  // ─── PANDORA ACTION TIER: Direct tool questions about Pandora's own data ──
+  // Detects questions about pending actions, workflow rules, CRM write history,
+  // findings, action thresholds, MEDDIC scores, or skill execution commands.
+  // These bypass skill-run synthesis and route directly to the tool-calling agent.
+  const pandoraActionPatterns = [
+    /\b(pending|queued|waiting|unresolved)\s+(actions?|approvals?|tasks?)\b/i,
+    /\b(what|show|list|get).*(pending|queued).*(actions?|approvals?)\b/i,
+    /\b(automation|workflow)\s+(rules?|automations?)\b/i,
+    /\b(what|show|list|get).*(rules?|automations?).*(active|configured|set)\b/i,
+    /\bwhat rules?\b/i,
+    /\bmeddic\b/i,
+    /\bqualification\s+(score|coverage|framework)\b/i,
+    /\b(crm\s+)?(changes?|writes?|modified|updated)\s*(this\s+week|today|recently)\b/i,
+    /\bpandora\s+(change|wrote?|updated?|did)\b/i,
+    /\bwhat\s+did\s+pandora\b/i,
+    /\b(insights?|flags?|findings?)\s+(flagged|active|outstanding|open)\b/i,
+    /\bwhat\s+(insights?|flags?|findings?)\b/i,
+    /\b(action\s+threshold|auto.?action\s+threshold|threshold\s+(for|is|set)|threshold\s+level)\b/i,
+    /\b(approve|dismiss|snooze)\s+(action|finding|flag)\b/i,
+    /\breverse\s+(the\s+)?(crm\s+)?(write|change|update)\b/i,
+    /\brun\s+(meddic|qualification)\s+(analysis|coverage|skill)\b/i,
+    /\b(undo|revert)\s+(crm|change|write)\b/i,
+  ];
+
+  if (pandoraActionPatterns.some(p => p.test(lower))) {
+    return {
+      tier: 'pandora_action',
+      primary_skill: null,
+      max_skills: 0,
+      allow_fresh_runs: false,
+      reasoning: 'Pandora operational data question — route directly to tool-calling agent',
     };
   }
 
