@@ -677,7 +677,7 @@ agentsWorkspaceRouter.post('/:workspaceId/reports/:reportId/charts', requirePerm
     const { workspaceId, reportId } = req.params;
     const { section_id, chart_type, title, data_labels, data_values, chart_options, position_in_section } = req.body;
 
-    // Render chart to PNG using chartjs-node-canvas
+    // Render chart to PNG via QuickChart.io HTTP API
     const { renderChartToPNG } = await import('../orchestrator/chart-renderer.js');
     const chartPNG = await renderChartToPNG({
       chart_type,
@@ -687,7 +687,12 @@ agentsWorkspaceRouter.post('/:workspaceId/reports/:reportId/charts', requirePerm
       chart_options,
     });
 
-    // Insert chart with PNG data
+    // Upsert: delete any existing chart for this section, then insert fresh
+    await query(`
+      DELETE FROM report_charts
+      WHERE workspace_id = $1 AND report_document_id = $2 AND section_id = $3
+    `, [workspaceId, reportId, section_id]);
+
     const result = await query(`
       INSERT INTO report_charts (
         workspace_id, report_document_id, section_id, chart_type,

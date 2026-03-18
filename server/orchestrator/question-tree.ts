@@ -115,7 +115,7 @@ nodes with weak answers.
     const response = await callLLM(workspaceId, 'reason', {
       systemPrompt,
       messages: [{ role: 'user', content: userMessage }],
-      maxTokens: 800,
+      maxTokens: 1500,
       temperature: 0.2,
       _tracking: {
         workspaceId,

@@ -10,6 +10,7 @@ import OverallBriefingFeedback from '../components/reports/OverallBriefingFeedba
 import SankeyChart from '../components/reports/SankeyChart';
 import ReportAnnotationEditor, { type Annotation } from '../components/reports/ReportAnnotationEditor';
 import AnnotatableSection, { type Annotation as DocAnnotation } from '../components/report/AnnotatableSection';
+import ChartSuggestionPanel from '../components/report/ChartSuggestionPanel';
 import PrepareForClientModal from '../components/report/PrepareForClientModal';
 import type { ExportConfig } from '../types/export';
 import ReportContextMenu, { type ReportContextTarget } from '../components/reports/ReportContextMenu';
@@ -897,47 +898,57 @@ export default function ReportViewer() {
                 </div>
 
                 {/* Sections */}
-                {reportDocument.sections.map((section) => (
-                  <div key={section.id} style={{ background: colors.surface, borderRadius: 8, border: `1px solid ${colors.border}`, padding: 24 }}>
-                    <AnnotatableSection
-                      section={section}
-                      annotations={docAnnotations.filter(a => a.section_id === section.id)}
-                      isAnnotating={isAnnotating}
-                      onAnnotationSave={async (data) => {
-                        const token = localStorage.getItem('pandora_session');
-                        const docId = reportDocument!.id;
-                        const wid = currentWorkspace?.id || workspaceId;
-                        const res = await fetch(
-                          `/api/workspaces/${wid}/reports/${docId}/annotations`,
-                          {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                            body: JSON.stringify(data),
+                {reportDocument.sections.map((section) => {
+                  const wid = currentWorkspace?.id || workspaceId || '';
+                  const tok = localStorage.getItem('pandora_session') || '';
+                  return (
+                    <div key={section.id} style={{ background: colors.surface, borderRadius: 8, border: `1px solid ${colors.border}`, padding: 24 }}>
+                      <AnnotatableSection
+                        section={section}
+                        annotations={docAnnotations.filter(a => a.section_id === section.id)}
+                        isAnnotating={isAnnotating}
+                        onAnnotationSave={async (data) => {
+                          const token = localStorage.getItem('pandora_session');
+                          const docId = reportDocument!.id;
+                          const res = await fetch(
+                            `/api/workspaces/${wid}/reports/${docId}/annotations`,
+                            {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                              body: JSON.stringify(data),
+                            }
+                          );
+                          if (!res.ok) {
+                            const err = await res.json().catch(() => ({}));
+                            console.error('[Annotations] Save failed:', res.status, err);
+                            throw new Error(err.error || `Save failed (${res.status})`);
                           }
-                        );
-                        if (!res.ok) {
-                          const err = await res.json().catch(() => ({}));
-                          console.error('[Annotations] Save failed:', res.status, err);
-                          throw new Error(err.error || `Save failed (${res.status})`);
-                        }
-                        const saved: DocAnnotation = await res.json();
-                        setDocAnnotations(prev => [
-                          ...prev.filter(a => !(a.section_id === data.section_id && a.paragraph_index === data.paragraph_index)),
-                          saved,
-                        ]);
-                      }}
-                      onAnnotationDelete={async (annotationId) => {
-                        const token = localStorage.getItem('pandora_session');
-                        const wid = currentWorkspace?.id || workspaceId;
-                        await fetch(
-                          `/api/workspaces/${wid}/reports/${reportDocument!.id}/annotations/${annotationId}`,
-                          { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } }
-                        );
-                        setDocAnnotations(prev => prev.filter(a => a.id !== annotationId));
-                      }}
-                    />
-                  </div>
-                ))}
+                          const saved: DocAnnotation = await res.json();
+                          setDocAnnotations(prev => [
+                            ...prev.filter(a => !(a.section_id === data.section_id && a.paragraph_index === data.paragraph_index)),
+                            saved,
+                          ]);
+                        }}
+                        onAnnotationDelete={async (annotationId) => {
+                          const token = localStorage.getItem('pandora_session');
+                          await fetch(
+                            `/api/workspaces/${wid}/reports/${reportDocument!.id}/annotations/${annotationId}`,
+                            { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } }
+                          );
+                          setDocAnnotations(prev => prev.filter(a => a.id !== annotationId));
+                        }}
+                      />
+                      {wid && tok && (
+                        <ChartSuggestionPanel
+                          workspaceId={wid}
+                          reportDocumentId={reportDocument!.id}
+                          sectionId={section.id}
+                          token={tok}
+                        />
+                      )}
+                    </div>
+                  );
+                })}
 
                 {/* Actions */}
                 {reportDocument.actions.length > 0 && (

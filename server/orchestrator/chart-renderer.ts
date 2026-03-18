@@ -1,37 +1,349 @@
 /**
- * Chart Renderer - Server-side chart rendering using chartjs-node-canvas
+ * Chart Renderer - Server-side chart rendering via QuickChart.io HTTP API
  *
- * Renders Chart.js charts to PNG buffers for embedding in DOCX/PDF exports
+ * Replaces chartjs-node-canvas (requires libcairo/libpango/libuuid native libs
+ * unavailable in this environment) with a pure HTTPS call to QuickChart.io.
+ *
+ * The existing RenderChartInput interface and agents.ts call-site are preserved
+ * via the renderChartToPNG backward-compat wrapper at the bottom.
  */
 
-import { ChartJSNodeCanvas } from 'chartjs-node-canvas';
-import { ChartConfiguration } from 'chart.js';
+import * as https from 'https';
+import type { ChartSuggestion } from './types.js';
 
-const DEFAULT_WIDTH = 600;
-const DEFAULT_HEIGHT = 400;
-
-// Color palette for charts - matching Pandora brand
 const COLORS = {
-  teal: '#0D9488',
-  blue: '#3B82F6',
-  amber: '#D97706',
-  red: '#DC2626',
-  green: '#16A34A',
-  purple: '#7C3AED',
-  pink: '#EC4899',
-  slate: '#64748B',
+  primary:   '#0D9488',
+  secondary: '#CBD5E1',
+  accent:    '#F59E0B',
+  danger:    '#EF4444',
+  muted:     '#94A3B8',
 };
 
-const CHART_COLORS = [
-  COLORS.teal,
-  COLORS.blue,
-  COLORS.amber,
-  COLORS.green,
-  COLORS.purple,
-  COLORS.pink,
-  COLORS.red,
-  COLORS.slate,
+const PALETTE = [
+  COLORS.primary,
+  COLORS.secondary,
+  COLORS.accent,
+  COLORS.danger,
+  COLORS.muted,
 ];
+
+// Semantic color map: label keyword → hex color
+// Checked against lower-cased, trimmed label strings
+const SEMANTIC_COLORS: Record<string, string> = {
+  'created':        '#0D9488',  // teal — new/positive
+  'advanced':       '#0D9488',  // teal — positive movement
+  'won':            '#16A34A',  // green — closed won
+  'closed won':     '#16A34A',
+  'closed-won':     '#16A34A',
+  'regressed':      '#F59E0B',  // amber — caution
+  'lost':           '#EF4444',  // red — negative
+  'closed lost':    '#EF4444',
+  'closed-lost':    '#EF4444',
+  'target':         '#CBD5E1',  // muted — benchmark
+  'coverage':       '#0D9488',  // teal — actual
+  'gap':            '#F59E0B',  // amber — shortfall
+  'bear':           '#94A3B8',  // muted
+  'base':           '#CBD5E1',  // light gray
+  'bull':           '#F59E0B',  // amber — upside
+  'open pipeline':  '#CBD5E1',
+  'best case':      '#F59E0B',
+  'commit':         '#0D9488',
+  'committed':      '#0D9488',
+  'pipeline':       '#CBD5E1',
+};
+
+function getSemanticColors(labels: string[], defaultPalette: string[]): string[] {
+  return labels.map((label, i) => {
+    const key = label.toLowerCase().trim();
+    return SEMANTIC_COLORS[key] ?? defaultPalette[i % defaultPalette.length];
+  });
+}
+
+export interface ChartRenderResult {
+  section_id: string;
+  png_buffer: Buffer;
+  width: number;
+  height: number;
+}
+
+export async function renderChartToPng(
+  chart: ChartSuggestion,
+  width = 560,
+  height = 220
+): Promise<ChartRenderResult> {
+  const config = buildChartJsConfig(chart);
+
+  const payload = {
+    width,
+    height,
+    backgroundColor: 'white',
+    format: 'png',
+    chart: config,
+  };
+
+  const body = JSON.stringify(payload);
+  const png_buffer = await fetchQuickChart(body);
+
+  return { section_id: chart.section_id, png_buffer, width, height };
+}
+
+export async function renderAllCharts(
+  charts: ChartSuggestion[]
+): Promise<Map<string, ChartRenderResult>> {
+  const results = new Map<string, ChartRenderResult>();
+
+  await Promise.all(
+    charts.map(async (chart) => {
+      try {
+        const result = await renderChartToPng(chart);
+        results.set(chart.section_id, result);
+      } catch (err) {
+        console.error(`[ChartRenderer] Failed ${chart.section_id}:`, err);
+      }
+    })
+  );
+
+  return results;
+}
+
+function fetchQuickChart(body: string): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: 'quickchart.io',
+      path: '/chart',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body),
+      },
+    };
+
+    const req = https.request(options, (res) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (chunk) => chunks.push(chunk));
+      res.on('end', () => {
+        const buf = Buffer.concat(chunks);
+        if (res.statusCode !== 200) {
+          reject(
+            new Error(
+              `QuickChart error ${res.statusCode}: ` +
+              buf.toString().slice(0, 200)
+            )
+          );
+          return;
+        }
+        resolve(buf);
+      });
+    });
+
+    req.on('error', reject);
+    req.setTimeout(15000, () => {
+      req.destroy();
+      reject(new Error('QuickChart timeout after 15s'));
+    });
+
+    req.write(body);
+    req.end();
+  });
+}
+
+/**
+ * Normalize values to K units when max >= 1000.
+ * QuickChart serializes ticks.callback functions to JSON where they break,
+ * so we pre-normalize the data and annotate the axis title instead.
+ * Count charts (all integers, max < 50) are left as-is.
+ */
+function normalizeValues(values: number[]): {
+  normalized: number[];
+  suffix: string;
+  isCount: boolean;
+} {
+  const maxVal = Math.max(...values, 0);
+  const allIntegers = values.every(v => Number.isInteger(v));
+
+  // Count chart: small integers — don't normalize, force integer axis
+  if (maxVal < 50 && allIntegers) {
+    return { normalized: values, suffix: '', isCount: true };
+  }
+
+  if (maxVal >= 1_000_000) {
+    return {
+      normalized: values.map(v => Math.round(v / 1_000_000 * 10) / 10),
+      suffix: '($M)',
+      isCount: false,
+    };
+  }
+  if (maxVal >= 1_000) {
+    return {
+      normalized: values.map(v => Math.round(v / 1_000)),
+      suffix: '($K)',
+      isCount: false,
+    };
+  }
+  return { normalized: values, suffix: '', isCount: false };
+}
+
+function buildChartJsConfig(chart: ChartSuggestion): object {
+  const labels = chart.data_labels;
+  const rawValues = chart.data_values;
+  const colors = getSemanticColors(labels, PALETTE);
+  const { normalized, suffix, isCount } = normalizeValues(rawValues);
+
+  // Y-axis title: prefer explicit suffix, then "Deals" for count charts
+  const yAxisTitleText = suffix || (isCount ? 'Deals' : '');
+  const yAxisTitle = yAxisTitleText
+    ? { display: true, text: yAxisTitleText, color: '#94A3B8', font: { size: 10 } }
+    : { display: false };
+
+  // Y-axis ticks: force integers for count charts
+  const yTicks = isCount
+    ? { color: '#64748B', font: { size: 11 }, precision: 0, stepSize: 1 }
+    : { color: '#64748B', font: { size: 11 } };
+
+  const baseOptions = {
+    plugins: {
+      legend: { display: false },
+      title: {
+        display: true,
+        text: chart.title,
+        font: { size: 13, weight: 'bold' },
+        color: '#1E293B',
+        padding: { bottom: 12 },
+      },
+    },
+    scales: {
+      x: {
+        grid: { display: false },
+        ticks: { color: '#64748B', font: { size: 11 } },
+      },
+      y: {
+        min: isCount ? 0 : undefined,
+        grid: { color: 'rgba(0,0,0,0.06)' },
+        border: { display: false },
+        title: yAxisTitle,
+        ticks: yTicks,
+      },
+    },
+  };
+
+  switch (chart.chart_type) {
+    case 'bar':
+      return {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [{
+            label: chart.title,
+            data: normalized,
+            backgroundColor: colors,
+            borderRadius: 4,
+          }],
+        },
+        options: baseOptions,
+      };
+
+    case 'horizontalBar': {
+      const xAxisTitleText = suffix || (isCount ? 'Deals' : '');
+      const xAxisTitle = xAxisTitleText
+        ? { display: true, text: xAxisTitleText, color: '#94A3B8', font: { size: 10 } }
+        : { display: false };
+      const xTicks = isCount
+        ? { color: '#64748B', font: { size: 11 }, precision: 0, stepSize: 1 }
+        : { color: '#64748B', font: { size: 11 } };
+      return {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [{
+            label: chart.title,
+            data: normalized,
+            backgroundColor: colors,
+            borderRadius: 4,
+          }],
+        },
+        options: {
+          ...baseOptions,
+          indexAxis: 'y',
+          scales: {
+            x: {
+              min: isCount ? 0 : undefined,
+              grid: { color: 'rgba(0,0,0,0.06)' },
+              border: { display: false },
+              title: xAxisTitle,
+              ticks: xTicks,
+            },
+            y: {
+              grid: { display: false },
+              ticks: { color: '#64748B', font: { size: 11 } },
+            },
+          },
+        },
+      };
+    }
+
+    case 'line':
+      return {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [{
+            label: chart.title,
+            data: normalized,
+            borderColor: COLORS.primary,
+            backgroundColor: 'rgba(13,148,136,0.1)',
+            borderWidth: 2,
+            pointRadius: 4,
+            fill: true,
+            tension: 0.3,
+          }],
+        },
+        options: baseOptions,
+      };
+
+    case 'doughnut':
+    case 'pie':
+      return {
+        type: chart.chart_type === 'pie' ? 'pie' : 'doughnut',
+        data: {
+          labels,
+          datasets: [{
+            label: chart.title,
+            data: rawValues,
+            backgroundColor: colors,
+            borderWidth: 2,
+            borderColor: 'white',
+          }],
+        },
+        options: {
+          plugins: {
+            legend: {
+              display: true,
+              position: 'right',
+              labels: {
+                color: '#374151',
+                font: { size: 11 },
+                padding: 16,
+              },
+            },
+            title: {
+              display: true,
+              text: chart.title,
+              font: { size: 13, weight: 'bold' },
+              color: '#1E293B',
+            },
+          },
+          cutout: chart.chart_type === 'doughnut' ? '65%' : '0%',
+        },
+      };
+
+    default:
+      return buildChartJsConfig({ ...chart, chart_type: 'bar' });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Backward-compat wrapper used by agents.ts POST /charts endpoint
+// ---------------------------------------------------------------------------
 
 export interface RenderChartInput {
   chart_type: 'bar' | 'line' | 'pie' | 'doughnut' | 'horizontalBar';
@@ -43,84 +355,21 @@ export interface RenderChartInput {
   height?: number;
 }
 
-export async function renderChartToPNG(
-  input: RenderChartInput
-): Promise<Buffer> {
-  const width = input.width || DEFAULT_WIDTH;
-  const height = input.height || DEFAULT_HEIGHT;
-
-  const chartJSNodeCanvas = new ChartJSNodeCanvas({
-    width,
-    height,
-    backgroundColour: '#FFFFFF',
-  });
-
-  // Map horizontalBar to indexAxis: 'y' for bar chart (Chart.js v3+)
-  let chartType = input.chart_type;
-  let indexAxis: 'x' | 'y' = 'x';
-  if (input.chart_type === 'horizontalBar') {
-    chartType = 'bar';
-    indexAxis = 'y';
-  }
-
-  // Build Chart.js configuration
-  const configuration: ChartConfiguration = {
-    type: chartType as any,
-    data: {
-      labels: input.data_labels,
-      datasets: [
-        {
-          label: input.title,
-          data: input.data_values,
-          backgroundColor: chartType === 'pie' || chartType === 'doughnut'
-            ? CHART_COLORS.slice(0, input.data_values.length)
-            : COLORS.teal,
-          borderColor: chartType === 'line' ? COLORS.teal : undefined,
-          borderWidth: chartType === 'line' ? 2 : 1,
-          fill: chartType === 'line' ? false : undefined,
-        },
-      ],
-    },
-    options: {
-      responsive: true,
-      plugins: {
-        title: {
-          display: true,
-          text: input.title,
-          font: {
-            size: 16,
-            weight: 'bold',
-          },
-          color: '#1E293B',
-        },
-        legend: {
-          display: chartType === 'pie' || chartType === 'doughnut',
-          position: 'right',
-        },
-      },
-      scales: chartType !== 'pie' && chartType !== 'doughnut' ? {
-        x: {
-          ticks: { color: '#64748B' },
-          grid: { color: '#E2E8F0' },
-        },
-        y: {
-          ticks: { color: '#64748B' },
-          grid: { color: '#E2E8F0' },
-          beginAtZero: true,
-        },
-      } : undefined,
-      indexAxis,
-      ...input.chart_options,
-    } as any,
+export async function renderChartToPNG(input: RenderChartInput): Promise<Buffer> {
+  const compat: ChartSuggestion = {
+    section_id: 'adhoc',
+    chart_type: input.chart_type,
+    title: input.title,
+    data_labels: input.data_labels,
+    data_values: input.data_values,
+    reasoning: '',
+    priority: 'medium',
   };
-
-  const buffer = await chartJSNodeCanvas.renderToBuffer(configuration);
-  return buffer;
+  const result = await renderChartToPng(compat, input.width, input.height);
+  return result.png_buffer;
 }
 
-export async function renderChartToDataURL(
-  input: RenderChartInput
-): Promise<string> {
+export async function renderChartToDataURL(input: RenderChartInput): Promise<string> {
   const buffer = await renderChartToPNG(input);
   return `data:image/png;base64,${buffer.toString('base64')}`;
 }

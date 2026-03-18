@@ -46,26 +46,60 @@ function formatCurrency(amount: number): string {
 // ============================================================================
 
 function summarizeForecastRollup(resultData: any): Omit<SkillSummary, 'ran_at' | 'data_age_hours'> {
-  const closed_won = safeGet(resultData, 'closed_won.amount', 0) || 0;
-  const commit = safeGet(resultData, 'commit.amount', 0) || 0;
-  const best_case = safeGet(resultData, 'best_case.amount', 0) || 0;
-  const pipeline = safeGet(resultData, 'pipeline.amount', 0) || 0;
+  // Result may be wrapped under forecast_data.team (new format) or flat (old format)
+  const team = safeGet(resultData, 'forecast_data.team', null) ?? safeGet(resultData, 'team', null) ?? {};
 
-  const bear = safeGet(resultData, 'landing_zone.bear', 0) || closed_won;
-  const base = safeGet(resultData, 'landing_zone.base', 0) || closed_won + commit;
-  const bull = safeGet(resultData, 'landing_zone.bull', 0) || closed_won + best_case;
+  const closed_won =
+    safeGet(team, 'closedWon', null) ??
+    safeGet(resultData, 'closed_won.amount', 0) ?? 0;
+  const commit =
+    safeGet(team, 'commit', null) ??
+    safeGet(resultData, 'commit.amount', 0) ?? 0;
+  const best_case =
+    safeGet(team, 'bestCase', null) ??
+    safeGet(resultData, 'best_case.amount', 0) ?? 0;
+  const pipeline =
+    safeGet(team, 'pipeline', null) ??
+    safeGet(resultData, 'pipeline.amount', 0) ?? 0;
 
-  const attainment_pct = safeGet(resultData, 'attainment_pct', null);
-  const quota = safeGet(resultData, 'quota', null);
-  const days_remaining = safeGet(resultData, 'days_remaining', 0) || 0;
+  const bear =
+    safeGet(team, 'bearCase', null) ??
+    safeGet(resultData, 'landing_zone.bear', null) ??
+    (closed_won || 0);
+  const base =
+    safeGet(team, 'baseCase', null) ??
+    safeGet(resultData, 'landing_zone.base', null) ??
+    ((closed_won || 0) + (commit || 0));
+  const bull =
+    safeGet(team, 'bullCase', null) ??
+    safeGet(resultData, 'landing_zone.bull', null) ??
+    ((closed_won || 0) + (best_case || 0));
+
+  const quotaConfig = safeGet(resultData, 'quota_config', null) ?? {};
+  const attainment_pct =
+    safeGet(team, 'attainmentPct', null) ??
+    safeGet(resultData, 'attainment_pct', null);
+  const quota =
+    safeGet(quotaConfig, 'quota', null) ??
+    safeGet(quotaConfig, 'totalQuota', null) ??
+    safeGet(resultData, 'quota', null);
+  const days_remaining =
+    safeGet(team, 'daysRemaining', null) ??
+    safeGet(resultData, 'days_remaining', 0) ?? 0;
 
   const has_quota = quota && quota > 0;
-  const category_changes = safeGet(resultData, 'category_changes', []) || [];
-  const concentration_risk = safeGet(resultData, 'concentration_risk', false);
+  const category_changes =
+    safeGet(resultData, 'wow_delta.categoryChanges', null) ??
+    safeGet(resultData, 'category_changes', []) ?? [];
+  const concentration_risk =
+    safeGet(resultData, 'forecast_data.concentrationRisk', null) ??
+    safeGet(resultData, 'concentration_risk', false);
 
   // Extract top stalled commits and pacing issues
   const top_actions: ActionSummary[] = [];
-  const stalled = safeGet(resultData, 'stalled_commits', []) || [];
+  const stalled =
+    safeGet(resultData, 'forecast_data.stalledCommits', null) ??
+    safeGet(resultData, 'stalled_commits', []) ?? [];
   stalled.slice(0, 2).forEach((deal: any) => {
     top_actions.push({
       urgency: 'this_week',
@@ -97,7 +131,9 @@ function summarizeForecastRollup(resultData: any): Omit<SkillSummary, 'ran_at' |
 
   const has_signal = category_changes.length > 0 ||
                      concentration_risk ||
-                     (has_quota && attainment_pct && attainment_pct < 80);
+                     (has_quota && attainment_pct && attainment_pct < 80) ||
+                     (closed_won || 0) > 0 ||
+                     (pipeline || 0) > 0;
 
   return {
     skill_id: 'forecast-rollup',
@@ -427,6 +463,18 @@ function summarizePipelineCoverage(resultData: any): Omit<SkillSummary, 'ran_at'
     }
   });
 
+  // Build rep pipeline breakdown for chart generation (top 6 reps with pipeline)
+  const rep_pipeline_json = JSON.stringify(
+    reps
+      .filter((r: any) => (r.pipeline || 0) > 0 || (r.closedWon || 0) > 0)
+      .slice(0, 6)
+      .map((r: any) => ({
+        name: (r.name || r.email || 'Unknown').split(' ')[0], // First name only for chart labels
+        pipeline: Math.round((r.pipeline || 0) / 1000),        // $K
+        closedWon: Math.round((r.closedWon || 0) / 1000),
+      }))
+  );
+
   return {
     skill_id: 'pipeline-coverage',
     headline,
@@ -438,6 +486,7 @@ function summarizePipelineCoverage(resultData: any): Omit<SkillSummary, 'ran_at'
       gap_amount,
       closed_won,
       deal_count,
+      rep_pipeline_json,
     },
     top_findings: top_findings.slice(0, 5),
     top_actions: top_actions.slice(0, 3),
