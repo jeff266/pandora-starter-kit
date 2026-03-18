@@ -226,13 +226,7 @@ function buildChartJsConfig(chart: ChartSuggestion): object {
   const baseOptions = {
     plugins: {
       legend: { display: false },
-      title: {
-        display: true,
-        text: chart.title,
-        font: { size: 13, weight: 'bold' },
-        color: '#1E293B',
-        padding: { bottom: 12 },
-      },
+      title: { display: false },  // Title rendered externally by PDF/docx renderer
     },
     scales: {
       x: {
@@ -439,13 +433,7 @@ function buildChartJsConfigFromSpec(
   const baseOptions = {
     plugins: {
       legend: { display: false },
-      title: {
-        display: true,
-        text: title,
-        font: { size: 13, weight: 'bold' },
-        color: '#1E293B',
-        padding: { bottom: 12 },
-      },
+      title: { display: false },  // Title rendered externally by PDF/docx renderer
     },
     scales: {
       x: {

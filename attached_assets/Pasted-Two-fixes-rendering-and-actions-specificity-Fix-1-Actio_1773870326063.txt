@@ -1,0 +1,96 @@
+Two fixes — rendering and actions specificity.
+
+Fix 1: Actions must reference specific deal names
+
+In server/orchestrator/report-orchestrator.ts,
+find the system prompt section that defines the
+actions array output format.
+
+The NAMED DEALS RULES block instructs the
+Orchestrator to cite deals in section content,
+but the actions array has a separate format
+instruction that may not reference the named
+deals block.
+
+Find the actions output format instruction and
+add explicitly:
+
+  "ACTIONS FORMAT:
+   Each action must reference a specific deal
+   name and dollar amount where applicable.
+   CORRECT: 'Close Butterfly Effects Inc ($273K)
+     — zero activities recorded'
+   WRONG: 'Close or re-qualify. Deal has been
+     dormant since mid-2025.'
+   If the NAMED DEALS block contains deals
+   relevant to this action, use the deal name
+   and amount directly in the action text.
+   Actions without specific deal references
+   are only acceptable for team-level actions
+   (e.g. 'Schedule Q2 pipeline kickoff')."
+
+Fix 2: Chart title overlapping chart body
+
+In server/orchestrator/chart-renderer.ts or
+chart-intelligence.ts, find where the Chart.js
+config title is set for QuickChart.
+
+The title is rendering inside the chart area.
+Fix by moving the title OUTSIDE the chart as
+a separate HTML element, OR increase the title
+padding so it sits clearly above the chart body.
+
+Option A — increase padding (simpler):
+  title: {
+    display: true,
+    text: spec.title,
+    font: { size: 13, weight: 'bold' },
+    color: '#1E293B',
+    padding: { top: 0, bottom: 20 },  // was 10
+  }
+
+Option B — disable Chart.js title entirely and
+pass the title as a separate caption in the
+renderer (more control):
+
+  In chart renderer: title: { display: false }
+  In docx-renderer: add a paragraph with
+    the chart title text ABOVE the ImageRun
+  In pdf-renderer: add a div with title text
+    ABOVE the img tag
+
+Option B is cleaner — the title is then styled
+by the renderer not Chart.js, giving full
+control over font, color, and spacing.
+
+Fix 3: Add bottom margin after charts
+in PDF renderer
+
+In server/renderers/pdf-renderer-v2.ts, find
+where chart images are rendered inside reasoning
+nodes. After the chart img tag, add margin:
+
+  style="...margin: 8px 0 32px 14px;"
+                            ↑
+                       increase from 16px to 32px
+
+This prevents the chart from bleeding into
+the next section header.
+
+---
+
+Acceptance Criteria:
+
+1. Actions reference specific deal names:
+   "Close Butterfly Effects Inc ($273K)" ✓
+   not "Close or re-qualify" ✗
+
+2. Chart title renders above chart body,
+   not overlapping bars or donut segments
+
+3. No chart bleeds into next section header —
+   adequate whitespace between chart bottom
+   and next section title
+
+4. Non-breaking: reports without named deals
+   still produce valid (if generic) actions

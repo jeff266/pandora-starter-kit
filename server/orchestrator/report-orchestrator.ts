@@ -125,6 +125,15 @@ NAMED DEALS RULES:
   relevant section with both signals
 - Named deals are more authoritative than aggregate metrics — prefer them
 
+ACTIONS FORMAT:
+- Each action must reference a specific deal name and dollar amount where applicable.
+- CORRECT: "Close Butterfly Effects Inc ($273K) — zero activities recorded"
+- WRONG: "Close or re-qualify. Deal has been dormant since mid-2025."
+- If the NAMED DEALS block contains deals relevant to this action, use the deal name
+  and amount directly in the action text.
+- Actions without specific deal references are only acceptable for team-level actions
+  (e.g. "Schedule Q2 pipeline kickoff with both reps").
+
 REQUIRED OUTPUT FORMAT — respond with ONLY valid JSON:
 {
   "headline": "string",

@@ -636,21 +636,21 @@ export async function renderPdf(
 
         // Chart Intelligence: render chart after answer
         if (node.chart_png && node.chart_spec) {
-          if (pdf.y > pdf.page.height - 230) pdf.addPage();
+          if (pdf.y > pdf.page.height - 260) pdf.addPage();
+
+          // Chart title ABOVE the image (Chart.js title is disabled in renderer)
+          pdf.fillColor(hexToRgb('#1E293B'))
+             .font('Helvetica-Bold')
+             .fontSize(10)
+             .text(node.chart_spec.title, 102, pdf.y, { width: W - 12, align: 'center' });
+          pdf.moveDown(0.5);
 
           // Embed chart image
           pdf.image(node.chart_png, 102, pdf.y, {
             fit: [W - 12, 180],
             align: 'center',
           });
-          pdf.moveDown(9.5);
-
-          // Chart title as caption
-          pdf.fillColor(hexToRgb('#64748B'))
-             .font('Helvetica-Oblique')
-             .fontSize(8.5)
-             .text(node.chart_spec.title, 102, pdf.y, { width: W - 12, align: 'center' });
-          pdf.moveDown(0.6);
+          pdf.moveDown(11);  // skip past image + Fix 3: extra bottom margin
         }
 
         // Data gap note
@@ -671,19 +671,21 @@ export async function renderPdf(
     const pdfSectionCharts = hasInlineCharts ? [] : (pdfChartsBySection.get(section.id) || []);
     for (const chart of pdfSectionCharts) {
       if (chart.chart_png) {
-        if (pdf.y > pdf.page.height - 250) pdf.addPage();
+        if (pdf.y > pdf.page.height - 280) pdf.addPage();
+
+        // Chart title ABOVE the image
+        pdf.fillColor(hexToRgb(DARK))
+           .font('Helvetica-Bold')
+           .fontSize(10)
+           .text(chart.title, 90, pdf.y, { width: W, align: 'center' });
+        pdf.moveDown(0.5);
 
         // Embed PNG chart image
         pdf.image(chart.chart_png, 90, pdf.y, {
           fit: [W, 200],
           align: 'center',
         });
-        pdf.moveDown(10.5);
-
-        // Chart caption
-        pdf.fillColor(hexToRgb(MUTED)).font('Helvetica-Oblique').fontSize(9)
-           .text(chart.title, 90, pdf.y, { width: W, align: 'center' });
-        pdf.moveDown(1.2);
+        pdf.moveDown(12);  // skip past image + bottom margin before next section
       }
     }
   }
