@@ -19,6 +19,40 @@ import { inferAnalysisScopes, applyInferredScopes } from '../../config/scope-inf
 import { stampAllDealsForWorkspace, stampDealScopes } from '../../config/scope-stamper.js';
 import { autoConfigurePipelineDefaults } from '../../chat/pipeline-resolver.js';
 
+const ACTIVITY_KEEP_FIELDS = new Set([
+  'hs_activity_type',
+  'hs_timestamp',
+  'hs_body_preview',
+  'hs_call_duration',
+  'hs_call_status',
+  'hs_call_direction',
+  'hs_meeting_title',
+  'hs_meeting_outcome',
+  'hubspot_owner_id',
+  'hs_email_subject',
+  'hs_email_status',
+]);
+
+function normalizeActivityProperties(
+  raw: Record<string, any>
+): Record<string, any> {
+  const normalized: Record<string, any> = {};
+
+  for (const field of ACTIVITY_KEEP_FIELDS) {
+    if (raw[field] !== undefined) {
+      normalized[field] = raw[field];
+    }
+  }
+
+  for (const [key, val] of Object.entries(raw)) {
+    if (!ACTIVITY_KEEP_FIELDS.has(key) && typeof val !== 'object' && val !== null) {
+      normalized[key] = val;
+    }
+  }
+
+  return normalized;
+}
+
 async function buildStageMaps(client: HubSpotClient, workspaceId: string): Promise<DealTransformOptions> {
   const stageMap = new Map<string, string>();
   const pipelineMap = new Map<string, string>();
@@ -319,7 +353,10 @@ async function upsertActivities(activities: any[]): Promise<number> {
             deal_id = EXCLUDED.deal_id,
             updated_at = NOW()`,
           [
-            activity.workspace_id, activity.source, activity.source_id, JSON.stringify(activity.source_data),
+            activity.workspace_id, activity.source, activity.source_id, JSON.stringify({
+              ...activity.source_data,
+              properties: normalizeActivityProperties(activity.source_data?.properties ?? {}),
+            }),
             activity.activity_type, activity.subject, activity.body, activity.timestamp,
             activity.duration_seconds, contactId, dealId,
           ]

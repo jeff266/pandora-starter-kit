@@ -1,0 +1,309 @@
+Claude Code Prompt: Storage Audit and Bloat Fix
+
+## Context
+
+Diagnostic reveals two storage anomalies that will
+cause performance problems as Pandora scales:
+
+1. skill_runs: 231MB for 24 rows (~9.6MB/row)
+   The output and result JSONB columns are storing
+   full skill output including raw transcripts,
+   conversation arrays, and large evidence objects.
+   This needs to be trimmed at write time.
+
+2. activities: 211MB for 420 rows (~500KB/row)
+   The properties JSONB column is storing raw
+   HubSpot API responses. This needs to be
+   normalized to only store fields Pandora uses.
+
+3. report_charts: 728KB for 24 rows (~30KB/row)
+   chart_png bytea column. This will grow fast.
+   Needs a size cap and eventual migration to
+   file storage.
+
+Before starting, read ALL of these:
+
+1. The skill_runs table schema — find the migration
+   that created it. Note which columns store JSONB:
+   output, result, result_data, or similar.
+
+2. Find where skill output is written to skill_runs.
+   Look for INSERT or UPDATE statements that write
+   the output column. This is in the skill runtime.
+
+3. Find the activities table schema — note what
+   columns exist and how properties JSONB is used
+   by skills. Which fields do skills actually read?
+   Check: server/skills/tool-definitions.ts for
+   any queryActivities or similar calls.
+
+4. report_charts table schema — note the chart_png
+   column type (bytea). Find where charts are
+   written.
+
+5. The latest migration number in /migrations/.
+
+Do not write code until all five are read.
+
+---
+
+## Fix 1: Trim skill_runs output at write time
+
+The skill runtime writes full skill output to the
+output column. Transcripts and raw evidence are
+the likely culprits.
+
+In the skill runtime (wherever skill output is
+persisted), add a trimming step before writing:
+```typescript
+function trimSkillOutput(output: any): any {
+  if (!output || typeof output !== 'object')
+    return output;
+
+  const trimmed = { ...output };
+
+  // Remove raw transcript text — it's in the
+  // conversations table, no need to duplicate
+  if (trimmed.transcript_text) {
+    trimmed.transcript_text = '[trimmed]';
+  }
+  if (trimmed.trimmed_conversations) {
+    delete trimmed.trimmed_conversations;
+  }
+  if (trimmed.recent_conversations) {
+    // Keep count and metadata, not full text
+    trimmed.recent_conversations =
+      Array.isArray(trimmed.recent_conversations)
+        ? trimmed.recent_conversations
+            .slice(0, 3)
+            .map((c: any) => ({
+              id: c.id,
+              title: c.title,
+              started_at: c.started_at,
+              duration_seconds: c.duration_seconds,
+              // Remove transcript/summary text
+            }))
+        : trimmed.recent_conversations;
+  }
+
+  // Cap any array fields at 50 items
+  for (const [key, val] of Object.entries(trimmed)) {
+    if (Array.isArray(val) && val.length > 50) {
+      (trimmed as any)[key] = val.slice(0, 50);
+      console.log(
+        `[SkillOutput] Trimmed ${key} from ` +
+        `${val.length} to 50 items`
+      );
+    }
+  }
+
+  return trimmed;
+}
+```
+
+Apply this function before every INSERT/UPDATE
+to the output column in skill_runs.
+
+Also add a DB-level size guard as a second line
+of defense — log a warning if the serialized
+output exceeds 2MB:
+```typescript
+const serialized = JSON.stringify(trimmedOutput);
+if (serialized.length > 2_000_000) {
+  console.warn(
+    `[SkillRuntime] Output size warning: ` +
+    `${Math.round(serialized.length / 1000)}KB ` +
+    `for skill ${skillId}. Consider further trimming.`
+  );
+}
+```
+
+Do NOT backfill existing rows — the 231MB is
+already written. Just prevent future growth.
+
+---
+
+## Fix 2: Normalize activities properties JSONB
+
+The activities table stores raw HubSpot API
+responses in properties JSONB. Each row is
+~500KB because HubSpot responses include
+nested objects Pandora never uses.
+
+Find where activities are written during HubSpot
+sync. Add a normalization step:
+```typescript
+function normalizeActivityProperties(
+  raw: Record<string, any>
+): Record<string, any> {
+  // Keep only fields Pandora's skills actually use
+  // Check tool-definitions.ts for queryActivities
+  // to find which fields are read
+  const KEEP_FIELDS = [
+    'hs_activity_type',
+    'hs_timestamp',
+    'hs_body_preview',
+    'hs_call_duration',
+    'hs_call_status',
+    'hs_call_direction',
+    'hs_meeting_title',
+    'hs_meeting_outcome',
+    'hubspot_owner_id',
+    'hs_email_subject',
+    'hs_email_status',
+  ];
+
+  const normalized: Record<string, any> = {};
+  for (const field of KEEP_FIELDS) {
+    if (raw[field] !== undefined) {
+      normalized[field] = raw[field];
+    }
+  }
+
+  // Keep any non-nested scalar values not in list
+  for (const [key, val] of Object.entries(raw)) {
+    if (
+      !KEEP_FIELDS.includes(key) &&
+      typeof val !== 'object' &&
+      val !== null
+    ) {
+      normalized[key] = val;
+    }
+  }
+
+  return normalized;
+}
+```
+
+Apply during HubSpot activities sync, not
+retroactively. Existing bloated rows stay as-is —
+only new syncs write normalized data.
+
+---
+
+## Fix 3: Cap chart_png size
+
+In the chart creation endpoint or chart renderer,
+add a size check before writing to report_charts:
+```typescript
+const MAX_CHART_SIZE_BYTES = 150_000; // 150KB
+
+if (pngBuffer.length > MAX_CHART_SIZE_BYTES) {
+  console.warn(
+    `[ChartRenderer] Chart PNG size ` +
+    `${Math.round(pngBuffer.length / 1000)}KB ` +
+    `exceeds ${MAX_CHART_SIZE_BYTES / 1000}KB cap. ` +
+    `Re-rendering at lower resolution.`
+  );
+  // Re-render at smaller dimensions
+  pngBuffer = await renderChartToPng(
+    chartSpec, 400, 160  // reduced from 560×220
+  );
+}
+```
+
+Log the sizes so you can see if QuickChart is
+returning unexpectedly large PNGs.
+
+---
+
+## Migration: Add missing indexes
+
+Create /migrations/XXX_performance_indexes.sql:
+```sql
+-- Close date range queries for BI
+-- Used by: "deals closing this quarter",
+--   "pipeline by close date bucket"
+CREATE INDEX CONCURRENTLY IF NOT EXISTS
+  idx_deals_close_date
+  ON deals(workspace_id, close_date)
+  WHERE close_date IS NOT NULL;
+
+-- Pipeline + stage composite for Fellowship exclusion
+-- Used by: getForecastPipelines() scoping
+CREATE INDEX CONCURRENTLY IF NOT EXISTS
+  idx_deals_pipeline_stage
+  ON deals(workspace_id, pipeline, stage_normalized)
+  WHERE amount > 0;
+
+-- Amount range for deal value queries
+-- Used by: "show me deals over $100K",
+--   "pipeline by deal size bucket"
+CREATE INDEX CONCURRENTLY IF NOT EXISTS
+  idx_deals_amount
+  ON deals(workspace_id, amount DESC)
+  WHERE amount > 0;
+
+-- Last activity date for staleness queries
+-- Used by: "deals dark 30+ days",
+--   chart intelligence stale deal extraction
+CREATE INDEX CONCURRENTLY IF NOT EXISTS
+  idx_deals_last_activity
+  ON deals(workspace_id, last_activity_date)
+  WHERE last_activity_date IS NOT NULL;
+
+-- skill_runs: faster lookup for summarizer
+-- The existing workspace_skill_created index is good
+-- but add status filter for completed-only queries
+CREATE INDEX CONCURRENTLY IF NOT EXISTS
+  idx_skill_runs_workspace_skill_status
+  ON skill_runs(workspace_id, skill_id, status,
+    created_at DESC)
+  WHERE status = 'completed';
+
+-- report_charts: workspace + document lookup
+-- Already have idx_report_charts_document
+-- Add workspace + section for the data picker
+CREATE INDEX CONCURRENTLY IF NOT EXISTS
+  idx_report_charts_workspace_section
+  ON report_charts(workspace_id, section_id,
+    created_at DESC);
+```
+
+Use CONCURRENTLY so indexes build without
+locking the table. Safe to run on live DB.
+
+---
+
+## Acceptance Criteria:
+
+1. New skill_run rows have output column < 500KB
+   Verify after next agent run:
+   SELECT
+     pg_size_pretty(pg_column_size(output))
+       as output_size,
+     skill_id
+   FROM skill_runs
+   ORDER BY created_at DESC LIMIT 5;
+
+2. trimSkillOutput() removes transcript_text
+   and trims conversation arrays
+
+3. New activity syncs write normalized properties
+   (check size of a new row after next sync)
+
+4. All 6 new indexes created:
+   SELECT indexname FROM pg_indexes
+   WHERE tablename IN ('deals', 'skill_runs',
+     'report_charts')
+   ORDER BY indexname;
+
+5. EXPLAIN ANALYZE on common queries shows
+   index scans not sequential scans:
+
+   EXPLAIN ANALYZE
+   SELECT id, name, amount, stage_normalized,
+     close_date, owner_email, last_activity_date
+   FROM deals
+   WHERE workspace_id = '4160191d...'
+     AND close_date BETWEEN NOW()
+       AND NOW() + INTERVAL '30 days'
+     AND stage_normalized != 'closed_won'
+   ORDER BY close_date;
+
+   Should show:
+   Index Scan using idx_deals_close_date
+   NOT: Seq Scan on deals
+
+6. No regressions — existing skill runs,
+   report generation, and exports unchanged

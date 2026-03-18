@@ -351,6 +351,8 @@ export interface RenderChartInput {
  * Renders a chart from ChartNodeSpec (Chart Intelligence output).
  * Returns PNG buffer directly.
  */
+const MAX_CHART_SIZE_BYTES = 150_000; // 150KB
+
 export async function renderChartFromSpec(
   spec: ChartNodeSpec,
   width = 560,
@@ -383,8 +385,21 @@ export async function renderChartFromSpec(
     chart: config,
   };
 
-  const body = JSON.stringify(payload);
-  return await fetchQuickChart(body);
+  let pngBuffer = await fetchQuickChart(JSON.stringify(payload));
+
+  console.log(`[ChartRenderer] ${spec.title}: ${Math.round(pngBuffer.length / 1000)}KB (${width}×${height})`);
+
+  if (pngBuffer.length > MAX_CHART_SIZE_BYTES) {
+    console.warn(
+      `[ChartRenderer] Chart PNG size ${Math.round(pngBuffer.length / 1000)}KB ` +
+      `exceeds ${MAX_CHART_SIZE_BYTES / 1000}KB cap. Re-rendering at lower resolution.`
+    );
+    const smallPayload = { ...payload, width: 400, height: 160, chart: config };
+    pngBuffer = await fetchQuickChart(JSON.stringify(smallPayload));
+    console.log(`[ChartRenderer] Re-rendered: ${Math.round(pngBuffer.length / 1000)}KB (400×160)`);
+  }
+
+  return pngBuffer;
 }
 
 function buildChartJsConfigFromSpec(

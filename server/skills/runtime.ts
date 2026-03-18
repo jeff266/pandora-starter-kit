@@ -85,6 +85,42 @@ const QUERY_TOOLS = new Set([
   'query_conversations', 'compute_metric',
 ]);
 
+function trimSkillOutput(output: any): any {
+  if (!output || typeof output !== 'object') return output;
+
+  const trimmed = { ...output };
+
+  if (trimmed.transcript_text) {
+    trimmed.transcript_text = '[trimmed]';
+  }
+  if (trimmed.trimmed_conversations) {
+    delete trimmed.trimmed_conversations;
+  }
+  if (trimmed.recent_conversations) {
+    trimmed.recent_conversations = Array.isArray(trimmed.recent_conversations)
+      ? trimmed.recent_conversations
+          .slice(0, 3)
+          .map((c: any) => ({
+            id: c.id,
+            title: c.title,
+            started_at: c.started_at,
+            duration_seconds: c.duration_seconds,
+          }))
+      : trimmed.recent_conversations;
+  }
+
+  for (const [key, val] of Object.entries(trimmed)) {
+    if (Array.isArray(val) && val.length > 50) {
+      (trimmed as any)[key] = val.slice(0, 50);
+      console.log(
+        `[SkillOutput] Trimmed ${key} from ${val.length} to 50 items`
+      );
+    }
+  }
+
+  return trimmed;
+}
+
 function isQueryTool(toolName: string): boolean {
   return QUERY_TOOLS.has(toolName);
 }
@@ -1273,6 +1309,17 @@ Important:
           ...(methodologyComparisons?.length ? { methodologyComparisons } : {}),
         } : null;
 
+        const trimmedResultData = trimSkillOutput(resultData);
+
+        const serialized = trimmedResultData ? JSON.stringify(trimmedResultData) : null;
+        if (serialized && serialized.length > 2_000_000) {
+          console.warn(
+            `[SkillRuntime] Output size warning: ` +
+            `${Math.round(serialized.length / 1000)}KB ` +
+            `for skill ${skillId}. Consider further trimming.`
+          );
+        }
+
         await query(
           `UPDATE skill_runs
            SET status = $2, output = $3, error = $4, completed_at = NOW(),
@@ -1282,7 +1329,7 @@ Important:
           [
             runId,
             status,
-            resultData ? JSON.stringify(resultData) : null,
+            serialized,
             error,
             enhancedTokenUsage ? JSON.stringify(enhancedTokenUsage) : null,
             durationMs ?? null,
