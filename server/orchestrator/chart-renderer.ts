@@ -539,21 +539,8 @@ function buildChartJsConfigFromSpec(
         },
         options: {
           plugins: {
-            legend: {
-              display: true,
-              position: 'right',
-              labels: {
-                color: '#374151',
-                font: { size: 11 },
-                padding: 16,
-              },
-            },
-            title: {
-              display: true,
-              text: title,
-              font: { size: 13, weight: 'bold' },
-              color: '#1E293B',
-            },
+            legend: { display: false },  // Title rendered above by PDF/docx renderer
+            title: { display: false },   // Segment labels visible inside the doughnut
           },
           cutout: '65%',
         },

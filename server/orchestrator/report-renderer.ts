@@ -636,21 +636,24 @@ export async function renderPdf(
 
         // Chart Intelligence: render chart after answer
         if (node.chart_png && node.chart_spec) {
-          if (pdf.y > pdf.page.height - 260) pdf.addPage();
+          if (pdf.y > pdf.page.height - 280) pdf.addPage();
 
           // Chart title ABOVE the image (Chart.js title is disabled in renderer)
           pdf.fillColor(hexToRgb('#1E293B'))
              .font('Helvetica-Bold')
              .fontSize(10)
              .text(node.chart_spec.title, 102, pdf.y, { width: W - 12, align: 'center' });
-          pdf.moveDown(0.5);
+          pdf.moveDown(0.4);
 
-          // Embed chart image
-          pdf.image(node.chart_png, 102, pdf.y, {
-            fit: [W - 12, 180],
+          // Embed chart image — capture startY before so we can force cursor
+          // to image bottom regardless of how PDFKit handles explicit-coordinate images
+          const chartH = 160;
+          const chartStartY = pdf.y;
+          pdf.image(node.chart_png, 102, chartStartY, {
+            fit: [W - 12, chartH],
             align: 'center',
           });
-          pdf.moveDown(11);  // skip past image + Fix 3: extra bottom margin
+          pdf.y = chartStartY + chartH + 28;  // force cursor past chart + bottom margin
         }
 
         // Data gap note
@@ -671,21 +674,23 @@ export async function renderPdf(
     const pdfSectionCharts = hasInlineCharts ? [] : (pdfChartsBySection.get(section.id) || []);
     for (const chart of pdfSectionCharts) {
       if (chart.chart_png) {
-        if (pdf.y > pdf.page.height - 280) pdf.addPage();
+        if (pdf.y > pdf.page.height - 300) pdf.addPage();
 
         // Chart title ABOVE the image
         pdf.fillColor(hexToRgb(DARK))
            .font('Helvetica-Bold')
            .fontSize(10)
            .text(chart.title, 90, pdf.y, { width: W, align: 'center' });
-        pdf.moveDown(0.5);
+        pdf.moveDown(0.4);
 
-        // Embed PNG chart image
-        pdf.image(chart.chart_png, 90, pdf.y, {
-          fit: [W, 200],
+        // Embed PNG chart image — capture startY to force cursor to image bottom
+        const sectionChartH = 180;
+        const sectionChartStartY = pdf.y;
+        pdf.image(chart.chart_png, 90, sectionChartStartY, {
+          fit: [W, sectionChartH],
           align: 'center',
         });
-        pdf.moveDown(12);  // skip past image + bottom margin before next section
+        pdf.y = sectionChartStartY + sectionChartH + 32;  // force cursor past chart + bottom margin
       }
     }
   }
