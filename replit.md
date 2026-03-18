@@ -987,31 +987,6 @@ Run delivery-only: `POST /api/workspaces/:wsId/agents/:agentId/run-now` `{"phase
 
 ## QuestionTree + Chart Suggestions — Validated (March 2026)
 
-### Status: COMPLETE ✓ — DO NOT RE-PLAN
-
-All items below are implemented, validated, and running. **Never create tasks for these again.**
-
-### Kellblog Skill Suite (migration 178 + all analysis modules)
-- `deal_field_history` + `forecast_accuracy_log` tables: migration 178, both in DB
-- `server/analysis/win-rate.ts` — `computeWinRates()` with derail classification
-- `server/analysis/pipeline-conversion.ts` — `week3PipelineConversionRate()`
-- `server/analysis/field-history-queries.ts` — `reconstructDealStateAtDate()`
-- `server/analysis/retro-accuracy.ts` — `reconstructQuarterSnapshot()` + `computeMethodPrediction()`
-- `server/analysis/pipeline-progression.ts` — Q0/Q+1/Q+2 snapshot
-- `server/analysis/rep-ramp.ts` — ramp curve for new rep risk
-- `server/jobs/retro-accuracy-bootstrap.ts` — bootstrap job + `POST /:wsId/admin/retro-accuracy-bootstrap`
-- `server/connectors/hubspot/field-history-backfill.ts` — tracks `forecastcategory`, `amount`, `closedate` into `deal_field_history`
-
-### New Skills (all registered in `server/skills/index.ts`, scheduled in `server/sync/skill-scheduler.ts`)
-- `pipeline-conversion-rate` — week-3 conversion rate + win rate analysis
-- `pipeline-progression` — three-quarter progression report
-- `gtm-health-diagnostic` — coverage/conversion problem classifier; added to `bowtie-review` agent
-
-### Enhancements to Existing Skills
-- `pipeline-coverage`: `toGoCoverage` + `detect-fake-pipeline` steps (3b, 3c)
-- `forecast-rollup`: 5 triangulation bearings + `forecast_methodology_divergence` step
-- `rep-scorecard`: `compute-rep-ramp` step (1b)
-
 ### QuestionTree (McKinsey reasoning layers)
 - `server/orchestrator/question-tree.ts` — `generateReasoningTree()` / `generateAllReasoningTrees()`
 - `maxTokens: 1500` (was 800 — caused JSON truncation at ~3000 chars, fixed)

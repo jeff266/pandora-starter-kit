@@ -1,0 +1,60 @@
+The test suite covered tools and routing. Now verify the Orchestrator is actually using the issue tree:
+bashcurl -s -X POST \
+"https://$REPLIT_DEV_DOMAIN/api/workspaces/\
+4160191d-73bc-414b-97dd-5a1853190378/\
+agents/4f8309a9-f959-44c8-ba90-9fd03939bce8/run-now" \
+-H "Authorization: Bearer <token>" \
+-H "Content-Type: application/json" \
+-d '{"phase": "both"}'
+```
+
+Watch logs for these lines in order:
+```
+[AgentRuntime] Using issue tree: 4 nodes
+[AgentRuntime] Prior context loaded: N metrics...
+[MECE] deal_execution: strong/partial/missing
+[MECE] pipeline_conversion: strong/partial/missing
+[MECE] team_execution: strong/partial/missing
+[MECE] forward_look: strong/partial/missing
+[QuestionTree] Generated trees for 4/4 sections
+[Orchestrator] monday_briefing generated: N words
+Then check the report:
+bashcurl -s \
+"https://$REPLIT_DEV_DOMAIN/api/workspaces/\
+4160191d.../reports/latest?type=monday_briefing" \
+-H "Authorization: Bearer <token>" | jq '{
+  headline: .headline,
+  prior_context_applied: .prior_context_applied,
+  section_ids: [.sections[].id],
+  completeness: .completeness_audit.overall,
+  gaps: .completeness_audit.material_gaps
+}'
+```
+
+**What you're looking for:**
+
+- `section_ids` should be `["deal_execution", "pipeline_conversion", "team_execution", "forward_look"]` — not the old `["the_number", "the_story", ...]`
+- `prior_context_applied: true` if 2+ prior reports exist
+- `completeness.overall` should be `"complete"` or `"partial"` — not `"degraded"`
+- Headline should reference trend if prior context loaded: "Pipeline contracting for 3rd week..." not just a snapshot
+
+**The full picture of where things stand:**
+```
+✅ Scheduling (Phase 1)
+✅ Orchestrator (Phase 2)
+✅ Annotation + Export (Phase 3)
+✅ Charts (Phase 4 partial)
+✅ Renderer v2 (Phase 5)
+✅ Question Tree (Phase A)
+✅ Agent Builder rewire (Phase B)
+   — Issue tree drives section structure
+   — Prior context injected
+   — MECE decomposition
+   — Completeness audit
+   — Skills from agent config
+
+🔲 Issue tree editor UI (Replit)
+   — VP configures nodes in Agent Builder
+🔲 Hypothesis update logic (Phase B continued)
+🔲 Chart Intelligence multi-option (Phase C)
+🔲 Pattern confirmation (needs 6 weeks data)
