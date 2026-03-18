@@ -115,6 +115,15 @@ export interface HypothesisUpdate {
   summary: string;  // human-readable summary for report display
 }
 
+export interface IssueTreeNode {
+  node_id: string;
+  title: string;
+  standing_question: string | null;
+  mece_category: string;
+  primary_skill_ids: string[];
+  position: number;
+}
+
 export interface OrchestratorInput {
   document_type: DocumentType;
   workspace_id: string;
@@ -131,4 +140,5 @@ export interface OrchestratorInput {
   skill_summaries: SkillSummary[];
   word_budget: number;
   prior_context?: PriorContext;
+  issue_tree_nodes?: IssueTreeNode[];
 }

@@ -30,8 +30,9 @@ export async function persistReportDocument(
       workspace_id, agent_run_id, document_type, week_label,
       headline, sections, actions, recommended_next_steps,
       skills_included, skills_omitted, total_word_count,
-      tokens_used, orchestrator_run_id, generated_at
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+      tokens_used, orchestrator_run_id, generated_at,
+      hypothesis_updates
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
     RETURNING id
   `, [
     doc.workspace_id,
@@ -48,6 +49,7 @@ export async function persistReportDocument(
     doc.tokens_used,
     doc.orchestrator_run_id,
     doc.generated_at,
+    JSON.stringify(doc.hypothesis_updates || []),
   ]);
 
   const reportDocumentId = result.rows[0].id;
@@ -106,6 +108,7 @@ export async function getLatestReportDocument(
     actions: row.actions,
     recommended_next_steps: row.recommended_next_steps,
     chart_suggestions: chartSuggestions,
+    hypothesis_updates: row.hypothesis_updates || [],
     skills_included: row.skills_included,
     skills_omitted: row.skills_omitted,
     total_word_count: row.total_word_count,
@@ -154,6 +157,7 @@ export async function getAllReportsForWorkspace(
       actions: row.actions,
       recommended_next_steps: row.recommended_next_steps,
       chart_suggestions: chartSuggestions,
+      hypothesis_updates: row.hypothesis_updates || [],
       skills_included: row.skills_included,
       skills_omitted: row.skills_omitted,
       total_word_count: row.total_word_count,
@@ -191,6 +195,7 @@ export async function getReportDocumentById(
     actions: row.actions,
     recommended_next_steps: row.recommended_next_steps,
     chart_suggestions: chartSuggestions,
+    hypothesis_updates: row.hypothesis_updates || [],
     skills_included: row.skills_included,
     skills_omitted: row.skills_omitted,
     total_word_count: row.total_word_count,

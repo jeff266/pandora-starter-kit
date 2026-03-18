@@ -42,6 +42,20 @@ async function loadHypotheses(workspaceId: string): Promise<PriorContext['hypoth
   }
 }
 
+function buildIssueTreeStructure(nodes: NonNullable<OrchestratorInput['issue_tree_nodes']>): string {
+  const sorted = [...nodes].sort((a, b) => a.position - b.position);
+  const lines = sorted.map((node, i) => {
+    const skillsHint = node.primary_skill_ids.length > 0
+      ? ` (draw primarily from: ${node.primary_skill_ids.join(', ')})`
+      : '';
+    const question = node.standing_question
+      ? `\n   Answer: "${node.standing_question}"`
+      : '';
+    return `${i + 1}. id: "${node.node_id}" — Title: "${node.title}"${skillsHint}${question}`;
+  });
+  return `STRUCTURE — produce sections in this exact order:\n\n${lines.join('\n\n')}`;
+}
+
 export async function runReportOrchestrator(
   input: OrchestratorInput
 ): Promise<ReportDocument> {
@@ -73,8 +87,21 @@ export async function runReportOrchestrator(
       `${s.skill_id} conflicts with ${s.conflicts_with!.join(', ')}`
     );
 
+  // If issue tree nodes provided, override the STRUCTURE block in the playbook
+  const usingIssueTree = input.issue_tree_nodes && input.issue_tree_nodes.length > 0;
+  const effectivePlaybook = usingIssueTree
+    ? playbook.replace(
+        /STRUCTURE[^\n]*\n([\s\S]*?)(?=\nTOTAL TARGET|\nVOICE|\nOMIT|\nDEDUPLICATION|\nCONFLICTS|$)/,
+        buildIssueTreeStructure(input.issue_tree_nodes!) + '\n'
+      )
+    : playbook;
+
+  if (usingIssueTree) {
+    console.log(`[Orchestrator] Using issue tree: ${input.issue_tree_nodes!.length} nodes`);
+  }
+
   const systemPrompt = `
-${playbook}
+${effectivePlaybook}
 
 ADDITIONAL RULES:
 - If two skills report conflicting data, use the more recent run

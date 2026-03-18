@@ -310,6 +310,33 @@ export class AgentRuntime {
       const dbAgent = await getAgent(agentId, workspaceId);
       const reportType = dbAgent?.report_type as DocumentType | null;
 
+      // Load issue tree nodes if agent uses issue tree
+      let issueTreeNodes: import('../orchestrator/types.js').IssueTreeNode[] | undefined;
+      if ((dbAgent as any)?.use_issue_tree) {
+        try {
+          const treeResult = await query(
+            `SELECT node_id, title, standing_question, mece_category, primary_skill_ids, position
+             FROM agent_issue_tree
+             WHERE agent_id = $1 AND workspace_id = $2
+             ORDER BY position ASC`,
+            [agentId, workspaceId]
+          );
+          if (treeResult.rows.length > 0) {
+            issueTreeNodes = treeResult.rows.map(r => ({
+              node_id: r.node_id,
+              title: r.title,
+              standing_question: r.standing_question,
+              mece_category: r.mece_category,
+              primary_skill_ids: r.primary_skill_ids || [],
+              position: r.position,
+            }));
+            console.log(`[Agent ${agentId}] Loaded issue tree: ${issueTreeNodes.length} nodes`);
+          }
+        } catch (err) {
+          console.warn(`[Agent ${agentId}] Failed to load issue tree (non-fatal):`, err);
+        }
+      }
+
       if (reportType && Object.keys(skillOutputs).length > 0) {
         orchestratorAttempted = true;
         console.log(`[Agent ${agentId}] Running report orchestrator for ${reportType}`);
@@ -398,6 +425,7 @@ export class AgentRuntime {
               attainment_pct: attainmentPct,
               prior_report_headline: priorHeadline,
             },
+            ...(issueTreeNodes ? { issue_tree_nodes: issueTreeNodes } : {}),
           });
 
           // 8. Persist report

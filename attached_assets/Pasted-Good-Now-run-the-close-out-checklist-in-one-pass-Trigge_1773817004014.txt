@@ -1,0 +1,77 @@
+Good. Now run the close-out checklist in one pass.
+
+Trigger the fresh run:
+
+```bash
+curl -s -X POST \
+"https://$REPLIT_DEV_DOMAIN/api/workspaces/\
+4160191d-73bc-414b-97dd-5a1853190378/\
+agents/4f8309a9-f959-44c8-ba90-9fd03939bce8/run-now" \
+-H "Authorization: Bearer <token>" \
+-H "Content-Type: application/json" \
+-d '{"phase": "both"}'
+```
+
+Watch the logs. You should see all of these in order:
+
+```
+[AgentRuntime] Using issue tree: 4 nodes
+[AgentRuntime] Prior context loaded: N metrics...
+[MECE] deal_execution: strong/partial
+[MECE] pipeline_conversion: strong/partial
+[MECE] team_execution: strong/partial
+[MECE] forward_look: partial
+[QuestionTree] Generated trees for 4/4 sections
+[HypothesisUpdater] pipeline-coverage.coverage_ratio:
+  60% → 48% (contradicted, weakening)
+[HypothesisUpdater] pipeline-coverage.rep_concentration:
+  80% → 88% (validated, strengthening)
+[HypothesisUpdater] Updated N hypotheses for workspace...
+[Orchestrator] monday_briefing generated: N words
+```
+
+Then run these four checks in sequence and share what you see:
+
+**Check 1 — Section IDs:**
+```bash
+curl -s \
+"https://$REPLIT_DEV_DOMAIN/api/workspaces/\
+4160191d.../reports/latest" \
+-H "Authorization: Bearer <token>" | jq \
+'[.sections[] | {id: .id, tree_nodes: (.reasoning_tree | length)}]'
+```
+Expect: `deal_execution`, `pipeline_conversion`, `team_execution`, `forward_look`
+
+**Check 2 — Hypothesis updates:**
+```bash
+curl -s \
+"https://$REPLIT_DEV_DOMAIN/api/workspaces/\
+4160191d.../reports/latest" \
+-H "Authorization: Bearer <token>" | jq \
+'.hypothesis_updates[] | {metric: .metric_key, old: .old_confidence, new: .new_confidence, direction: .direction}'
+```
+
+**Check 3 — Hypothesis table shifted:**
+```sql
+SELECT metric_key, confidence, current_value, updated_at
+FROM standing_hypotheses
+WHERE workspace_id = '4160191d-73bc-414b-97dd-5a1853190378'
+ORDER BY updated_at DESC;
+```
+
+**Check 4 — In the browser:**
+```
+□ Open Reports → click the new report
+□ Sections show deal_execution / pipeline_conversion /
+  team_execution / forward_look (not the_number etc.)
+□ Each section has WHY / WHAT THIS MEANS labels below
+  the conclusion text
+□ Sections with no chart suggestion show nothing
+  (no auto-showing message)
+□ Export PDF → two files download (PDF + XLSX)
+□ Open PDF → charts embedded, question tree visible
+□ Open DOCX in Word → question tree renders with
+  layer labels
+```
+
+Share the log output and the four curl responses. If all four checks pass, the build is closed out and we move to the McKinsey gap work — starting with deal-level evidence pipeline.
