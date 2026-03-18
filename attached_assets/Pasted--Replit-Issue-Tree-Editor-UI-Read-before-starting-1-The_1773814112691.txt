@@ -1,0 +1,681 @@
+```
+Replit: Issue Tree Editor UI
+
+Read before starting:
+1. The existing Agent detail page — find where goal,
+   standing questions, and skills are currently
+   displayed and edited. Image 1 from earlier in
+   this session shows the current layout:
+   goal card, standing questions list, run history,
+   skills picker.
+
+2. server/routes/agents.ts — find:
+   GET /:workspaceId/agents/:agentId
+   PATCH /:workspaceId/agents/:agentId
+   These are the endpoints the editor reads/writes.
+
+3. The agent_issue_tree table (migration just applied)
+   — columns: node_id, title, standing_question,
+   mece_category, primary_skill_ids[], position,
+   confirmed_pattern, pattern_summary.
+
+4. The agents table columns added in the rewire:
+   use_issue_tree (boolean), custom_skill_ids (text[]).
+
+5. The registered skills list —
+   GET /:workspaceId/skills
+   Returns all 39 registered skills with id and name.
+   The skill picker on the issue tree node uses this.
+
+6. client/src/components/ReportViewer.tsx for design
+   reference — match the existing card style, teal
+   accent color (#0D9488), border-radius, typography.
+
+---
+
+## What to build
+
+The Agent detail page gets a new tab alongside
+the existing content: "Report Structure"
+
+The tab has two states:
+
+STATE A — use_issue_tree = false (default)
+Shows the current agent configuration (goal +
+standing questions) with an upgrade prompt:
+
+┌────────────────────────────────────────────┐
+│  📋 Report Structure                        │
+│                                            │
+│  This agent uses a standard report         │
+│  template. Upgrade to a MECE issue tree    │
+│  for structured, consistent reports that   │
+│  learn from prior weeks.                   │
+│                                            │
+│  [ Upgrade to Issue Tree ]                 │
+└────────────────────────────────────────────┘
+
+Clicking "Upgrade to Issue Tree" sets
+use_issue_tree = true and shows STATE B.
+
+STATE B — use_issue_tree = true
+Full issue tree editor with drag-to-reorder nodes.
+
+---
+
+## Task 1: Issue Tree API endpoints
+
+Add to server/routes/agents.ts:
+
+```
+GET /:workspaceId/agents/:agentId/issue-tree
+  Returns: IssueTreeNode[] ordered by position
+  Returns [] if no nodes exist
+
+POST /:workspaceId/agents/:agentId/issue-tree
+  Body: { node_id, title, standing_question,
+          mece_category, primary_skill_ids[], position }
+  Upserts on (agent_id, node_id)
+  Returns: saved node
+
+PATCH /:workspaceId/agents/:agentId/issue-tree/:nodeId
+  Body: partial node fields
+  Returns: updated node
+
+DELETE /:workspaceId/agents/:agentId/issue-tree/:nodeId
+  Returns: { deleted: true }
+
+PATCH /:workspaceId/agents/:agentId/issue-tree/reorder
+  Body: { positions: [{ node_id, position }] }
+  Batch updates position for all nodes in one call
+  Returns: { updated: N }
+
+PATCH /:workspaceId/agents/:agentId
+  Already exists — ensure it handles:
+  use_issue_tree: boolean
+  custom_skill_ids: string[] | null
+```
+
+All endpoints enforce workspace ownership —
+verify agent belongs to workspace before read/write.
+
+---
+
+## Task 2: IssueTreeEditor Component
+
+Create client/src/components/agents/IssueTreeEditor.tsx
+
+```typescript
+interface IssueTreeEditorProps {
+  workspaceId: string;
+  agentId: string;
+  agentGoal: string;
+  token: string;
+  onSave?: () => void;
+}
+```
+
+### State
+
+```typescript
+const [nodes, setNodes] = useState<IssueTreeNode[]>([]);
+const [loading, setLoading] = useState(true);
+const [saving, setSaving] = useState(false);
+const [editingNodeId, setEditingNodeId] =
+  useState<string | null>(null);
+const [showAddForm, setShowAddForm] = useState(false);
+const [availableSkills, setAvailableSkills] =
+  useState<{ id: string; name: string }[]>([]);
+const [dragOverIndex, setDragOverIndex] =
+  useState<number | null>(null);
+```
+
+### Load on mount
+
+```typescript
+useEffect(() => {
+  async function load() {
+    setLoading(true);
+    const [nodesRes, skillsRes] = await Promise.all([
+      fetch(`/api/workspaces/${workspaceId}/agents/
+        ${agentId}/issue-tree`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      ),
+      fetch(`/api/workspaces/${workspaceId}/skills`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      ),
+    ]);
+    const nodesData = await nodesRes.json();
+    const skillsData = await skillsRes.json();
+    setNodes(Array.isArray(nodesData) ? nodesData : []);
+    setAvailableSkills(Array.isArray(skillsData)
+      ? skillsData : []);
+    setLoading(false);
+  }
+  load();
+}, [agentId]);
+```
+
+### Node card (read mode)
+
+Each node renders as a card:
+
+```
+┌─────────────────────────────────────────────┐
+│  ⠿  [drag handle]                           │
+│                                             │
+│  DEAL EXECUTION                  [ Edit ]  │
+│  MECE: execution                           │
+│                                             │
+│  "Can we hit the quarterly target and       │
+│   which deals can close?"                  │
+│                                             │
+│  Skills: forecast-rollup, deal-risk-review, │
+│           single-thread-alert               │
+│                                             │
+│  ✓ Confirmed pattern (6+ weeks)            │
+│    "Nate closes 70%+ of team revenue"       │
+└─────────────────────────────────────────────┘
+```
+
+Render confirmed_pattern badge in teal if
+confirmed_pattern = true and pattern_summary exists.
+
+### Node card (edit mode)
+
+When user clicks Edit, card expands inline:
+
+```
+┌─────────────────────────────────────────────┐
+│  Section title                              │
+│  [ Deal Execution                         ] │
+│                                             │
+│  Standing question                          │
+│  [ Can we hit the quarterly target and    ] │
+│  [ which deals can close?                 ] │
+│                                             │
+│  MECE category                             │
+│  [ execution ▾ ]                           │
+│  Options: generation | conversion |         │
+│           execution | retention | custom   │
+│                                             │
+│  Skills for this section                   │
+│  Selected:                                  │
+│  [forecast-rollup ×] [deal-risk-review ×]  │
+│  [single-thread-alert ×]                   │
+│                                             │
+│  Add skill:                                │
+│  [ Search skills...          ▾ ]           │
+│  (dropdown of all 39 registered skills,    │
+│   filtered by search)                      │
+│                                             │
+│  [ Cancel ]  [ Save section ]              │
+└─────────────────────────────────────────────┘
+```
+
+Save calls PATCH /:agentId/issue-tree/:nodeId.
+Cancel reverts to read mode without saving.
+
+### Add new section button
+
+Below the last node:
+
+```
+[ + Add section ]
+```
+
+Clicking shows the same form as edit mode but
+empty, positioned below the last card.
+On save calls POST /:agentId/issue-tree with
+position = nodes.length + 1.
+
+Auto-generate node_id from title:
+```typescript
+function generateNodeId(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_|_$/g, '')
+    .substring(0, 40);
+}
+```
+
+### Drag to reorder
+
+Use HTML5 drag and drop — no library needed.
+
+```typescript
+function handleDragStart(e: React.DragEvent,
+                          index: number) {
+  e.dataTransfer.setData('text/plain',
+    String(index));
+  e.dataTransfer.effectAllowed = 'move';
+}
+
+function handleDragOver(e: React.DragEvent,
+                         index: number) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  setDragOverIndex(index);
+}
+
+function handleDrop(e: React.DragEvent,
+                     targetIndex: number) {
+  e.preventDefault();
+  const sourceIndex = parseInt(
+    e.dataTransfer.getData('text/plain')
+  );
+  if (sourceIndex === targetIndex) return;
+
+  const reordered = [...nodes];
+  const [moved] = reordered.splice(sourceIndex, 1);
+  reordered.splice(targetIndex, 0, moved);
+
+  // Update positions
+  const updated = reordered.map((n, i) => ({
+    ...n, position: i + 1
+  }));
+  setNodes(updated);
+
+  // Persist reorder
+  fetch(
+    `/api/workspaces/${workspaceId}/agents/
+      ${agentId}/issue-tree/reorder`,
+    {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        positions: updated.map(n => ({
+          node_id: n.node_id,
+          position: n.position,
+        })),
+      }),
+    }
+  );
+
+  setDragOverIndex(null);
+}
+```
+
+Show a visual drop indicator (blue horizontal line)
+at dragOverIndex position between cards.
+
+### Delete node
+
+On the node card, a small "×" or "Delete" link.
+On click: confirm dialog "Remove this section?
+The report will no longer cover [title]."
+On confirm: DELETE /:agentId/issue-tree/:nodeId,
+remove from nodes state.
+
+### Render
+
+```typescript
+if (loading) return (
+  <div style={{ padding: 24, color: '#94A3B8',
+                fontSize: 13 }}>
+    Loading issue tree...
+  </div>
+);
+
+return (
+  <div style={{ padding: '0 0 24px' }}>
+    {/* Goal reminder at top */}
+    <div style={{
+      fontSize: 12, color: '#64748B',
+      marginBottom: 20,
+      padding: '10px 14px',
+      background: '#F8FAFC',
+      borderRadius: 6,
+      borderLeft: '3px solid #0D9488',
+    }}>
+      <span style={{ fontWeight: 500,
+                     color: '#374151' }}>
+        Agent goal:
+      </span> {agentGoal}
+    </div>
+
+    {/* MECE coverage indicator */}
+    <MECECoverageIndicator nodes={nodes} />
+
+    {/* Node list */}
+    {nodes
+      .sort((a, b) => a.position - b.position)
+      .map((node, index) => (
+        <div
+          key={node.node_id}
+          draggable
+          onDragStart={e => handleDragStart(e, index)}
+          onDragOver={e => handleDragOver(e, index)}
+          onDrop={e => handleDrop(e, index)}
+          onDragLeave={() => setDragOverIndex(null)}
+          style={{
+            marginBottom: 8,
+            borderTop: dragOverIndex === index
+              ? '2px solid #0D9488' : '2px solid transparent',
+          }}
+        >
+          {editingNodeId === node.node_id
+            ? <NodeEditForm
+                node={node}
+                availableSkills={availableSkills}
+                onSave={async (updated) => {
+                  await saveNode(updated);
+                  setEditingNodeId(null);
+                }}
+                onCancel={() => setEditingNodeId(null)}
+                token={token}
+                workspaceId={workspaceId}
+                agentId={agentId}
+              />
+            : <NodeReadCard
+                node={node}
+                onEdit={() =>
+                  setEditingNodeId(node.node_id)}
+                onDelete={() => deleteNode(node.node_id)}
+              />
+          }
+        </div>
+      ))
+    }
+
+    {/* Add section */}
+    {showAddForm
+      ? <NodeEditForm
+          node={null}
+          availableSkills={availableSkills}
+          onSave={async (newNode) => {
+            await addNode(newNode);
+            setShowAddForm(false);
+          }}
+          onCancel={() => setShowAddForm(false)}
+          token={token}
+          workspaceId={workspaceId}
+          agentId={agentId}
+          nextPosition={nodes.length + 1}
+        />
+      : <button
+          onClick={() => setShowAddForm(true)}
+          style={{
+            width: '100%',
+            padding: '10px 0',
+            fontSize: 13,
+            color: '#0D9488',
+            background: 'none',
+            border: '1px dashed #0D9488',
+            borderRadius: 8,
+            cursor: 'pointer',
+            marginTop: 8,
+          }}
+        >
+          + Add section
+        </button>
+    }
+  </div>
+);
+```
+
+---
+
+## Task 3: MECECoverageIndicator Component
+
+Small inline component that shows which MECE
+categories are covered vs. missing.
+
+```typescript
+const MECE_CATEGORIES = [
+  { id: 'generation', label: 'Generation',
+    description: 'Top of funnel, pipeline creation' },
+  { id: 'conversion', label: 'Conversion',
+    description: 'Mid funnel, stage progression' },
+  { id: 'execution',  label: 'Execution',
+    description: 'Late funnel, closing and forecast' },
+  { id: 'retention',  label: 'Retention',
+    description: 'Post-close, expansion and churn' },
+];
+
+function MECECoverageIndicator({
+  nodes
+}: { nodes: IssueTreeNode[] }) {
+  const covered = new Set(
+    nodes.map(n => n.mece_category)
+  );
+
+  return (
+    <div style={{
+      display: 'flex', gap: 6, marginBottom: 16,
+      flexWrap: 'wrap',
+    }}>
+      {MECE_CATEGORIES.map(cat => {
+        const isCovered = covered.has(cat.id);
+        return (
+          <div
+            key={cat.id}
+            title={cat.description}
+            style={{
+              padding: '3px 10px',
+              borderRadius: 4,
+              fontSize: 11,
+              fontWeight: 500,
+              background: isCovered
+                ? '#F0FDF9' : '#F8FAFC',
+              color: isCovered
+                ? '#0D9488' : '#94A3B8',
+              border: '0.5px solid',
+              borderColor: isCovered
+                ? '#0D9488' : '#E2E8F0',
+            }}
+          >
+            {isCovered ? '✓' : '○'} {cat.label}
+          </div>
+        );
+      })}
+      {nodes.some(n => n.mece_category === 'custom') && (
+        <div style={{
+          padding: '3px 10px',
+          borderRadius: 4,
+          fontSize: 11,
+          fontWeight: 500,
+          background: '#F0FDF9',
+          color: '#0D9488',
+          border: '0.5px solid #0D9488',
+        }}>
+          ✓ Custom
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+---
+
+## Task 4: Wire Into Agent Detail Page
+
+In the Agent detail page component, add a
+"Report Structure" tab alongside existing content.
+
+The tab renders differently based on use_issue_tree:
+
+```typescript
+// Add to agent detail state:
+const [activeTab, setActiveTab] =
+  useState<'overview' | 'structure'>('overview');
+
+// Tab switcher (add to header area):
+<div style={{ display: 'flex', gap: 0,
+              borderBottom: '1px solid #E2E8F0',
+              marginBottom: 20 }}>
+  {[
+    { id: 'overview', label: 'Overview' },
+    { id: 'structure', label: 'Report Structure' },
+  ].map(tab => (
+    <button
+      key={tab.id}
+      onClick={() => setActiveTab(tab.id as any)}
+      style={{
+        padding: '8px 16px',
+        fontSize: 13,
+        background: 'none',
+        border: 'none',
+        borderBottom: activeTab === tab.id
+          ? '2px solid #0D9488' : '2px solid transparent',
+        color: activeTab === tab.id
+          ? '#0D9488' : '#64748B',
+        cursor: 'pointer',
+        marginBottom: -1,
+      }}
+    >
+      {tab.label}
+    </button>
+  ))}
+</div>
+
+// Tab content:
+{activeTab === 'overview' && (
+  // existing goal, standing questions, run history
+)}
+
+{activeTab === 'structure' && (
+  agent.use_issue_tree
+    ? <IssueTreeEditor
+        workspaceId={workspaceId}
+        agentId={agentId}
+        agentGoal={agent.goal || ''}
+        token={token}
+      />
+    : <UpgradePrompt
+        onUpgrade={async () => {
+          await fetch(
+            `/api/workspaces/${workspaceId}/
+              agents/${agentId}`,
+            {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({
+                use_issue_tree: true
+              }),
+            }
+          );
+          // Reload agent
+          setAgent(prev =>
+            prev ? { ...prev, use_issue_tree: true }
+                 : prev
+          );
+        }}
+      />
+)}
+```
+
+UpgradePrompt component:
+```typescript
+function UpgradePrompt({ onUpgrade }: {
+  onUpgrade: () => void
+}) {
+  return (
+    <div style={{
+      padding: 32, textAlign: 'center',
+      color: '#64748B',
+    }}>
+      <div style={{
+        fontSize: 32, marginBottom: 12
+      }}>📋</div>
+      <div style={{
+        fontSize: 15, fontWeight: 500,
+        color: '#1E293B', marginBottom: 8,
+      }}>
+        MECE Issue Tree
+      </div>
+      <div style={{
+        fontSize: 13, lineHeight: 1.6,
+        maxWidth: 360, margin: '0 auto 20px',
+      }}>
+        Replace the standard template with a structured
+        issue tree. Each section covers a distinct MECE
+        category. The report learns from prior weeks and
+        tracks unresolved actions.
+      </div>
+      <button
+        onClick={onUpgrade}
+        style={{
+          padding: '8px 20px',
+          background: '#0D9488',
+          color: 'white',
+          border: 'none',
+          borderRadius: 6,
+          fontSize: 13,
+          fontWeight: 500,
+          cursor: 'pointer',
+        }}
+      >
+        Upgrade to Issue Tree
+      </button>
+    </div>
+  );
+}
+```
+
+---
+
+## What NOT to change:
+- Existing Overview tab content (goal, standing
+  questions, run history, skills picker)
+- Agent scheduling configuration
+- Run Now button
+- Any other agent page content
+
+---
+
+## Acceptance Criteria:
+
+1. Agent detail page has "Overview" and "Report
+   Structure" tabs
+
+2. Report Structure tab for Monday Pipeline
+   Briefing shows IssueTreeEditor (use_issue_tree
+   = true from seed data)
+
+3. Four seeded nodes render as cards:
+   Deal Execution, Pipeline Conversion,
+   Team Execution, Forward Look
+
+4. MECE coverage indicator shows:
+   ✓ Execution  ✓ Conversion  ✓ Generation
+   ○ Retention  (retention not covered)
+
+5. Clicking Edit on a node expands the inline form
+   with pre-filled title, question, category, skills
+
+6. Editing title and saving → card updates without
+   page reload
+
+7. Skill picker shows all 39 registered skills
+   filtered by search input
+
+8. Adding "pipeline-hygiene" to Deal Execution →
+   persists to agent_issue_tree via PATCH
+
+9. Drag node from position 1 to position 3 →
+   order updates, persists via reorder endpoint
+
+10. "+" Add section → form appears → fill and save
+    → new node appears at bottom with position 5
+
+11. Delete a node → confirm dialog → node removed
+    from list and DB
+
+12. Agent without use_issue_tree shows Upgrade prompt
+
+13. Clicking Upgrade → sets use_issue_tree = true
+    → IssueTreeEditor appears with empty state
+    and "+ Add section" button
+
+14. Zero regressions — Overview tab, Run Now button,
+    and scheduling all still work
+```
