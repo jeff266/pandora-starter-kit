@@ -29,6 +29,7 @@ interface ChartDecision {
   rationale: string;
   chart_type?: 'bar' | 'horizontalBar' | 'line' | 'doughnut';
   conclusion_title?: string;
+  why_insight?: string;  // 1-2 sentence mechanism — WHY this data pattern exists; must NOT repeat section prose
   data_points?: Array<{
     label: string;
     value: number;
@@ -80,20 +81,20 @@ RULES:
    - GOOD: "Nate carries 89% of pipeline"
    - BAD: "Pipeline by rep"
 4. Chart types:
-   - bar/horizontalBar: comparisons across categories
+   - horizontalBar: comparing named entities (reps, deals, accounts) by dollar amount — ALWAYS use this for rep pipeline comparisons
+   - bar: short abstract labels (stage names, months, quarters)
    - line: trends over time
-   - doughnut: composition/parts-of-whole
-   - For rep_performance data source: always suggest horizontalBar,
-     never doughnut. Dollar amounts matter more than percentages for
-     rep pipeline comparisons.
+   - doughnut: ONLY for whole-pipeline composition between two abstract buckets (e.g., "Won vs At-Risk pipeline") — NEVER use for rep comparisons even if there are only 2 reps
 5. Orientation:
+   - Use horizontalBar for any rep, deal, or account comparison regardless of label length
    - Use horizontalBar if any label > 12 characters
-   - Use bar for short labels (stage names, months, rep first names)
+   - Use bar for short labels (stage names, months)
 6. Color hints:
    - dead: deals lost, stale >30 days, zero activity
    - at_risk: high risk scores, approaching deadline, stalled
    - healthy: won deals, on track, strong signals
    - neutral: time periods, stages, aggregate metrics
+7. why_insight: Write 1-2 sentences explaining the MECHANISM behind the data pattern — the structural reason WHY it exists. Do not restate what the chart shows. Write at the level of diagnosis, not description. Example: "Quarter-end psychology: reps have mentally closed Q1 and shifted focus to Q2 pipeline, leaving in-flight deals without coverage at the moment they need it most."
 
 OUTPUT: Valid JSON only. No preamble.
 
@@ -105,6 +106,7 @@ OUTPUT: Valid JSON only. No preamble.
       "rationale": "string - why this node does/doesn't need a chart",
       "chart_type": "bar|horizontalBar|line|doughnut or null",
       "conclusion_title": "string - conclusion-first title or null",
+      "why_insight": "string - 1-2 sentence mechanism behind the pattern, NOT a restatement of the data",
       "data_points": [
         {
           "label": "string",
@@ -222,16 +224,18 @@ function buildChartNodeSpec(decision: ChartDecision): ChartNodeSpec | null {
     }
   }
 
-  // Rep comparison override:
-  // Donut loses absolute values — use horizontal bar for rep
-  // comparisons so dollar amounts are visible. Detect rep comparisons
-  // by checking for ≤3 items with short labels (likely rep names).
-  if (chart_type === 'doughnut' && data_points.length <= 3) {
-    const maxLabelLength = Math.max(...data_points.map(dp => dp.label.length));
-    // Short labels (≤15 chars) with few items suggests rep comparison
-    if (maxLabelLength <= 15) {
+  // Named-entity comparison override:
+  // Doughnut loses absolute dollar values. When ALL data points have neutral
+  // color hints (rep names, account names, territory names — not risk buckets),
+  // force horizontalBar so dollar amounts are visible on the x-axis.
+  // Semantic doughnuts (at_risk vs healthy) are kept as doughnuts.
+  if (chart_type === 'doughnut') {
+    const allNeutral = data_points.every(
+      dp => !dp.color_hint || dp.color_hint === 'neutral'
+    );
+    if (allNeutral) {
       chart_type = 'horizontalBar';
-      orientation_rationale = 'Horizontal bar for rep comparison - dollar amounts matter more than percentages';
+      orientation_rationale = 'Horizontal bar for named-entity comparison — dollar amounts matter more than percentages';
     }
   }
 
@@ -241,6 +245,7 @@ function buildChartNodeSpec(decision: ChartDecision): ChartNodeSpec | null {
     data_points,
     color_scheme,
     orientation_rationale,
+    insight: decision.why_insight || undefined,
   };
 }
 

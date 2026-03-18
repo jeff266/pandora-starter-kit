@@ -72,6 +72,7 @@ export interface ChartNodeSpec {
   data_points: ChartDataPoint[];
   color_scheme: ChartColorScheme;
   orientation_rationale?: string;  // Why horizontal was chosen
+  insight?: string;           // 1-2 sentence mechanism (WHY the pattern exists) — shown in reasoning node answer
 }
 
 export interface ReasoningNode {

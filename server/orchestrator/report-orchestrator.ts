@@ -408,8 +408,8 @@ async function generateSectionCharts(
 
       const syntheticNodes: ReasoningNode[] = [{
         layer,
-        question: `What does the data show about ${section.title}?`,
-        answer: section.content || '',
+        question: `What structural pattern is driving this outcome?`,
+        answer: '',  // Will be replaced by spec.insight after chart generation
         evidence_skill: section.source_skills?.[0],
       }];
 
@@ -434,6 +434,9 @@ async function generateSectionCharts(
         if (!node) continue;
 
         node.chart_spec = spec;
+        // Use the DeepSeek-generated mechanism insight as the WHY answer —
+        // distinct from section prose, adds analytical depth not repetition
+        node.answer = spec.insight || '';
         try {
           node.chart_png = await renderChartFromSpec(spec);
           console.log(
