@@ -1,0 +1,514 @@
+62KB PDF confirms charts are embedded. The pipeline works.
+
+Write the Step 4 Replit prompt:
+
+```
+Replit: Chart Suggestions UI in ReportViewer
+
+Read before starting:
+1. client/src/components/ReportViewer.tsx — find where
+   sections render and where the annotation layer sits.
+   You are adding a chart panel alongside each section.
+2. The chart endpoints already built in server/routes/agents.ts:
+   GET  /:workspaceId/reports/:reportId/chart-suggestions
+   GET  /:workspaceId/reports/:reportId/charts
+   POST /:workspaceId/reports/:reportId/charts
+   DELETE /:workspaceId/reports/:reportId/charts/:chartId
+3. The ChartSuggestion shape — section_id, chart_type,
+   title, data[], rationale
+4. The report_charts shape — same fields plus
+   is_user_modified, chart_png (stored as bytea)
+
+---
+
+## What to build
+
+Each report section gets a chart area below its content.
+The chart area has three states:
+
+STATE 1 — No chart accepted yet (default)
+Shows the AI suggestion as a preview card:
+
+┌─────────────────────────────────────────┐
+│  Suggested chart                    [×] │
+│  "Forecast Landing Zone" · bar chart    │
+│  ┌─────────────────────────────────┐    │
+│  │   [chart preview image]         │    │
+│  └─────────────────────────────────┘    │
+│  [ Change type ▾ ]    [ Add to report ] │
+└─────────────────────────────────────────┘
+
+STATE 2 — Chart accepted (user clicked "Add to report")
+Shows the chart inline with section content:
+
+┌─────────────────────────────────────────┐
+│  [chart image — full width]             │
+│  "Forecast Landing Zone"                │
+│  [ Edit ]  [ Remove ]                   │
+└─────────────────────────────────────────┘
+
+STATE 3 — No suggestion, no chart
+Shows a subtle "Add chart" link:
+  + Add chart to this section
+
+---
+
+## Task 1: ChartSuggestionPanel component
+
+Create client/src/components/report/ChartSuggestionPanel.tsx
+
+```typescript
+interface ChartSuggestionPanelProps {
+  workspaceId: string;
+  reportDocumentId: string;
+  sectionId: string;
+  token: string;
+}
+```
+
+State:
+```typescript
+const [suggestion, setSuggestion] =
+  useState<ChartSuggestion | null>(null);
+const [acceptedChart, setAcceptedChart] =
+  useState<ReportChart | null>(null);
+const [previewUrl, setPreviewUrl] =
+  useState<string | null>(null);
+const [loading, setLoading] = useState(true);
+const [adding, setAdding] = useState(false);
+const [selectedType, setSelectedType] =
+  useState<ChartType | null>(null);
+```
+
+On mount, load both suggestion and accepted chart:
+```typescript
+useEffect(() => {
+  async function load() {
+    setLoading(true);
+    try {
+      // Load AI suggestion for this section
+      const sugRes = await fetch(
+        `/api/workspaces/${workspaceId}/reports/` +
+        `${reportDocumentId}/chart-suggestions`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      const suggestions = await sugRes.json();
+      const match = suggestions.find(
+        (s: any) => s.section_id === sectionId
+      );
+      if (match) {
+        setSuggestion(match);
+        setSelectedType(match.chart_type);
+      }
+
+      // Load accepted chart for this section
+      const chartRes = await fetch(
+        `/api/workspaces/${workspaceId}/reports/` +
+        `${reportDocumentId}/charts`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      const charts = await chartRes.json();
+      const accepted = charts.find(
+        (c: any) => c.section_id === sectionId
+      );
+      if (accepted) {
+        setAcceptedChart(accepted);
+        // Load the PNG for display
+        const imgRes = await fetch(
+          `/api/workspaces/${workspaceId}/reports/` +
+          `${reportDocumentId}/charts/${accepted.id}/image`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        const blob = await imgRes.blob();
+        setPreviewUrl(URL.createObjectURL(blob));
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+  load();
+}, [reportDocumentId, sectionId]);
+```
+
+### Add chart to report:
+```typescript
+async function handleAddToReport() {
+  if (!suggestion) return;
+  setAdding(true);
+  try {
+    const res = await fetch(
+      `/api/workspaces/${workspaceId}/reports/` +
+      `${reportDocumentId}/charts`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          section_id: sectionId,
+          chart_type: selectedType || suggestion.chart_type,
+          title: suggestion.title,
+          data: suggestion.data,
+          x_label: suggestion.x_label,
+          y_label: suggestion.y_label,
+        }),
+      }
+    );
+    const saved = await res.json();
+    setAcceptedChart(saved);
+
+    // Load the PNG
+    const imgRes = await fetch(
+      `/api/workspaces/${workspaceId}/reports/` +
+      `${reportDocumentId}/charts/${saved.id}/image`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    const blob = await imgRes.blob();
+    setPreviewUrl(URL.createObjectURL(blob));
+
+  } finally {
+    setAdding(false);
+  }
+}
+```
+
+### Remove chart:
+```typescript
+async function handleRemove() {
+  if (!acceptedChart) return;
+  await fetch(
+    `/api/workspaces/${workspaceId}/reports/` +
+    `${reportDocumentId}/charts/${acceptedChart.id}`,
+    {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    }
+  );
+  setAcceptedChart(null);
+  if (previewUrl) URL.revokeObjectURL(previewUrl);
+  setPreviewUrl(null);
+}
+```
+
+### Chart type selector:
+Four options in a small pill group:
+
+```typescript
+const CHART_TYPES: { value: ChartType; label: string }[] = [
+  { value: 'bar',            label: 'Bar' },
+  { value: 'horizontal_bar', label: 'Horizontal' },
+  { value: 'line',           label: 'Line' },
+  { value: 'donut',          label: 'Donut' },
+];
+```
+
+When type changes, if chart is already accepted,
+call the POST endpoint again with the new type to
+re-render (POST upserts on section_id).
+
+### Render:
+
+```typescript
+if (loading) return (
+  <div style={{ height: 40, display: 'flex',
+    alignItems: 'center' }}>
+    <span style={{ fontSize: 12, color: '#94A3B8' }}>
+      Loading chart...
+    </span>
+  </div>
+);
+
+// No suggestion and no accepted chart
+if (!suggestion && !acceptedChart) return (
+  <div style={{ marginTop: 8, marginBottom: 16 }}>
+    <button style={{
+      background: 'none', border: 'none',
+      fontSize: 12, color: '#94A3B8',
+      cursor: 'pointer', padding: 0,
+    }}>
+      + Add chart
+    </button>
+  </div>
+);
+
+// Accepted chart — show full width
+if (acceptedChart && previewUrl) return (
+  <div style={{ marginTop: 16, marginBottom: 24 }}>
+    <img
+      src={previewUrl}
+      alt={acceptedChart.title}
+      style={{ width: '100%', maxWidth: 520,
+               height: 'auto', display: 'block',
+               borderRadius: 4 }}
+    />
+    <div style={{ display: 'flex', gap: 8,
+                  marginTop: 8, alignItems: 'center' }}>
+      <span style={{ fontSize: 11, color: '#94A3B8',
+                     flex: 1 }}>
+        {acceptedChart.title}
+      </span>
+      {/* Type switcher */}
+      <div style={{ display: 'flex', gap: 4 }}>
+        {CHART_TYPES.map(t => (
+          <button
+            key={t.value}
+            onClick={() => {
+              setSelectedType(t.value);
+              // Re-render by POSTing with new type
+              handleChangeType(t.value);
+            }}
+            style={{
+              padding: '2px 8px',
+              fontSize: 11,
+              borderRadius: 4,
+              border: '0.5px solid',
+              borderColor: selectedType === t.value
+                ? '#0D9488' : '#E2E8F0',
+              background: selectedType === t.value
+                ? '#F0FDF9' : 'white',
+              color: selectedType === t.value
+                ? '#0D9488' : '#64748B',
+              cursor: 'pointer',
+            }}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      <button
+        onClick={handleRemove}
+        style={{
+          background: 'none', border: 'none',
+          fontSize: 11, color: '#94A3B8',
+          cursor: 'pointer', padding: '2px 6px',
+        }}
+      >
+        Remove
+      </button>
+    </div>
+  </div>
+);
+
+// Suggestion not yet accepted — show preview card
+return (
+  <div style={{
+    marginTop: 16, marginBottom: 16,
+    border: '0.5px solid #E2E8F0',
+    borderRadius: 8, overflow: 'hidden',
+    background: '#FAFAFA',
+  }}>
+    <div style={{
+      padding: '8px 12px',
+      borderBottom: '0.5px solid #E2E8F0',
+      display: 'flex', justifyContent: 'space-between',
+      alignItems: 'center',
+    }}>
+      <span style={{ fontSize: 11, color: '#64748B',
+                     fontWeight: 500 }}>
+        Suggested chart
+      </span>
+      <button
+        onClick={() => setSuggestion(null)}
+        style={{
+          background: 'none', border: 'none',
+          fontSize: 14, color: '#94A3B8',
+          cursor: 'pointer', lineHeight: 1,
+        }}
+      >
+        ×
+      </button>
+    </div>
+
+    <div style={{ padding: 12 }}>
+      <div style={{ fontSize: 12, color: '#374151',
+                    marginBottom: 8 }}>
+        "{suggestion!.title}"
+        <span style={{ color: '#94A3B8', marginLeft: 6 }}>
+          · {suggestion!.chart_type.replace('_', ' ')}
+        </span>
+      </div>
+
+      {/* Data preview — small table */}
+      <div style={{ marginBottom: 12 }}>
+        {suggestion!.data.slice(0, 4).map((d, i) => (
+          <div key={i} style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            fontSize: 11, color: '#64748B',
+            padding: '2px 0',
+          }}>
+            <span>{d.label}</span>
+            <span style={{ fontWeight: 500,
+                           color: '#374151' }}>
+              {d.value >= 1000
+                ? '$' + Math.round(d.value/1000) + 'K'
+                : d.value}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {/* Type selector */}
+      <div style={{ display: 'flex', gap: 4,
+                    marginBottom: 12 }}>
+        {CHART_TYPES.map(t => (
+          <button
+            key={t.value}
+            onClick={() => setSelectedType(t.value)}
+            style={{
+              padding: '3px 10px',
+              fontSize: 11,
+              borderRadius: 4,
+              border: '0.5px solid',
+              borderColor: selectedType === t.value
+                ? '#0D9488' : '#E2E8F0',
+              background: selectedType === t.value
+                ? '#F0FDF9' : 'white',
+              color: selectedType === t.value
+                ? '#0D9488' : '#64748B',
+              cursor: 'pointer',
+            }}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      <button
+        onClick={handleAddToReport}
+        disabled={adding}
+        style={{
+          width: '100%',
+          padding: '7px 0',
+          fontSize: 13,
+          fontWeight: 500,
+          background: adding ? '#F0FDF9' : '#0D9488',
+          color: adding ? '#0D9488' : 'white',
+          border: adding
+            ? '0.5px solid #0D9488' : 'none',
+          borderRadius: 6,
+          cursor: adding ? 'not-allowed' : 'pointer',
+        }}
+      >
+        {adding ? 'Adding...' : 'Add to report'}
+      </button>
+    </div>
+  </div>
+);
+```
+
+Add a `handleChangeType` function that POSTs with
+the new chart_type to re-render and updates
+`acceptedChart` and `previewUrl` state.
+
+---
+
+## Task 2: Wire into ReportViewer
+
+In ReportViewer.tsx, after each section renders
+(both in annotation mode and read mode), add
+ChartSuggestionPanel:
+
+```typescript
+import { ChartSuggestionPanel }
+  from './report/ChartSuggestionPanel';
+
+// After each AnnotatableSection or plain section render:
+{reportDocument && (
+  <ChartSuggestionPanel
+    workspaceId={workspaceId}
+    reportDocumentId={reportDocument.id}
+    sectionId={section.id}
+    token={token}
+  />
+)}
+```
+
+This renders below every section regardless of
+whether annotation mode is active.
+
+---
+
+## Task 3: Image endpoint
+
+Check whether
+GET /:workspaceId/reports/:reportId/charts/:chartId/image
+already exists in server/routes/agents.ts.
+
+If it exists and returns the PNG buffer with
+Content-Type: image/png — no changes needed.
+
+If it doesn't exist, add it:
+```typescript
+router.get(
+  '/:workspaceId/reports/:reportId/charts/:chartId/image',
+  async (req, res) => {
+    const { workspaceId, reportId, chartId } = req.params;
+
+    const result = await query(`
+      SELECT rc.chart_png, rc.chart_type
+      FROM report_charts rc
+      JOIN report_documents rd
+        ON rd.id = rc.report_document_id
+      WHERE rc.id = $1
+        AND rc.report_document_id = $2
+        AND rd.workspace_id = $3
+    `, [chartId, reportId, workspaceId]);
+
+    if (!result.rows[0]?.chart_png) {
+      return res.status(404).json(
+        { error: 'Chart not found' }
+      );
+    }
+
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.end(result.rows[0].chart_png);
+  }
+);
+```
+
+---
+
+## What NOT to change:
+- chart-renderer.ts (QuickChart implementation)
+- report-renderer.ts (DOCX/PDF embedding)
+- Export endpoint in agents.ts
+- Annotation layer components
+
+---
+
+## Acceptance Criteria:
+
+1. Open Monday Briefing report — each section that
+   has a chart suggestion shows the suggestion card
+   below the section text
+
+2. Suggestion card shows the chart title, data
+   preview (label/value pairs), and type selector
+
+3. Clicking "Bar" / "Horizontal" / "Line" / "Donut"
+   updates selectedType immediately (visual feedback)
+
+4. Clicking "Add to report" calls POST /charts,
+   then loads and displays the PNG image inline
+
+5. Chart image renders correctly below section text
+   (not broken/missing)
+
+6. Clicking "Remove" deletes the chart and reverts
+   to suggestion card
+
+7. Changing chart type on an accepted chart
+   re-renders and updates the displayed image
+
+8. Sections with no suggestion show nothing
+   (no empty card, no error)
+
+9. Export PDF after adding charts → PDF contains
+   chart images (confirm via 62KB+ file size)
+
+10. Zero regressions — annotation mode, export
+    modal, and timeline all still work
+```

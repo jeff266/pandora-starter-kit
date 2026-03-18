@@ -1,0 +1,87 @@
+Two fixes in sequence. Do not proceed to Fix 2 until
+Fix 1 is confirmed working.
+
+---
+
+## Fix 1: Install chartjs-node-canvas and verify
+
+Run:
+npm install chartjs-node-canvas
+
+Then verify it loads without error:
+node -e "const { ChartJSNodeCanvas } = 
+  require('chartjs-node-canvas'); 
+  console.log('ok');"
+
+If this throws MODULE_NOT_FOUND or a native binding
+error, try:
+npm install chartjs-node-canvas canvas
+
+Then verify again with the same node -e command.
+
+If canvas native bindings fail with a system library
+error (e.g. missing libcairo, libpango), report the
+exact error and STOP — do not proceed. This means
+the environment doesn't support native canvas and
+we need an alternative rendering approach.
+
+If the verify command prints "ok", proceed.
+
+---
+
+## Fix 2: Regenerate the report to populate charts
+
+Only run this if Fix 1 succeeded.
+
+Call renderChartToPng() directly with a test payload
+to confirm PNG generation works end-to-end:
+
+In a temporary test script or via the existing test
+endpoint, render this chart:
+
+{
+  section_id: "the_number",
+  chart_type: "bar",
+  title: "Q1 revenue build",
+  data: [
+    { label: "Closed-won", value: 1300 },
+    { label: "Open pipeline", value: 288 },
+    { label: "Best case", value: 1588 }
+  ],
+  rationale: "test"
+}
+
+Write the PNG buffer to /tmp/test-chart.png and
+report the file size. If it's > 5000 bytes, the
+chart rendered successfully.
+
+Then trigger a fresh agent run to regenerate the
+report and populate chart_suggestions:
+
+POST /api/workspaces/4160191d-73bc-414b-97dd-5a1853190378
+  /agents/4f8309a9-f959-44c8-ba90-9fd03939bce8/run-now
+Body: { "phase": "both" }
+
+After the run completes, verify chart suggestions
+were stored:
+
+SELECT
+  id,
+  jsonb_array_length(
+    COALESCE(chart_suggestions, '[]'::jsonb)
+  ) as suggestion_count
+FROM report_documents
+WHERE workspace_id = '4160191d-73bc-414b-97dd-5a1853190378'
+ORDER BY generated_at DESC
+LIMIT 1;
+
+OR if chart_suggestions is in the separate table:
+
+SELECT COUNT(*) FROM report_chart_suggestions
+WHERE workspace_id = '4160191d-73bc-414b-97dd-5a1853190378';
+
+Report:
+- chartjs-node-canvas install: success/fail
+- Test PNG file size (bytes)
+- chart_suggestions count after re-run
+- Any errors encountered

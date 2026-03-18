@@ -1,0 +1,170 @@
+I've completed a comprehensive verification of the Ask Pandora Level 1       
+  Integration implementation. Here's what I found:                                        
+                                                                                          
+  ✅ Implementation Verification Complete                                                 
+                                                                                          
+  All 11 Tools Verified:                                                                  
+                                                                                          
+  Read Tools (6):                                                                         
+  1. ✅ get_pending_actions - server/chat/pandora-agent.ts:779                            
+  2. ✅ get_workflow_rules - server/chat/pandora-agent.ts:793                             
+  3. ✅ get_meddic_coverage - server/chat/pandora-agent.ts:806                            
+  4. ✅ get_crm_write_history - server/chat/pandora-agent.ts:818                          
+  5. ✅ get_insights_findings - server/chat/pandora-agent.ts:833                          
+  6. ✅ get_action_threshold_settings - server/chat/pandora-agent.ts:850                  
+                                                                                          
+  Write Tools (4):                                                                        
+  7. ✅ approve_pending_action - server/chat/pandora-agent.ts:860                         
+  8. ✅ dismiss_finding - server/chat/pandora-agent.ts:873                                
+  9. ✅ snooze_finding - server/chat/pandora-agent.ts:887                                 
+  10. ✅ reverse_crm_write - server/chat/pandora-agent.ts:901                             
+                                                                                          
+  Execution Tool (1):                                                                     
+  11. ✅ run_meddic_coverage_skill - server/chat/pandora-agent.ts:914                     
+                                                                                          
+  Implementation Components:                                                              
+                                                                                          
+  ✅ Tool Definitions - All present in PANDORA_TOOLS array                                
+  ✅ Switch Cases - All 11 cases in executeDataTool() (lines 408-429)                     
+  ✅ Implementation Functions - All 11 functions exist (lines 4027-4642)                  
+  ✅ Shared Logic Modules - Both extracted:                                               
+  - server/workflow/action-approver.ts:23 (executeActionApproval)                         
+  - server/crm-writeback/write-reverser.ts:22 (reverseWrite)                              
+  ✅ Imports - Correctly imported in data-tools.ts:37-38                                  
+  ✅ Preview/Confirm Pattern - Write tools correctly implement two-step confirmation      
+                                                                                          
+  Deal Context Scoping:                                                                   
+                                                                                          
+  ✅ Client-Side (Phase 2):                                                               
+  - AssistantView.tsx:93 - Extracts pandoraContext from location.state                    
+  - AssistantView.tsx:95-99 - Creates scope object                                        
+  - AssistantView.tsx:398 - Passes scope to ConversationView                              
+  - ConversationView.tsx:58-60 - Sets scope via setScope()                                
+  - ConversationView.tsx:182-192 - Renders deal breadcrumb                                
+  - useConversationStream.ts:387 - Sends scope in API body                                
+                                                                                          
+  ✅ Server-Side:                                                                         
+  - conversation-stream.ts:73 - Extracts scope from request                               
+  - conversation-stream.ts:151-156 - Sets sessionContext.activeScope                      
+  - conversation-stream.ts:161-163 - Queries deal data                                    
+  - Deal context injected into system prompt                                              
+                                                                                          
+  Code Quality:                                                                           
+                                                                                          
+  - TypeScript errors exist but are pre-existing (in deliberation-engine.ts,              
+  loop-executor.ts, orchestrator.ts, etc.)                                                
+  - No new errors introduced by Ask Pandora Level 1 implementation                        
+  - All patterns follow established conventions                                           
+                                                                                          
+  ---                                                                                     
+  📋 Manual Testing Checklist                                                             
+                                                                                          
+  The implementation is code-complete. Here's what needs manual testing:                  
+                                                                                          
+  Phase 1: Read Tools (Test in Ask Pandora UI)                                            
+                                                                                          
+  Test 1: "What pending actions do I have?"                                               
+  Expected: get_pending_actions called, returns list with action_type, deal_name,         
+  rule_name                                                                               
+                                                                                          
+  Test 2: "What automation rules are active?"                                             
+  Expected: get_workflow_rules called, returns rules with trigger_type, action_type       
+                                                                                          
+  Test 3: "What's the MEDDIC score on [deal name]?"                                       
+  Expected: get_meddic_coverage called, returns scores for M/E/D/D/I/C fields             
+                                                                                          
+  Test 4: "What did Pandora change this week?"                                            
+  Expected: get_crm_write_history called, returns writes with field, old/new values       
+                                                                                          
+  Test 5: "What insights are flagged?"                                                    
+  Expected: get_insights_findings called, returns findings with severity, deal_name       
+                                                                                          
+  Test 6: "What threshold is set for auto-actions?"                                       
+  Expected: get_action_threshold_settings called, returns threshold level, protected      
+  fields                                                                                  
+                                                                                          
+  Phase 2: Write Tools - Preview Mode                                                     
+                                                                                          
+  Test 7: "Approve pending action [id]" (without confirm)                                 
+  Expected: Preview shown with action details, message says "Set confirm=true"            
+                                                                                          
+  Test 8: "Dismiss finding [id]" (without confirm)                                        
+  Expected: Preview shown with finding details, asks for confirmation                     
+                                                                                          
+  Test 9: "Snooze finding [id] for 7 days" (without confirm)                              
+  Expected: Preview shown with snooze duration, asks for confirmation                     
+                                                                                          
+  Test 10: "Reverse the CRM write [id]" (without confirm)                                 
+  Expected: Preview shown with old value, new value, undo window status                   
+                                                                                          
+  Phase 3: Write Tools - Execution                                                        
+                                                                                          
+  After user confirms in chat, Claude should call again with confirm: true:               
+                                                                                          
+  Test 11: Approve action execution                                                       
+  Expected: Action executes, CRM write occurs, action status updates to completed         
+                                                                                          
+  Test 12: Dismiss finding execution                                                      
+  Expected: Finding.resolved_at timestamp set, no longer appears in active findings       
+                                                                                          
+  Test 13: Snooze finding execution                                                       
+  Expected: Finding.snoozed_until set, doesn't appear until snooze expires                
+                                                                                          
+  Test 14: Reverse CRM write execution                                                    
+  Expected: Previous value written back to CRM, write marked as reversed                  
+                                                                                          
+  Phase 4: Deal Context Scoping                                                           
+                                                                                          
+  Test 15: Open Ask Pandora from Deal Detail page                                         
+  Expected: Blue breadcrumb shows "Viewing: [Deal Name]"                                  
+                                                                                          
+  Test 16: Ask "What's the MEDDIC score?" (no deal specified)                             
+  Expected: Claude uses current deal from scope automatically                             
+                                                                                          
+  Test 17: Open Ask Pandora from Command Center (no scope)                                
+  Expected: No breadcrumb shown, Claude asks which deal                                   
+                                                                                          
+  Test 18: Ask about different deal while scoped                                          
+  Expected: Claude honors explicit deal mention, overrides scope                          
+                                                                                          
+  Phase 5: Execution Tool                                                                 
+                                                                                          
+  Test 19: "Run MEDDIC analysis on [deal name]"                                           
+  Expected: Preview shows deal, stage, estimated duration                                 
+                                                                                          
+  Test 20: User confirms MEDDIC run                                                       
+  Expected: Skill execution starts, returns run_id, user can check status                 
+                                                                                          
+  Test 21: "What's the MEDDIC score?" (after skill completes)                             
+  Expected: get_meddic_coverage retrieves fresh results from completed run                
+                                                                                          
+  ---                                                                                     
+  🎯 Edge Cases to Test                                                                   
+                                                                                          
+  ✓ Expired undo window - reverse_crm_write should detect and report                      
+  ✓ Already reversed write - should block double-reversal                                 
+  ✓ Threshold policy change - approve_pending_action should re-check                      
+  ✓ Missing permissions - should show helpful error message                               
+  ✓ Network failures - should allow retry without data loss                               
+                                                                                          
+  ---                                                                                     
+                                                                                          
+⏺ Perfect! The Ask Pandora Level 1 Integration implementation is fully complete and       
+  verified. All 11 tools are properly implemented with:                                   
+                                                                                          
+  - ✅ Tool definitions in pandora-agent.ts                                               
+  - ✅ Routing in data-tools.ts                                                           
+  - ✅ Implementation functions with correct patterns                                     
+  - ✅ Shared logic modules extracted (action-approver, write-reverser)                   
+  - ✅ Deal context scoping (client + server)                                             
+  - ✅ Preview/confirm flow for write tools                                               
+  - ✅ No new TypeScript errors introduced                                                
+                                                                                          
+  Ready for manual testing using the 21-test checklist above. The system should handle:   
+  - Read operations (6 tools for querying data)                                           
+  - Write operations (4 tools with preview/confirm pattern)                               
+  - Skill execution (MEDDIC on-demand)                                                    
+  - Deal context scoping (breadcrumb UI + automatic deal defaulting)                      
+  - Edge cases (undo windows, permissions, etc.)                                          
+                                                                                          
+  All pending tasks from the plan are now complete. You're ready to test in the UI!  

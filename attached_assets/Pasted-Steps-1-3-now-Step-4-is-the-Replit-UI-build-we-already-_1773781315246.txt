@@ -1,0 +1,396 @@
+Steps 1–3 now. Step 4 is the Replit UI build we already had planned — do it after charts are working in exports.
+
+Give Replit this:
+
+```
+Fix the chart renderer using QuickChart.io HTTP API.
+Then verify end-to-end. Then regenerate the report.
+
+---
+
+## Step 1: Rewrite chart-renderer.ts
+
+Replace the entire contents of
+server/orchestrator/chart-renderer.ts with this
+implementation. No chartjs-node-canvas anywhere.
+
+QuickChart.io is a free HTTP API that accepts a
+Chart.js config as JSON and returns a PNG. No
+native dependencies, no system libraries.
+
+```typescript
+import * as https from 'https';
+import { ChartSuggestion, ChartType } from './types';
+
+const QUICKCHART_BASE = 'https://quickchart.io/chart';
+
+const COLORS = {
+  primary:   '#0D9488',
+  secondary: '#CBD5E1',
+  accent:    '#F59E0B',
+  danger:    '#EF4444',
+  muted:     '#94A3B8',
+};
+
+const PALETTE = [
+  COLORS.primary,
+  COLORS.secondary,
+  COLORS.accent,
+  COLORS.danger,
+  COLORS.muted,
+];
+
+export interface ChartRenderResult {
+  section_id: string;
+  png_buffer: Buffer;
+  width: number;
+  height: number;
+}
+
+export async function renderChartToPng(
+  chart: ChartSuggestion,
+  width = 560,
+  height = 220
+): Promise<ChartRenderResult> {
+
+  const config = buildChartJsConfig(chart);
+
+  const payload = {
+    width,
+    height,
+    backgroundColor: 'white',
+    format: 'png',
+    chart: config,
+  };
+
+  const body = JSON.stringify(payload);
+  const png_buffer = await fetchQuickChart(body);
+
+  return { section_id: chart.section_id, png_buffer,
+           width, height };
+}
+
+export async function renderAllCharts(
+  charts: ChartSuggestion[]
+): Promise<Map<string, ChartRenderResult>> {
+  const results = new Map<string, ChartRenderResult>();
+
+  await Promise.all(
+    charts.map(async chart => {
+      try {
+        const result = await renderChartToPng(chart);
+        results.set(chart.section_id, result);
+      } catch (err) {
+        console.error(
+          `[ChartRenderer] Failed ${chart.section_id}:`,
+          err
+        );
+      }
+    })
+  );
+
+  return results;
+}
+
+function fetchQuickChart(body: string): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: 'quickchart.io',
+      path: '/chart',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body),
+      },
+    };
+
+    const req = https.request(options, (res) => {
+      const chunks: Buffer[] = [];
+      res.on('data', chunk => chunks.push(chunk));
+      res.on('end', () => {
+        const buf = Buffer.concat(chunks);
+        if (res.statusCode !== 200) {
+          reject(new Error(
+            `QuickChart error ${res.statusCode}: ` +
+            buf.toString().slice(0, 200)
+          ));
+          return;
+        }
+        resolve(buf);
+      });
+    });
+
+    req.on('error', reject);
+    req.setTimeout(15000, () => {
+      req.destroy();
+      reject(new Error('QuickChart timeout after 15s'));
+    });
+
+    req.write(body);
+    req.end();
+  });
+}
+
+function buildChartJsConfig(chart: ChartSuggestion): object {
+  const labels = chart.data.map(d => d.label);
+  const values = chart.data.map(d => d.value);
+  const colors = chart.data.map(
+    (d, i) => d.color || PALETTE[i % PALETTE.length]
+  );
+
+  const baseOptions = {
+    plugins: {
+      legend: { display: false },
+      title: {
+        display: true,
+        text: chart.title,
+        font: { size: 13, weight: 'bold' },
+        color: '#1E293B',
+        padding: { bottom: 12 },
+      },
+    },
+    scales: {
+      x: {
+        grid: { display: false },
+        ticks: { color: '#64748B', font: { size: 11 } },
+      },
+      y: {
+        grid: { color: 'rgba(0,0,0,0.06)' },
+        border: { display: false },
+        ticks: {
+          color: '#64748B',
+          font: { size: 11 },
+          callback: (v: number) =>
+            v >= 1000
+              ? '$' + Math.round(v / 1000) + 'K'
+              : '$' + v,
+        },
+      },
+    },
+  };
+
+  switch (chart.chart_type) {
+
+    case 'bar':
+      return {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [{
+            data: values,
+            backgroundColor: colors,
+            borderRadius: 4,
+          }],
+        },
+        options: baseOptions,
+      };
+
+    case 'horizontal_bar':
+      return {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [{
+            data: values,
+            backgroundColor: colors,
+            borderRadius: 4,
+          }],
+        },
+        options: {
+          ...baseOptions,
+          indexAxis: 'y',
+          scales: {
+            x: {
+              grid: { color: 'rgba(0,0,0,0.06)' },
+              border: { display: false },
+              ticks: {
+                color: '#64748B',
+                font: { size: 11 },
+                callback: (v: number) =>
+                  v >= 1000
+                    ? '$' + Math.round(v / 1000) + 'K'
+                    : '$' + v,
+              },
+            },
+            y: {
+              grid: { display: false },
+              ticks: {
+                color: '#64748B', font: { size: 11 }
+              },
+            },
+          },
+        },
+      };
+
+    case 'line':
+      return {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [{
+            data: values,
+            borderColor: COLORS.primary,
+            backgroundColor: 'rgba(13,148,136,0.1)',
+            borderWidth: 2,
+            pointRadius: 4,
+            fill: true,
+            tension: 0.3,
+          }],
+        },
+        options: baseOptions,
+      };
+
+    case 'donut':
+      return {
+        type: 'doughnut',
+        data: {
+          labels,
+          datasets: [{
+            data: values,
+            backgroundColor: colors,
+            borderWidth: 2,
+            borderColor: 'white',
+          }],
+        },
+        options: {
+          plugins: {
+            legend: {
+              display: true,
+              position: 'right',
+              labels: {
+                color: '#374151',
+                font: { size: 11 },
+                padding: 16,
+              },
+            },
+            title: {
+              display: true,
+              text: chart.title,
+              font: { size: 13, weight: 'bold' },
+              color: '#1E293B',
+            },
+          },
+          cutout: '65%',
+        },
+      };
+
+    default:
+      return buildChartJsConfig(
+        { ...chart, chart_type: 'bar' }
+      );
+  }
+}
+```
+
+Remove any remaining import of chartjs-node-canvas
+from this file and any other file that imports it.
+
+---
+
+## Step 2: Verify chart rendering works
+
+Run this test directly in the Node REPL or as a
+quick script:
+
+```javascript
+const { renderChartToPng } = require(
+  './server/orchestrator/chart-renderer'
+);
+const fs = require('fs');
+
+renderChartToPng({
+  section_id: 'the_number',
+  chart_type: 'bar',
+  title: 'Q1 revenue build',
+  data: [
+    { label: 'Closed-won', value: 1300 },
+    { label: 'Open pipeline', value: 288 },
+    { label: 'Best case', value: 1588 },
+  ],
+  rationale: 'test',
+}).then(result => {
+  fs.writeFileSync('/tmp/test-chart.png',
+    result.png_buffer);
+  console.log('SUCCESS:', result.png_buffer.length,
+    'bytes');
+}).catch(err => {
+  console.error('FAILED:', err.message);
+});
+```
+
+Report the file size. Must be > 5000 bytes to pass.
+If QuickChart returns an error body instead of PNG,
+log the full response text.
+
+Do not proceed to Step 3 if Step 2 fails.
+
+---
+
+## Step 3: Regenerate report to populate charts
+
+Only run if Step 2 produced a valid PNG.
+
+Trigger a fresh agent run:
+
+POST /api/workspaces/4160191d-73bc-414b-97dd-5a1853190378
+  /agents/4f8309a9-f959-44c8-ba90-9fd03939bce8/run-now
+Body: { "phase": "both" }
+
+After it completes, verify suggestions were stored:
+
+SELECT
+  rcs.section_id,
+  rcs.chart_type,
+  rcs.title,
+  jsonb_array_length(rcs.data) as data_points
+FROM report_chart_suggestions rcs
+JOIN report_documents rd
+  ON rd.id = rcs.report_document_id
+WHERE rd.workspace_id =
+  '4160191d-73bc-414b-97dd-5a1853190378'
+ORDER BY rd.generated_at DESC, rcs.section_id
+LIMIT 10;
+
+Report:
+- How many suggestions were stored?
+- Which section_ids and chart_types?
+
+Then trigger a test export via the API and check
+the response Content-Type:
+
+POST /api/workspaces/4160191d.../reports/latest-id/export
+Body: {
+  "format": "pdf",
+  "audience": "client",
+  "included_sections": ["the_number", "the_story",
+    "deals_requiring_action", "rep_status"],
+  "prepared_by": "RevOps Impact",
+  "for_company": "Frontera Health",
+  "anonymize": true,
+  "link_target": "hubspot",
+  "include_actions": true
+}
+
+Report:
+- Response Content-Type
+  (application/json = dual file with charts,
+   application/pdf = single file no charts)
+- If JSON: primary.data length and companion present?
+- If error: full message
+
+---
+
+## What NOT to change:
+- report-renderer.ts (DOCX/PDF embedding logic)
+- agents.ts export endpoint
+- Any migration files
+- persistence.ts
+
+---
+
+## Report back:
+1. Step 1: chartjs-node-canvas removed — yes/no
+2. Step 2: PNG size in bytes
+3. Step 3: chart suggestions count after re-run
+4. Step 3: export response Content-Type
+```

@@ -1,0 +1,255 @@
+Good progress — the charts are rendering and embedding in the PDF correctly. Three targeted fixes. Give Replit this:
+
+```
+Fix three chart rendering issues in
+server/orchestrator/chart-renderer.ts
+and ChartSuggestionPanel.tsx
+
+---
+
+Fix 1: Type switcher (Bar/Horizontal/Line/Donut)
+does nothing on click
+
+In ChartSuggestionPanel.tsx, the handleChangeType
+function exists but is likely not wired to the
+type switcher buttons correctly, or it's calling
+POST /charts but not refreshing the PNG after.
+
+Find handleChangeType() and verify this flow:
+1. User clicks a type pill
+2. setSelectedType(newType) updates UI immediately
+3. POST to /charts with new chart_type (upsert)
+4. GET the new PNG from /charts/:id/image
+5. setPreviewUrl(new blob URL)
+6. Old blob URL is revoked
+
+If handleChangeType doesn't exist or isn't called
+by the type pills on the accepted chart, add it:
+
+```typescript
+async function handleChangeType(newType: ChartType) {
+  if (!suggestion && !acceptedChart) return;
+  setSelectedType(newType);
+
+  const source = acceptedChart || suggestion!;
+
+  const res = await fetch(
+    `/api/workspaces/${workspaceId}/reports/` +
+    `${reportDocumentId}/charts`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        section_id: sectionId,
+        chart_type: newType,
+        title: source.title,
+        data: source.data,
+        x_label: source.x_label,
+        y_label: source.y_label,
+      }),
+    }
+  );
+
+  const saved = await res.json();
+  setAcceptedChart(saved);
+
+  // Revoke old blob URL
+  if (previewUrl) URL.revokeObjectURL(previewUrl);
+
+  // Load new PNG
+  const imgRes = await fetch(
+    `/api/workspaces/${workspaceId}/reports/` +
+    `${reportDocumentId}/charts/${saved.id}/image`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  const blob = await imgRes.blob();
+  setPreviewUrl(URL.createObjectURL(blob));
+  setSelectedType(saved.chart_type);
+}
+```
+
+Wire to type pills on the ACCEPTED CHART state:
+```typescript
+onClick={() => handleChangeType(t.value)}
+```
+
+---
+
+Fix 2: Legend color doesn't match bars
+
+The legend shows green (teal #0D9488) for all
+series but bars show multiple colors. This happens
+because Chart.js legend reads the first dataset's
+backgroundColor[0] when it's an array.
+
+For single-dataset charts (bar, horizontal_bar, line),
+hide the legend entirely — it adds no information
+when each bar is already labeled on the axis:
+
+```typescript
+// In buildChartJsConfig, baseOptions:
+plugins: {
+  legend: { display: false },  // hide for all
+                                // except donut
+  title: { ... }
+}
+```
+
+For donut only, keep legend visible:
+```typescript
+// donut case keeps its own options with
+// legend: { display: true, position: 'right' }
+```
+
+This is already the pattern in the code — verify
+baseOptions has `legend: { display: false }` and
+that the donut case overrides it with display: true.
+
+---
+
+Fix 3: Pipeline Movement chart — decimal axis
+and wrong color logic
+
+The "Pipeline Movement This Week" chart has:
+- Decimal y-axis (1.0, 1.5, 2.0, 3.0) — values
+  are small integers, shouldn't have decimals
+- Multiple colors per bar — for a movement chart
+  (Created, Advanced, Regressed, Won, Lost) color
+  should encode meaning, not just be random palette
+
+Two fixes in buildChartJsConfig:
+
+A) Force integer y-axis ticks for small values:
+
+```typescript
+// In bar and horizontal_bar cases, update y ticks:
+ticks: {
+  color: '#64748B',
+  font: { size: 11 },
+  // Force integers — no decimals for count data
+  precision: 0,
+  stepSize: 1,
+}
+```
+
+For the QuickChart API, set this via options:
+```typescript
+scales: {
+  y: {
+    ticks: {
+      precision: 0,
+      stepSize: 1,
+    },
+    min: 0,
+    // ...other scale options
+  }
+}
+```
+
+B) Semantic colors for movement/comparison charts:
+
+Add a color scheme based on label content.
+In chart-renderer.ts, after building labels, check
+if this looks like a movement chart and apply
+semantic colors:
+
+```typescript
+function getSemanticColors(
+  labels: string[],
+  defaultPalette: string[]
+): string[] {
+  const SEMANTIC: Record<string, string> = {
+    // Movement semantics
+    'created':   '#0D9488',  // teal — new/positive
+    'advanced':  '#0D9488',  // teal — positive
+    'won':       '#16A34A',  // green — won
+    'closed won':'#16A34A',
+    'regressed': '#F59E0B',  // amber — caution
+    'lost':      '#EF4444',  // red — negative
+    'closed lost':'#EF4444',
+    // Coverage semantics
+    'target':    '#CBD5E1',  // muted — benchmark
+    'coverage':  '#0D9488',  // teal — actual
+    'gap':       '#F59E0B',  // amber — shortfall
+    // Forecast semantics
+    'bear':      '#94A3B8',  // muted
+    'base':      '#CBD5E1',  // light
+    'bull':      '#F59E0B',  // amber — upside
+    'closed-won':'#0D9488',  // teal
+    'open pipeline': '#CBD5E1',
+    'best case': '#F59E0B',
+  };
+
+  return labels.map((label, i) => {
+    const key = label.toLowerCase().trim();
+    return SEMANTIC[key] || defaultPalette[i % defaultPalette.length];
+  });
+}
+```
+
+Call this instead of the plain palette mapping:
+```typescript
+// Replace:
+const colors = chart.data.map(
+  (d, i) => d.color || PALETTE[i % PALETTE.length]
+);
+
+// With:
+const colors = chart.data.map(
+  (d, i) => d.color || getSemanticColors(labels, PALETTE)[i]
+);
+```
+
+C) Add axis label for count-based charts:
+
+When values are small integers (max < 50 and all
+integers), assume this is a count chart and label
+the y-axis "Deals" if no y_label is provided:
+
+```typescript
+const isCountChart = maxValue < 50 &&
+  values.every(v => Number.isInteger(v));
+
+const yAxisLabel = chart.y_label ||
+  (isCountChart ? 'Deals' : '');
+```
+
+Apply to the y-axis title display in bar/horizontal_bar.
+
+---
+
+After all three fixes, re-render the stored charts
+by calling the POST /charts endpoint for each
+existing chart in report_charts table with the
+same data but triggering a fresh PNG render.
+This updates the stored PNGs with the new formatting.
+
+Or simply: delete the 3 rows in report_charts and
+let the user re-add them — simpler than a migration.
+
+Run:
+DELETE FROM report_charts
+WHERE workspace_id =
+  '4160191d-73bc-414b-97dd-5a1853190378';
+
+This forces fresh renders when the user clicks
+"Add to report" again.
+
+---
+
+Acceptance Criteria:
+1. Clicking "Horizontal" or "Line" on accepted chart
+   → chart re-renders and updates
+2. No legend showing mismatched colors on bar charts
+3. Pipeline Movement chart y-axis shows 0, 1, 2, 3
+   (integers, no decimals)
+4. Pipeline Movement bars: Created=teal, Advanced=teal,
+   Regressed=amber, Won=green, Lost=red
+5. Pipeline Movement y-axis labeled "Deals"
+6. Forecast Landing Zone bars: Bear=muted, Base=light,
+   Bull=amber (semantic, not random palette)
+7. Zero regressions on export — PDF still embeds charts
+```

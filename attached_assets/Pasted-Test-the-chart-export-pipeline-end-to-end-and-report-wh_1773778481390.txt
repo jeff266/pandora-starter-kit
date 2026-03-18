@@ -1,0 +1,115 @@
+Test the chart export pipeline end-to-end and report
+what you find. Do not fix anything yet — just diagnose
+and report.
+
+---
+
+## Test 1: Confirm chart suggestions exist on latest report
+
+Run this against the database:
+
+SELECT
+  id,
+  document_type,
+  generated_at,
+  jsonb_array_length(chart_suggestions) as chart_count,
+  chart_suggestions
+FROM report_documents
+WHERE workspace_id = '4160191d-73bc-414b-97dd-5a1853190378'
+ORDER BY generated_at DESC
+LIMIT 1;
+
+Report:
+- How many chart suggestions exist?
+- What are their section_ids and chart_types?
+- If chart_count = 0, report that clearly
+
+---
+
+## Test 2: Confirm report_charts table exists and has rows
+
+SELECT COUNT(*) FROM report_charts
+WHERE workspace_id = '4160191d-73bc-414b-97dd-5a1853190378';
+
+Report:
+- Does the table exist?
+- How many rows?
+
+---
+
+## Test 3: Hit the chart-suggestions endpoint
+
+GET /api/workspaces/4160191d-73bc-414b-97dd-5a1853190378
+  /reports/:reportId/chart-suggestions
+
+Use the report ID from Test 1.
+
+Report:
+- HTTP status code
+- Response body (or first 500 chars if large)
+
+---
+
+## Test 4: Trigger a fresh export via API
+
+POST /api/workspaces/4160191d-73bc-414b-97dd-5a1853190378
+  /reports/:reportId/export
+Body: {
+  "format": "pdf",
+  "audience": "client",
+  "included_sections": ["the_number", "the_story",
+    "deals_requiring_action", "rep_status"],
+  "prepared_by": "RevOps Impact",
+  "for_company": "Frontera Health",
+  "anonymize": true,
+  "link_target": "hubspot",
+  "include_actions": true
+}
+
+Report:
+- HTTP status code
+- Content-Type header of the response
+- If JSON: is there a "primary" and "companion" key?
+- If JSON: how large is primary.data (chars)?
+- If binary PDF: what is the response size?
+- If error: full error message
+
+---
+
+## Test 5: Render one chart to PNG directly
+
+Call renderChartToPng() with this test input and
+write the result to /tmp/test-chart.png:
+
+{
+  section_id: "the_number",
+  chart_type: "bar",
+  title: "Q1 revenue build",
+  data: [
+    { label: "Closed-won", value: 1300 },
+    { label: "Open pipeline", value: 288 },
+    { label: "Best case", value: 1588 }
+  ],
+  rationale: "test"
+}
+
+Report:
+- Did it succeed or throw?
+- If success: file size in bytes
+- If error: full error message and stack trace
+
+---
+
+## Summary
+
+After running all 5 tests, provide:
+
+1. Chart suggestions in DB: yes/no, count
+2. chart-suggestions endpoint: working/broken
+3. Export endpoint response type: json/pdf/error
+4. Dual download (primary + companion): yes/no
+5. Chart PNG rendering: working/broken
+6. What the most likely root cause is if anything
+   is broken
+
+Do not fix anything. Just report findings.

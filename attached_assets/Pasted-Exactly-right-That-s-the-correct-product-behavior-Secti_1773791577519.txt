@@ -1,0 +1,357 @@
+Exactly right. That's the correct product behavior:
+
+```
+Section loads
+  ↓
+AI suggestion exists?
+  YES → show suggestion card (title, data preview,
+         type selector, "Add to report")
+  NO  → show "+ Add chart" link
+          ↓
+        User clicks → show manual creation form
+          (title, type, data rows)
+          → Create → embeds chart
+```
+
+AI does the work when it can. User controls when it can't or wants something different. And on an accepted chart, the type switcher and Remove button always available.
+
+Give Replit this:
+
+```
+Add manual chart creation form to
+ChartSuggestionPanel.tsx
+
+This is the fallback when no AI suggestion exists.
+Do not change any behavior for sections that DO
+have an AI suggestion — that flow works correctly.
+
+---
+
+When "+ Add chart" is clicked and suggestion is null:
+Show an inline form (not a modal):
+
+```typescript
+const [showManualForm, setShowManualForm] =
+  useState(false);
+const [manualTitle, setManualTitle] = useState('');
+const [manualType, setManualType] =
+  useState<ChartType>('bar');
+const [manualRows, setManualRows] = useState([
+  { label: '', value: '' },
+  { label: '', value: '' },
+  { label: '', value: '' },
+]);
+const [creating, setCreating] = useState(false);
+
+function addRow() {
+  setManualRows(r => [...r, { label: '', value: '' }]);
+}
+
+function removeRow(i: number) {
+  setManualRows(r => r.filter((_, idx) => idx !== i));
+}
+
+function updateRow(
+  i: number,
+  field: 'label' | 'value',
+  val: string
+) {
+  setManualRows(r => r.map((row, idx) =>
+    idx === i ? { ...row, [field]: val } : row
+  ));
+}
+
+async function handleManualCreate() {
+  const validRows = manualRows.filter(
+    r => r.label.trim() && r.value.trim() &&
+         !isNaN(Number(r.value))
+  );
+  if (!manualTitle.trim() || validRows.length < 2)
+    return;
+
+  setCreating(true);
+  try {
+    const res = await fetch(
+      `/api/workspaces/${workspaceId}/reports/` +
+      `${reportDocumentId}/charts`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          section_id: sectionId,
+          chart_type: manualType,
+          title: manualTitle.trim(),
+          data: validRows.map(r => ({
+            label: r.label.trim(),
+            value: Number(r.value),
+          })),
+        }),
+      }
+    );
+
+    const saved = await res.json();
+    setAcceptedChart(saved);
+    setShowManualForm(false);
+
+    const imgRes = await fetch(
+      `/api/workspaces/${workspaceId}/reports/` +
+      `${reportDocumentId}/charts/${saved.id}/image`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    const blob = await imgRes.blob();
+    setPreviewUrl(URL.createObjectURL(blob));
+    setSelectedType(manualType);
+
+  } finally {
+    setCreating(false);
+  }
+}
+```
+
+Form render (when !suggestion && !acceptedChart
+&& showManualForm):
+
+```typescript
+<div style={{
+  marginTop: 12, marginBottom: 16,
+  border: '0.5px solid #E2E8F0',
+  borderRadius: 8,
+  background: '#FAFAFA',
+  padding: 16,
+}}>
+  {/* Title */}
+  <div style={{ marginBottom: 12 }}>
+    <label style={{
+      fontSize: 11, color: '#64748B',
+      display: 'block', marginBottom: 4,
+    }}>
+      Chart title
+    </label>
+    <input
+      value={manualTitle}
+      onChange={e => setManualTitle(e.target.value)}
+      placeholder="e.g. Pipeline by rep ($K)"
+      style={{ width: '100%' }}
+    />
+  </div>
+
+  {/* Type selector */}
+  <div style={{ marginBottom: 12 }}>
+    <label style={{
+      fontSize: 11, color: '#64748B',
+      display: 'block', marginBottom: 4,
+    }}>
+      Chart type
+    </label>
+    <div style={{ display: 'flex', gap: 4 }}>
+      {CHART_TYPES.map(t => (
+        <button
+          key={t.value}
+          onClick={() => setManualType(t.value)}
+          style={{
+            padding: '3px 10px',
+            fontSize: 11,
+            borderRadius: 4,
+            border: '0.5px solid',
+            borderColor: manualType === t.value
+              ? '#0D9488' : '#E2E8F0',
+            background: manualType === t.value
+              ? '#F0FDF9' : 'white',
+            color: manualType === t.value
+              ? '#0D9488' : '#64748B',
+            cursor: 'pointer',
+          }}
+        >
+          {t.label}
+        </button>
+      ))}
+    </div>
+  </div>
+
+  {/* Data rows */}
+  <div style={{ marginBottom: 12 }}>
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: '1fr 100px 24px',
+      gap: 6,
+      marginBottom: 4,
+    }}>
+      <span style={{ fontSize: 11, color: '#64748B' }}>
+        Label
+      </span>
+      <span style={{ fontSize: 11, color: '#64748B' }}>
+        Value
+      </span>
+      <span />
+    </div>
+
+    {manualRows.map((row, i) => (
+      <div key={i} style={{
+        display: 'grid',
+        gridTemplateColumns: '1fr 100px 24px',
+        gap: 6,
+        marginBottom: 6,
+      }}>
+        <input
+          value={row.label}
+          onChange={e => updateRow(i, 'label',
+            e.target.value)}
+          placeholder="e.g. Rep 1"
+        />
+        <input
+          value={row.value}
+          onChange={e => updateRow(i, 'value',
+            e.target.value)}
+          placeholder="256"
+          type="number"
+        />
+        <button
+          onClick={() => removeRow(i)}
+          disabled={manualRows.length <= 2}
+          style={{
+            background: 'none',
+            border: 'none',
+            color: '#94A3B8',
+            cursor: manualRows.length <= 2
+              ? 'not-allowed' : 'pointer',
+            fontSize: 16,
+            padding: 0,
+            lineHeight: 1,
+          }}
+        >
+          ×
+        </button>
+      </div>
+    ))}
+
+    <button
+      onClick={addRow}
+      style={{
+        background: 'none',
+        border: 'none',
+        fontSize: 12,
+        color: '#0D9488',
+        cursor: 'pointer',
+        padding: 0,
+        marginTop: 2,
+      }}
+    >
+      + Add row
+    </button>
+  </div>
+
+  {/* Actions */}
+  <div style={{
+    display: 'flex',
+    justifyContent: 'flex-end',
+    gap: 8,
+    marginTop: 4,
+  }}>
+    <button
+      onClick={() => {
+        setShowManualForm(false);
+        setManualTitle('');
+        setManualRows([
+          { label: '', value: '' },
+          { label: '', value: '' },
+          { label: '', value: '' },
+        ]);
+      }}
+      style={{
+        background: 'none',
+        border: '0.5px solid #E2E8F0',
+        borderRadius: 6,
+        padding: '6px 12px',
+        fontSize: 12,
+        color: '#64748B',
+        cursor: 'pointer',
+      }}
+    >
+      Cancel
+    </button>
+    <button
+      onClick={handleManualCreate}
+      disabled={
+        creating ||
+        !manualTitle.trim() ||
+        manualRows.filter(r =>
+          r.label.trim() && !isNaN(Number(r.value))
+        ).length < 2
+      }
+      style={{
+        background: creating ? '#F0FDF9' : '#0D9488',
+        border: 'none',
+        borderRadius: 6,
+        padding: '6px 16px',
+        fontSize: 12,
+        fontWeight: 500,
+        color: creating ? '#0D9488' : 'white',
+        cursor: creating ? 'not-allowed' : 'pointer',
+      }}
+    >
+      {creating ? 'Creating...' : 'Create chart'}
+    </button>
+  </div>
+</div>
+```
+
+The empty state render:
+```typescript
+// No suggestion, no accepted chart:
+if (!suggestion && !acceptedChart) return (
+  <div style={{ marginTop: 8, marginBottom: 16 }}>
+    {!showManualForm ? (
+      <button
+        onClick={() => setShowManualForm(true)}
+        style={{
+          background: 'none',
+          border: 'none',
+          fontSize: 12,
+          color: '#94A3B8',
+          cursor: 'pointer',
+          padding: 0,
+        }}
+      >
+        + Add chart
+      </button>
+    ) : (
+      // manual form rendered above
+    )}
+  </div>
+);
+```
+
+---
+
+Also fix the AI suggestion dismissal — currently
+dismissing a suggestion permanently hides it.
+Change dismiss to just collapse it back to the
+"Suggested chart" state, not remove it:
+
+The × on the suggestion card should collapse
+the card to a small collapsed state:
+
+```
+[chart icon] Suggested: "Forecast Landing Zone"  [expand ▾]
+```
+
+Clicking expand re-shows the full suggestion card.
+This way the suggestion is never lost, just tucked.
+
+---
+
+Acceptance Criteria:
+1. Section with no suggestion → "+ Add chart" link
+2. Click "+ Add chart" → manual form appears inline
+3. Fill title + 2+ rows + type → "Create chart" enabled
+4. Create chart → PNG renders inline below section
+5. Remove button → returns to "+ Add chart" link
+6. Section WITH suggestion → suggestion card as before
+   (no change to that flow)
+7. × on suggestion card collapses to compact state
+   with expand option — does not permanently dismiss
+8. AI suggestion sections are unaffected by this change
+```

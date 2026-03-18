@@ -1,0 +1,322 @@
+Yes, it's crappy in its current form. The manual form is a last resort for edge cases — a VP RevOps should never have to type in "Rep 1" and "256" manually. That's the wrong interaction entirely.
+
+The real answer is the AI suggestions should be working reliably, not the manual form. Let me explain what should actually happen:
+
+**The correct flow for a VP RevOps:**
+
+```
+Report renders
+  ↓
+Orchestrator already ran the skills
+  ↓
+generateChartSuggestions() reads skill summaries
+  → knows pipeline = $288K across 19 deals
+  → knows Rep 1 = $256K, Rep 2 = $32K
+  → knows Bear = $1.1M, Base = $1.4M, Bull = $1.8M
+  ↓
+Suggestion cards appear pre-populated with real data
+  ↓
+VP clicks "Add to report" — one click, chart appears
+  ↓
+Optionally switches Bar → Horizontal
+  ↓
+Done
+```
+
+The VP never enters a number. The data comes from the skill runs that already happened Sunday night.
+
+**Why it's broken right now:**
+
+The `generateChartSuggestions()` function exists but it's generating suggestions based on a static analysis of the Orchestrator prompt output — not by reading the actual `key_metrics` from skill summaries. So when the latest report ran, either the function failed silently or the suggestions weren't tied to the new `report_document_id` correctly.
+
+**The actual fix needed:**
+
+The suggestion generation needs to reliably pull real numbers from skill summaries every time. The manual form is a fallback for when a user wants a chart the AI didn't think to suggest — not for missing data.
+
+Give Replit this:
+
+```
+Fix chart suggestion generation so it reliably
+produces suggestions with real data from skill runs.
+
+The problem: report_chart_suggestions is empty
+for the Mar 17 4:19 PM report even though skills
+ran and produced data.
+
+---
+
+Step 1: Diagnose
+
+Run this to find the latest report and its skill data:
+
+SELECT
+  rd.id as report_id,
+  rd.generated_at,
+  rd.skills_included,
+  rd.sections::jsonb -> 0 -> 'content' as first_section
+FROM report_documents
+WHERE workspace_id = '4160191d-73bc-414b-97dd-5a1853190378'
+ORDER BY generated_at DESC
+LIMIT 1;
+
+Then check if suggestions were attempted:
+SELECT COUNT(*) FROM report_chart_suggestions
+WHERE report_document_id = (
+  SELECT id FROM report_documents
+  WHERE workspace_id =
+    '4160191d-73bc-414b-97dd-5a1853190378'
+  ORDER BY generated_at DESC LIMIT 1
+);
+
+Report both results before making any changes.
+
+---
+
+Step 2: Find generateChartSuggestions()
+
+Find where chart suggestions are generated —
+likely in server/orchestrator/report-orchestrator.ts
+or server/orchestrator/persistence.ts.
+
+Answer these questions:
+- Is generateChartSuggestions() called after
+  the Orchestrator Claude call completes?
+- Does it have access to the skill_summaries
+  with their key_metrics?
+- Does it insert into report_chart_suggestions
+  with the correct report_document_id?
+- Is there a try/catch that swallows errors silently?
+
+Report what you find before making changes.
+
+---
+
+Step 3: Fix the suggestion generation
+
+Based on what you find in Step 2, ensure:
+
+1. generateChartSuggestions() is called with
+   the actual skill_summaries array BEFORE
+   the ReportDocument is returned from
+   runReportOrchestrator()
+
+2. It extracts real numbers from key_metrics:
+
+```typescript
+function generateChartSuggestions(
+  sections: ReportSection[],
+  skillSummaries: SkillSummary[]
+): ChartSuggestion[] {
+  const suggestions: ChartSuggestion[] = [];
+
+  // Forecast landing zone — from forecast-rollup
+  const forecast = skillSummaries.find(
+    s => s.skill_id === 'forecast-rollup'
+  );
+  if (forecast?.key_metrics) {
+    const bear = Number(forecast.key_metrics['bear'])
+      || 0;
+    const base = Number(forecast.key_metrics['base'])
+      || 0;
+    const bull = Number(forecast.key_metrics['bull'])
+      || 0;
+    if (bear > 0 || base > 0 || bull > 0) {
+      suggestions.push({
+        section_id: 'the_number',
+        chart_type: 'bar',
+        title: 'Forecast Landing Zone ($K)',
+        data: [
+          { label: 'Bear',
+            value: Math.round(bear / 1000) },
+          { label: 'Base',
+            value: Math.round(base / 1000) },
+          { label: 'Bull',
+            value: Math.round(bull / 1000) },
+        ],
+        rationale: 'Shows forecast range',
+      });
+    }
+  }
+
+  // Rep pipeline comparison — from pipeline-coverage
+  // or rep-scorecard
+  const coverage = skillSummaries.find(
+    s => s.skill_id === 'pipeline-coverage' ||
+         s.skill_id === 'rep-scorecard'
+  );
+  if (coverage?.key_metrics) {
+    // Look for rep-level data in key_metrics
+    // The summarizer should have stored rep breakdown
+    // as key_metrics.rep_1_pipeline, rep_2_pipeline
+    // OR as a structured object
+    // Check what's actually in key_metrics and extract
+    const repData = extractRepData(coverage.key_metrics);
+    if (repData.length >= 2) {
+      suggestions.push({
+        section_id: 'rep_status',
+        chart_type: 'horizontal_bar',
+        title: 'Open Pipeline by Rep ($K)',
+        data: repData,
+        rationale: 'Shows rep pipeline concentration',
+      });
+    }
+  }
+
+  // Pipeline movement — from pipeline-waterfall
+  const waterfall = skillSummaries.find(
+    s => s.skill_id === 'pipeline-waterfall'
+  );
+  if (waterfall?.key_metrics) {
+    const created = Number(
+      waterfall.key_metrics['created']) || 0;
+    const advanced = Number(
+      waterfall.key_metrics['advanced']) || 0;
+    const regressed = Number(
+      waterfall.key_metrics['regressed']) || 0;
+    const won = Number(
+      waterfall.key_metrics['closed_won_count']
+      || waterfall.key_metrics['won']) || 0;
+    const lost = Number(
+      waterfall.key_metrics['closed_lost_count']
+      || waterfall.key_metrics['lost']) || 0;
+
+    if (created + advanced + regressed + won + lost > 0) {
+      suggestions.push({
+        section_id: 'the_story',
+        chart_type: 'bar',
+        title: 'Pipeline Movement This Week',
+        data: [
+          { label: 'Created', value: created },
+          { label: 'Advanced', value: advanced },
+          { label: 'Regressed', value: regressed },
+          { label: 'Won', value: won },
+          { label: 'Lost', value: lost },
+        ].filter(d => d.value > 0),
+        rationale: 'Shows deal movement',
+      });
+    }
+  }
+
+  return suggestions;
+}
+
+function extractRepData(
+  metrics: Record<string, string | number>
+): { label: string; value: number }[] {
+  // Try structured rep data first
+  // The coverage summarizer may store this differently
+  // Check key names and extract what's there
+  const repData: { label: string; value: number }[] = [];
+
+  // Pattern 1: rep_name_pipeline keys
+  for (const [key, val] of Object.entries(metrics)) {
+    if (key.includes('pipeline') &&
+        !key.includes('total') &&
+        !key.includes('team')) {
+      const label = key
+        .replace('_pipeline', '')
+        .replace(/_/g, ' ')
+        .replace(/\b\w/g, c => c.toUpperCase());
+      const value = Math.round(Number(val) / 1000);
+      if (value > 0) repData.push({ label, value });
+    }
+  }
+
+  return repData.slice(0, 6); // max 6 reps
+}
+```
+
+3. After generating suggestions, persist them:
+
+```typescript
+// In runReportOrchestrator, before returning:
+const chartSuggestions = generateChartSuggestions(
+  sections, input.skill_summaries
+);
+
+// Add to returned document
+return {
+  ...document,
+  chart_suggestions: chartSuggestions,
+};
+
+// In persistReportDocument, also insert suggestions:
+if (doc.chart_suggestions?.length) {
+  for (const suggestion of doc.chart_suggestions) {
+    await query(`
+      INSERT INTO report_chart_suggestions
+        (workspace_id, report_document_id, section_id,
+         chart_type, title, data, rationale)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      ON CONFLICT (report_document_id, section_id)
+        DO UPDATE SET
+          chart_type = EXCLUDED.chart_type,
+          title = EXCLUDED.title,
+          data = EXCLUDED.data
+    `, [
+      doc.workspace_id, docId,
+      suggestion.section_id, suggestion.chart_type,
+      suggestion.title,
+      JSON.stringify(suggestion.data),
+      suggestion.rationale,
+    ]);
+  }
+}
+```
+
+4. Wrap the entire suggestion generation in
+   try/catch with explicit logging — never
+   let it fail silently:
+
+```typescript
+try {
+  const suggestions = generateChartSuggestions(
+    sections, input.skill_summaries
+  );
+  console.log(
+    `[Orchestrator] Generated ${suggestions.length}` +
+    ` chart suggestions`
+  );
+} catch (err) {
+  console.error(
+    '[Orchestrator] Chart suggestion failed:', err
+  );
+  // Non-fatal — continue without suggestions
+}
+```
+
+---
+
+Step 4: Re-run and verify
+
+After the fix, trigger a fresh agent run and confirm:
+
+SELECT
+  section_id, chart_type, title,
+  jsonb_array_length(data) as data_points
+FROM report_chart_suggestions
+WHERE report_document_id = (
+  SELECT id FROM report_documents
+  WHERE workspace_id =
+    '4160191d-73bc-414b-97dd-5a1853190378'
+  ORDER BY generated_at DESC LIMIT 1
+);
+
+Expect 2-3 rows with real data points.
+Report the results.
+
+---
+
+Acceptance Criteria:
+1. After agent run, report_chart_suggestions has
+   rows tied to the new report_document_id
+2. Forecast Landing Zone suggestion has Bear/Base/Bull
+   with real dollar values (not 0)
+3. Opening the new report shows suggestion cards
+   with real data — VP clicks "Add to report",
+   chart renders immediately, no manual entry needed
+4. Console logs show chart suggestion count,
+   not a silent failure
+```
+
+The manual form stays as a fallback for custom charts a VP wants that the AI didn't suggest. But the primary path — AI suggests from real skill data, VP clicks once — needs to be reliable first.

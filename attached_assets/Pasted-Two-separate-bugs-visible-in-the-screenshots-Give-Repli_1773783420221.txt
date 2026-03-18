@@ -1,0 +1,180 @@
+Two separate bugs visible in the screenshots. Give Replit this:
+
+```
+Fix two bugs in ChartSuggestionPanel.tsx
+
+---
+
+Bug 1: "+ Add chart" click does nothing
+
+In Image 2, "Deals Requiring Action" shows "+ Add chart"
+but clicking it has no effect.
+
+The fallback state renders a button but it's missing
+an onClick handler that opens any UI. For now, wire
+it to show the suggestion card UI if a suggestion
+exists, or show a minimal chart creator if not.
+
+Fix: when "+ Add chart" is clicked, if suggestion
+exists, set a local state flag showSuggestion = true
+and render the suggestion card. If no suggestion
+exists, render a minimal inline form:
+
+```typescript
+const [showAddForm, setShowAddForm] = useState(false);
+
+// Empty state render:
+if (!suggestion && !acceptedChart) return (
+  <div style={{ marginTop: 8, marginBottom: 16 }}>
+    {!showAddForm ? (
+      <button
+        onClick={() => setShowAddForm(true)}
+        style={{
+          background: 'none', border: 'none',
+          fontSize: 12, color: '#94A3B8',
+          cursor: 'pointer', padding: 0,
+        }}
+      >
+        + Add chart
+      </button>
+    ) : (
+      // Minimal form — user enters title and picks type
+      // data defaults to empty, they can't add data
+      // without a suggestion so show a message instead:
+      <div style={{
+        padding: 12,
+        border: '0.5px solid #E2E8F0',
+        borderRadius: 8,
+        background: '#FAFAFA',
+        fontSize: 12,
+        color: '#64748B',
+      }}>
+        No chart suggestion available for this section.
+        Charts are suggested automatically when the report
+        runs with sufficient data for this section.
+        <button
+          onClick={() => setShowAddForm(false)}
+          style={{
+            display: 'block', marginTop: 8,
+            background: 'none', border: 'none',
+            fontSize: 11, color: '#94A3B8',
+            cursor: 'pointer', padding: 0,
+          }}
+        >
+          Dismiss
+        </button>
+      </div>
+    )}
+  </div>
+);
+```
+
+---
+
+Bug 2: Legend shows "undefined", y-axis not formatted
+
+In Image 1, the accepted chart shows:
+- Legend label reads "undefined"
+- Y-axis shows raw numbers (1800000, 1700000)
+  instead of $1.8M / $1.7M
+
+Both are QuickChart rendering issues in chart-renderer.ts.
+
+Fix the legend label — the dataset needs a label field:
+```typescript
+// In buildChartJsConfig, bar case datasets:
+datasets: [{
+  label: chart.title,  // ADD THIS — fixes "undefined"
+  data: values,
+  backgroundColor: colors,
+  borderRadius: 4,
+}]
+```
+
+Apply the same `label: chart.title` to horizontal_bar
+and line datasets.
+
+Fix the y-axis formatting — the callback uses a
+TypeScript typed parameter but QuickChart serializes
+this to JSON so the function doesn't survive. Use
+a string-based tick format instead:
+
+QuickChart supports a special `tickFormat` string
+or you can use the Chart.js `ticks.callback` as a
+string representation. The cleanest fix for QuickChart
+is to divide values by 1000 before sending and
+label the axis with "($K)":
+
+```typescript
+// In buildChartJsConfig, before building config:
+// If all values >= 1000, normalize to K
+const maxValue = Math.max(...values);
+const useKFormat = maxValue >= 1000;
+const normalizedValues = useKFormat
+  ? values.map(v => Math.round(v / 1000))
+  : values;
+const yAxisTitle = useKFormat
+  ? (chart.y_label ? chart.y_label + ' ($K)' : '($K)')
+  : (chart.y_label || '');
+
+// Then use normalizedValues instead of values in datasets
+// And set the y-axis title:
+y: {
+  grid: { color: 'rgba(0,0,0,0.06)' },
+  border: { display: false },
+  title: {
+    display: yAxisTitle.length > 0,
+    text: yAxisTitle,
+    color: '#94A3B8',
+    font: { size: 10 },
+  },
+  ticks: {
+    color: '#64748B',
+    font: { size: 11 },
+    // Simple prefix — no callback function needed
+    // Values are already in K
+  },
+}
+```
+
+Apply the same normalization to horizontal_bar x-axis.
+
+For the donut chart, no axis so no change needed.
+
+---
+
+Bug 3: Chart type switcher shows "Line" selected
+but renders as bar
+
+In Image 1 the type switcher shows "Line" highlighted
+but the chart looks like a bar chart. This means
+selectedType state is out of sync with what was
+actually saved to report_charts.
+
+On load, when fetching the accepted chart, set
+selectedType from the saved chart_type:
+
+```typescript
+// In the useEffect load function, after setting
+// acceptedChart:
+if (accepted) {
+  setAcceptedChart(accepted);
+  setSelectedType(accepted.chart_type);  // ADD THIS
+  // ... load PNG ...
+}
+```
+
+---
+
+Acceptance Criteria:
+1. "+ Add chart" click → shows "no suggestion available"
+   message with Dismiss button
+2. Accepted chart legend shows the chart title,
+   not "undefined"
+3. Y-axis shows "$1.3K" or "$1.3M" not "1300000"
+   (normalized to K for values >= 1000)
+4. selectedType pill matches the actual saved chart_type
+   on load
+5. Switching type re-renders and updates selectedType
+   to match the new saved type
+```
