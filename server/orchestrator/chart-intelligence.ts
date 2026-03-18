@@ -83,6 +83,9 @@ RULES:
    - bar/horizontalBar: comparisons across categories
    - line: trends over time
    - doughnut: composition/parts-of-whole
+   - For rep_performance data source: always suggest horizontalBar,
+     never doughnut. Dollar amounts matter more than percentages for
+     rep pipeline comparisons.
 5. Orientation:
    - Use horizontalBar if any label > 12 characters
    - Use bar for short labels (stage names, months, rep first names)
@@ -216,6 +219,19 @@ function buildChartNodeSpec(decision: ChartDecision): ChartNodeSpec | null {
     if (maxLabelLength > 12 && chart_type === 'bar') {
       chart_type = 'horizontalBar';
       orientation_rationale = 'Horizontal orientation for long labels';
+    }
+  }
+
+  // Rep comparison override:
+  // Donut loses absolute values — use horizontal bar for rep
+  // comparisons so dollar amounts are visible. Detect rep comparisons
+  // by checking for ≤3 items with short labels (likely rep names).
+  if (chart_type === 'doughnut' && data_points.length <= 3) {
+    const maxLabelLength = Math.max(...data_points.map(dp => dp.label.length));
+    // Short labels (≤15 chars) with few items suggests rep comparison
+    if (maxLabelLength <= 15) {
+      chart_type = 'horizontalBar';
+      orientation_rationale = 'Horizontal bar for rep comparison - dollar amounts matter more than percentages';
     }
   }
 

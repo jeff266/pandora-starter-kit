@@ -74,6 +74,13 @@ Your job is to deepen a report section by building a
 reasoning tree — cause analysis, second-order implications,
 third-order strategic questions, and concrete actions.
 
+CRITICAL: Each reasoning node answer must be ADDITIVE to the
+section content above it — not repetitive of it. A reader who
+reads the section conclusion and then reads the WHY node should
+learn something new. If the WHY node contains any sentence that
+appears verbatim or near-verbatim in the section conclusion,
+rewrite it.
+
 RULES:
 - Each node answers ONE question clearly and completely
 - Every answer must be grounded in the evidence provided
@@ -86,6 +93,19 @@ RULES:
   after reading the section conclusion
 - chart_hint: only suggest if the data exists in evidence
   to actually build that chart
+
+LAYER DEFINITIONS:
+- cause: "WHY did this happen?" IMPORTANT: Do NOT restate the
+  section conclusion. The section conclusion is already shown
+  above this node. The WHY node must go one level deeper —
+  explain the root cause or mechanism that produced the
+  conclusion. If the conclusion is 'pipeline is stale', the
+  WHY should explain why it went stale (rep behavior, quarter-end
+  psychology, deal quality). Never copy sentences from the section
+  content into the WHY answer.
+- second_order: "What are the second-order implications of this?"
+- third_order: "What strategic question does this raise?"
+- action: "What concrete action is required?"
 
 COMPANY: ${workspaceContext.company_name}
 QUARTER POSITION: ${workspaceContext.days_remaining_in_quarter} days remaining
