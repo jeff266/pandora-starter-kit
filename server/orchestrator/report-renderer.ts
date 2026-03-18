@@ -563,6 +563,20 @@ export async function renderPdf(
     pdfChartsBySection.get(chart.section_id)!.push(chart);
   }
 
+  // Re-attach chart PNGs from report_charts to reasoning_tree nodes.
+  // chart_png Buffers are stripped before JSON serialization (persistence.ts),
+  // so they must be restored here for inline rendering to work.
+  for (const section of doc.sections) {
+    if (!section.reasoning_tree?.length) continue;
+    const sectionCharts = pdfChartsBySection.get(section.id) || [];
+    for (let i = 0; i < section.reasoning_tree.length; i++) {
+      const node = section.reasoning_tree[i];
+      if (node.chart_spec && sectionCharts[i]) {
+        node.chart_png = sectionCharts[i].chart_png;
+      }
+    }
+  }
+
   for (const section of doc.sections) {
     if (pdf.y > pdf.page.height - 180) pdf.addPage();
 
@@ -652,8 +666,9 @@ export async function renderPdf(
       pdf.moveDown(0.6);
     }
 
-    // Embed charts for this section
-    const pdfSectionCharts = pdfChartsBySection.get(section.id) || [];
+    // Embed section-level charts — skip if inline charts already rendered via reasoning_tree
+    const hasInlineCharts = section.reasoning_tree?.some((n: any) => n.chart_png);
+    const pdfSectionCharts = hasInlineCharts ? [] : (pdfChartsBySection.get(section.id) || []);
     for (const chart of pdfSectionCharts) {
       if (chart.chart_png) {
         if (pdf.y > pdf.page.height - 250) pdf.addPage();

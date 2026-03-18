@@ -25,6 +25,16 @@ async function getChartSuggestionsForReport(
 export async function persistReportDocument(
   doc: ReportDocument
 ): Promise<string> {
+  // Strip non-serializable Buffer (chart_png) from reasoning_tree before JSON storage.
+  // chart_png Buffers are persisted separately to report_charts below.
+  const sectionsForStorage = doc.sections.map(s => ({
+    ...s,
+    reasoning_tree: s.reasoning_tree?.map(n => ({
+      ...n,
+      chart_png: undefined,  // Not storable in JSONB — re-loaded from report_charts at render time
+    })),
+  }));
+
   const result = await query(`
     INSERT INTO report_documents (
       workspace_id, agent_run_id, document_type, week_label,
@@ -40,7 +50,7 @@ export async function persistReportDocument(
     doc.document_type,
     doc.week_label,
     doc.headline,
-    JSON.stringify(doc.sections),
+    JSON.stringify(sectionsForStorage),
     JSON.stringify(doc.actions),
     doc.recommended_next_steps,
     doc.skills_included,
@@ -53,6 +63,33 @@ export async function persistReportDocument(
   ]);
 
   const reportDocumentId = result.rows[0].id;
+
+  // Persist chart PNGs from section reasoning trees → report_charts table
+  // position_in_section = node index, so the renderer can re-attach them in order
+  for (const section of doc.sections) {
+    if (!section.reasoning_tree?.length) continue;
+    for (let i = 0; i < section.reasoning_tree.length; i++) {
+      const node = section.reasoning_tree[i];
+      if (node.chart_spec && node.chart_png) {
+        await query(`
+          INSERT INTO report_charts (
+            workspace_id, report_document_id, section_id,
+            chart_type, title, data_labels, data_values, chart_png, position_in_section
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+        `, [
+          doc.workspace_id,
+          reportDocumentId,
+          section.id,
+          node.chart_spec.chart_type,
+          node.chart_spec.title,
+          JSON.stringify(node.chart_spec.data_points.map((dp: any) => dp.label)),
+          JSON.stringify(node.chart_spec.data_points.map((dp: any) => dp.value)),
+          node.chart_png,
+          i,
+        ]);
+      }
+    }
+  }
 
   // Persist chart suggestions
   if (doc.chart_suggestions && doc.chart_suggestions.length > 0) {

@@ -2,8 +2,10 @@ import { randomUUID } from 'crypto';
 import { query } from '../db.js';
 import { callLLM } from '../utils/llm-router.js';
 import { DOCUMENT_PLAYBOOKS, WORD_BUDGETS } from './playbooks.js';
-import { OrchestratorInput, ReportDocument, ReportSection, SkillSummary, ChartSuggestion, HypothesisUpdate, PriorContext } from './types.js';
+import { OrchestratorInput, ReportDocument, ReportSection, ReasoningNode, SkillSummary, ChartSuggestion, HypothesisUpdate, PriorContext } from './types.js';
 import { updateHypotheses } from './hypothesis-updater.js';
+import { generateChartSpecs } from './chart-intelligence.js';
+import { renderChartFromSpec } from './chart-renderer.js';
 
 /**
  * Loads active hypotheses from standing_hypotheses table
@@ -226,7 +228,10 @@ Word budget: ${input.word_budget} words total across all sections.
 
   const totalWords = sections.reduce((sum, s) => sum + s.word_count, 0);
 
-  // Generate chart suggestions based on skill summaries
+  // Generate Chart Intelligence specs for each section (per-node inline charts)
+  await generateSectionCharts(sections, activeSkills, input.workspace_id);
+
+  // Generate chart suggestions based on skill summaries (section-level fallback)
   let chartSuggestions: ChartSuggestion[] = [];
   try {
     chartSuggestions = generateChartSuggestions(sections, activeSkills);
@@ -376,6 +381,83 @@ function deriveSectionSeverity(
   if (hasZeroSignal) return 'critical';
   if (relevant.length > 0) return 'warning';
   return 'info';
+}
+
+/**
+ * Chart Intelligence — generates per-node inline charts for each section.
+ *
+ * For each section, constructs a synthetic ReasoningNode from the section
+ * content and calls generateChartSpecs (DeepSeek) to decide what chart
+ * (if any) best proves the section's argument. Charts with conclusion-first
+ * titles and semantic colors are rendered via QuickChart and attached as
+ * section.reasoning_tree so the PDF renderer embeds them inline.
+ *
+ * Non-fatal: if generation fails for any section, that section renders
+ * without a chart.
+ */
+async function generateSectionCharts(
+  sections: ReportSection[],
+  skillSummaries: SkillSummary[],
+  workspaceId: string
+): Promise<void> {
+  for (const section of sections) {
+    try {
+      // Build a synthetic reasoning node from the section content
+      const layer: ReasoningNode['layer'] =
+        section.id.includes('action') || section.id.includes('next') ? 'action' : 'cause';
+
+      const syntheticNodes: ReasoningNode[] = [{
+        layer,
+        question: `What does the data show about ${section.title}?`,
+        answer: section.content || '',
+        evidence_skill: section.source_skills?.[0],
+      }];
+
+      // Narrow skill summaries to those relevant to this section
+      const relevantSkills = skillSummaries.filter(
+        s => section.source_skills.includes(s.skill_id)
+      );
+      const skillsForChart = relevantSkills.length > 0 ? relevantSkills : skillSummaries;
+
+      const chartSpecs = await generateChartSpecs(
+        section.id,
+        syntheticNodes,
+        skillsForChart,
+        workspaceId
+      );
+
+      if (chartSpecs.size === 0) continue;
+
+      const nodes: ReasoningNode[] = [];
+      for (const [nodeIndex, spec] of chartSpecs.entries()) {
+        const node = syntheticNodes[nodeIndex];
+        if (!node) continue;
+
+        node.chart_spec = spec;
+        try {
+          node.chart_png = await renderChartFromSpec(spec);
+          console.log(
+            `[ChartIntelligence] Rendered chart for ${section.id}/${node.layer}: "${spec.title}"`
+          );
+        } catch (renderErr) {
+          console.error(
+            `[ChartIntelligence] Chart render failed for ${section.id}:`, renderErr
+          );
+          // Keep chart_spec but no PNG — non-fatal
+        }
+
+        nodes.push(node);
+      }
+
+      if (nodes.some(n => n.chart_png)) {
+        section.reasoning_tree = nodes;
+      }
+
+    } catch (err) {
+      // Non-fatal — section renders without chart
+      console.error(`[ChartIntelligence] Section ${section.id} failed:`, err);
+    }
+  }
 }
 
 function generateChartSuggestions(

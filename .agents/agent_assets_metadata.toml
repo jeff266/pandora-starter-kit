@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "1905xqk9LgclW4oNkI7jz"
+uri = "file://pandora-report.pdf"
+type = "pdf"
+title = "Monday Briefing — Week of Mar 18 (with Chart Intelligence)"
