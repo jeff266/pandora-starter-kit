@@ -730,6 +730,53 @@ export class WorkspaceConfigLoader {
     const key = `${templateType}:${sectionId}`;
     return profile.sectionPreferences[key] || null;
   }
+
+  // ===== PIPELINE VALUE & FORECAST ELIGIBILITY =====
+
+  /**
+   * Returns only pipelines eligible for quota/forecast math.
+   * Skills use this to scope coverage ratio, attainment %,
+   * and forecast rollup calculations.
+   */
+  async getForecastPipelines(workspaceId: string): Promise<PipelineConfig[]> {
+    const config = await this.getConfig(workspaceId);
+    return config.pipelines.filter(
+      p => p.forecast_eligible !== false
+      // default true if field missing (backwards compat)
+    );
+  }
+
+  /**
+   * Returns pipelines NOT eligible for forecast math.
+   * Skills report these separately without adding to
+   * quota attainment.
+   */
+  async getNonForecastPipelines(workspaceId: string): Promise<PipelineConfig[]> {
+    const config = await this.getConfig(workspaceId);
+    return config.pipelines.filter(
+      p => p.forecast_eligible === false
+    );
+  }
+
+  /**
+   * Returns the value_field for a specific pipeline.
+   * Default: 'amount'
+   */
+  async getValueField(
+    workspaceId: string,
+    pipelineId?: string
+  ): Promise<string> {
+    const config = await this.getConfig(workspaceId);
+    if (pipelineId) {
+      const pipeline = config.pipelines.find(p => p.id === pipelineId);
+      return pipeline?.value_field || 'amount';
+    }
+    // Return value_field from first forecast-eligible pipeline
+    const forecast = config.pipelines.find(
+      p => p.forecast_eligible !== false
+    );
+    return forecast?.value_field || 'amount';
+  }
 }
 
 // Export singleton instance

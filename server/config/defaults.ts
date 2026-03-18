@@ -13,6 +13,9 @@ export function getDefaultConfig(workspaceId: string): WorkspaceConfig & { _meta
         stage_probabilities: {},
         loss_values: ['closed_lost'],
         included_in_default_scope: true,
+        value_field: 'amount',          // default: use amount field
+        value_formula: null,            // no formula by default
+        forecast_eligible: true,        // default: count toward quota
       },
     ],
     win_rate: {

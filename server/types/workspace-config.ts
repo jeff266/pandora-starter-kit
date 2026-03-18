@@ -316,6 +316,37 @@ export interface PipelineConfig {
     /** Field that stores forecast category */
     category_field: string;
   };
+
+  /**
+   * Economic value field - field used as economic value for this pipeline.
+   * Default: 'amount'
+   * Override examples:
+   *   'arr_value'         — custom ARR field
+   *   'acv_amount'        — custom ACV field
+   *   'properties.amount' — nested field path
+   * Used by ALL skills when summing deal value.
+   */
+  value_field: string;
+
+  /**
+   * Optional arithmetic formula for calculated values.
+   * null = use value_field directly
+   * Supported variables: {amount}, {arr_value}, {contract_months}, {acv_amount}
+   * Examples:
+   *   '{amount} / {contract_months}'
+   *   '{amount} * 12'  (MRR → ARR)
+   *   '{acv_amount} || {amount}'  (ACV if exists, else amount)
+   * Formula is evaluated server-side with safe parser.
+   */
+  value_formula?: string | null;
+
+  /**
+   * Does this pipeline count toward quota attainment?
+   * true (default): counted in coverage ratio, attainment %, forecast rollup, quota gap
+   * false: tracked and reported separately but NEVER added to quota math
+   * Example: Fellowship pipeline at Frontera → false, Core Sales pipeline → true
+   */
+  forecast_eligible: boolean;
 }
 
 // ===== WIN RATE CONFIG =====

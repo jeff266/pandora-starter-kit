@@ -180,6 +180,29 @@ router.patch(
         sectionData = { ...(existing.system_avatars || {}), ...sectionData };
       }
 
+      if (section === 'pipelines') {
+        // Validate new pipeline value fields
+        for (const pipeline of sectionData || []) {
+          if (pipeline.value_field !== undefined && typeof pipeline.value_field !== 'string') {
+            res.status(400).json({ error: 'value_field must be a string' });
+            return;
+          }
+
+          if (pipeline.value_formula !== undefined &&
+              pipeline.value_formula !== null &&
+              typeof pipeline.value_formula !== 'string') {
+            res.status(400).json({ error: 'value_formula must be string or null' });
+            return;
+          }
+
+          if (pipeline.forecast_eligible !== undefined &&
+              typeof pipeline.forecast_eligible !== 'boolean') {
+            res.status(400).json({ error: 'forecast_eligible must be boolean' });
+            return;
+          }
+        }
+      }
+
       if (section === 'voice') {
         const validDetail = ['concise', 'standard', 'detailed'];
         const validFraming = ['direct', 'balanced', 'diplomatic'];
