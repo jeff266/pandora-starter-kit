@@ -1,0 +1,44 @@
+The issue tree is driving the report. Section structure is correct — Deal Execution, Pipeline Conversion, Team Execution, Forward Look. That's the rewire working.
+
+**Three things to note:**
+
+**1. Issue tree sections confirmed ✅**
+The old section names are gone. The Orchestrator is reading from the agent configuration, not the hardcoded playbook.
+
+**2. Only 1 skill ran — this is the main gap**
+"1 skills analyzed" explains why Pipeline Conversion is empty. The issue tree nodes reference `pipeline-hygiene`, `pipeline-waterfall`, `rep-scorecard` etc. but most didn't run with signal. The agent's skill selection (10 skills selected in the UI) needs to actually run those skills before the Orchestrator synthesizes. Check which skill ran:
+
+```sql
+SELECT skill_id, status, started_at
+FROM skill_runs
+WHERE workspace_id = '4160191d-73bc-414b-97dd-5a1853190378'
+  AND started_at > NOW() - INTERVAL '2 hours'
+ORDER BY started_at DESC;
+```
+
+**3. Content quality is solid where data exists**
+Deal Execution and Team Execution are well-written — specific names, specific numbers, correct framing for late-quarter. "Pipeline coverage ratios are irrelevant. What matters is deal-by-deal assessment" — that's the right conclusion. Forward Look correctly identifies the Q2 blind spot.
+
+**Now run the two SQL checks:**
+
+```sql
+-- Check 1: Section IDs
+SELECT jsonb_path_query_array(sections, '$[*].id')
+FROM report_documents
+WHERE workspace_id = '4160191d-73bc-414b-97dd-5a1853190378'
+ORDER BY created_at DESC LIMIT 1;
+
+-- Check 2: Hypothesis updates
+SELECT
+  jsonb_array_length(hypothesis_updates),
+  jsonb_path_query_array(
+    hypothesis_updates, '$[*].metric_key'
+  )
+FROM report_documents
+WHERE workspace_id = '4160191d-73bc-414b-97dd-5a1853190378'
+ORDER BY created_at DESC LIMIT 1;
+```
+
+The 1-skill problem is the priority fix before anything else. The issue tree nodes have skill assignments but those skills aren't being scheduled to run before the Orchestrator fires. The scheduler needs to run ALL skills referenced across issue tree nodes, not just the default REPORT_SKILL_MAP skills.
+
+Share the skill_runs query result and the two SQL checks.

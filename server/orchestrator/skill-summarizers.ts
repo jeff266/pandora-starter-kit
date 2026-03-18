@@ -640,14 +640,16 @@ export async function buildSkillSummaries(
       resultData = linked.rows[0].result;
       ranAt = linked.rows[0].started_at;
     } else {
-      // Fallback: most recent successful run within 12h
+      // Fallback: most recent successful run within 7 days
+      // Weekly-scheduled skills run once per week; 12h window misses them when the
+      // agent fires before the skill's scheduled slot completes.
       const fallback = await query(`
         SELECT result, started_at
         FROM skill_runs
         WHERE workspace_id = $1
           AND skill_id = $2
           AND status IN ('completed', 'partial')
-          AND started_at > NOW() - INTERVAL '12 hours'
+          AND started_at > NOW() - INTERVAL '7 days'
         ORDER BY started_at DESC
         LIMIT 1
       `, [workspaceId, skillId]);
@@ -679,6 +681,7 @@ export async function buildSkillSummaries(
   }
 
   // Detect conflicts after all summaries built
+  console.log(`[SkillSummarizers] ${summaries.length}/${skillIds.length} skills resolved: ${summaries.map(s => s.skill_id).join(', ') || 'none'}`);
   return detectConflicts(summaries);
 }
 
