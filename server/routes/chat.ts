@@ -112,6 +112,7 @@ router.post('/:workspaceId/chat', async (req: Request, res: Response): Promise<v
       latency_ms: result.latency_ms,
       ...(result.evidence ? { evidence: result.evidence } : {}),
       ...(result.chart_specs?.length ? { chart_specs: result.chart_specs } : {}),
+      ...(result.chart ? { chart: result.chart } : {}),
       ...(suggestedActions.length > 0 ? { suggested_actions: suggestedActions } : {}),
       ...(result.deliberation ? { deliberation: result.deliberation } : {}),
     };
@@ -159,6 +160,7 @@ router.post('/:workspaceId/chat', async (req: Request, res: Response): Promise<v
       ...(result.latency_ms != null ? { latency_ms: result.latency_ms } : {}),
       ...(result.inline_actions ? { inline_actions: result.inline_actions } : {}),
       ...(result.chart_specs?.length ? { chart_specs: result.chart_specs } : {}),
+      ...(result.chart ? { chart: result.chart } : {}),
       ...(suggestedActions.length > 0 ? { suggested_actions: suggestedActions } : {}),
       ...(result.deliberation ? { deliberation: result.deliberation } : {}),
     });

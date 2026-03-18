@@ -1,0 +1,482 @@
+Clean ship. The SSE pattern is the right call — streaming the chart as a separate event means the text response renders immediately and the chart appears when ready, rather than blocking the whole response on chart generation.
+
+Now give Replit the frontend prompt:
+
+```
+Replit: Ask Pandora Chart Display and
+"Add to Report" Flow
+
+Read before starting:
+1. The Ask Pandora chat component — find where
+   SSE events are handled and responses rendered.
+   A new SSE event type 'response_chart' now
+   arrives with:
+   { type: 'response_chart', chart: {
+       spec: ChartNodeSpec,
+       png_base64: string,
+       suggested_section_id: string
+   }}
+   Find how existing SSE events like 'chart_specs'
+   are handled — use the same pattern.
+
+2. How responses are rendered in the chat UI —
+   find the message bubble component. Currently
+   renders text. You are adding chart display
+   below the text when a response_chart event
+   arrives for that message.
+
+3. server/routes/agents.ts — the report_charts
+   POST endpoint:
+   POST /:workspaceId/reports/:reportId/charts
+   Body: { section_id, chart_type, title, data[] }
+   This is what "Add to report" calls.
+
+4. The new GET /:workspaceId/reports/current
+   endpoint — returns { id, week_label,
+   section_count, sections[] } for the latest
+   report. Used to populate the section picker.
+
+5. ChartSuggestionPanel.tsx — design reference
+   for how charts render inline. Match the same
+   visual style: borderRadius 6, maxWidth 480,
+   teal type switcher pills.
+
+6. How Ask Pandora is opened/focused in the app.
+   Look for the Cmd+K handler, the chat open
+   button, or a global openAskPandora() function.
+   You need this for the "Explore ↗" button.
+
+---
+
+## Build 1: Handle response_chart SSE event
+
+In the Ask Pandora SSE handler, add a case
+for 'response_chart':
+
+```typescript
+case 'response_chart': {
+  const { chart } = event;
+  // Attach chart to the current message being built
+  // Store in message state alongside the text
+  setCurrentMessage(prev => ({
+    ...prev,
+    chart: chart,
+  }));
+  break;
+}
+```
+
+The message state needs a chart field:
+```typescript
+interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  text: string;
+  chart?: {
+    spec: any;
+    png_base64: string;
+    suggested_section_id?: string;
+  };
+}
+```
+
+---
+
+## Build 2: Chart display in message bubble
+
+In the message bubble component, after
+rendering the text content, add:
+
+```typescript
+{message.chart && (
+  <div style={{
+    marginTop: 16,
+    paddingTop: 16,
+    borderTop: '0.5px solid var(--color-border-tertiary)',
+  }}>
+    <img
+      src={`data:image/png;base64,${message.chart.png_base64}`}
+      alt={message.chart.spec?.title || 'chart'}
+      style={{
+        width: '100%',
+        maxWidth: 480,
+        height: 'auto',
+        display: 'block',
+        borderRadius: 6,
+        marginBottom: 8,
+      }}
+    />
+    <div style={{
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    }}>
+      <span style={{
+        fontSize: 11,
+        color: 'var(--color-text-secondary)',
+        fontStyle: 'italic',
+      }}>
+        {message.chart.spec?.title}
+      </span>
+      <AddToReportButton
+        chart={message.chart}
+        workspaceId={workspaceId}
+        token={token}
+      />
+    </div>
+  </div>
+)}
+```
+
+---
+
+## Build 3: AddToReportButton component
+
+Create client/src/components/chat/
+AddToReportButton.tsx
+
+```typescript
+interface AddToReportButtonProps {
+  chart: {
+    spec: any;
+    png_base64: string;
+    suggested_section_id?: string;
+  };
+  workspaceId: string;
+  token: string;
+}
+
+type ButtonState =
+  'idle' | 'picking' | 'saving' | 'saved' | 'error';
+```
+
+State:
+```typescript
+const [state, setState] =
+  useState<ButtonState>('idle');
+const [reportId, setReportId] =
+  useState<string | null>(null);
+const [sections, setSections] =
+  useState<{ id: string; title: string }[]>([]);
+const [selectedSection, setSelectedSection] =
+  useState(chart.suggested_section_id || '');
+```
+
+On click (idle → picking):
+```typescript
+async function handleClick() {
+  setState('picking');
+  try {
+    const res = await fetch(
+      `/api/workspaces/${workspaceId}/reports/current`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (!res.ok) {
+      // No report exists — hide button
+      setState('idle');
+      return;
+    }
+    const report = await res.json();
+    setReportId(report.id);
+
+    // Parse sections from report
+    // sections may be stored as array of
+    // { id, title } objects
+    const sectionList = Array.isArray(report.sections)
+      ? report.sections.map((s: any) => ({
+          id: s.id || s.section_id,
+          title: s.title,
+        }))
+      : [
+          { id: 'node-deal-execution',
+            title: 'Deal Execution' },
+          { id: 'node-pipeline-conv',
+            title: 'Pipeline Conversion' },
+          { id: 'node-team-execution',
+            title: 'Team Execution' },
+          { id: 'node-forward-look',
+            title: 'Forward Look' },
+        ];
+
+    setSections(sectionList);
+
+    // Pre-select suggested or first section
+    if (!selectedSection && sectionList.length > 0) {
+      setSelectedSection(
+        chart.suggested_section_id
+        || sectionList[0].id
+      );
+    }
+  } catch {
+    setState('error');
+  }
+}
+```
+
+On save:
+```typescript
+async function handleSave() {
+  if (!reportId || !selectedSection) return;
+  setState('saving');
+
+  try {
+    const res = await fetch(
+      `/api/workspaces/${workspaceId}/reports/` +
+      `${reportId}/charts`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          section_id: selectedSection,
+          chart_type: chart.spec?.chart_type
+            || 'bar',
+          title: chart.spec?.title || 'Chart',
+          data: (chart.spec?.data_points || [])
+            .map((d: any) => ({
+              label: d.label,
+              value: d.value,
+            })),
+        }),
+      }
+    );
+
+    if (!res.ok) throw new Error('Save failed');
+
+    setState('saved');
+    // Revert to idle after 2 seconds
+    setTimeout(() => setState('idle'), 2000);
+
+  } catch {
+    setState('error');
+  }
+}
+```
+
+Section picker UI (state === 'picking'):
+```typescript
+<div style={{
+  marginTop: 8,
+  padding: 12,
+  background: 'var(--color-background-secondary)',
+  borderRadius: 8,
+  border: '0.5px solid var(--color-border-tertiary)',
+  minWidth: 220,
+}}>
+  <div style={{
+    fontSize: 11,
+    fontWeight: 500,
+    color: 'var(--color-text-primary)',
+    marginBottom: 8,
+  }}>
+    Add to report section:
+  </div>
+
+  {sections.map(section => (
+    <label key={section.id} style={{
+      display: 'flex',
+      alignItems: 'center',
+      gap: 8,
+      padding: '4px 0',
+      fontSize: 12,
+      color: 'var(--color-text-primary)',
+      cursor: 'pointer',
+    }}>
+      <input
+        type="radio"
+        name="section"
+        value={section.id}
+        checked={selectedSection === section.id}
+        onChange={() => setSelectedSection(section.id)}
+      />
+      {section.title}
+    </label>
+  ))}
+
+  <div style={{
+    display: 'flex',
+    gap: 6,
+    marginTop: 10,
+  }}>
+    <button
+      onClick={() => setState('idle')}
+      style={{
+        fontSize: 11,
+        padding: '4px 10px',
+        background: 'none',
+        border: '0.5px solid var(--color-border-secondary)',
+        borderRadius: 4,
+        color: 'var(--color-text-secondary)',
+        cursor: 'pointer',
+      }}
+    >
+      Cancel
+    </button>
+    <button
+      onClick={handleSave}
+      disabled={!selectedSection}
+      style={{
+        fontSize: 11,
+        padding: '4px 12px',
+        background: selectedSection
+          ? '#0D9488' : '#CBD5E1',
+        border: 'none',
+        borderRadius: 4,
+        color: 'white',
+        cursor: selectedSection
+          ? 'pointer' : 'not-allowed',
+        fontWeight: 500,
+      }}
+    >
+      Add to report
+    </button>
+  </div>
+</div>
+```
+
+Button render by state:
+```typescript
+// idle
+<button onClick={handleClick} style={{
+  fontSize: 11,
+  padding: '3px 10px',
+  background: 'none',
+  border: '0.5px solid var(--color-border-secondary)',
+  borderRadius: 4,
+  color: 'var(--color-text-secondary)',
+  cursor: 'pointer',
+}}>
+  + Add to report
+</button>
+
+// saving
+<button disabled style={{
+  fontSize: 11, padding: '3px 10px',
+  opacity: 0.6, cursor: 'not-allowed',
+  border: '0.5px solid var(--color-border-tertiary)',
+  borderRadius: 4, background: 'none',
+  color: 'var(--color-text-secondary)',
+}}>
+  Adding...
+</button>
+
+// saved
+<button style={{
+  fontSize: 11, padding: '3px 10px',
+  background: '#F0FDF9',
+  border: '0.5px solid #0D9488',
+  borderRadius: 4, color: '#0D9488',
+  cursor: 'default', fontWeight: 500,
+}}>
+  ✓ Added
+</button>
+
+// error
+<button onClick={handleClick} style={{
+  fontSize: 11, padding: '3px 10px',
+  background: 'none',
+  border: '0.5px solid #EF4444',
+  borderRadius: 4, color: '#EF4444',
+  cursor: 'pointer',
+}}>
+  Retry
+</button>
+```
+
+Hide the button entirely if no report exists
+(GET /reports/current returns 404).
+
+---
+
+## Build 4: "Explore ↗" on report charts
+
+In ChartSuggestionPanel.tsx, on the accepted
+chart state, add an Explore button next to Remove:
+
+```typescript
+// Find the section title from the sectionId prop
+// or pass it as a prop from ReportViewer
+
+<button
+  onClick={() => {
+    const context =
+      `I'm looking at the report. ` +
+      `The current chart shows ` +
+      `"${acceptedChart.title}". ` +
+      `Help me explore this data from ` +
+      `a different angle, or show me ` +
+      `something related.`;
+
+    // Open Ask Pandora with pre-seeded message
+    // Find the mechanism — look for:
+    // - A global event: window.dispatchEvent(
+    //     new CustomEvent('open-ask-pandora',
+    //     { detail: { message: context } }))
+    // - A context/state setter
+    // - A URL param that triggers open on load
+    // Use whatever mechanism already exists
+    // in the app to open Ask Pandora
+    openAskPandora(context);
+  }}
+  style={{
+    background: 'none',
+    border: 'none',
+    fontSize: 11,
+    color: '#94A3B8',
+    cursor: 'pointer',
+    padding: '2px 6px',
+  }}
+>
+  Explore ↗
+</button>
+```
+
+---
+
+## What NOT to change:
+- SSE stream handling beyond the new event
+- Existing chart suggestion AI flow
+- Report viewer section rendering
+- Export pipeline
+
+---
+
+## Acceptance Criteria:
+
+1. Ask "Show me at-risk deals ranked by
+   dollar amount" in Ask Pandora →
+   chart renders below text response
+
+2. Chart shows deal names on y-axis (horizontal),
+   amounts on x-axis, semantic colors
+
+3. "Add to report" button appears below chart
+
+4. Clicking it → section picker appears with
+   correct sections from current report
+
+5. Suggested section is pre-selected:
+   "which deals are stale" →
+   Pipeline Conversion pre-selected
+
+6. Click "Add to report" → button shows
+   "✓ Added" → open Reports page →
+   chart visible in that section
+
+7. Export PDF from Reports → the chart added
+   from Ask Pandora is embedded in the section
+
+8. "Explore ↗" on a report chart → Ask Pandora
+   opens with chart title as context
+
+9. If no report exists → "Add to report"
+   button hidden entirely
+
+10. Non-chartable question ("what is our
+    win rate") → no chart appears, no error
+
+11. Zero regressions on existing Ask Pandora
+    text responses and existing report charts
+```

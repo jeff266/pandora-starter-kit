@@ -9,6 +9,7 @@ import type { ChartSpec } from './shared/ChartRenderer';
 import DeliberationCard from './DeliberationCard';
 import ChatDocBar from './ChatDocBar';
 import SaveAsAgentBanner from './chat/SaveAsAgentBanner';
+import AddToReportButton from './chat/AddToReportButton';
 import { useSaveAsAgentTrigger } from '../hooks/useSaveAsAgentTrigger';
 import SuggestedActionsPanel from './assistant/SuggestedActionsPanel';
 import type { SuggestedAction } from './assistant/useConversationStream';
@@ -49,6 +50,7 @@ interface ChatMessage {
   tool_call_count?: number;
   latency_ms?: number;
   chart_specs?: ChartSpec[];
+  response_chart?: { spec: any; png_base64: string; suggested_section_id?: string };
   deliberation?: any;
 }
 
@@ -344,6 +346,7 @@ export default function ChatPanel({ isOpen, onClose, scope, initialSessionId, pe
         tool_call_count: msg.metadata?.tool_call_count,
         latency_ms: msg.metadata?.latency_ms,
         chart_specs: msg.metadata?.chart_specs,
+        response_chart: msg.metadata?.chart,
         deliberation: msg.metadata?.deliberation,
       }));
       setMessages(mapped);
@@ -466,6 +469,7 @@ export default function ChatPanel({ isOpen, onClose, scope, initialSessionId, pe
         tool_call_count: result.tool_call_count,
         latency_ms: result.latency_ms,
         chart_specs: result.chart_specs,
+        response_chart: result.chart,
         deliberation: result.deliberation,
       };
       setMessages(prev => [...prev, assistantMsg]);
@@ -682,6 +686,21 @@ export default function ChatPanel({ isOpen, onClose, scope, initialSessionId, pe
                       <ChartRenderer spec={spec} compact={false} />
                     </div>
                   ))}
+                </div>
+              )}
+              {msg.role === 'assistant' && msg.response_chart && (
+                <div style={{ marginTop: 12, paddingTop: 12, borderTop: '0.5px solid rgba(148,163,184,0.2)' }}>
+                  <img
+                    src={`data:image/png;base64,${msg.response_chart.png_base64}`}
+                    alt={msg.response_chart.spec?.title || 'chart'}
+                    style={{ width: '100%', maxWidth: 480, height: 'auto', borderRadius: 6, display: 'block', marginBottom: 8 }}
+                  />
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: 11, color: '#94a3b8', fontStyle: 'italic' }}>
+                      {msg.response_chart.spec?.title}
+                    </span>
+                    <AddToReportButton chart={msg.response_chart} />
+                  </div>
                 </div>
               )}
               {msg.role === 'assistant' && msg.deliberation && (

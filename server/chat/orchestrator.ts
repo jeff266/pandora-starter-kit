@@ -725,6 +725,7 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
             latency_ms: latencyMs,
             documents: synthOutput,
             ...(pandoraResult?.chart_specs?.length ? { chart_specs: pandoraResult.chart_specs } : {}),
+            ...(pandoraResult?.chart ? { chart: pandoraResult.chart } : {}),
           };
         } catch (err) {
           console.error('[orchestrator] Document synthesis failed:', (err as Error).message, (err as Error).stack);
@@ -907,6 +908,7 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
         } : {}),
         ...(pandoraResult.inline_actions ? { inline_actions: pandoraResult.inline_actions } : {}),
         ...(pandoraResult.chart_specs?.length ? { chart_specs: pandoraResult.chart_specs } : {}),
+        ...(pandoraResult.chart ? { chart: pandoraResult.chart } : {}),
       } as any;
     } catch (err) {
       console.error('[orchestrator] Pandora Agent failed:', err);

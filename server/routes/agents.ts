@@ -415,6 +415,37 @@ agentsWorkspaceRouter.get('/:workspaceId/reports/latest', requirePermission('age
   }
 });
 
+// GET /reports/current — client-friendly alias for section picker in AddToReportButton
+agentsWorkspaceRouter.get('/:workspaceId/reports/current', requirePermission('agents.view'), async (req: Request, res: Response) => {
+  const workspaceId = req.params.workspaceId as string;
+  const documentType = (req.query.type as string) || 'monday_briefing';
+
+  try {
+    const { getLatestReportDocument } = await import('../orchestrator/persistence.js');
+    const report = await getLatestReportDocument(workspaceId, documentType);
+
+    if (!report) {
+      return res.status(404).json({ error: 'No report found' });
+    }
+
+    const sections = Array.isArray(report.sections)
+      ? report.sections.map((s: any) => ({ id: s.id || s.section_id, title: s.title }))
+      : [];
+
+    res.json({
+      id: report.id,
+      week_label: report.generated_at
+        ? new Date(report.generated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+        : '',
+      section_count: sections.length,
+      sections,
+    });
+  } catch (err: any) {
+    console.error('[Reports] Failed to get current report:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 agentsWorkspaceRouter.get('/:workspaceId/reports', requirePermission('agents.view'), async (req: Request, res: Response) => {
   const workspaceId = req.params.workspaceId as string;
   const limit = Math.min(parseInt(req.query.limit as string) || 10, 50);

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 type ChartType = 'bar' | 'horizontalBar' | 'line' | 'pie' | 'doughnut';
 
@@ -56,6 +57,7 @@ export default function ChartSuggestionPanel({
   sectionId,
   token,
 }: ChartSuggestionPanelProps) {
+  const navigate = useNavigate();
   const [suggestion, setSuggestion] = useState<ChartSuggestion | null>(null);
   const [collapsed, setCollapsed] = useState(false);
   const [acceptedChart, setAcceptedChart] = useState<ReportChart | null>(null);
@@ -420,23 +422,42 @@ export default function ChartSuggestionPanel({
             ))}
           </div>
 
-          <button
-            onClick={handleAddToReport}
-            disabled={adding}
-            style={{
-              width: '100%',
-              padding: '7px 0',
-              fontSize: 13,
-              fontWeight: 500,
-              background: adding ? '#F0FDF9' : '#0D9488',
-              color: adding ? '#0D9488' : 'white',
-              border: adding ? '0.5px solid #0D9488' : 'none',
-              borderRadius: 6,
-              cursor: adding ? 'not-allowed' : 'pointer',
-            }}
-          >
-            {adding ? 'Adding...' : 'Add to report'}
-          </button>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button
+              onClick={handleAddToReport}
+              disabled={adding}
+              style={{
+                flex: 1,
+                padding: '7px 0',
+                fontSize: 13,
+                fontWeight: 500,
+                background: adding ? '#F0FDF9' : '#0D9488',
+                color: adding ? '#0D9488' : 'white',
+                border: adding ? '0.5px solid #0D9488' : 'none',
+                borderRadius: 6,
+                cursor: adding ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {adding ? 'Adding...' : 'Add to report'}
+            </button>
+            <button
+              onClick={() => navigate('/assistant', { state: { openChatWithMessage: `Tell me more about: ${suggestion.title}` } })}
+              title="Explore in Ask Pandora"
+              style={{
+                padding: '7px 12px',
+                fontSize: 12,
+                fontWeight: 500,
+                background: 'none',
+                border: '0.5px solid #CBD5E1',
+                borderRadius: 6,
+                color: '#64748B',
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              Explore ↗
+            </button>
+          </div>
         </div>
       </div>
     );

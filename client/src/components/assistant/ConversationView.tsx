@@ -19,6 +19,7 @@ import ChartRenderer from '../shared/ChartRenderer';
 import SankeyChart from '../reports/SankeyChart';
 import WinningPathsChart from '../pipeline/WinningPathsChart';
 import SuggestedActionsPanel from './SuggestedActionsPanel';
+import AddToReportButton from '../chat/AddToReportButton';
 
 interface EntityScope {
   entityType: 'deal';
@@ -385,6 +386,33 @@ export default function ConversationView({ initialMessage, onBack, onThreadId, s
                   <ChartRenderer spec={spec} compact={true} />
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {state.responseChart && state.synthesisComplete && (
+          <div style={{ display: 'flex', justifyContent: 'flex-start', width: '100%', marginBottom: 12 }}>
+            <div style={{
+              maxWidth: '75%', padding: '12px 14px', borderRadius: 10,
+              background: colors.surface, border: `1px solid ${colors.border}`,
+              width: '100%',
+            }}>
+              <div style={{ paddingTop: 4, paddingBottom: 4, borderTop: `0.5px solid ${colors.border}` }}>
+                <img
+                  src={`data:image/png;base64,${state.responseChart.png_base64}`}
+                  alt={state.responseChart.spec?.title || 'chart'}
+                  style={{
+                    width: '100%', maxWidth: 480, height: 'auto',
+                    display: 'block', borderRadius: 6, marginBottom: 8,
+                  }}
+                />
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: 11, color: colors.textMuted, fontStyle: 'italic' }}>
+                    {state.responseChart.spec?.title}
+                  </span>
+                  <AddToReportButton chart={state.responseChart} />
+                </div>
+              </div>
             </div>
           </div>
         )}

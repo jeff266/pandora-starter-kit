@@ -79,6 +79,7 @@ export interface ConversationState {
   strategicAnalysis: any | null;
   deliverableOptions: DeliverableOption[];
   chartSpecs: ChartSpec[];
+  responseChart: { spec: any; png_base64: string; suggested_section_id?: string } | null;
   sankeyData: SankeyChartData | null;
   winningPathsData: WinningPathsData | null;
   error: string | null;
@@ -122,6 +123,7 @@ const initial: ConversationState = {
   strategicAnalysis: null,
   deliverableOptions: [],
   chartSpecs: [],
+  responseChart: null,
   sankeyData: null,
   winningPathsData: null,
   planText: null,
@@ -172,6 +174,7 @@ function reducer(state: ConversationState, action: Action): ConversationState {
       strategicAnalysis: null,
       deliverableOptions: [],
       chartSpecs: [],
+      responseChart: null,
       sankeyData: null,
       winningPathsData: null,
       error: null,
@@ -269,6 +272,9 @@ function reducer(state: ConversationState, action: Action): ConversationState {
       }
       case 'chart_specs': {
         return { ...state, chartSpecs: ev.specs ?? [] };
+      }
+      case 'response_chart': {
+        return { ...state, responseChart: ev.chart ?? null };
       }
       case 'sankey_data': {
         return { ...state, sankeyData: ev.data ?? null };
