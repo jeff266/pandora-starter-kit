@@ -174,6 +174,80 @@ export async function renderDocx(
       children.push(new Paragraph(paraProps));
     }
 
+    // Render reasoning tree (McKinsey-style reasoning layers)
+    if (section.reasoning_tree?.length) {
+      // Small spacer before tree
+      children.push(new Paragraph({
+        spacing: { before: 160 },
+      }));
+
+      const layerLabels: Record<string, string> = {
+        cause:        'Why',
+        second_order: 'What this means',
+        third_order:  'Strategic question',
+        action:       'Action required',
+      };
+
+      const layerColors: Record<string, string> = {
+        cause:        '475569',  // slate
+        second_order: '0F6E56',  // dark teal
+        third_order:  '533AB7',  // purple
+        action:       'DC2626',  // red
+      };
+
+      for (const node of section.reasoning_tree) {
+        // Layer label
+        children.push(new Paragraph({
+          children: [new TextRun({
+            text: layerLabels[node.layer] || node.layer,
+            size: 16,  // 8pt
+            bold: true,
+            color: layerColors[node.layer] || '475569',
+            allCaps: true,
+          })],
+          spacing: { before: 160, after: 40 },
+        }));
+
+        // Question in italic
+        children.push(new Paragraph({
+          children: [new TextRun({
+            text: node.question,
+            size: 18,  // 9pt
+            italics: true,
+            color: '374151',
+          })],
+          spacing: { before: 0, after: 60 },
+          indent: { left: convertInchesToTwip(0.15) },
+        }));
+
+        // Answer
+        children.push(new Paragraph({
+          children: [new TextRun({
+            text: node.answer,
+            size: 20,  // 10pt
+            color: node.data_gap ? '94A3B8' : '1E293B',
+            italics: node.data_gap || false,
+          })],
+          spacing: { before: 0, after: 120 },
+          indent: { left: convertInchesToTwip(0.15) },
+        }));
+
+        // Data gap note
+        if (node.data_gap) {
+          children.push(new Paragraph({
+            children: [new TextRun({
+              text: '⚠ Insufficient data to answer fully',
+              size: 16,
+              color: 'F59E0B',
+              italics: true,
+            })],
+            indent: { left: convertInchesToTwip(0.15) },
+            spacing: { after: 80 },
+          }));
+        }
+      }
+    }
+
     // Embed charts for this section
     const sectionCharts = chartsBySection.get(section.id) || [];
     for (const chart of sectionCharts) {
@@ -473,6 +547,60 @@ export async function renderPdf(
     pdf.fillColor(hexToRgb(MID)).font('Helvetica').fontSize(10.5)
        .text(section.content || '', { width: W, lineGap: 2 });
     pdf.moveDown(1.2);
+
+    // Render reasoning tree (McKinsey-style reasoning layers)
+    if (section.reasoning_tree?.length) {
+      const layerLabels: Record<string, string> = {
+        cause:        'WHY',
+        second_order: 'WHAT THIS MEANS',
+        third_order:  'STRATEGIC QUESTION',
+        action:       'ACTION REQUIRED',
+      };
+
+      const layerColors: Record<string, string> = {
+        cause:        '#475569',  // slate
+        second_order: '#0F6E56',  // dark teal
+        third_order:  '#533AB7',  // purple
+        action:       '#DC2626',  // red
+      };
+
+      for (const node of section.reasoning_tree) {
+        if (pdf.y > pdf.page.height - 120) pdf.addPage();
+
+        // Layer label
+        const labelColor = layerColors[node.layer] || '#475569';
+        pdf.fillColor(hexToRgb(labelColor))
+           .font('Helvetica-Bold')
+           .fontSize(8)
+           .text(layerLabels[node.layer] || node.layer.toUpperCase(), 90, pdf.y, { width: W });
+        pdf.moveDown(0.2);
+
+        // Question in italic
+        pdf.fillColor(hexToRgb('#475569'))
+           .font('Helvetica-Oblique')
+           .fontSize(9)
+           .text(node.question, 102, pdf.y, { width: W - 12, lineGap: 1 });
+        pdf.moveDown(0.3);
+
+        // Answer
+        pdf.fillColor(hexToRgb(node.data_gap ? '#94A3B8' : '#1E293B'))
+           .font(node.data_gap ? 'Helvetica-Oblique' : 'Helvetica')
+           .fontSize(10)
+           .text(node.answer, 102, pdf.y, { width: W - 12, lineGap: 2 });
+        pdf.moveDown(0.5);
+
+        // Data gap note
+        if (node.data_gap) {
+          pdf.fillColor(hexToRgb('#F59E0B'))
+             .font('Helvetica-Oblique')
+             .fontSize(8)
+             .text('⚠ Insufficient data to answer fully', 102, pdf.y, { width: W - 12 });
+          pdf.moveDown(0.4);
+        }
+      }
+
+      pdf.moveDown(0.6);
+    }
 
     // Embed charts for this section
     const pdfSectionCharts = pdfChartsBySection.get(section.id) || [];

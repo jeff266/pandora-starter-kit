@@ -3,6 +3,7 @@ import { query } from '../db.js';
 import { callLLM } from '../utils/llm-router.js';
 import { DOCUMENT_PLAYBOOKS, WORD_BUDGETS } from './playbooks.js';
 import { OrchestratorInput, ReportDocument, ReportSection, SkillSummary, ChartSuggestion } from './types.js';
+import { generateAllReasoningTrees } from './question-tree.js';
 
 export async function runReportOrchestrator(
   input: OrchestratorInput
@@ -149,8 +150,39 @@ Word budget: ${input.word_budget} words total across all sections.
 
   const totalWords = sections.reduce((sum, s) => sum + s.word_count, 0);
 
-  // Generate chart suggestions based on skill summaries
-  const chartSuggestions = generateChartSuggestions(sections, activeSkills);
+  // Generate reasoning trees in parallel (non-fatal)
+  let treeMap = new Map<string, any[]>();
+  let treeTokens = 0;
+  try {
+    treeMap = await generateAllReasoningTrees(
+      sections,
+      activeSkills,
+      input.workspace_id,
+      {
+        company_name: input.workspace_context.company_name,
+        days_remaining_in_quarter:
+          input.workspace_context.days_remaining_in_quarter,
+        has_quota: input.workspace_context.has_quota,
+      }
+    );
+    // Estimate tokens used by question tree (rough calculation)
+    treeTokens = treeMap.size * 800;  // ~800 tokens per section
+  } catch (err) {
+    console.error('[Orchestrator] Question tree failed:', err);
+  }
+
+  // Attach trees to sections
+  const sectionsWithTrees = sections.map(section => ({
+    ...section,
+    reasoning_tree: treeMap.get(section.id) || [],
+  }));
+
+  // Generate chart suggestions based on skill summaries and reasoning tree hints
+  const baseChartSuggestions = generateChartSuggestions(sectionsWithTrees, activeSkills);
+  const treeChartSuggestions = extractChartHintsFromTrees(sectionsWithTrees, activeSkills);
+
+  // Merge: tree-derived hints take priority over generic suggestions for same section
+  const chartSuggestions = mergeChartSuggestions(baseChartSuggestions, treeChartSuggestions);
 
   return {
     document_type: input.document_type,
@@ -159,7 +191,7 @@ Word budget: ${input.word_budget} words total across all sections.
     generated_at: new Date().toISOString(),
     week_label: input.workspace_context.week_label,
     headline: parsed.headline,
-    sections,
+    sections: sectionsWithTrees,
     actions: (parsed.actions || []).slice(0, 5),
     recommended_next_steps: parsed.recommended_next_steps || '',
     chart_suggestions: chartSuggestions,
@@ -169,7 +201,7 @@ Word budget: ${input.word_budget} words total across all sections.
       ...(parsed.skills_omitted || []),
     ],
     total_word_count: totalWords,
-    tokens_used: tokensUsed,
+    tokens_used: tokensUsed + treeTokens,
     orchestrator_run_id: runId,
   };
 }
@@ -332,4 +364,151 @@ function generateChartSuggestions(
   }
 
   return suggestions.slice(0, 6); // Max 6 charts per report
+}
+
+function extractChartHintsFromTrees(
+  sections: ReportSection[],
+  skillSummaries: SkillSummary[]
+): ChartSuggestion[] {
+  const suggestions: ChartSuggestion[] = [];
+
+  for (const section of sections) {
+    if (!section.reasoning_tree?.length) continue;
+
+    for (const node of section.reasoning_tree) {
+      if (!node.chart_hint || node.data_gap) continue;
+
+      // Try to resolve actual data from skill summaries
+      const chartData = resolveChartData(
+        node.chart_hint.data_description,
+        section.source_skills,
+        skillSummaries
+      );
+
+      if (chartData && chartData.length >= 2) {
+        suggestions.push({
+          section_id: section.id,
+          chart_type: node.chart_hint.type as any,
+          title: node.chart_hint.title,
+          data_labels: chartData.map(d => d.label),
+          data_values: chartData.map(d => d.value),
+          reasoning: node.question,
+          priority: 'high',
+        });
+        break; // One chart per section from tree
+      }
+    }
+  }
+
+  return suggestions;
+}
+
+function resolveChartData(
+  description: string,
+  sourceSkills: string[],
+  summaries: SkillSummary[]
+): Array<{ label: string; value: number }> | null {
+  const desc = description.toLowerCase();
+
+  // Rep comparison
+  if (desc.includes('rep') &&
+      (desc.includes('pipeline') || desc.includes('closed'))) {
+    const coverage = summaries.find(s =>
+      s.skill_id === 'pipeline-coverage' ||
+      s.skill_id === 'rep-scorecard'
+    );
+    if (!coverage) return null;
+
+    const repData: { label: string; value: number }[] = [];
+    const metrics = coverage.key_metrics;
+
+    for (const [key, val] of Object.entries(metrics)) {
+      if ((key.includes('rep') || key.includes('owner'))
+          && (key.includes('pipeline') ||
+              key.includes('closed'))) {
+        const label = key
+          .replace(/_pipeline|_closed|_open/g, '')
+          .replace(/_/g, ' ')
+          .trim();
+        const value = Math.round(Number(val) / 1000);
+        if (value > 0 && label.length > 0) {
+          repData.push({ label, value });
+        }
+      }
+    }
+    return repData.length >= 2 ? repData : null;
+  }
+
+  // Forecast scenarios
+  if (desc.includes('forecast') || desc.includes('bear') ||
+      desc.includes('bull') || desc.includes('landing')) {
+    const forecast = summaries.find(
+      s => s.skill_id === 'forecast-rollup'
+    );
+    if (!forecast) return null;
+
+    const bear = Math.round(
+      Number(forecast.key_metrics['bear'] || 0) / 1000
+    );
+    const base = Math.round(
+      Number(forecast.key_metrics['base'] || 0) / 1000
+    );
+    const bull = Math.round(
+      Number(forecast.key_metrics['bull'] || 0) / 1000
+    );
+
+    if (bear + base + bull === 0) return null;
+    return [
+      { label: 'Bear', value: bear },
+      { label: 'Base', value: base },
+      { label: 'Bull', value: bull },
+    ].filter(d => d.value > 0);
+  }
+
+  // Pipeline movement
+  if (desc.includes('movement') || desc.includes('created') ||
+      desc.includes('advanced') || desc.includes('won')) {
+    const waterfall = summaries.find(
+      s => s.skill_id === 'pipeline-waterfall'
+    );
+    if (!waterfall) return null;
+
+    const m = waterfall.key_metrics;
+    return [
+      { label: 'Created',
+        value: Number(m['created'] || 0) },
+      { label: 'Advanced',
+        value: Number(m['advanced'] || 0) },
+      { label: 'Regressed',
+        value: Number(m['regressed'] || 0) },
+      { label: 'Won',
+        value: Number(m['closed_won_count']
+          || m['won'] || 0) },
+      { label: 'Lost',
+        value: Number(m['closed_lost_count']
+          || m['lost'] || 0) },
+    ].filter(d => d.value > 0);
+  }
+
+  return null;
+}
+
+function mergeChartSuggestions(
+  base: ChartSuggestion[],
+  treeHints: ChartSuggestion[]
+): ChartSuggestion[] {
+  // Tree-derived hints take priority over generic suggestions for the same section
+  const merged = new Map<string, ChartSuggestion>();
+
+  // Add base suggestions first
+  for (const suggestion of base) {
+    merged.set(suggestion.section_id, suggestion);
+  }
+
+  // Override with tree hints (higher priority)
+  for (const suggestion of treeHints) {
+    merged.set(suggestion.section_id, suggestion);
+  }
+
+  return Array.from(merged.values()).slice(0, 6);
 }

@@ -26,6 +26,26 @@ export interface ActionSummary {
   owner_email?: string;
 }
 
+export type ReasoningLayer =
+  | 'cause'
+  | 'second_order'
+  | 'third_order'
+  | 'action';
+
+export interface ReasoningNode {
+  layer: ReasoningLayer;
+  question: string;        // The question this node answers
+  answer: string;          // The answer, evidence-backed
+  evidence_skill?: string; // Which skill provided evidence
+  data_gap?: boolean;      // True if answer is limited by missing data
+  urgency?: 'today' | 'this_week' | 'this_month';  // Only on 'action' nodes
+  chart_hint?: {           // Hint for Chart Intelligence
+    type: 'bar' | 'line' | 'pie' | 'doughnut' | 'horizontalBar';
+    title: string;
+    data_description: string; // What data would make this chart
+  };
+}
+
 export interface ReportSection {
   id: string;
   title: string;
@@ -34,6 +54,7 @@ export interface ReportSection {
   source_skills: string[];
   severity?: 'critical' | 'warning' | 'info';
   flagged_for_client?: boolean;  // Set by annotation merge later
+  reasoning_tree?: ReasoningNode[];  // McKinsey-style reasoning layers
 }
 
 export interface ChartSuggestion {
