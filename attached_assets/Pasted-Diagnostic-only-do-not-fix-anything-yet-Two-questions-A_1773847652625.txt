@@ -1,0 +1,89 @@
+Diagnostic only — do not fix anything yet.
+Two questions. Answer both before touching code.
+
+---
+
+Question 1: Why is deal-risk-review ghost-completing?
+
+The skill has 3 runs on Mar 18 that completed with
+0 steps and null result. Last real run was Feb 14.
+
+Find the deal-risk-review skill definition in
+server/skills/tool-definitions.ts or wherever
+it lives. Answer:
+
+a) What is the skill's trigger condition?
+   Does it have a has_signal check or a
+   precondition that causes early exit?
+
+b) Find the skill's first step. Is there a
+   condition like:
+     if (deals.length === 0) return earlyExit;
+   or a minimum data threshold that's failing?
+
+c) Check the Mar 18 runs in skill_runs table:
+   SELECT id, status, started_at, completed_at,
+     result, error_message,
+     jsonb_array_length(
+       COALESCE(result->'steps_completed',
+       '[]'::jsonb)
+     ) as steps
+   FROM skill_runs
+   WHERE workspace_id =
+     '4160191d-73bc-414b-97dd-5a1853190378'
+     AND skill_id = 'deal-risk-review'
+   ORDER BY started_at DESC LIMIT 5;
+
+   Does error_message have anything?
+   Does result have a partial structure
+   (e.g. just {status: 'skipped'} or {})?
+
+d) Has anything changed in the codebase between
+   Feb 14 and now that would affect this skill?
+   Check git log for deal-risk-review related
+   changes since Feb 14.
+
+---
+
+Question 2: What does pipeline-hygiene actually
+compute before it stops?
+
+The skill stores only time_windows. Find:
+
+a) How many steps does pipeline-hygiene have
+   defined in its skill definition?
+
+b) Which steps are actually completing?
+   Check the most recent skill_run result:
+   SELECT result
+   FROM skill_runs
+   WHERE workspace_id =
+     '4160191d-73bc-414b-97dd-5a1853190378'
+     AND skill_id = 'pipeline-hygiene'
+     AND status = 'completed'
+   ORDER BY started_at DESC LIMIT 1;
+
+c) Is there an early-exit condition after
+   time_windows that's triggering?
+
+d) What deal-level data SHOULD pipeline-hygiene
+   produce? List the steps after time_windows
+   that aren't running.
+
+---
+
+Report format:
+
+deal-risk-review ghost runs:
+  a) Trigger/precondition: [answer]
+  b) Early exit condition: [answer]
+  c) Mar 18 run results: [SQL output]
+  d) Recent code changes: [answer]
+
+pipeline-hygiene truncation:
+  a) Total steps defined: [N]
+  b) Steps completing: [list]
+  c) Early exit after time_windows: [answer]
+  d) Steps not running: [list]
+
+Do not fix anything. Just diagnose.

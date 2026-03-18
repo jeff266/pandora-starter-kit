@@ -209,53 +209,49 @@ function summarizePipelineWaterfall(resultData: any, outputData?: any): Omit<Ski
 
 function summarizeDealRiskReview(resultData: any, outputData?: any): Omit<SkillSummary, 'ran_at' | 'data_age_hours'> {
   const flagged_deals = safeGet(resultData, 'flagged_deals', []) || [];
-  const total_risk_value = flagged_deals.reduce((sum: number, d: any) => sum + (d.amount || 0), 0);
-  const critical_count = flagged_deals.filter((d: any) => d.risk_severity === 'critical').length;
 
-  const avg_days_stale = flagged_deals.length > 0
-    ? Math.round(flagged_deals.reduce((sum: number, d: any) => sum + (d.days_stale || 0), 0) / flagged_deals.length)
-    : 0;
-
-  const risk_types: Record<string, number> = {};
-  flagged_deals.forEach((d: any) => {
-    const type = d.risk_type || 'unknown';
-    risk_types[type] = (risk_types[type] || 0) + 1;
-  });
-
-  const dominant_risk = Object.entries(risk_types).sort((a, b) => b[1] - a[1])[0]?.[0] || 'unknown';
-
-  const headline = flagged_deals.length > 0
-    ? `${flagged_deals.length} deals at risk totaling ${formatCurrency(total_risk_value)} — ${dominant_risk}`
-    : 'No deals flagged at risk';
-
-  const top_findings: string[] = [];
-  flagged_deals.slice(0, 3).forEach((deal: any) => {
-    top_findings.push(`${deal.name}: ${formatCurrency(deal.amount || 0)} — ${deal.risk_reason || 'unknown'}`);
-  });
-
-  const top_actions: ActionSummary[] = [];
-  flagged_deals.slice(0, 3).forEach((deal: any) => {
-    top_actions.push({
-      urgency: deal.risk_severity === 'critical' ? 'today' : 'this_week',
-      text: deal.recommended_action || `Review ${deal.name}`,
-      deal_name: deal.name,
-      deal_id: deal.id,
-      source_id: deal.source_id,
-    });
-  });
-
-  // Extract at-risk deals from output column for Orchestrator named deals block
+  // ── Step 1: Extract at-risk deals from output->narrative (Claude's assessment) ──
+  // This is the authoritative source — Claude reads full deal context and produces
+  // a structured JSON array with named deals, risk scores, and recommended actions.
+  // The narrative may be stored as a markdown-wrapped JSON string: ```json\n[...]\n```
   let at_risk_deals: any[] = [];
   try {
     if (outputData) {
-      // output column may contain JSON string or already-parsed object
-      let parsed = typeof outputData === 'string' ? JSON.parse(outputData) : outputData;
-      // narrative field may contain the deal array
-      const narrative = parsed?.narrative || parsed?.risk_assessment || parsed;
-      const deals = Array.isArray(narrative) ? narrative : [];
+      // outputData may be:
+      //   A) JSONB object: { evidence: {...}, narrative: "```json\n[...]\n```" }
+      //   B) String (partial/cached runs): "```json\n[...]\n```" (narrative directly)
+      //   C) String (partial/cached runs): '{"evidence":...,"narrative":"..."}' (JSON-encoded object)
+      let raw: any = outputData;
+
+      if (typeof raw === 'string') {
+        // Try stripping markdown first (case B) — most common raw string format
+        const maybeStripped = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+        try {
+          raw = JSON.parse(maybeStripped);
+        } catch {
+          // Stripped didn't parse; try the raw string as JSON (case C)
+          try { raw = JSON.parse(raw); } catch { raw = null; }
+        }
+      }
+
+      // Now raw is either an object ({evidence, narrative}), an array (deals), or null
+      let narrative: any;
+      if (Array.isArray(raw)) {
+        narrative = raw;                                  // raw is already the deal array
+      } else {
+        narrative = raw?.narrative || raw?.risk_assessment || null;
+      }
+
+      // Narrative may still be a markdown-wrapped JSON string
+      if (typeof narrative === 'string') {
+        const stripped = narrative.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+        try { narrative = JSON.parse(stripped); } catch { narrative = []; }
+      }
+
+      const deals: any[] = Array.isArray(narrative) ? narrative : [];
 
       at_risk_deals = deals
-        .filter((d: any) => d.risk === 'high' || d.risk === 'medium' || d.riskScore >= 60)
+        .filter((d: any) => d.risk === 'high' || d.risk === 'medium' || (d.riskScore || 0) >= 60)
         .sort((a: any, b: any) => (b.riskScore || 0) - (a.riskScore || 0))
         .slice(0, 5)
         .map((d: any) => ({
@@ -269,24 +265,71 @@ function summarizeDealRiskReview(resultData: any, outputData?: any): Omit<SkillS
           close_date: d.closeDate || d.close_date || '',
           recommended_action: d.recommendedAction || d.recommended_action,
         }));
+
+      console.log(`[DealRiskReview Summarizer] ${at_risk_deals.length} at-risk deals extracted from narrative (${deals.length} total assessed)`);
     }
   } catch (err) {
     console.warn('[DealRiskReview Summarizer] Failed to parse output column:', err);
-    // Non-fatal: continue with empty at_risk_deals
   }
+
+  // ── Step 2: Build metrics — prefer at_risk_deals (Claude) over flagged_deals (compute) ──
+  // The result column uses flagged_deals from pre-Claude compute steps.
+  // When empty (common — compute steps may not persist flagged arrays), fall back
+  // to at_risk_deals which come from the authoritative Claude assessment.
+  const effective_deals = flagged_deals.length > 0 ? flagged_deals : at_risk_deals;
+  const total_risk_value = effective_deals.reduce(
+    (sum: number, d: any) => sum + (Number(d.amount) || 0), 0
+  );
+  const critical_count = effective_deals.filter(
+    (d: any) => (d.risk_severity === 'critical') || (d.risk_score || 0) >= 80
+  ).length;
+
+  const avg_days_stale = flagged_deals.length > 0 && flagged_deals[0].days_stale !== undefined
+    ? Math.round(flagged_deals.reduce((sum: number, d: any) => sum + (d.days_stale || 0), 0) / flagged_deals.length)
+    : 0;
+
+  const headline = effective_deals.length > 0
+    ? `${effective_deals.length} deals at risk totaling ${formatCurrency(total_risk_value)}`
+    : 'No deals flagged at risk';
+
+  // top_findings: prefer flagged_deals format, fall back to at_risk_deals
+  const top_findings: string[] = flagged_deals.length > 0
+    ? flagged_deals.slice(0, 3).map((d: any) =>
+        `${d.name}: ${formatCurrency(d.amount || 0)} — ${d.risk_reason || 'unknown'}`
+      )
+    : at_risk_deals.slice(0, 3).map((d: any) =>
+        `${d.name}: ${formatCurrency(d.amount)} — ${(d.risk_factors || []).join('; ')}`
+      );
+
+  // top_actions: prefer flagged_deals format, fall back to at_risk_deals
+  const top_actions: ActionSummary[] = flagged_deals.length > 0
+    ? flagged_deals.slice(0, 3).map((d: any) => ({
+        urgency: d.risk_severity === 'critical' ? 'today' as const : 'this_week' as const,
+        text: d.recommended_action || `Review ${d.name}`,
+        deal_name: d.name,
+        deal_id: d.id,
+        source_id: d.source_id,
+      }))
+    : at_risk_deals.slice(0, 3).map((d: any) => ({
+        urgency: (d.risk_score || 0) >= 80 ? 'today' as const : 'this_week' as const,
+        text: d.recommended_action || `Review ${d.name}`,
+        deal_name: d.name,
+        deal_id: undefined,
+        source_id: undefined,
+      }));
 
   return {
     skill_id: 'deal-risk-review',
     headline,
     key_metrics: {
-      deals_at_risk: flagged_deals.length,
+      deals_at_risk: effective_deals.length,
       value_at_risk: total_risk_value,
       avg_days_stale,
       critical_count,
     },
     top_findings: top_findings.slice(0, 5),
     top_actions: top_actions.slice(0, 3),
-    has_signal: flagged_deals.length > 0,
+    has_signal: effective_deals.length > 0,
     at_risk_deals: at_risk_deals.length > 0 ? at_risk_deals : undefined,
   };
 }
@@ -690,9 +733,12 @@ export async function buildSkillSummaries(
       outputData = linked.rows[0].output;
       ranAt = linked.rows[0].started_at;
     } else {
-      // Fallback: most recent successful run within 7 days
-      // Weekly-scheduled skills run once per week; 12h window misses them when the
-      // agent fires before the skill's scheduled slot completes.
+      // Fallback: most recent successful run within 7 days.
+      // Prefer runs that have result data (result IS NOT NULL) — agent-phase runs
+      // often write to output only; scheduler runs write to both result and output.
+      // Using result-first ordering ensures we get the richer structured data for
+      // summarizers that rely on result (forecast-rollup, pipeline-waterfall, etc.),
+      // while output-only runs still work for skills like deal-risk-review.
       const fallback = await query(`
         SELECT result, output, started_at
         FROM skill_runs
@@ -700,7 +746,7 @@ export async function buildSkillSummaries(
           AND skill_id = $2
           AND status IN ('completed', 'partial')
           AND started_at > NOW() - INTERVAL '7 days'
-        ORDER BY started_at DESC
+        ORDER BY (result IS NOT NULL)::int DESC, started_at DESC
         LIMIT 1
       `, [workspaceId, skillId]);
 
@@ -711,8 +757,8 @@ export async function buildSkillSummaries(
       }
     }
 
-    if (!resultData || !ranAt) {
-      // Skill didn't run — omit from summaries silently
+    if (!ranAt || (!resultData && !outputData)) {
+      // Skill didn't run or has no data at all — omit from summaries silently
       continue;
     }
 
