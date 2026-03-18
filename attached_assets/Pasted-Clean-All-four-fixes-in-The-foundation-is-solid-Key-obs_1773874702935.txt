@@ -1,0 +1,772 @@
+Clean. All four fixes in. The foundation is solid.
+
+Key observations from the results:
+
+**skill_runs bloat explained:** The 231MB was from old rows storing full conversation transcripts. New rows are 1-5KB — that's a 99.9% reduction. The trimmer is working.
+
+**activities bloat:** Same pattern — raw HubSpot API responses. Normalizer applied going forward.
+
+**chart PNGs are healthy:** 11-37KB per chart is well within the 150KB cap. The guard exists for edge cases with many-label charts.
+
+**Index planner note is correct:** At 2,980 deals, the workspace filter is selective enough that `idx_deals_workspace` wins. `idx_deals_close_date` will take over around 50-100K deals when date range selectivity matters more. This is the right behavior — don't second-guess the planner.
+
+---
+
+**One follow-up before writing the Ask Pandora chart prompts:**
+
+The `standing_hypotheses` table shows 0 rows after the seed script ran. Verify the seed landed:
+
+```sql
+SELECT metric_key, confidence, threshold, unit
+FROM standing_hypotheses
+WHERE workspace_id =
+  '4160191d-73bc-414b-97dd-5a1853190378';
+```
+
+If still 0, the seed SQL path may have been wrong. Run manually:
+
+```bash
+psql $DATABASE_URL -f \
+  server/orchestrator/seed-frontera-hypotheses.sql
+```
+
+---
+
+**Now the Ask Pandora chart build. Two prompts — Claude Code then Replit:**
+
+---
+
+```
+Claude Code Prompt: Ask Pandora Chart Rendering
+
+## Context
+
+Ask Pandora answers VP RevOps questions with text.
+This prompt adds chart rendering to responses when
+the answer contains numeric data that benefits from
+visualization.
+
+The interaction:
+  VP asks: "Show me at-risk deals by days dark"
+  Ask Pandora queries deals → returns data
+  Chart Intelligence classifies → should_chart?
+  If yes: QuickChart renders PNG
+  Response returns: text + chart_png + metadata
+  Frontend displays chart below text answer
+  "Add to report" button appears
+
+This is the right authoring surface for report
+charts. VPs think in questions not in data pickers.
+
+Before starting, read ALL of these:
+
+1. server/chat/ or server/ask-pandora/ — find the
+   Ask Pandora response handler. Understand the
+   full flow from user message to response object.
+   What does the response object look like currently?
+   Does it return { text } or { content } or other?
+
+2. server/orchestrator/chart-intelligence.ts —
+   generateChartSpecs() and classifyChartForNode().
+   You are calling this from the Ask Pandora handler.
+   Understand what it needs as input.
+
+3. server/orchestrator/chart-renderer.ts —
+   renderChartFromSpec(). Returns a PNG Buffer.
+   This is what gets called after classification.
+
+4. server/orchestrator/types.ts —
+   ChartNodeSpec, ChartDataPoint, AtRiskDeal,
+   StaleDeal. The chart intelligence input types.
+
+5. server/tools/deal-query.ts — queryDeals().
+   Understand the return shape. When Ask Pandora
+   calls this tool, what does the result look like?
+   Does it return deal objects with the fields
+   chart intelligence needs (name, amount, stage,
+   owner, risk_score, days_in_stage)?
+
+6. server/routes/agents.ts — the report_charts
+   POST endpoint. This is what "Add to report"
+   will call. Understand the request body shape:
+   { section_id, chart_type, title, data,
+     report_document_id, workspace_id }
+
+7. The latest report_documents row for Frontera —
+   check what fields exist. The "Add to report"
+   button needs to know the current report_document_id.
+
+8. /migrations/ — latest number.
+
+Do not write code until all eight are read.
+
+---
+
+## Task 1: Extend Ask Pandora response type
+
+Find the Ask Pandora response type/interface.
+Add chart fields:
+
+```typescript
+interface AskPandoraResponse {
+  text: string;           // existing
+  tool_calls?: any[];     // existing
+
+  // NEW — chart attached to this response
+  chart?: {
+    spec: ChartNodeSpec;
+    png_base64: string;   // base64 encoded PNG
+    // For "Add to report" button:
+    suggested_section_id?: string;
+    // Which section this answer relates to
+    // e.g. if question was about Deal Execution
+  };
+}
+```
+
+---
+
+## Task 2: Chart trigger detection
+
+After Ask Pandora generates a text response,
+check whether a chart should be generated.
+
+Create server/chat/chart-trigger.ts:
+
+```typescript
+import { ChartNodeSpec, SkillSummary } from
+  '../orchestrator/types';
+import { generateChartSpecs } from
+  '../orchestrator/chart-intelligence';
+import { renderChartFromSpec } from
+  '../orchestrator/chart-renderer';
+
+/**
+ * Detects whether an Ask Pandora response
+ * contains chartable data and if so,
+ * generates a chart.
+ *
+ * Called after the response text is generated.
+ * Non-fatal — if chart generation fails,
+ * response returns without chart.
+ */
+export async function maybeGenerateResponseChart(
+  question: string,
+  responseText: string,
+  toolResults: any[],
+  workspaceId: string
+): Promise<{
+  spec: ChartNodeSpec;
+  png_base64: string;
+  suggested_section_id?: string;
+} | null> {
+
+  try {
+    // Extract numeric data from tool results
+    const chartableData = extractChartableData(
+      question, responseText, toolResults
+    );
+
+    if (!chartableData) return null;
+
+    // Build a synthetic ReasoningNode-like object
+    // for chart intelligence
+    const syntheticNode = {
+      layer: 'cause' as const,
+      question: question,
+      answer: responseText.slice(0, 500),
+      data_gap: false,
+    };
+
+    // Build skill summaries from tool results
+    const syntheticSummaries = buildSyntheticSummaries(
+      toolResults, chartableData
+    );
+
+    // Run chart intelligence (DeepSeek classify)
+    const nodes = await generateChartSpecs(
+      [syntheticNode],
+      syntheticSummaries,
+      workspaceId
+    );
+
+    const nodeWithSpec = nodes[0];
+    if (!nodeWithSpec?.chart_spec?.should_chart)
+      return null;
+
+    // Render PNG
+    const pngBuffer = await renderChartFromSpec(
+      nodeWithSpec.chart_spec
+    );
+
+    // Suggest which report section this belongs to
+    const suggested_section_id =
+      suggestSectionId(question);
+
+    console.log(
+      `[AskPandora] Generated chart: ` +
+      `"${nodeWithSpec.chart_spec.title}"`
+    );
+
+    return {
+      spec: nodeWithSpec.chart_spec,
+      png_base64: pngBuffer.toString('base64'),
+      suggested_section_id,
+    };
+
+  } catch (err) {
+    console.error(
+      '[AskPandora] Chart generation failed:', err
+    );
+    return null; // non-fatal
+  }
+}
+
+/**
+ * Extracts chartable numeric data from tool
+ * call results.
+ *
+ * Returns null if no numeric data found.
+ */
+function extractChartableData(
+  question: string,
+  responseText: string,
+  toolResults: any[]
+): any | null {
+
+  // Look for deal arrays in tool results
+  for (const result of toolResults) {
+    const data = result?.content || result?.result
+      || result;
+
+    // queryDeals result
+    if (Array.isArray(data?.deals) &&
+        data.deals.length >= 2) {
+      return {
+        type: 'deals',
+        deals: data.deals.slice(0, 8),
+      };
+    }
+    if (Array.isArray(data) && data.length >= 2 &&
+        data[0]?.amount !== undefined) {
+      return {
+        type: 'deals',
+        deals: data.slice(0, 8),
+      };
+    }
+
+    // Aggregated numeric results
+    if (data && typeof data === 'object' &&
+        !Array.isArray(data)) {
+      const numericEntries = Object.entries(data)
+        .filter(([, v]) =>
+          typeof v === 'number' && v > 0
+        );
+      if (numericEntries.length >= 2) {
+        return {
+          type: 'metrics',
+          metrics: Object.fromEntries(numericEntries),
+        };
+      }
+    }
+  }
+
+  // Check if response text contains numbers that
+  // suggest chartable data (heuristic)
+  const dollarAmounts = responseText.match(
+    /\$[\d,]+[KMB]?/g
+  );
+  if (dollarAmounts && dollarAmounts.length >= 3) {
+    return { type: 'text_only', amounts: dollarAmounts };
+  }
+
+  return null;
+}
+
+/**
+ * Converts tool results into synthetic SkillSummary
+ * objects that chart intelligence can read.
+ */
+function buildSyntheticSummaries(
+  toolResults: any[],
+  chartableData: any
+): SkillSummary[] {
+
+  if (chartableData.type === 'deals') {
+    const deals = chartableData.deals;
+
+    // Build at_risk_deals from deal array
+    const atRiskDeals = deals
+      .filter((d: any) => d.amount > 0)
+      .map((d: any) => ({
+        name: d.name || d.deal_name || 'Unknown',
+        amount: Number(d.amount) || 0,
+        owner: d.owner_email || d.owner || '',
+        stage: d.stage_normalized || d.stage || '',
+        risk_score: d.deal_risk
+          || d.risk_score || 50,
+        risk_factors: d.deal_risk_factors || [],
+        days_in_stage: d.days_in_stage || 0,
+        close_date: d.close_date || '',
+        recommended_action: d.recommended_action,
+      }));
+
+    return [{
+      skill_id: 'ask-pandora-query',
+      has_signal: true,
+      top_findings: [],
+      key_metrics: {
+        total_deals: deals.length,
+        total_pipeline: deals.reduce(
+          (s: number, d: any) =>
+            s + Number(d.amount || 0), 0
+        ),
+      },
+      data_age_hours: 0,
+      at_risk_deals: atRiskDeals,
+      stale_deals: deals
+        .filter((d: any) =>
+          d.days_since_activity > 14 ||
+          d.days_stale > 14
+        )
+        .map((d: any) => ({
+          name: d.name || 'Unknown',
+          amount: Number(d.amount) || 0,
+          owner: d.owner_email || '',
+          stage: d.stage_normalized || '',
+          days_stale: d.days_since_activity
+            || d.days_stale || 0,
+          last_activity_date:
+            d.last_activity_date || '',
+        })),
+    }];
+  }
+
+  if (chartableData.type === 'metrics') {
+    return [{
+      skill_id: 'ask-pandora-query',
+      has_signal: true,
+      top_findings: [],
+      key_metrics: chartableData.metrics,
+      data_age_hours: 0,
+    }];
+  }
+
+  return [];
+}
+
+/**
+ * Heuristic: which report section does this
+ * question relate to?
+ */
+function suggestSectionId(question: string): string {
+  const q = question.toLowerCase();
+
+  if (q.includes('close') || q.includes('forecast')
+      || q.includes('quarter') || q.includes('target'))
+    return 'node-deal-execution';
+
+  if (q.includes('stage') || q.includes('progress')
+      || q.includes('stall') || q.includes('stuck')
+      || q.includes('pipeline'))
+    return 'node-pipeline-conv';
+
+  if (q.includes('rep') || q.includes('nate')
+      || q.includes('sara') || q.includes('team')
+      || q.includes('attainment'))
+    return 'node-team-execution';
+
+  if (q.includes('q2') || q.includes('next quarter')
+      || q.includes('coverage') || q.includes('future'))
+    return 'node-forward-look';
+
+  return 'node-deal-execution'; // default
+}
+```
+
+---
+
+## Task 3: Wire into Ask Pandora handler
+
+In the Ask Pandora response handler, after
+the agent loop completes and response text
+is assembled:
+
+```typescript
+import { maybeGenerateResponseChart }
+  from './chart-trigger';
+
+// After assembling responseText and toolResults:
+
+// Check if response warrants a chart
+// Non-fatal — never blocks the text response
+let chartData: AskPandoraResponse['chart'] | null
+  = null;
+
+try {
+  chartData = await maybeGenerateResponseChart(
+    userMessage,
+    responseText,
+    toolResults,  // all tool call results
+    workspaceId
+  );
+} catch (err) {
+  console.error('[AskPandora] Chart hook failed:', err);
+}
+
+// Include in response
+return {
+  text: responseText,
+  tool_calls: toolResults,
+  chart: chartData || undefined,
+};
+```
+
+---
+
+## Task 4: Current report context endpoint
+
+Add to server/routes/agents.ts:
+
+```typescript
+// GET /:workspaceId/reports/current
+// Returns the most recent report document for
+// this workspace — used by "Add to report" button
+// to know which report_document_id to target
+
+router.get(
+  '/:workspaceId/reports/current',
+  async (req, res) => {
+    const { workspaceId } = req.params;
+    // Verify workspace access
+
+    const result = await query(`
+      SELECT id, document_type, week_label,
+        generated_at,
+        jsonb_array_length(sections) as section_count,
+        sections->0->>'id' as first_section_id
+      FROM report_documents
+      WHERE workspace_id = $1
+      ORDER BY generated_at DESC
+      LIMIT 1
+    `, [workspaceId]);
+
+    if (!result.rows[0]) {
+      return res.status(404).json(
+        { error: 'No reports found' }
+      );
+    }
+
+    res.json(result.rows[0]);
+  }
+);
+```
+
+---
+
+## What NOT to build:
+- Frontend changes (Replit handles that)
+- New skill definitions
+- Changes to the existing report orchestrator
+- Streaming chart generation
+
+---
+
+## Acceptance Criteria:
+
+1. Ask a chartable question in Ask Pandora:
+   "Show me at-risk deals by dollar amount"
+   Response object includes chart field with
+   png_base64 and spec
+
+2. Ask a non-chartable question:
+   "What is the coverage ratio?"
+   Response returns without chart field
+   (single number, not chartable)
+
+3. Ask about reps:
+   "Compare Nate and Sara's pipeline"
+   Chart type is horizontal_bar
+   (two named items = orientation rule fires)
+
+4. Chart title is conclusion-first:
+   "Nate carries 93% of active pipeline"
+   not "Pipeline by rep"
+
+5. suggested_section_id correctly maps:
+   "which deals are stale" → node-pipeline-conv
+   "can we hit the quarter" → node-deal-execution
+   "what does Q2 look like" → node-forward-look
+
+6. GET /reports/current returns latest report
+   with id, week_label, section_count
+
+7. Non-fatal: if chart generation fails,
+   text response returns normally with no
+   chart field — confirmed by injecting an
+   error in maybeGenerateResponseChart
+
+8. Token cost: DeepSeek classify call for
+   chart trigger adds ~500 tokens per
+   chartable question — log this
+```
+
+---
+
+Then give Replit this after Claude Code confirms:
+
+```
+Replit: Ask Pandora Chart Display and
+"Add to Report" Flow
+
+Read before starting:
+1. The Ask Pandora chat component — find where
+   responses are rendered. Currently shows text.
+   You are adding chart display below text.
+2. The AskPandoraResponse type just extended by
+   Claude Code — now includes optional chart field
+   with png_base64 and spec
+3. The report_charts POST endpoint —
+   POST /:workspaceId/reports/:reportId/charts
+   Body: { section_id, chart_type, title, data }
+4. The new GET /:workspaceId/reports/current
+   endpoint — returns latest report with id
+   and section list
+5. The ChartSuggestionPanel component — for
+   design reference on chart display style
+
+---
+
+## Build 1: Chart display in Ask Pandora
+
+When an Ask Pandora response includes a chart
+field, render the chart below the text:
+
+```typescript
+// In the message bubble component,
+// after rendering response.text:
+
+{response.chart && (
+  <div style={{
+    marginTop: 16,
+    borderTop: '0.5px solid var(--color-border-tertiary)',
+    paddingTop: 16,
+  }}>
+    <img
+      src={`data:image/png;base64,${response.chart.png_base64}`}
+      alt={response.chart.spec.title}
+      style={{
+        width: '100%',
+        maxWidth: 480,
+        height: 'auto',
+        display: 'block',
+        borderRadius: 6,
+        marginBottom: 8,
+      }}
+    />
+    <div style={{
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    }}>
+      <span style={{
+        fontSize: 11,
+        color: 'var(--color-text-secondary)',
+        fontStyle: 'italic',
+      }}>
+        {response.chart.spec.title}
+      </span>
+      <AddToReportButton
+        chart={response.chart}
+        workspaceId={workspaceId}
+        token={token}
+      />
+    </div>
+  </div>
+)}
+```
+
+---
+
+## Build 2: AddToReportButton component
+
+Create client/src/components/chat/
+AddToReportButton.tsx
+
+```typescript
+interface AddToReportButtonProps {
+  chart: {
+    spec: ChartNodeSpec;
+    png_base64: string;
+    suggested_section_id?: string;
+  };
+  workspaceId: string;
+  token: string;
+}
+```
+
+States:
+```typescript
+const [state, setState] = useState
+  'idle' | 'picking' | 'saving' | 'saved'
+>('idle');
+const [sections, setSections] = useState
+  { id: string; title: string }[]
+>([]);
+const [selectedSection, setSelectedSection] =
+  useState<string>(
+    chart.suggested_section_id || ''
+  );
+const [reportId, setReportId] =
+  useState<string | null>(null);
+```
+
+On click (idle → picking):
+1. Fetch GET /reports/current to get report id
+   and section list
+2. Show section picker inline
+
+Section picker UI:
+```
+┌─────────────────────────────────────────┐
+│  Add to report                      [×] │
+│  "Nate carries 93% of pipeline"         │
+│                                         │
+│  Select section:                        │
+│  ○ Deal Execution                       │
+│  ● Pipeline Conversion  ← pre-selected  │
+│  ○ Team Execution                       │
+│  ○ Forward Look                         │
+│                                         │
+│  [ Cancel ]  [ Add to report ]          │
+└─────────────────────────────────────────┘
+```
+
+Pre-select suggested_section_id if available.
+
+On "Add to report":
+1. POST to /reports/:reportId/charts with:
+   ```json
+   {
+     "section_id": selectedSection,
+     "chart_type": chart.spec.chart_type,
+     "title": chart.spec.title,
+     "data": chart.spec.data_points.map(d => ({
+       "label": d.label,
+       "value": d.value
+     }))
+   }
+   ```
+2. On success → state = 'saved'
+3. Show "Added ✓" for 2 seconds then
+   revert to idle (chart stays visible)
+4. On error → show error state with retry
+
+Button render per state:
+```typescript
+// idle:
+<button style={{
+  fontSize: 11,
+  padding: '4px 10px',
+  background: 'none',
+  border: '0.5px solid var(--color-border-secondary)',
+  borderRadius: 4,
+  color: 'var(--color-text-secondary)',
+  cursor: 'pointer',
+}}>
+  + Add to report
+</button>
+
+// picking: show inline section picker (above)
+
+// saving:
+<button disabled style={{ opacity: 0.6 }}>
+  Adding...
+</button>
+
+// saved:
+<button style={{
+  color: '#0D9488',
+  borderColor: '#0D9488',
+  background: '#F0FDF9',
+}}>
+  ✓ Added
+</button>
+```
+
+---
+
+## Build 3: "Explore in Ask Pandora" on report charts
+
+In ChartSuggestionPanel.tsx, on accepted charts,
+add a small link next to the Remove button:
+
+```typescript
+// In the accepted chart render, next to Remove:
+<button
+  onClick={() => {
+    // Open Ask Pandora with pre-seeded context
+    const context = `I'm looking at the ` +
+      `${sectionTitle} section. The current chart ` +
+      `shows "${acceptedChart.title}". ` +
+      `Help me explore this further or show me ` +
+      `a different angle on this data.`;
+
+    // Trigger Ask Pandora open with this as
+    // the initial message
+    // Find how Ask Pandora is opened in the app
+    // (likely a global state or event)
+    openAskPandora(context);
+  }}
+  style={{
+    background: 'none',
+    border: 'none',
+    fontSize: 11,
+    color: '#94A3B8',
+    cursor: 'pointer',
+    padding: '2px 6px',
+  }}
+>
+  Explore ↗
+</button>
+```
+
+Find how Ask Pandora is opened — look for
+the Cmd+K handler or the chat open button.
+Use the same mechanism but pre-seed the
+input with the context string.
+
+---
+
+## Acceptance Criteria:
+
+1. Ask "Show me at-risk deals by dollar amount"
+   → chart renders below text answer in chat
+
+2. Chart has "Add to report" button
+
+3. Clicking "Add to report" → section picker
+   appears with correct sections from current report
+
+4. Suggested section is pre-selected based on
+   question content
+
+5. Clicking "Add to report" → POST to /charts →
+   button shows "✓ Added"
+
+6. Open Report page → the section now has the
+   chart from Ask Pandora visible
+
+7. Export PDF → the Ask Pandora chart is embedded
+   in the correct section
+
+8. "Explore ↗" on report charts → opens Ask
+   Pandora with section context pre-seeded
+
+9. If no current report exists → "Add to report"
+   button is hidden (don't show if nowhere to add)
+
+10. Non-fatal: if POST to /charts fails,
+    show error state with retry — never crash
+    the conversation
+```

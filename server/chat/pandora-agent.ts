@@ -1368,6 +1368,11 @@ export interface PandoraResponse {
   latency_ms: number;
   inline_actions?: InlineAction[];
   chart_specs?: ChartSpec[];
+  chart?: {
+    spec: import('../orchestrator/types.js').ChartNodeSpec;
+    png_base64: string;
+    suggested_section_id?: string;
+  };
   sessionContext?: SessionContext;
   suggested_actions?: SuggestedAction[];
 }
@@ -2492,6 +2497,18 @@ The system will transform raw_annotation into a voice-styled annotation automati
     // Swallow error - don't fail the whole response
   }
 
+  // ── Chart Intelligence for response ───────────────────────────────────────
+  let responseChart: import('./chart-trigger.js').ResponseChart | null = null;
+  if (toolTrace.length > 0) {
+    const { maybeGenerateResponseChart } = await import('./chart-trigger.js');
+    responseChart = await maybeGenerateResponseChart(
+      message,
+      parsedFinal.answer,
+      toolTrace,
+      workspaceId
+    );
+  }
+
   return {
     answer: parsedFinal.answer,
     follow_up_questions: parsedFinal.followups,
@@ -2504,6 +2521,7 @@ The system will transform raw_annotation into a voice-styled annotation automati
     latency_ms: Date.now() - startTime,
     inline_actions: inlineActions,
     chart_specs: chartSpecs.length > 0 ? chartSpecs : undefined,
+    chart: responseChart ?? undefined,
   };
 }
 

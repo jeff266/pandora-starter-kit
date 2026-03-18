@@ -434,6 +434,9 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
       if (pandoraAction.chart_specs && pandoraAction.chart_specs.length > 0) {
         sse(res, { type: 'chart_specs', specs: pandoraAction.chart_specs });
       }
+      if (pandoraAction.chart) {
+        sse(res, { type: 'response_chart', chart: pandoraAction.chart });
+      }
       sse(res, { type: 'synthesis_chunk', text: pandoraAction.answer });
       sse(res, { type: 'synthesis_done', full_text: pandoraAction.answer, response_id: randomUUID() });
       if (pandoraAction.suggested_actions && pandoraAction.suggested_actions.length > 0) {
@@ -591,6 +594,9 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
         if (pandoraT1.chart_specs && pandoraT1.chart_specs.length > 0) {
           sse(res, { type: 'chart_specs', specs: pandoraT1.chart_specs });
         }
+        if (pandoraT1.chart) {
+          sse(res, { type: 'response_chart', chart: pandoraT1.chart });
+        }
         sse(res, { type: 'synthesis_chunk', text: pandoraT1.answer });
         sse(res, { type: 'synthesis_done', full_text: pandoraT1.answer, response_id: randomUUID() });
 
@@ -698,6 +704,9 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
         const fallbackResponseId = randomUUID();
         if (pandoraFallback.chart_specs && pandoraFallback.chart_specs.length > 0) {
           sse(res, { type: 'chart_specs', specs: pandoraFallback.chart_specs });
+        }
+        if (pandoraFallback.chart) {
+          sse(res, { type: 'response_chart', chart: pandoraFallback.chart });
         }
         sse(res, { type: 'synthesis_chunk', text: pandoraFallback.answer });
         sse(res, { type: 'synthesis_done', full_text: pandoraFallback.answer, response_id: fallbackResponseId });
