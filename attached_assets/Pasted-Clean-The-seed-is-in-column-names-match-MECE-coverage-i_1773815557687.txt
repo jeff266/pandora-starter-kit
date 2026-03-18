@@ -1,0 +1,73 @@
+Clean. The seed is in, column names match, MECE coverage is correct with Retention intentionally uncovered.
+
+**Run the final validation now:**
+
+Trigger a fresh run and watch for the issue tree in the logs:
+
+```bash
+curl -s -X POST \
+"https://$REPLIT_DEV_DOMAIN/api/workspaces/\
+4160191d-73bc-414b-97dd-5a1853190378/\
+agents/4f8309a9-f959-44c8-ba90-9fd03939bce8/run-now" \
+-H "Authorization: Bearer <token>" \
+-H "Content-Type: application/json" \
+-d '{"phase": "both"}'
+```
+
+Look for these specific log lines:
+
+```
+[AgentRuntime] Using issue tree: 4 nodes
+[MECE] deal_execution: strong/partial
+[MECE] pipeline_conversion: strong/partial
+[MECE] team_execution: strong/partial
+[MECE] forward_look: partial
+[QuestionTree] Generated trees for 4/4 sections
+[Orchestrator] monday_briefing generated: N words
+```
+
+Then check the report sections:
+
+```bash
+curl -s \
+"https://$REPLIT_DEV_DOMAIN/api/workspaces/\
+4160191d.../reports/latest?type=monday_briefing" \
+-H "Authorization: Bearer <token>" | jq \
+'[.sections[] | {id: .id, title: .title, words: .word_count, tree_nodes: (.reasoning_tree | length)}]'
+```
+
+**You should see:**
+```json
+[
+  { "id": "deal_execution",      "title": "Deal Execution",      "words": 120, "tree_nodes": 4 },
+  { "id": "pipeline_conversion", "title": "Pipeline Conversion", "words": 115, "tree_nodes": 3 },
+  { "id": "team_execution",      "title": "Team Execution",      "words": 110, "tree_nodes": 4 },
+  { "id": "forward_look",        "title": "Forward Look",        "words": 90,  "tree_nodes": 2 }
+]
+```
+
+If section IDs match the issue tree node IDs and reasoning trees are populated — the full stack is validated end to end.
+
+**Where things stand after tonight:**
+
+```
+✅ Scheduling — Sunday skills, Monday 5am
+✅ Orchestrator — issue tree driven, prior context
+✅ MECE structure — 4 nodes, completeness audit
+✅ Question tree — WHY / WHAT THIS MEANS /
+                   STRATEGIC QUESTION / ACTION
+✅ Annotation + Export
+✅ Charts — AI suggested + manual creation
+✅ Renderer v2 DOCX + PDF
+✅ Issue Tree Editor UI
+✅ Reports page
+
+🔲 Hypothesis update logic (highest value next)
+🔲 Chart Intelligence multi-option
+🔲 Revenue Retention skills (blind spot)
+🔲 Week label fix (shows 03-18 not "Week of Mar 16")
+```
+
+This is a fundamentally different product than what existed this morning. The report now has MECE structure, causal reasoning, and learns from prior weeks. That's the McKinsey-grade architecture.
+
+Hypothesis updates tomorrow?
