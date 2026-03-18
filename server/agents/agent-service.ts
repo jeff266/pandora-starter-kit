@@ -25,6 +25,8 @@ export interface CreateAgentInput {
   standing_questions?: string[];
   created_from?: 'manual' | 'conversation';
   seed_conversation_id?: string;
+  use_issue_tree?: boolean;
+  custom_skill_ids?: string[];
 }
 
 export interface Agent {
@@ -237,7 +239,9 @@ export async function updateAgent(
        event_config=CASE WHEN $17::boolean THEN $18 ELSE event_config END,
        focus_config=COALESCE($19, focus_config),
        goal=COALESCE($20, goal),
-       standing_questions=COALESCE($21, standing_questions)
+       standing_questions=COALESCE($21, standing_questions),
+       use_issue_tree=COALESCE($22, use_issue_tree),
+       custom_skill_ids=COALESCE($23, custom_skill_ids)
      WHERE id=$11 AND workspace_id=$12
      RETURNING *`,
     [
@@ -254,6 +258,8 @@ export async function updateAgent(
       updatedFocusConfig,
       input.goal !== undefined ? input.goal : null,
       input.standing_questions !== undefined ? JSON.stringify(input.standing_questions) : null,
+      input.use_issue_tree !== undefined ? input.use_issue_tree : null,
+      input.custom_skill_ids !== undefined ? input.custom_skill_ids : null,
     ]
   );
   return result.rows[0];

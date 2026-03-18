@@ -7,6 +7,7 @@ import { ChevronLeft, Plus, X, GripVertical, Save, Zap, Play, Loader2, Pencil } 
 import LearnedPreferences from '../components/agents/LearnedPreferences';
 import RunHistoryPanel from '../components/agents/RunHistoryPanel';
 import GuidedAgentChat from '../components/agents/GuidedAgentChat';
+import IssueTreeEditor from '../components/agents/IssueTreeEditor';
 import SaveAsAgentModal from '../components/SaveAsAgentModal';
 import { usePermissions } from '../hooks/usePermissions';
 import AgentCopilot from '../components/copilot/AgentCopilot';
@@ -104,7 +105,7 @@ const SCHEDULE_PRESETS: { label: string; cron: string }[] = [
 ];
 
 type ViewState = 'gallery' | 'builder' | 'list' | 'copilot';
-type BuilderTab = 'audience' | 'goals' | 'skills' | 'data_window' | 'scope' | 'schedule' | 'formats';
+type BuilderTab = 'audience' | 'goals' | 'skills' | 'data_window' | 'scope' | 'schedule' | 'formats' | 'structure';
 
 interface NamedFilterOption {
   id: string;
@@ -163,6 +164,7 @@ export default function AgentBuilder() {
   const [modalExtraction, setModalExtraction] = useState<any>(null);
   const [modalConversationId, setModalConversationId] = useState<string | null>(null);
 
+  const [useIssueTree, setUseIssueTree] = useState(false);
   const [seedConversationId, setSeedConversationId] = useState<string | null>(null);
   const [fromChat, setFromChat] = useState(false);
   const [systemPickerOpen, setSystemPickerOpen] = useState<'pandora' | 'bull' | 'bear' | null>(null);
@@ -281,6 +283,7 @@ export default function AgentBuilder() {
     setSkills(a.skill_ids || []);
     setScopeFilters(a.scope_filters || []);
     setSchedule({ type: 'manual' });
+    setUseIssueTree(!!(a as any).use_issue_tree);
     setEditingAgentId(a.id);
     setSeedConversationId((a as any).seed_conversation_id ?? null);
     setFromChat(false);
@@ -297,6 +300,7 @@ export default function AgentBuilder() {
     setFocusQuestions([]);
     setGoal('');
     setStandingQuestions([]);
+    setUseIssueTree(false);
     setDataWindow({ primary: 'current_week', comparison: 'previous_period' });
     setOutputFormats(['slack']);
     setSkills([]);
@@ -866,6 +870,7 @@ export default function AgentBuilder() {
     { key: 'scope', label: 'Scope Filters' },
     { key: 'schedule', label: 'Schedule' },
     { key: 'formats', label: 'Output Formats' },
+    ...(editingAgentId ? [{ key: 'structure' as BuilderTab, label: 'Report Structure' }] : []),
   ];
 
   const SKILL_QUESTION_SUGGESTIONS: Record<string, string[]> = {
@@ -1547,8 +1552,56 @@ export default function AgentBuilder() {
         </div>
       )}
 
+      {/* ─── Report Structure Tab ────────────────────── */}
+      {activeTab === 'structure' && editingAgentId && (
+        <div>
+          {useIssueTree ? (
+            <IssueTreeEditor
+              workspaceId={getWorkspaceId()}
+              agentId={editingAgentId}
+              agentGoal={goal}
+              onSave={() => {}}
+            />
+          ) : (
+            <div style={{ padding: 32, textAlign: 'center', color: '#64748B' }}>
+              <div style={{ fontSize: 32, marginBottom: 12 }}>📋</div>
+              <div style={{ fontSize: 15, fontWeight: 500, color: '#1E293B', marginBottom: 8 }}>
+                MECE Issue Tree
+              </div>
+              <div style={{ fontSize: 13, lineHeight: 1.6, maxWidth: 360, margin: '0 auto 20px' }}>
+                Replace the standard template with a structured issue tree. Each section covers a
+                distinct MECE category. The report learns from prior weeks and tracks unresolved actions.
+              </div>
+              <button
+                onClick={async () => {
+                  try {
+                    await api.patch(`/agents-v2/${editingAgentId}`, { use_issue_tree: true });
+                    setUseIssueTree(true);
+                  } catch (err: any) {
+                    alert(err.message || 'Failed to upgrade');
+                  }
+                }}
+                style={{
+                  padding: '8px 20px',
+                  background: '#0D9488',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: 6,
+                  fontSize: 13,
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                }}
+              >
+                Upgrade to Issue Tree
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ─── Save Bar ────────────────────────────────── */}
-      <div style={{ marginTop: 32, paddingTop: 20, borderTop: `1px solid ${colors.border}`, display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
+      <div style={{ marginTop: 32, paddingTop: 20, borderTop: activeTab === 'structure' ? 'none' : `1px solid ${colors.border}`, display: activeTab === 'structure' ? 'none' : 'flex', justifyContent: 'flex-end', gap: 12 }}>
         <button onClick={() => setView('list')} style={btnSecondary}>Cancel</button>
         <button onClick={handleSave} disabled={saving} style={btnPrimary}>
           {saving ? 'Saving...' : <><Save size={14} /> {editingAgentId ? 'Update Agent' : 'Create Agent'}</>}

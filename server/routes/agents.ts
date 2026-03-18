@@ -862,6 +862,157 @@ agentsWorkspaceRouter.post('/:workspaceId/reports/:reportId/export', requirePerm
   }
 });
 
+// ── Issue Tree Endpoints ─────────────────────────────────────────────────────
+
+async function verifyAgentOwnership(workspaceId: string, agentId: string): Promise<boolean> {
+  const result = await query(
+    'SELECT id FROM agents WHERE id = $1 AND workspace_id = $2',
+    [agentId, workspaceId]
+  );
+  return result.rows.length > 0;
+}
+
+agentsWorkspaceRouter.get('/:workspaceId/agents/:agentId/issue-tree', requirePermission('agents.view'), async (req: Request, res: Response) => {
+  const { workspaceId, agentId } = req.params;
+  try {
+    if (!await verifyAgentOwnership(workspaceId, agentId)) {
+      return res.status(404).json({ error: 'Agent not found' });
+    }
+    const result = await query(
+      `SELECT node_id, title, standing_question, mece_category, primary_skill_ids,
+              position, confirmed_pattern, pattern_summary
+       FROM agent_issue_tree
+       WHERE agent_id = $1 AND workspace_id = $2
+       ORDER BY position ASC`,
+      [agentId, workspaceId]
+    );
+    res.json(result.rows);
+  } catch (err: any) {
+    console.error('[IssueTree] GET failed:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+agentsWorkspaceRouter.post('/:workspaceId/agents/:agentId/issue-tree', requirePermission('agents.view'), async (req: Request, res: Response) => {
+  const { workspaceId, agentId } = req.params;
+  const { node_id, title, standing_question, mece_category, primary_skill_ids, position } = req.body;
+  try {
+    if (!await verifyAgentOwnership(workspaceId, agentId)) {
+      return res.status(404).json({ error: 'Agent not found' });
+    }
+    if (!node_id || !title) {
+      return res.status(400).json({ error: 'node_id and title are required' });
+    }
+    const result = await query(
+      `INSERT INTO agent_issue_tree
+         (agent_id, workspace_id, node_id, title, standing_question, mece_category, primary_skill_ids, position)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       ON CONFLICT (agent_id, node_id) DO UPDATE SET
+         title = EXCLUDED.title,
+         standing_question = EXCLUDED.standing_question,
+         mece_category = EXCLUDED.mece_category,
+         primary_skill_ids = EXCLUDED.primary_skill_ids,
+         position = EXCLUDED.position,
+         updated_at = NOW()
+       RETURNING node_id, title, standing_question, mece_category, primary_skill_ids,
+                 position, confirmed_pattern, pattern_summary`,
+      [agentId, workspaceId, node_id, title, standing_question ?? null,
+       mece_category ?? 'custom', primary_skill_ids ?? [], position ?? 1]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err: any) {
+    console.error('[IssueTree] POST failed:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+agentsWorkspaceRouter.patch('/:workspaceId/agents/:agentId/issue-tree/reorder', requirePermission('agents.view'), async (req: Request, res: Response) => {
+  const { workspaceId, agentId } = req.params;
+  const { positions } = req.body as { positions: { node_id: string; position: number }[] };
+  try {
+    if (!await verifyAgentOwnership(workspaceId, agentId)) {
+      return res.status(404).json({ error: 'Agent not found' });
+    }
+    if (!Array.isArray(positions) || positions.length === 0) {
+      return res.status(400).json({ error: 'positions array is required' });
+    }
+    let updated = 0;
+    for (const { node_id, position } of positions) {
+      const r = await query(
+        `UPDATE agent_issue_tree SET position = $1, updated_at = NOW()
+         WHERE agent_id = $2 AND node_id = $3 AND workspace_id = $4`,
+        [position, agentId, node_id, workspaceId]
+      );
+      updated += r.rowCount || 0;
+    }
+    res.json({ updated });
+  } catch (err: any) {
+    console.error('[IssueTree] Reorder failed:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+agentsWorkspaceRouter.patch('/:workspaceId/agents/:agentId/issue-tree/:nodeId', requirePermission('agents.view'), async (req: Request, res: Response) => {
+  const { workspaceId, agentId, nodeId } = req.params;
+  const { title, standing_question, mece_category, primary_skill_ids, position, confirmed_pattern, pattern_summary } = req.body;
+  try {
+    if (!await verifyAgentOwnership(workspaceId, agentId)) {
+      return res.status(404).json({ error: 'Agent not found' });
+    }
+    const updates: string[] = [];
+    const values: any[] = [];
+    let p = 0;
+    if (title !== undefined) { updates.push(`title = $${++p}`); values.push(title); }
+    if (standing_question !== undefined) { updates.push(`standing_question = $${++p}`); values.push(standing_question); }
+    if (mece_category !== undefined) { updates.push(`mece_category = $${++p}`); values.push(mece_category); }
+    if (primary_skill_ids !== undefined) { updates.push(`primary_skill_ids = $${++p}`); values.push(primary_skill_ids); }
+    if (position !== undefined) { updates.push(`position = $${++p}`); values.push(position); }
+    if (confirmed_pattern !== undefined) { updates.push(`confirmed_pattern = $${++p}`); values.push(confirmed_pattern); }
+    if (pattern_summary !== undefined) { updates.push(`pattern_summary = $${++p}`); values.push(pattern_summary); }
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'No fields to update' });
+    }
+    updates.push(`updated_at = NOW()`);
+    values.push(agentId, nodeId, workspaceId);
+    const result = await query(
+      `UPDATE agent_issue_tree SET ${updates.join(', ')}
+       WHERE agent_id = $${++p} AND node_id = $${++p} AND workspace_id = $${++p}
+       RETURNING node_id, title, standing_question, mece_category, primary_skill_ids,
+                 position, confirmed_pattern, pattern_summary`,
+      values
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Node not found' });
+    }
+    res.json(result.rows[0]);
+  } catch (err: any) {
+    console.error('[IssueTree] PATCH failed:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+agentsWorkspaceRouter.delete('/:workspaceId/agents/:agentId/issue-tree/:nodeId', requirePermission('agents.view'), async (req: Request, res: Response) => {
+  const { workspaceId, agentId, nodeId } = req.params;
+  try {
+    if (!await verifyAgentOwnership(workspaceId, agentId)) {
+      return res.status(404).json({ error: 'Agent not found' });
+    }
+    const result = await query(
+      `DELETE FROM agent_issue_tree
+       WHERE agent_id = $1 AND node_id = $2 AND workspace_id = $3
+       RETURNING node_id`,
+      [agentId, nodeId, workspaceId]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Node not found' });
+    }
+    res.json({ deleted: true });
+  } catch (err: any) {
+    console.error('[IssueTree] DELETE failed:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 function anonymizeText(text: string, nameMap: Map<string, string>): string {
   let result = text;
   nameMap.forEach((alias, realName) => {
