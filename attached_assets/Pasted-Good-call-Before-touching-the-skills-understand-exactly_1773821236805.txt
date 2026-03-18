@@ -1,0 +1,114 @@
+Good call. Before touching the skills, understand exactly what's filtering what.
+
+Give Replit this diagnostic first:
+
+```
+Diagnostic only — do not change any code.
+Read and report. This informs the next build.
+
+---
+
+## Question: How do forecast and Monte Carlo
+skills currently scope deals?
+
+For each of these four skills, find the code
+and answer the three questions below:
+
+1. server/skills/library/forecast-rollup.ts
+   (or wherever forecast-rollup lives in
+   tool-definitions.ts)
+
+2. server/skills/library/pipeline-coverage.ts
+
+3. server/skills/library/pipeline-waterfall.ts
+
+4. server/skills/library/monte-carlo-forecast.ts
+   (or monte-carlo in tool-definitions.ts)
+
+---
+
+For EACH skill answer:
+
+A) How does it scope deals?
+   - Does it filter by pipeline field?
+   - Does it use getPipelineScopeFilter()?
+   - Does it use a hardcoded WHERE clause?
+   - Does it take all deals with no filter?
+   - Does it use workspace config at all?
+
+B) How does it calculate deal value?
+   - Direct d.amount reference?
+   - deal.properties.amount?
+   - Any existing abstraction?
+   - How many times does amount appear?
+
+C) Does it already handle multiple pipelines?
+   - Does it segment by pipeline in output?
+   - Does it report pipelines separately?
+   - Any existing exclusion logic?
+
+---
+
+Also answer:
+
+D) Where is the deals query happening?
+   - Is there a shared getDeal() or
+     queryDeals() function all skills use?
+   - Or does each skill query independently?
+   - If shared: one change fixes all skills
+   - If independent: each skill needs
+     its own update
+
+E) Does Frontera's workspace config currently
+   have Fellowship as a separate pipeline entry?
+   Check:
+   SELECT definitions->'pipelines'
+   FROM context_layer
+   WHERE workspace_id =
+     '4160191d-73bc-414b-97dd-5a1853190378';
+
+F) What pipeline values exist on Frontera deals?
+   Check:
+   SELECT DISTINCT
+     properties->>'pipeline' as pipeline,
+     COUNT(*) as deal_count,
+     SUM((properties->>'amount')::numeric)
+       as total_value
+   FROM deals
+   WHERE workspace_id =
+     '4160191d-73bc-414b-97dd-5a1853190378'
+   GROUP BY properties->>'pipeline'
+   ORDER BY total_value DESC;
+
+---
+
+Report format:
+
+Skill: forecast-rollup
+  A) Scoping: [answer]
+  B) Value: [answer — include line numbers
+     and exact code snippet]
+  C) Multi-pipeline: [answer]
+
+Skill: pipeline-coverage
+  [same]
+
+Skill: pipeline-waterfall
+  [same]
+
+Skill: monte-carlo-forecast
+  [same]
+
+Shared query layer:
+  D) [answer]
+
+Frontera pipeline config:
+  E) [SQL result]
+
+Frontera deal pipeline values:
+  F) [SQL result]
+
+Do not fix anything. Just report.
+```
+
+This tells us exactly what needs changing and whether there's a shared query layer that makes the fix a one-liner instead of four separate skill updates. Share what comes back.
