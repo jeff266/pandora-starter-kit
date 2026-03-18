@@ -358,12 +358,17 @@ curl -X PATCH http://localhost:3001/api/workspaces/4160191d.../workspace-config/
 7. ✅ API validation for new fields
 8. ✅ resolveValue() never throws, all errors gracefully handled
 
-### Pending (3/12)
+### Completed (11/12)
 
-9. ⏳ forecast-rollup uses getForecastPipelines() and resolveValue()
-10. ⏳ Fellowship deals excluded from attainment/coverage calculations
-11. ⏳ Non-forecast pipeline totals reported separately
-12. ⏳ pipeline-coverage, rep-scorecard, waterfall use resolveValue()
+9. ✅ forecast-rollup uses getForecastPipelines() and filters closed-won queries
+10. ✅ Fellowship deals excluded from attainment/coverage calculations via pipeline filter
+11. ✅ Non-forecast pipeline totals reported separately in forecastRollup result
+12. ✅ pipeline-waterfall passes forecast pipeline filter to waterfallAnalysis
+13. ✅ monte-carlo defaults to forecast pipelines, excludes Fellowship from simulation
+
+### Pending (1/12)
+
+14. ⏳ value-resolver integration: Replace d.amount with resolveValue() in skills
 
 ---
 
@@ -377,6 +382,80 @@ curl -X PATCH http://localhost:3001/api/workspaces/4160191d.../workspace-config/
 - **New Config Methods**: 3 (getForecastPipelines, getNonForecastPipelines, getValueField)
 - **Formula Variables Supported**: 6 ({amount}, {arr_value}, {acv_amount}, {contract_months}, {mrr}, {arr})
 - **Operators Supported**: 5 (+, -, *, /, ||)
+
+---
+
+## 🔧 Phase 2: Skill forecast_eligible Integration (March 18, 2026)
+
+### Changes Made
+
+**1. forecast-rollup skill** (server/skills/tool-definitions.ts line 3068)
+- Load forecast/non-forecast pipelines at top of execute function
+- Filter closed-won queries: `AND pipeline = ANY($forecastPipelineNames)`
+- Query non-forecast pipelines separately and return as `nonForecastPipelines` in result
+- Updated comments to explain Fellowship Pipeline exclusion logic
+
+**SQL Changes**:
+- `stageAttainmentResult` query (line 3097): Added `AND pipeline = ANY($2)` filter
+- `cwByPipelineResult` query (line 3109): Added `AND pipeline = ANY($2)` filter
+- `closedWonDealsResult` query (line 3125): Added `AND pipeline = ANY($2)` filter, added `pipeline` column
+- New query before return (line 3487): Separate non-forecast pipeline summary with open + closed-won breakdown
+
+**Result Schema Changes**:
+- Added `nonForecastPipelines` field with pipelines[], total_open_value, total_closed_won_in_quarter, note
+
+**2. pipeline-waterfall skill** (server/skills/tool-definitions.ts line 4135)
+- Load forecast pipelines using `configLoader.getForecastPipelines()`
+- Pass first forecast pipeline name to `waterfallAnalysis(context.workspaceId, periodStart, periodEnd, { pipeline: pipelineFilter })`
+- Added TODO comment explaining single-pipeline limitation and multi-pipeline roadmap
+
+**3. monte-carlo skill - mcLoadOpenDeals tool** (server/skills/tool-definitions.ts line 7703)
+- Load forecast pipelines at start of execute function
+- Default `pipelineFilter` to first forecast pipeline if not specified
+- Return `simulationScope` object with pipelineFilter, forecastPipelineNames, and explanatory note
+- Added TODO comment explaining single-pipeline limitation
+
+**Result Schema Changes**:
+- Added `simulationScope` field with pipelineFilter, forecastPipelineNames[], note
+
+### Impact on Frontera Workspace
+
+**Before Phase 2**:
+- Fellowship Pipeline ($2.4M open, 42 deals) contaminated:
+  - Waterfall analysis (showed as pipeline flow)
+  - Monte Carlo simulation (included in P10-P90 range)
+  - Forecast rollup attainment (counted toward quota)
+
+**After Phase 2**:
+- Fellowship Pipeline correctly excluded from:
+  - ✅ Forecast attainment calculations (only Core Sales counts)
+  - ✅ Waterfall stage flow analysis (only Core Sales shown)
+  - ✅ Monte Carlo simulation (only Core Sales simulated)
+- Fellowship Pipeline visible separately in:
+  - ✅ forecastRollup.nonForecastPipelines (tracked but not counted)
+  - ✅ monte-carlo simulationScope.note (explains exclusion)
+
+### Testing Commands
+
+```bash
+# Verify forecast-rollup excludes Fellowship from attainment
+curl http://localhost:3001/api/skills/forecast-rollup/run \
+  -H "X-Workspace-ID: 4160191d-73bc-414b-97dd-5a1853190378"
+# Check: team.closedWon should NOT include Fellowship deals
+# Check: nonForecastPipelines should list Fellowship separately
+
+# Verify waterfall excludes Fellowship
+curl http://localhost:3001/api/skills/pipeline-waterfall/run \
+  -H "X-Workspace-ID: 4160191d-73bc-414b-97dd-5a1853190378"
+# Check: stages[] should only show Core Sales deals
+# Check: summary.totalOpenStart should NOT include Fellowship $2.4M
+
+# Verify Monte Carlo excludes Fellowship
+curl http://localhost:3001/api/skills/monte-carlo-forecast/run \
+  -H "X-Workspace-ID: 4160191d-73bc-414b-97dd-5a1853190378"
+# Check: open_deals.simulationScope.pipelineFilter should be "Core Sales Pipeline"
+# Check: open_deals.totalCrmValue should NOT include Fellowship deals
+```
 
 ---
 

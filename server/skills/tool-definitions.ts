@@ -3078,6 +3078,11 @@ const forecastRollup: ToolDefinition = {
     return safeExecute('forecastRollup', async () => {
       const nameMap = await resolveOwnerNames(context.workspaceId);
 
+      // Load forecast-eligible and non-forecast-eligible pipelines
+      const forecastPipelines = await configLoader.getForecastPipelines(context.workspaceId);
+      const nonForecastPipelines = await configLoader.getNonForecastPipelines(context.workspaceId);
+      const forecastPipelineNames = forecastPipelines.map(p => p.name);
+
       // Quarter bounds and ownership come from the pre-resolved QueryScope.
       // This is fiscal-year-aware (reads workspace_config.cadence.fiscal_year_start_month)
       // and never re-queries the database for role/email.
@@ -3090,47 +3095,49 @@ const forecastRollup: ToolDefinition = {
       // Open-pipeline categories (commit, best_case, pipeline) are unrestricted.
       const closedWonDateClause = `AND (forecast_category != 'closed' OR (close_date >= '${quarterStart}' AND close_date <= '${quarterEnd}'))`;
 
-      // Stage-normalized attainment: counts ALL closed_won deals in the quarter
-      // regardless of forecast_category. This picks up pipelines (e.g. Fellowship
-      // Pipeline) where HubSpot does not assign a forecast_category, which would
-      // otherwise be invisible to the category-based query below.
+      // Stage-normalized attainment: counts ONLY forecast-eligible pipelines (e.g. Core Sales)
+      // and EXCLUDES non-forecast pipelines (e.g. Fellowship Pipeline) from quota attainment.
+      // This ensures only revenue-bearing pipelines count toward team targets.
       const stageAttainmentResult = await query(
         `SELECT COALESCE(SUM(amount), 0) AS total
          FROM deals
          WHERE workspace_id = $1
            AND stage_normalized = 'closed_won'
            AND close_date >= '${quarterStart}'
-           AND close_date <= '${quarterEnd}'${dealOwnerClause}`,
-        [context.workspaceId]
+           AND close_date <= '${quarterEnd}'
+           AND pipeline = ANY($2)${dealOwnerClause}`,
+        [context.workspaceId, forecastPipelineNames]
       );
       const stageClosedWon = Number((stageAttainmentResult.rows[0] as any)?.total ?? 0);
 
-      // Per-pipeline closed won (for attainment breakdown)
+      // Per-pipeline closed won (for attainment breakdown) - forecast pipelines only
       const cwByPipelineResult = await query(
         `SELECT COALESCE(scope_id, 'unknown') AS scope_id, COALESCE(SUM(amount), 0) AS total
          FROM deals
          WHERE workspace_id = $1
            AND stage_normalized = 'closed_won'
            AND close_date >= '${quarterStart}'
-           AND close_date <= '${quarterEnd}'${dealOwnerClause}
+           AND close_date <= '${quarterEnd}'
+           AND pipeline = ANY($2)${dealOwnerClause}
          GROUP BY scope_id`,
-        [context.workspaceId]
+        [context.workspaceId, forecastPipelineNames]
       );
       const closedWonByPipeline: Record<string, number> = {};
       for (const row of (cwByPipelineResult as any).rows) {
         if (row.scope_id) closedWonByPipeline[row.scope_id] = Number(row.total);
       }
 
-      // Deal-level rows backing the closed won total (for evidence transparency)
+      // Deal-level rows backing the closed won total (for evidence transparency) - forecast pipelines only
       const closedWonDealsResult = await query(
-        `SELECT name, amount, scope_id, owner, close_date, forecast_category
+        `SELECT name, amount, scope_id, owner, close_date, forecast_category, pipeline
          FROM deals
          WHERE workspace_id = $1
            AND stage_normalized = 'closed_won'
            AND close_date >= '${quarterStart}'
-           AND close_date <= '${quarterEnd}'${dealOwnerClause}
+           AND close_date <= '${quarterEnd}'
+           AND pipeline = ANY($2)${dealOwnerClause}
          ORDER BY close_date DESC, amount DESC`,
-        [context.workspaceId]
+        [context.workspaceId, forecastPipelineNames]
       );
       const closedWonDeals = (closedWonDealsResult as any).rows.map((r: any) => ({
         name: r.name,
@@ -3139,6 +3146,7 @@ const forecastRollup: ToolDefinition = {
         owner: r.owner,
         close_date: r.close_date ? new Date(r.close_date).toISOString().split('T')[0] : null,
         forecast_category: r.forecast_category,
+        pipeline: r.pipeline,
       }));
 
       const teamResult = await query(
@@ -3476,6 +3484,39 @@ const forecastRollup: ToolDefinition = {
         };
       }
 
+      // Query non-forecast pipelines separately (e.g. Fellowship Pipeline)
+      // These are tracked but NOT included in quota attainment calculations.
+      let nonForecastSummary: any = null;
+      if (nonForecastPipelines.length > 0) {
+        const nonForecastNames = nonForecastPipelines.map(p => p.name);
+        const nonForecastResult = await query(
+          `SELECT
+             COALESCE(pipeline, 'unknown') AS pipeline_name,
+             COUNT(*) AS deal_count,
+             COALESCE(SUM(amount), 0) AS total_amount,
+             COUNT(*) FILTER (WHERE stage_normalized = 'closed_won' AND close_date >= '${quarterStart}' AND close_date <= '${quarterEnd}') AS closed_won_count,
+             COALESCE(SUM(amount) FILTER (WHERE stage_normalized = 'closed_won' AND close_date >= '${quarterStart}' AND close_date <= '${quarterEnd}'), 0) AS closed_won_amount
+           FROM deals
+           WHERE workspace_id = $1
+             AND pipeline = ANY($2)
+             AND stage_normalized NOT IN ('closed_lost')${dealOwnerClause}
+           GROUP BY pipeline`,
+          [context.workspaceId, nonForecastNames]
+        );
+        nonForecastSummary = {
+          pipelines: nonForecastResult.rows.map((r: any) => ({
+            pipeline_name: r.pipeline_name,
+            deal_count: Number(r.deal_count),
+            total_amount: Number(r.total_amount),
+            closed_won_count: Number(r.closed_won_count),
+            closed_won_amount: Number(r.closed_won_amount),
+          })),
+          total_open_value: nonForecastResult.rows.reduce((s: number, r: any) => s + Number(r.total_amount), 0),
+          total_closed_won_in_quarter: nonForecastResult.rows.reduce((s: number, r: any) => s + Number(r.closed_won_amount), 0),
+          note: 'These pipelines are tracked separately and DO NOT count toward quota attainment.',
+        };
+      }
+
       return {
         team: {
           closedWon,
@@ -3507,6 +3548,7 @@ const forecastRollup: ToolDefinition = {
         rfmQuality,
         closedWonByPipeline,
         closedWonDeals,
+        nonForecastPipelines: nonForecastSummary,
         queriesRun: [
           {
             label: `Stage: Closed Won (${quarterStart} to ${quarterEnd})`,
@@ -4120,7 +4162,20 @@ const waterfallAnalysisTool: ToolDefinition = {
         ? new Date(timeWindows.analysisRange.end)
         : new Date(timeWindows.previousPeriodRange?.end || timeWindows.analysisRange.end);
 
-      return await waterfallAnalysis(context.workspaceId, periodStart, periodEnd);
+      // Load forecast-eligible pipelines and pass to waterfall analysis.
+      // This ensures non-forecast pipelines (e.g. Fellowship) are excluded from flow calculations.
+      const forecastPipelines = await configLoader.getForecastPipelines(context.workspaceId);
+
+      // TODO: waterfallAnalysis.filterParams.pipeline accepts a single pipeline name string,
+      // not an array. For workspaces with multiple forecast pipelines, we currently pass
+      // only the first one. Full multi-pipeline support requires either:
+      // (a) running waterfall separately per pipeline and merging results, or
+      // (b) extending waterfallAnalysis to accept pipeline array filter.
+      const pipelineFilter = forecastPipelines.length > 0 ? forecastPipelines[0].name : undefined;
+
+      return await waterfallAnalysis(context.workspaceId, periodStart, periodEnd, {
+        pipeline: pipelineFilter,
+      });
     }, params);
   },
 };
@@ -7647,12 +7702,23 @@ const mcFitDistributions: ToolDefinition = {
 
 const mcLoadOpenDeals: ToolDefinition = {
   name: 'mcLoadOpenDeals',
-  description: 'Load all open deals for Monte Carlo simulation (excludes closed stages, includes deals closing within 24 months).',
+  description: 'Load all open deals for Monte Carlo simulation (excludes closed stages, includes deals closing within 24 months). Automatically filters to forecast-eligible pipelines only.',
   tier: 'compute',
   parameters: { type: 'object', properties: {}, required: [] },
   execute: async (_params, context) => {
     return safeExecute('mcLoadOpenDeals', async () => {
-      const pipelineFilter: string | null = context.params?.pipelineFilter ?? null;
+      // Load forecast-eligible pipelines and default to first forecast pipeline if no filter specified.
+      // This ensures non-forecast pipelines (e.g. Fellowship) are excluded from simulation by default.
+      const forecastPipelines = await configLoader.getForecastPipelines(context.workspaceId);
+      let pipelineFilter: string | null = context.params?.pipelineFilter ?? null;
+
+      // TODO: Monte Carlo currently simulates a single pipeline at a time. For workspaces with
+      // multiple forecast pipelines, we default to the first one. Full multi-pipeline support
+      // requires running separate simulations per pipeline or extending the simulation engine.
+      if (!pipelineFilter && forecastPipelines.length > 0) {
+        pipelineFilter = forecastPipelines[0].name;
+      }
+
       const params: any[] = [context.workspaceId];
       let pipelineClause = '';
 
@@ -7724,7 +7790,22 @@ const mcLoadOpenDeals: ToolDefinition = {
         stageBreakdown[deal.stageNormalized].value += deal.amount;
       }
 
-      return { openDeals, dealCount: openDeals.length, totalCrmValue, stageBreakdown };
+      // Include metadata about pipeline scope for transparency in synthesis
+      const simulationScope = {
+        pipelineFilter: pipelineFilter || 'all',
+        forecastPipelineNames: forecastPipelines.map(p => p.name),
+        note: pipelineFilter
+          ? `Simulation scoped to "${pipelineFilter}" pipeline only. Non-forecast pipelines excluded.`
+          : 'Simulation includes all pipelines.',
+      };
+
+      return {
+        openDeals,
+        dealCount: openDeals.length,
+        totalCrmValue,
+        stageBreakdown,
+        simulationScope,
+      };
     }, _params);
   },
 };
