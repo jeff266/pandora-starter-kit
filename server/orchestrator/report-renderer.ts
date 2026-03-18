@@ -232,6 +232,37 @@ export async function renderDocx(
           indent: { left: convertInchesToTwip(0.15) },
         }));
 
+        // Chart Intelligence: render chart after answer
+        if (node.chart_png && node.chart_spec) {
+          children.push(new Paragraph({
+            children: [
+              new ImageRun({
+                data: node.chart_png,
+                transformation: {
+                  width: 450,
+                  height: 300,
+                },
+              }),
+            ],
+            spacing: { before: 120, after: 120 },
+            alignment: AlignmentType.CENTER,
+            indent: { left: convertInchesToTwip(0.15) },
+          }));
+
+          // Chart title as caption
+          children.push(new Paragraph({
+            children: [new TextRun({
+              text: node.chart_spec.title,
+              size: 16,
+              color: '64748B',
+              italics: true,
+            })],
+            alignment: AlignmentType.CENTER,
+            spacing: { after: 120 },
+            indent: { left: convertInchesToTwip(0.15) },
+          }));
+        }
+
         // Data gap note
         if (node.data_gap) {
           children.push(new Paragraph({
@@ -588,6 +619,25 @@ export async function renderPdf(
            .fontSize(10)
            .text(node.answer, 102, pdf.y, { width: W - 12, lineGap: 2 });
         pdf.moveDown(0.5);
+
+        // Chart Intelligence: render chart after answer
+        if (node.chart_png && node.chart_spec) {
+          if (pdf.y > pdf.page.height - 230) pdf.addPage();
+
+          // Embed chart image
+          pdf.image(node.chart_png, 102, pdf.y, {
+            fit: [W - 12, 180],
+            align: 'center',
+          });
+          pdf.moveDown(9.5);
+
+          // Chart title as caption
+          pdf.fillColor(hexToRgb('#64748B'))
+             .font('Helvetica-Oblique')
+             .fontSize(8.5)
+             .text(node.chart_spec.title, 102, pdf.y, { width: W - 12, align: 'center' });
+          pdf.moveDown(0.6);
+        }
 
         // Data gap note
         if (node.data_gap) {

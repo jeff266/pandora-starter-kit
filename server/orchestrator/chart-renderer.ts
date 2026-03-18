@@ -9,7 +9,7 @@
  */
 
 import * as https from 'https';
-import type { ChartSuggestion } from './types.js';
+import type { ChartSuggestion, ChartNodeSpec, ChartDataPoint } from './types.js';
 
 const COLORS = {
   primary:   '#0D9488',
@@ -52,9 +52,32 @@ const SEMANTIC_COLORS: Record<string, string> = {
   'pipeline':       '#CBD5E1',
 };
 
+// Chart Intelligence semantic colors: explicit color hints
+const COLOR_HINT_MAP: Record<string, string> = {
+  'dead':      '#EF4444',  // red — lost, stale >30d, zero activity
+  'at_risk':   '#F59E0B',  // amber — high risk, approaching deadline
+  'healthy':   '#0D9488',  // teal — won, on track, strong signals
+  'neutral':   '#CBD5E1',  // light gray — time periods, stages
+};
+
 function getSemanticColors(labels: string[], defaultPalette: string[]): string[] {
   return labels.map((label, i) => {
     const key = label.toLowerCase().trim();
+    return SEMANTIC_COLORS[key] ?? defaultPalette[i % defaultPalette.length];
+  });
+}
+
+function getSemanticColorsFromHints(
+  dataPoints: ChartDataPoint[],
+  defaultPalette: string[]
+): string[] {
+  return dataPoints.map((point, i) => {
+    // Explicit color hint from Chart Intelligence
+    if (point.color_hint && COLOR_HINT_MAP[point.color_hint]) {
+      return COLOR_HINT_MAP[point.color_hint];
+    }
+    // Fallback to label-based semantic matching
+    const key = point.label.toLowerCase().trim();
     return SEMANTIC_COLORS[key] ?? defaultPalette[i % defaultPalette.length];
   });
 }
@@ -353,6 +376,205 @@ export interface RenderChartInput {
   chart_options?: Record<string, any>;
   width?: number;
   height?: number;
+}
+
+/**
+ * Renders a chart from ChartNodeSpec (Chart Intelligence output).
+ * Returns PNG buffer directly.
+ */
+export async function renderChartFromSpec(
+  spec: ChartNodeSpec,
+  width = 560,
+  height = 220
+): Promise<Buffer> {
+  const labels = spec.data_points.map(dp => dp.label);
+  const rawValues = spec.data_points.map(dp => dp.value);
+
+  const colors = spec.color_scheme === 'semantic'
+    ? getSemanticColorsFromHints(spec.data_points, PALETTE)
+    : getSemanticColors(labels, PALETTE);
+
+  const { normalized, suffix, isCount } = normalizeValues(rawValues);
+
+  const config = buildChartJsConfigFromSpec(
+    spec.chart_type,
+    spec.title,
+    labels,
+    normalized,
+    colors,
+    suffix,
+    isCount
+  );
+
+  const payload = {
+    width,
+    height,
+    backgroundColor: 'white',
+    format: 'png',
+    chart: config,
+  };
+
+  const body = JSON.stringify(payload);
+  return await fetchQuickChart(body);
+}
+
+function buildChartJsConfigFromSpec(
+  chartType: 'bar' | 'horizontalBar' | 'line' | 'doughnut',
+  title: string,
+  labels: string[],
+  normalized: number[],
+  colors: string[],
+  suffix: string,
+  isCount: boolean
+): object {
+  const yAxisTitleText = suffix || (isCount ? 'Deals' : '');
+  const yAxisTitle = yAxisTitleText
+    ? { display: true, text: yAxisTitleText, color: '#94A3B8', font: { size: 10 } }
+    : { display: false };
+
+  const yTicks = isCount
+    ? { color: '#64748B', font: { size: 11 }, precision: 0, stepSize: 1 }
+    : { color: '#64748B', font: { size: 11 } };
+
+  const baseOptions = {
+    plugins: {
+      legend: { display: false },
+      title: {
+        display: true,
+        text: title,
+        font: { size: 13, weight: 'bold' },
+        color: '#1E293B',
+        padding: { bottom: 12 },
+      },
+    },
+    scales: {
+      x: {
+        grid: { display: false },
+        ticks: { color: '#64748B', font: { size: 11 } },
+      },
+      y: {
+        min: isCount ? 0 : undefined,
+        grid: { color: 'rgba(0,0,0,0.06)' },
+        border: { display: false },
+        title: yAxisTitle,
+        ticks: yTicks,
+      },
+    },
+  };
+
+  switch (chartType) {
+    case 'bar':
+      return {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [{
+            label: title,
+            data: normalized,
+            backgroundColor: colors,
+            borderRadius: 4,
+          }],
+        },
+        options: baseOptions,
+      };
+
+    case 'horizontalBar': {
+      const xAxisTitleText = suffix || (isCount ? 'Deals' : '');
+      const xAxisTitle = xAxisTitleText
+        ? { display: true, text: xAxisTitleText, color: '#94A3B8', font: { size: 10 } }
+        : { display: false };
+      const xTicks = isCount
+        ? { color: '#64748B', font: { size: 11 }, precision: 0, stepSize: 1 }
+        : { color: '#64748B', font: { size: 11 } };
+      return {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [{
+            label: title,
+            data: normalized,
+            backgroundColor: colors,
+            borderRadius: 4,
+          }],
+        },
+        options: {
+          ...baseOptions,
+          indexAxis: 'y',
+          scales: {
+            x: {
+              min: isCount ? 0 : undefined,
+              grid: { color: 'rgba(0,0,0,0.06)' },
+              border: { display: false },
+              title: xAxisTitle,
+              ticks: xTicks,
+            },
+            y: {
+              grid: { display: false },
+              ticks: { color: '#64748B', font: { size: 11 } },
+            },
+          },
+        },
+      };
+    }
+
+    case 'line':
+      return {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [{
+            label: title,
+            data: normalized,
+            borderColor: COLORS.primary,
+            backgroundColor: 'rgba(13,148,136,0.1)',
+            borderWidth: 2,
+            pointRadius: 4,
+            fill: true,
+            tension: 0.3,
+          }],
+        },
+        options: baseOptions,
+      };
+
+    case 'doughnut':
+      return {
+        type: 'doughnut',
+        data: {
+          labels,
+          datasets: [{
+            label: title,
+            data: normalized,
+            backgroundColor: colors,
+            borderWidth: 2,
+            borderColor: 'white',
+          }],
+        },
+        options: {
+          plugins: {
+            legend: {
+              display: true,
+              position: 'right',
+              labels: {
+                color: '#374151',
+                font: { size: 11 },
+                padding: 16,
+              },
+            },
+            title: {
+              display: true,
+              text: title,
+              font: { size: 13, weight: 'bold' },
+              color: '#1E293B',
+            },
+          },
+          cutout: '65%',
+        },
+      };
+
+    default:
+      // Fallback to bar
+      return buildChartJsConfigFromSpec('bar', title, labels, normalized, colors, suffix, isCount);
+  }
 }
 
 export async function renderChartToPNG(input: RenderChartInput): Promise<Buffer> {

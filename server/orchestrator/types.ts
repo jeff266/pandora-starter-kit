@@ -55,6 +55,25 @@ export type ReasoningLayer =
   | 'third_order'
   | 'action';
 
+export type ChartColorScheme =
+  | 'semantic'      // Red for dead/lost, amber for at-risk, teal for healthy
+  | 'gradient'      // Single-color gradient
+  | 'categorical';  // Standard palette for unrelated categories
+
+export interface ChartDataPoint {
+  label: string;
+  value: number;
+  color_hint?: 'dead' | 'at_risk' | 'healthy' | 'neutral';
+}
+
+export interface ChartNodeSpec {
+  chart_type: 'bar' | 'horizontalBar' | 'line' | 'doughnut';
+  title: string;              // Conclusion-first title (NOT data description)
+  data_points: ChartDataPoint[];
+  color_scheme: ChartColorScheme;
+  orientation_rationale?: string;  // Why horizontal was chosen
+}
+
 export interface ReasoningNode {
   layer: ReasoningLayer;
   question: string;        // The question this node answers
@@ -67,6 +86,8 @@ export interface ReasoningNode {
     title: string;
     data_description: string; // What data would make this chart
   };
+  chart_spec?: ChartNodeSpec;  // Resolved chart specification
+  chart_png?: Buffer;          // Rendered chart image (in-memory only)
 }
 
 export interface ReportSection {

@@ -10,6 +10,8 @@
 
 import { callLLM } from '../utils/llm-router.js';
 import { ReportSection, ReasoningNode, SkillSummary } from './types.js';
+import { generateChartSpecs } from './chart-intelligence.js';
+import { renderChartFromSpec } from './chart-renderer.js';
 
 /**
  * Generates a reasoning tree for one section.
@@ -161,9 +163,49 @@ nodes with weak answers.
       parsed.reasoning_tree || [];
 
     // Validate structure
-    return nodes.filter(n =>
+    const validNodes = nodes.filter(n =>
       n.layer && n.question && n.answer
     );
+
+    // Generate chart specifications for valid nodes
+    if (validNodes.length > 0) {
+      try {
+        const chartSpecs = await generateChartSpecs(
+          section.id,
+          validNodes,
+          relevantSkills,
+          workspaceId
+        );
+
+        // Render charts and attach to nodes
+        for (const [nodeIndex, spec] of chartSpecs.entries()) {
+          const node = validNodes[nodeIndex];
+          if (node) {
+            node.chart_spec = spec;
+            try {
+              node.chart_png = await renderChartFromSpec(spec);
+              console.log(
+                `[QuestionTree] Rendered chart for ${section.id} node ${nodeIndex}`
+              );
+            } catch (renderErr) {
+              console.error(
+                `[QuestionTree] Chart render failed for ${section.id} node ${nodeIndex}:`,
+                renderErr
+              );
+              // Non-fatal - node keeps chart_spec but no PNG
+            }
+          }
+        }
+      } catch (chartErr) {
+        console.error(
+          `[QuestionTree] Chart intelligence failed for ${section.id}:`,
+          chartErr
+        );
+        // Non-fatal - nodes render without charts
+      }
+    }
+
+    return validNodes;
 
   } catch (err) {
     console.error(
