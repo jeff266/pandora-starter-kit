@@ -477,17 +477,21 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
     const pipelineFilter = req.query.pipeline as string | undefined;
     const timeRangeParam = req.query.time_range as string | undefined;
 
-    // Calculate time range filter if provided
+    // Calculate time range filter if provided.
+    // 'today' is treated as "current real-time state" — no close_date filter applied,
+    // since pipeline coverage/open deals should always reflect the live pipeline.
+    // Other ranges (this_week, this_month, etc.) filter by close_date to show what's
+    // closing within that window.
     let timeRangeFilter = '';
     let dateRange: { start: string; end: string } | null = null;
-    if (timeRangeParam && ['today', 'this_week', 'this_month', 'this_quarter', 'this_year'].includes(timeRangeParam)) {
+    if (timeRangeParam && ['this_week', 'this_month', 'this_quarter', 'this_year'].includes(timeRangeParam)) {
       const range = calculateTimeRange(timeRangeParam);
       if (range) {
         dateRange = {
           start: range.start.toISOString(),
           end: range.end.toISOString(),
         };
-        // Filter deals by close_date for both metrics and pipeline display
+        // Filter deals by close_date for forward-looking window views
         timeRangeFilter = ` AND d.close_date >= '${range.start.toISOString()}'::timestamptz AND d.close_date <= '${range.end.toISOString()}'::timestamptz`;
       }
     }
