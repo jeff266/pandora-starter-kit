@@ -227,6 +227,29 @@ Respond ONLY with JSON:
 // ---------------------------------------------------------------------------
 
 /**
+ * Apply orientation rule unconditionally based on label length.
+ * Any chart with labels > 12 chars becomes horizontal bar for readability.
+ * Never override donut or line charts.
+ */
+function applyOrientationRule(
+  suggestedType: ChartNodeSpec['chart_type'],
+  dataPoints: ChartDataPoint[]
+): ChartNodeSpec['chart_type'] {
+  // Never override donut or line
+  if (suggestedType === 'doughnut' || suggestedType === 'line') {
+    return suggestedType;
+  }
+
+  // Unconditional: any label > 12 chars → horizontal
+  const hasLongLabel = dataPoints.some(d => d.label.length > 12);
+  if (hasLongLabel) {
+    return 'horizontalBar';
+  }
+
+  return suggestedType || 'bar';
+}
+
+/**
  * Extract rep pipeline data from coverage skill key_metrics.
  */
 function buildRepData(
@@ -300,8 +323,10 @@ function resolveChartFromQuestion(
           ) as ChartDataPoint['color_hint'],
         }));
 
+      const chartType = applyOrientationRule('horizontalBar', dataPoints);
+
       return {
-        chart_type: 'horizontalBar',
+        chart_type: chartType,
         title: question.chart_question,
         data_points: dataPoints,
         color_scheme: 'semantic',
@@ -322,11 +347,11 @@ function resolveChartFromQuestion(
         color_hint: (i === 0 ? 'actual' : 'neutral') as ChartDataPoint['color_hint'],
       }));
 
-      // Short rep names (≤12 chars) → bar; long names → horizontalBar
-      const hasLongLabel = dataPoints.some(dp => dp.label.length > 12);
+      // Apply orientation rule based on label length
+      const chartType = applyOrientationRule('bar', dataPoints);
 
       return {
-        chart_type: hasLongLabel ? 'horizontalBar' : 'bar',
+        chart_type: chartType,
         title: question.chart_question,
         data_points: dataPoints,
         color_scheme: 'comparative',
@@ -351,21 +376,25 @@ function resolveChartFromQuestion(
         return null;
       }
 
+      const dataPoints: ChartDataPoint[] = [
+        {
+          label: 'Open Pipeline',
+          value: Math.round(actual / 1000),
+          color_hint: 'actual',
+        },
+        {
+          label: 'Coverage Target',
+          value: Math.round(target / 1000),
+          color_hint: 'target',
+        },
+      ];
+
+      const chartType = applyOrientationRule('bar', dataPoints);
+
       return {
-        chart_type: 'bar',
+        chart_type: chartType,
         title: question.chart_question,
-        data_points: [
-          {
-            label: 'Open Pipeline',
-            value: Math.round(actual / 1000),
-            color_hint: 'actual',
-          },
-          {
-            label: 'Coverage Target',
-            value: Math.round(target / 1000),
-            color_hint: 'target',
-          },
-        ],
+        data_points: dataPoints,
         color_scheme: 'comparative',
       };
     }
@@ -382,21 +411,25 @@ function resolveChartFromQuestion(
       );
       if (closed === 0 && open === 0) return null;
 
+      const dataPoints: ChartDataPoint[] = [
+        {
+          label: 'Closed Won',
+          value: Math.round(closed / 1000),
+          color_hint: 'positive',
+        },
+        {
+          label: 'Open Pipeline',
+          value: Math.round(open / 1000),
+          color_hint: 'target',
+        },
+      ];
+
+      const chartType = applyOrientationRule('doughnut', dataPoints);
+
       return {
-        chart_type: 'doughnut',
+        chart_type: chartType,
         title: question.chart_question,
-        data_points: [
-          {
-            label: 'Closed Won',
-            value: Math.round(closed / 1000),
-            color_hint: 'positive',
-          },
-          {
-            label: 'Open Pipeline',
-            value: Math.round(open / 1000),
-            color_hint: 'target',
-          },
-        ],
+        data_points: dataPoints,
         color_scheme: 'semantic',
       };
     }
@@ -412,13 +445,17 @@ function resolveChartFromQuestion(
 
       if (candidates.length < 2) return null;
 
+      const dataPoints: ChartDataPoint[] = candidates.map(([key, value]) => ({
+        label: key.replace(/^[^.]+\./, '').replace(/_/g, ' '),
+        value: Math.round(Number(value) / 1000),
+      }));
+
+      const chartType = applyOrientationRule('bar', dataPoints);
+
       return {
-        chart_type: 'bar',
+        chart_type: chartType,
         title: question.chart_question,
-        data_points: candidates.map(([key, value]) => ({
-          label: key.replace(/^[^.]+\./, '').replace(/_/g, ' '),
-          value: Math.round(Number(value) / 1000),
-        })),
+        data_points: dataPoints,
         color_scheme: 'uniform',
       };
     }
