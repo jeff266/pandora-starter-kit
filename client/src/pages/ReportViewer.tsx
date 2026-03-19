@@ -413,7 +413,9 @@ export default function ReportViewer() {
   }
 
   const displayName = reportDocument
-    ? (DOC_TYPE_LABELS[reportDocument.document_type] || reportDocument.document_type)
+    ? (reportDocument.document_type === 'agent_run' && reportDocument.config?.agent_name
+        ? reportDocument.config.agent_name
+        : (DOC_TYPE_LABELS[reportDocument.document_type] || reportDocument.document_type))
     : (template?.name || generation?.agent_name || 'Agent Briefing');
   const sections = generation?.sections_content || generation?.sections_snapshot || [];
   const isV2 = (generation?.version || 1) > 1;

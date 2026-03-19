@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
 import FloatingBubble from './FloatingBubble';
+import { renderMarkdown } from '../../lib/render-markdown';
 
 export interface Annotation {
   id: string;
@@ -176,7 +177,7 @@ export default function AnnotatableSection({
               onMouseLeave={() => isAnnotating && setHoveredIndex(null)}
               style={getParagraphStyle(index)}
             >
-              {getParagraphContent(index)}
+              {renderMarkdown(getParagraphContent(index))}
 
               {/* Annotation indicators */}
               {isAnnotating && (
