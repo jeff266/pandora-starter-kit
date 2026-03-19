@@ -106,6 +106,7 @@ const SCHEDULE_PRESETS: { label: string; cron: string }[] = [
 
 type ViewState = 'gallery' | 'builder' | 'list' | 'copilot';
 type BuilderTab = 'audience' | 'goals' | 'skills' | 'data_window' | 'scope' | 'schedule' | 'formats' | 'structure';
+type StandingQuestion = { id: string; text: string };
 
 interface NamedFilterOption {
   id: string;
@@ -134,7 +135,7 @@ export default function AgentBuilder() {
   const [audience, setAudience] = useState<AudienceConfig>({ role: 'VP Sales', detail_preference: 'manager' });
   const [focusQuestions, setFocusQuestions] = useState<string[]>([]);
   const [goal, setGoal] = useState('');
-  const [standingQuestions, setStandingQuestions] = useState<string[]>([]);
+  const [standingQuestions, setStandingQuestions] = useState<StandingQuestion[]>([]);
   const [standingQInput, setStandingQInput] = useState('');
   const [dataWindow, setDataWindow] = useState<DataWindowConfig>({ primary: 'current_week', comparison: 'previous_period' });
   const [outputFormats, setOutputFormats] = useState<string[]>(['slack']);
@@ -221,7 +222,7 @@ export default function AgentBuilder() {
     setDescription(prefill.goal || '');
     setIcon(AVATAR_GALLERY[0].src);
     setGoal(prefill.goal || '');
-    setStandingQuestions(prefill.standing_questions || []);
+    setStandingQuestions((prefill.standing_questions || []).map((text: string) => ({ id: crypto.randomUUID(), text })));
     setSkills(prefill.detected_skills || []);
     setOutputFormats(prefill.suggested_delivery?.format ? [prefill.suggested_delivery.format] : ['slack']);
     setSchedule(
@@ -242,7 +243,8 @@ export default function AgentBuilder() {
 
   useEffect(() => {
     if (activeTab !== 'skills') return;
-    const key = `${goal}||${standingQuestions.join('|')}`;
+    const sqTexts = standingQuestions.map(q => q.text);
+    const key = `${goal}||${sqTexts.join('|')}`;
     if (!goal && standingQuestions.length === 0) {
       setSuggestedSkills([]);
       return;
@@ -250,11 +252,11 @@ export default function AgentBuilder() {
     if (key === lastSuggestionKey.current) return;
     lastSuggestionKey.current = key;
 
-    const staticIds = staticSuggestSkills(standingQuestions.length > 0 ? standingQuestions : goal ? [goal] : []);
+    const staticIds = staticSuggestSkills(standingQuestions.length > 0 ? sqTexts : goal ? [goal] : []);
     setSuggestedSkills(staticIds.map(id => ({ skill_id: id, reason: '' })));
     setSuggestionsLoading(true);
 
-    api.post('/agents/suggest-skills', { goal, standing_questions: standingQuestions })
+    api.post('/agents/suggest-skills', { goal, standing_questions: sqTexts })
       .then((res: any) => {
         if (res.suggested?.length > 0) {
           setSuggestedSkills(res.suggested);
@@ -289,7 +291,7 @@ export default function AgentBuilder() {
     setAudience(a.audience?.role ? a.audience : { role: 'VP Sales', detail_preference: 'manager' });
     setFocusQuestions(a.focus_questions || []);
     setGoal((a as any).goal || '');
-    setStandingQuestions((a as any).standing_questions || []);
+    setStandingQuestions(((a as any).standing_questions || []).map((text: string) => ({ id: crypto.randomUUID(), text })));
     setDataWindow(a.data_window?.primary ? a.data_window : { primary: 'current_week', comparison: 'previous_period' });
     setOutputFormats(a.output_formats || ['slack']);
     setSkills(a.skill_ids || []);
@@ -345,7 +347,7 @@ export default function AgentBuilder() {
           output_formats: outputFormats,
           scope_filters: scopeFilters,
           goal: goal || undefined,
-          standing_questions: standingQuestions.length > 0 ? standingQuestions : undefined,
+          standing_questions: standingQuestions.length > 0 ? standingQuestions.map(q => q.text) : undefined,
           event_config: schedule.type === 'event_prep' ? {
             event_name: schedule.event_name,
             prep_days_before: schedule.prep_days_before,
@@ -380,7 +382,7 @@ export default function AgentBuilder() {
           output_formats: outputFormats,
           scope_filters: scopeFilters,
           goal: goal || undefined,
-          standing_questions: standingQuestions.length > 0 ? standingQuestions : undefined,
+          standing_questions: standingQuestions.length > 0 ? standingQuestions.map(q => q.text) : undefined,
           created_from: seedConversationId ? 'conversation' : undefined,
           seed_conversation_id: seedConversationId || undefined,
           event_config: schedule.type === 'event_prep' ? {
@@ -910,7 +912,7 @@ export default function AgentBuilder() {
 
   const suggestedQuestions = Array.from(
     new Set(skills.flatMap(s => SKILL_QUESTION_SUGGESTIONS[s] || []))
-  ).filter(q => !standingQuestions.includes(q));
+  ).filter(q => !standingQuestions.some(sq => sq.text === q));
 
   function getSkillName(skillId: string): string {
     const found = allSkills.find(s => s.id === skillId);
@@ -919,8 +921,8 @@ export default function AgentBuilder() {
   }
 
   function addQuestionFromSuggestion(text: string) {
-    if (standingQuestions.length < 8 && !standingQuestions.includes(text)) {
-      setStandingQuestions(prev => [...prev, text]);
+    if (standingQuestions.length < 8 && !standingQuestions.some(sq => sq.text === text)) {
+      setStandingQuestions(prev => [...prev, { id: crypto.randomUUID(), text }]);
       setFocusQuestions(prev => [...prev, text]);
     }
   }
@@ -946,7 +948,7 @@ export default function AgentBuilder() {
     try {
       const data = await api.post(`/agents/${editingAgentId}/generate-sections`, {
         goal,
-        questions: standingQuestions,
+        questions: standingQuestions.map(q => q.text),
       });
       setSuggestedSections(data.sections || []);
       setShowSectionPreview(true);
@@ -1117,7 +1119,7 @@ export default function AgentBuilder() {
                 Standing Questions ({standingQuestions.length})
               </div>
               <ul style={{ margin: 0, paddingLeft: 18, font: `400 12px ${fonts.sans}`, color: colors.textSecondary, lineHeight: 1.7 }}>
-                {standingQuestions.map((q, i) => <li key={i}>{q}</li>)}
+                {standingQuestions.map((q) => <li key={q.id}>{q.text}</li>)}
               </ul>
             </div>
           )}
@@ -1296,7 +1298,7 @@ export default function AgentBuilder() {
               </div>
 
               {aiSuggestedQuestions.map((q, i) => {
-                const alreadyAdded = standingQuestions.includes(q.text);
+                const alreadyAdded = standingQuestions.some(sq => sq.text === q.text);
                 return (
                   <div key={i} style={{
                     display: 'flex',
@@ -1341,11 +1343,11 @@ export default function AgentBuilder() {
                 );
               })}
 
-              {aiSuggestedQuestions.some(q => !standingQuestions.includes(q.text)) && (
+              {aiSuggestedQuestions.some(q => !standingQuestions.some(sq => sq.text === q.text)) && (
                 <button
                   onClick={() => {
                     aiSuggestedQuestions
-                      .filter(q => !standingQuestions.includes(q.text))
+                      .filter(q => !standingQuestions.some(sq => sq.text === q.text))
                       .forEach(q => addQuestionFromSuggestion(q.text));
                   }}
                   style={{
@@ -1377,7 +1379,7 @@ export default function AgentBuilder() {
 
           {standingQuestions.map((q, i) => (
             <div
-              key={q + i}
+              key={q.id}
               draggable
               onDragStart={() => { dragIndexRef.current = i; }}
               onDragOver={e => { e.preventDefault(); }}
@@ -1385,7 +1387,7 @@ export default function AgentBuilder() {
                 e.preventDefault();
                 const from = dragIndexRef.current;
                 if (from === null || from === i) return;
-                const reorder = (arr: string[]) => {
+                const reorder = <T,>(arr: T[]): T[] => {
                   const next = [...arr];
                   const [moved] = next.splice(from, 1);
                   next.splice(i, 0, moved);
@@ -1400,7 +1402,7 @@ export default function AgentBuilder() {
             >
               <GripVertical size={14} style={{ color: colors.textMuted, flexShrink: 0 }} />
               <span style={{ flex: 1, font: `400 13px ${fonts.sans}`, color: colors.text, padding: '6px 0' }}>
-                {i + 1}. {q}
+                {i + 1}. {q.text}
               </span>
               <button
                 onClick={() => {
@@ -1433,7 +1435,7 @@ export default function AgentBuilder() {
                 onKeyDown={e => {
                   if (e.key === 'Enter' && standingQInput.trim() && standingQuestions.length < 8) {
                     const q = standingQInput.trim();
-                    setStandingQuestions(prev => [...prev, q]);
+                    setStandingQuestions(prev => [...prev, { id: crypto.randomUUID(), text: q }]);
                     setFocusQuestions(prev => [...prev, q]);
                     setStandingQInput('');
                   }
@@ -1445,7 +1447,7 @@ export default function AgentBuilder() {
                 onClick={() => {
                   if (standingQInput.trim() && standingQuestions.length < 8) {
                     const q = standingQInput.trim();
-                    setStandingQuestions(prev => [...prev, q]);
+                    setStandingQuestions(prev => [...prev, { id: crypto.randomUUID(), text: q }]);
                     setFocusQuestions(prev => [...prev, q]);
                     setStandingQInput('');
                   }
@@ -1473,17 +1475,17 @@ export default function AgentBuilder() {
                   <button
                     key={q}
                     onClick={() => {
-                      if (!standingQuestions.includes(q) && standingQuestions.length < 8) {
-                        setStandingQuestions(prev => [...prev, q]);
+                      if (!standingQuestions.some(sq => sq.text === q) && standingQuestions.length < 8) {
+                        setStandingQuestions(prev => [...prev, { id: crypto.randomUUID(), text: q }]);
                         setFocusQuestions(prev => [...prev, q]);
                       }
                     }}
-                    disabled={standingQuestions.includes(q)}
+                    disabled={standingQuestions.some(sq => sq.text === q)}
                     style={{
                       background: colors.accentSoft, border: `1px solid ${colors.border}`,
-                      borderRadius: 20, padding: '4px 12px', cursor: standingQuestions.includes(q) ? 'not-allowed' : 'pointer',
+                      borderRadius: 20, padding: '4px 12px', cursor: standingQuestions.some(sq => sq.text === q) ? 'not-allowed' : 'pointer',
                       font: `400 12px ${fonts.sans}`, color: colors.accent,
-                      opacity: standingQuestions.includes(q) ? 0.5 : 1,
+                      opacity: standingQuestions.some(sq => sq.text === q) ? 0.5 : 1,
                     }}
                   >
                     + {q}

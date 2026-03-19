@@ -1,0 +1,164 @@
+Replit diagnostic: Check what's stored in
+skill_runs for chart builder data sourcing
+
+Run these queries against the Neon DB and
+report the FULL output verbatim. Do not
+truncate. Do not summarize. Paste everything.
+
+---
+
+Query 1 — What skill runs exist:
+SELECT
+  skill_id,
+  status,
+  created_at,
+  pg_size_pretty(pg_column_size(result_data))
+    as result_data_size,
+  pg_size_pretty(pg_column_size(output))
+    as output_size
+FROM skill_runs
+WHERE workspace_id = '4160191d-73bc-414b-97dd-5a1853190378'
+  AND status = 'completed'
+ORDER BY created_at DESC
+LIMIT 10;
+
+---
+
+Query 2 — Top-level keys in result_data
+for each skill:
+SELECT
+  skill_id,
+  jsonb_object_keys(result_data) as result_keys
+FROM skill_runs
+WHERE workspace_id = '4160191d-73bc-414b-97dd-5a1853190378'
+  AND status = 'completed'
+ORDER BY created_at DESC;
+
+---
+
+Query 3 — Top-level keys in output
+for each skill:
+SELECT
+  skill_id,
+  jsonb_object_keys(output) as output_keys
+FROM skill_runs
+WHERE workspace_id = '4160191d-73bc-414b-97dd-5a1853190378'
+  AND status = 'completed'
+ORDER BY created_at DESC;
+
+---
+
+Query 4 — Full result_data for deal-risk-review:
+SELECT
+  skill_id,
+  created_at,
+  result_data
+FROM skill_runs
+WHERE workspace_id = '4160191d-73bc-414b-97dd-5a1853190378'
+  AND skill_id = 'deal-risk-review'
+  AND status = 'completed'
+ORDER BY created_at DESC
+LIMIT 1;
+
+---
+
+Query 5 — Full result_data for pipeline-hygiene:
+SELECT
+  skill_id,
+  created_at,
+  result_data
+FROM skill_runs
+WHERE workspace_id = '4160191d-73bc-414b-97dd-5a1853190378'
+  AND skill_id = 'pipeline-hygiene'
+  AND status = 'completed'
+ORDER BY created_at DESC
+LIMIT 1;
+
+---
+
+Query 6 — Full result_data for pipeline-coverage:
+SELECT
+  skill_id,
+  created_at,
+  result_data
+FROM skill_runs
+WHERE workspace_id = '4160191d-73bc-414b-97dd-5a1853190378'
+  AND skill_id = 'pipeline-coverage'
+  AND status = 'completed'
+ORDER BY created_at DESC
+LIMIT 1;
+
+---
+
+Query 7 — Full result_data for forecast-rollup:
+SELECT
+  skill_id,
+  created_at,
+  result_data
+FROM skill_runs
+WHERE workspace_id = '4160191d-73bc-414b-97dd-5a1853190378'
+  AND skill_id = 'forecast-rollup'
+  AND status = 'completed'
+ORDER BY created_at DESC
+LIMIT 1;
+
+---
+
+Query 8 — Check if tool_calls or query params
+are stored anywhere:
+SELECT
+  skill_id,
+  result_data->'tool_calls' as tool_calls,
+  result_data->'queries' as queries,
+  result_data->'compute_steps' as compute_steps,
+  result_data->'sql' as sql,
+  output->'tool_calls' as output_tool_calls,
+  output->'queries' as output_queries
+FROM skill_runs
+WHERE workspace_id = '4160191d-73bc-414b-97dd-5a1853190378'
+  AND status = 'completed'
+ORDER BY created_at DESC
+LIMIT 5;
+
+---
+
+Query 9 — Sample the first deal object from
+deal-risk-review result_data to see field names:
+SELECT
+  skill_id,
+  result_data->'deals'->0 as first_deal,
+  result_data->'at_risk_deals'->0
+    as first_at_risk_deal,
+  result_data->'evaluated_records'->0
+    as first_evaluated_record
+FROM skill_runs
+WHERE workspace_id = '4160191d-73bc-414b-97dd-5a1853190378'
+  AND skill_id = 'deal-risk-review'
+  AND status = 'completed'
+ORDER BY created_at DESC
+LIMIT 1;
+
+---
+
+Query 10 — Sample pipeline-coverage for
+rep-level data:
+SELECT
+  skill_id,
+  result_data->'by_rep' as by_rep,
+  result_data->'reps' as reps,
+  result_data->'rep_breakdown' as rep_breakdown,
+  result_data->'owners' as owners,
+  result_data->'coverage_by_rep' as coverage_by_rep
+FROM skill_runs
+WHERE workspace_id = '4160191d-73bc-414b-97dd-5a1853190378'
+  AND skill_id = 'pipeline-coverage'
+  AND status = 'completed'
+ORDER BY created_at DESC
+LIMIT 1;
+
+---
+
+Report ALL output verbatim. Every query.
+Every row. Every field name and value.
+This determines the chart builder
+data source architecture.
