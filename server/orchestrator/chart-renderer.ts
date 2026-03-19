@@ -30,34 +30,59 @@ const PALETTE = [
 // Semantic color map: label keyword → hex color
 // Checked against lower-cased, trimmed label strings
 const SEMANTIC_COLORS: Record<string, string> = {
-  'created':        '#0D9488',  // teal — new/positive
-  'advanced':       '#0D9488',  // teal — positive movement
-  'won':            '#16A34A',  // green — closed won
-  'closed won':     '#16A34A',
-  'closed-won':     '#16A34A',
-  'regressed':      '#F59E0B',  // amber — caution
-  'lost':           '#EF4444',  // red — negative
-  'closed lost':    '#EF4444',
-  'closed-lost':    '#EF4444',
-  'target':         '#CBD5E1',  // muted — benchmark
-  'coverage':       '#0D9488',  // teal — actual
-  'gap':            '#F59E0B',  // amber — shortfall
-  'bear':           '#94A3B8',  // muted
-  'base':           '#CBD5E1',  // light gray
-  'bull':           '#F59E0B',  // amber — upside
-  'open pipeline':  '#CBD5E1',
-  'best case':      '#F59E0B',
-  'commit':         '#0D9488',
-  'committed':      '#0D9488',
-  'pipeline':       '#CBD5E1',
+  // Movement / stage transitions
+  'created':              '#0D9488',  // teal — new/positive
+  'advanced':             '#0D9488',  // teal — positive movement
+  'regressed':            '#F59E0B',  // amber — caution
+
+  // Win/loss
+  'won':                  '#16A34A',  // green — closed won
+  'closed won':           '#16A34A',
+  'closed-won':           '#16A34A',
+  'lost':                 '#EF4444',  // red — negative
+  'closed lost':          '#EF4444',
+  'closed-lost':          '#EF4444',
+
+  // Comparison states
+  'target':               '#CBD5E1',  // muted — benchmark
+  'coverage target':      '#CBD5E1',
+  'coverage':             '#0D9488',  // teal — actual
+  'gap':                  '#F59E0B',  // amber — shortfall
+  'actual':               '#0D9488',  // teal — what we have
+  'benchmark':            '#CBD5E1',
+
+  // Directional
+  'positive':             '#0D9488',
+  'negative':             '#EF4444',
+  'neutral':              '#94A3B8',
+
+  // Forecast scenarios
+  'bear':                 '#94A3B8',  // muted
+  'base':                 '#CBD5E1',  // light gray
+  'bull':                 '#F59E0B',  // amber — upside
+
+  // Pipeline states
+  'open pipeline':        '#CBD5E1',
+  'remaining pipeline':   '#CBD5E1',
+  'best case':            '#F59E0B',
+  'commit':               '#0D9488',
+  'committed':            '#0D9488',
+  'pipeline':             '#CBD5E1',
 };
 
-// Chart Intelligence semantic colors: explicit color hints
+// Chart Intelligence semantic colors: explicit color_hint values → hex
+// Extended to cover comparative color scheme (actual/target/positive)
 const COLOR_HINT_MAP: Record<string, string> = {
+  // Risk semantics
   'dead':      '#EF4444',  // red — lost, stale >30d, zero activity
   'at_risk':   '#F59E0B',  // amber — high risk, approaching deadline
   'healthy':   '#0D9488',  // teal — won, on track, strong signals
   'neutral':   '#CBD5E1',  // light gray — time periods, stages
+
+  // Comparison / coverage semantics (used by coverage_gap, pipeline_composition)
+  'actual':    '#0D9488',  // teal — what we currently have
+  'target':    '#CBD5E1',  // muted gray — goal / benchmark
+  'positive':  '#0D9488',  // teal — alias for healthy
 };
 
 function getSemanticColors(labels: string[], defaultPalette: string[]): string[] {
@@ -378,9 +403,16 @@ export async function renderChartFromSpec(
   const labels = spec.data_points.map(dp => dp.label);
   const rawValues = spec.data_points.map(dp => dp.value);
 
-  const colors = spec.color_scheme === 'semantic'
-    ? getSemanticColorsFromHints(spec.data_points, PALETTE)
-    : getSemanticColors(labels, PALETTE);
+  // Color resolution by scheme:
+  // 'semantic'|'comparative' → explicit color_hint values from Chart Intelligence
+  // 'uniform'                → all bars teal (single metric, no comparison needed)
+  // 'categorical'|'gradient' → label-keyword based semantic lookup
+  const colors =
+    spec.color_scheme === 'semantic' || spec.color_scheme === 'comparative'
+      ? getSemanticColorsFromHints(spec.data_points, PALETTE)
+      : spec.color_scheme === 'uniform'
+        ? spec.data_points.map(() => COLORS.primary)
+        : getSemanticColors(labels, PALETTE);
 
   const { normalized, suffix, isCount } = normalizeValues(rawValues);
 

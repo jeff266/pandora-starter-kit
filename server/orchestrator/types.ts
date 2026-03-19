@@ -58,12 +58,70 @@ export type ReasoningLayer =
 export type ChartColorScheme =
   | 'semantic'      // Red for dead/lost, amber for at-risk, teal for healthy
   | 'gradient'      // Single-color gradient
-  | 'categorical';  // Standard palette for unrelated categories
+  | 'categorical'   // Standard palette for unrelated categories
+  | 'comparative'   // actual=teal, target=gray — two-bar actual vs target
+  | 'uniform';      // Single teal for all bars (metric_comparison)
 
 export interface ChartDataPoint {
   label: string;
   value: number;
-  color_hint?: 'dead' | 'at_risk' | 'healthy' | 'neutral';
+  // color_hint drives explicit bar/segment coloring by Chart Intelligence
+  // 'dead'|'at_risk'|'healthy'|'neutral' — risk semantics
+  // 'actual'|'target' — coverage/comparison semantics
+  // 'positive' — alias for healthy
+  color_hint?: 'dead' | 'at_risk' | 'healthy' | 'neutral' | 'actual' | 'target' | 'positive';
+}
+
+// ---------------------------------------------------------------------------
+// Chart Intelligence — two-step reasoning types (Task 1)
+// ---------------------------------------------------------------------------
+
+export type ChartQuestionType =
+  | 'deal_triage'
+  // Which specific deals to work vs abandon?
+  // → use at_risk_deals[], horizontal bar, sorted by urgency
+
+  | 'deal_timing'
+  // When are deals closing relative to activity?
+  // → use at_risk_deals[], horizontal bar, showing days_stale or days_in_stage
+
+  | 'rep_comparison'
+  // How do reps compare on a metric?
+  // → use rep_performance data, bar chart, teal=primary rep, amber=secondary
+
+  | 'pipeline_composition'
+  // What portion of pipeline is in each state?
+  // → use key_metrics, donut chart
+  // ONLY when composition IS the argument (not as default fallback)
+
+  | 'coverage_gap'
+  // How far are we from a target?
+  // → comparative bar: actual vs target, two bars
+
+  | 'trend'
+  // How has a metric changed over time?
+  // → line chart, requires ≥3 time points (BLOCKED if data has < 3 points)
+
+  | 'metric_comparison'
+  // Comparing 3+ discrete values of same type?
+  // → vertical bar, uniform teal color
+
+  | 'not_chartable';
+  // Qualitative argument, no numeric data, or data_gap = true → no chart
+
+export interface ChartQuestion {
+  vp_decision: string;
+  // What must the VP decide after reading this?
+
+  chart_question: string;
+  // What specific question does the chart answer?
+
+  question_type: ChartQuestionType;
+
+  preferred_data: 'at_risk_deals' | 'stale_deals' | 'rep_performance' | 'key_metrics' | 'none';
+
+  reasoning: string;
+  // Why this chart type for this argument (for logging and debugging)
 }
 
 export interface ChartNodeSpec {

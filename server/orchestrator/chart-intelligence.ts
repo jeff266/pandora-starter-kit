@@ -1,16 +1,22 @@
 /**
- * Chart Intelligence - DeepSeek-powered chart specification generator
+ * Chart Intelligence — Two-Step Haiku + Rules Architecture
  *
- * Decides which reasoning nodes should have charts, what type, what title
- * (as conclusion), and which data points prove the argument.
+ * Step 1: Claude Haiku reasons about what decision-forcing question
+ *         a chart must answer for the VP to act today.
+ *         Output: ChartQuestion (structured JSON)
+ *
+ * Step 2: Rules resolve ChartQuestion → ChartNodeSpec deterministically.
+ *         No model variance. Fully testable.
+ *
+ * DeepSeek is removed entirely from chart intelligence.
  *
  * Rules:
- * - Only chart 'cause' and 'action' layer nodes (not second_order or third_order)
+ * - Only chart 'cause' and 'action' layer nodes
  * - Max 2 charts per section
- * - Titles are conclusion-first ("Nate carries 89% of pipeline" not "Pipeline by rep")
- * - Semantic colors: dead=red, at-risk=amber, healthy=teal
- * - Orientation: labels >12 chars → horizontal_bar
- * - Non-fatal: if DeepSeek fails, continue without chart
+ * - Titles are conclusion-first ("Nate carries 89% of pipeline")
+ * - Semantic colors: dead=red, at_risk=amber, healthy/actual=teal, target=gray
+ * - Orientation: labels >12 chars → horizontalBar (enforced by rule, not model)
+ * - Non-fatal: if Haiku fails, node gets no chart, report continues
  */
 
 import { callLLM } from '../utils/llm-router.js';
@@ -21,25 +27,471 @@ import {
   SkillSummary,
   AtRiskDeal,
   StaleDeal,
+  ChartQuestion,
 } from './types.js';
 
-interface ChartDecision {
-  node_index: number;
-  should_chart: boolean;
-  rationale: string;
-  chart_type?: 'bar' | 'horizontalBar' | 'line' | 'doughnut';
-  conclusion_title?: string;
-  why_insight?: string;  // 1-2 sentence mechanism — WHY this data pattern exists; must NOT repeat section prose
-  data_points?: Array<{
-    label: string;
-    value: number;
-    color_hint?: 'dead' | 'at_risk' | 'healthy' | 'neutral';
-  }>;
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+interface AvailableDataSummary {
+  atRiskDeals: AtRiskDeal[];
+  staleDeals: StaleDeal[];
+  repData: { name: string; pipeline: number }[];
+  keyMetrics: { key: string; value: string | number }[];
+  hasNumericData: boolean;
 }
 
 /**
- * Generates chart specifications for reasoning nodes using DeepSeek classification.
- * Non-fatal - returns empty array if generation fails.
+ * Aggregate all skill evidence into a flat, queryable summary.
+ * Called once per node (data is small; aggregation cost is negligible).
+ */
+function buildAvailableDataBlock(
+  skillSummaries: SkillSummary[]
+): AvailableDataSummary {
+  const atRiskDeals: AtRiskDeal[] = [];
+  const staleDeals: StaleDeal[] = [];
+  const keyMetrics: { key: string; value: string | number }[] = [];
+  const repData: { name: string; pipeline: number }[] = [];
+
+  for (const skill of skillSummaries) {
+    // At-risk deals
+    if (skill.at_risk_deals?.length) {
+      atRiskDeals.push(...skill.at_risk_deals);
+    }
+
+    // Stale deals
+    if (skill.stale_deals?.length) {
+      staleDeals.push(...skill.stale_deals);
+    }
+
+    // Key metrics
+    for (const [key, value] of Object.entries(skill.key_metrics)) {
+      keyMetrics.push({ key: `${skill.skill_id}.${key}`, value });
+    }
+
+    // Rep/owner pipeline from key_metrics
+    for (const [key, val] of Object.entries(skill.key_metrics)) {
+      if ((key.includes('rep') || key.includes('owner'))
+          && key.includes('pipeline')
+          && !key.includes('total')) {
+        const name = key
+          .replace(/_pipeline|_open/g, '')
+          .replace(/_/g, ' ')
+          .trim();
+        const value = Number(val);
+        if (value > 0 && name.length > 0) {
+          repData.push({ name, pipeline: value });
+        }
+      }
+    }
+  }
+
+  // Deduplicate rep entries by name, keeping highest pipeline value
+  const repMap = new Map<string, number>();
+  for (const r of repData) {
+    repMap.set(r.name, Math.max(repMap.get(r.name) ?? 0, r.pipeline));
+  }
+  const repDataDeduped = Array.from(repMap.entries())
+    .map(([name, pipeline]) => ({ name, pipeline }))
+    .sort((a, b) => b.pipeline - a.pipeline)
+    .slice(0, 4);
+
+  const hasNumericData =
+    atRiskDeals.length > 0 ||
+    staleDeals.length > 0 ||
+    repDataDeduped.length > 0 ||
+    keyMetrics.some(m => typeof m.value === 'number' && (m.value as number) > 0);
+
+  return {
+    atRiskDeals,
+    staleDeals,
+    repData: repDataDeduped,
+    keyMetrics,
+    hasNumericData,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Step 1: Haiku reasoning
+// ---------------------------------------------------------------------------
+
+/**
+ * Step 1: Haiku reasons about what question the chart must answer
+ * for the VP to act. This is the ONLY LLM call in chart intelligence.
+ *
+ * Routes via 'reason' capability (Claude Sonnet by default;
+ * configure workspace routing to 'anthropic/claude-haiku-4-5-20251001'
+ * for cost-optimal chart intelligence — ~$0.0001 per node vs ~$0.0008).
+ */
+async function reasonAboutChart(
+  node: ReasoningNode,
+  availableData: AvailableDataSummary,
+  workspaceId: string
+): Promise<ChartQuestion> {
+  const systemPrompt = `You are advising a VP of Revenue Operations who must make a decision today.
+
+Your job: given a reasoning node from a sales intelligence report, decide what question a chart should answer — if a chart is warranted at all.
+
+A chart is warranted when it makes a specific decision OBVIOUS in 3 seconds. It is NOT warranted when it merely describes a state the VP already knows from reading the text.
+
+The worst charts:
+- Show portfolio composition as a default (pie charts showing % closed vs % open)
+- Describe history when the VP needs to act now
+- Answer a question nobody asked
+
+The best charts for late-quarter deal sections:
+- Show which specific deals can close vs cannot
+- Show how long deals have been silent
+- Show which rep owns the risk
+
+Output ONLY valid JSON. No explanation.`;
+
+  const userMessage = `REASONING NODE:
+Layer: ${node.layer}
+Question: "${node.question}"
+Answer: "${node.answer.slice(0, 400)}"
+
+AVAILABLE DATA:
+${availableData.atRiskDeals.length > 0
+  ? `At-risk deals (${availableData.atRiskDeals.length}):
+${availableData.atRiskDeals.map(d =>
+    `  ${d.name} $${Math.round(d.amount / 1000)}K risk:${d.risk_score} ${d.days_in_stage}d in stage`
+  ).join('\n')}`
+  : 'No at-risk deals'}
+
+${availableData.staleDeals.length > 0
+  ? `Stale deals (${availableData.staleDeals.length}):
+${availableData.staleDeals.map(d =>
+    `  ${d.name} $${Math.round(d.amount / 1000)}K ${d.days_stale}d dark`
+  ).join('\n')}`
+  : 'No stale deal data'}
+
+${availableData.repData.length > 0
+  ? `Rep data:\n${availableData.repData.map(r =>
+    `  ${r.name} $${Math.round(r.pipeline / 1000)}K`
+  ).join('\n')}`
+  : ''}
+
+${availableData.keyMetrics.length > 0
+  ? `Key metrics:\n${availableData.keyMetrics
+    .slice(0, 6).map(m => `  ${m.key}: ${m.value}`)
+    .join('\n')}`
+  : ''}
+
+Respond ONLY with JSON:
+{
+  "vp_decision": "one sentence: what must VP decide?",
+  "chart_question": "one sentence: what does chart answer?",
+  "question_type": "deal_triage|deal_timing|rep_comparison|pipeline_composition|coverage_gap|trend|metric_comparison|not_chartable",
+  "preferred_data": "at_risk_deals|stale_deals|rep_performance|key_metrics|none",
+  "reasoning": "one sentence: why this type"
+}`;
+
+  // 'reason' routes to Claude Sonnet by default.
+  // Configure workspace routing to 'anthropic/claude-haiku-4-5-20251001'
+  // for cheapest chart classification (~$0.0001/node).
+  const response = await callLLM(workspaceId, 'reason', {
+    systemPrompt,
+    messages: [{ role: 'user', content: userMessage }],
+    maxTokens: 300,
+    temperature: 0.1,
+    _tracking: {
+      workspaceId,
+      skillId: 'chart-intelligence',
+      phase: 'reason',
+      stepName: `chart-question-${node.layer}`,
+    },
+  });
+
+  const tokensUsed =
+    (response.usage?.input || 0) + (response.usage?.output || 0);
+
+  const raw = response.content
+    .replace(/```json\s*/g, '')
+    .replace(/```\s*/g, '')
+    .trim();
+
+  const parsed = JSON.parse(raw);
+
+  console.log(
+    `[ChartIntelligence] node ${node.layer}: ` +
+    `${tokensUsed} tokens → ${parsed.question_type} — ${parsed.reasoning}`
+  );
+
+  return parsed as ChartQuestion;
+}
+
+// ---------------------------------------------------------------------------
+// Step 2: Deterministic resolver
+// ---------------------------------------------------------------------------
+
+/**
+ * Extract rep pipeline data from coverage skill key_metrics.
+ */
+function buildRepData(
+  coverageSkill: SkillSummary | undefined
+): { name: string; pipeline: number }[] {
+  if (!coverageSkill?.key_metrics) return [];
+
+  const reps: { name: string; pipeline: number }[] = [];
+  for (const [key, val] of Object.entries(coverageSkill.key_metrics)) {
+    if ((key.includes('rep') || key.includes('owner'))
+        && key.includes('pipeline')
+        && !key.includes('total')) {
+      const name = key
+        .replace(/_pipeline|_open/g, '')
+        .replace(/_/g, ' ')
+        .trim();
+      const value = Number(val);
+      if (value > 0 && name.length > 0) {
+        reps.push({ name, pipeline: value });
+      }
+    }
+  }
+
+  return reps
+    .sort((a, b) => b.pipeline - a.pipeline)
+    .slice(0, 4);
+}
+
+/**
+ * Step 2: Rules resolve ChartQuestion → ChartNodeSpec.
+ *
+ * question_type drives data source selection.
+ * Data shape drives orientation and colors.
+ * Guards block nonsensical chart types (line without time series, etc.).
+ *
+ * Fully deterministic — no model calls.
+ */
+function resolveChartFromQuestion(
+  question: ChartQuestion,
+  skillSummaries: SkillSummary[]
+): ChartNodeSpec | null {
+  const riskSkill = skillSummaries.find(
+    s => s.skill_id === 'deal-risk-review'
+  );
+  const hygieneSkill = skillSummaries.find(
+    s => s.skill_id === 'pipeline-hygiene'
+  );
+  const coverageSkill = skillSummaries.find(
+    s => s.skill_id === 'pipeline-coverage'
+  );
+
+  switch (question.question_type) {
+    case 'deal_triage':
+    case 'deal_timing': {
+      // Horizontal bar showing named deals sorted by risk score.
+      // Color by risk: dead=red, at_risk=amber, healthy=teal.
+      // Always horizontal — deal names are long labels.
+      const deals = riskSkill?.at_risk_deals || [];
+      if (deals.length < 2) return null;
+
+      const dataPoints: ChartDataPoint[] = deals
+        .sort((a, b) => b.risk_score - a.risk_score)
+        .slice(0, 6)
+        .map(d => ({
+          label: d.name,
+          value: Math.round(d.amount / 1000),
+          color_hint: (
+            d.risk_score > 80 ? 'dead' :
+            d.risk_score > 60 ? 'at_risk' :
+            'healthy'
+          ) as ChartDataPoint['color_hint'],
+        }));
+
+      return {
+        chart_type: 'horizontalBar',
+        title: question.chart_question,
+        data_points: dataPoints,
+        color_scheme: 'semantic',
+        insight: question.reasoning,
+      };
+    }
+
+    case 'rep_comparison': {
+      // Bar chart: each rep's pipeline.
+      // First rep is teal (actual), rest are gray (target/neutral).
+      const repData = buildRepData(coverageSkill);
+      if (repData.length < 2) return null;
+
+      const dataPoints: ChartDataPoint[] = repData.map((r, i) => ({
+        label: r.name,
+        value: Math.round(r.pipeline / 1000),
+        color_hint: (i === 0 ? 'actual' : 'neutral') as ChartDataPoint['color_hint'],
+      }));
+
+      // Short rep names (≤12 chars) → bar; long names → horizontalBar
+      const hasLongLabel = dataPoints.some(dp => dp.label.length > 12);
+
+      return {
+        chart_type: hasLongLabel ? 'horizontalBar' : 'bar',
+        title: question.chart_question,
+        data_points: dataPoints,
+        color_scheme: 'comparative',
+        insight: question.reasoning,
+      };
+    }
+
+    case 'coverage_gap': {
+      // Two-bar: actual pipeline vs coverage target.
+      const m = coverageSkill?.key_metrics || {};
+      const actual = Number(
+        m['pipeline-coverage.total_pipeline'] || m['total_pipeline'] || 0
+      );
+      const target = Number(
+        m['pipeline-coverage.quota'] || m['quota'] || 0
+      );
+      if (actual === 0 && target === 0) return null;
+
+      return {
+        chart_type: 'bar',
+        title: question.chart_question,
+        data_points: [
+          {
+            label: 'Open Pipeline',
+            value: Math.round(actual / 1000),
+            color_hint: 'actual',
+          },
+          {
+            label: 'Coverage Target',
+            value: Math.round(target / 1000),
+            color_hint: 'target',
+          },
+        ],
+        color_scheme: 'comparative',
+        insight: question.reasoning,
+      };
+    }
+
+    case 'pipeline_composition': {
+      // Donut — ONLY when composition IS the argument, not as a default fallback.
+      // Haiku must explicitly classify this as pipeline_composition.
+      const m = coverageSkill?.key_metrics || {};
+      const closed = Number(
+        m['forecast-rollup.closed_won'] || m['closed_won'] || 0
+      );
+      const open = Number(
+        m['pipeline-coverage.total_pipeline'] || m['total_pipeline'] || 0
+      );
+      if (closed === 0 && open === 0) return null;
+
+      return {
+        chart_type: 'doughnut',
+        title: question.chart_question,
+        data_points: [
+          {
+            label: 'Closed Won',
+            value: Math.round(closed / 1000),
+            color_hint: 'positive',
+          },
+          {
+            label: 'Open Pipeline',
+            value: Math.round(open / 1000),
+            color_hint: 'target',
+          },
+        ],
+        color_scheme: 'semantic',
+        insight: question.reasoning,
+      };
+    }
+
+    case 'metric_comparison': {
+      // 3+ discrete values compared on same metric.
+      // Uniform teal bars — no semantic distinction between items.
+      // Pull top key_metrics that look like dollar/count comparisons.
+      const m = coverageSkill?.key_metrics || riskSkill?.key_metrics || {};
+      const candidates = Object.entries(m)
+        .filter(([, v]) => typeof v === 'number' && (v as number) > 0)
+        .slice(0, 5);
+
+      if (candidates.length < 2) return null;
+
+      return {
+        chart_type: 'bar',
+        title: question.chart_question,
+        data_points: candidates.map(([key, value]) => ({
+          label: key.replace(/^[^.]+\./, '').replace(/_/g, ' '),
+          value: Math.round(Number(value) / 1000),
+        })),
+        color_scheme: 'uniform',
+        insight: question.reasoning,
+      };
+    }
+
+    case 'trend': {
+      // Line chart — BLOCKED if < 3 data points.
+      // Most single-report nodes won't have time series.
+      // Reserved for prior_context week-over-week data (future feature).
+      console.log(
+        '[ChartIntelligence] Trend chart requested but no time series data available — skipping'
+      );
+      return null;
+    }
+
+    case 'not_chartable':
+    default:
+      return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Per-node orchestrator
+// ---------------------------------------------------------------------------
+
+/**
+ * Classify a single reasoning node via two-step Haiku + rules.
+ * Non-fatal: returns null if Haiku fails or data is insufficient.
+ */
+async function classifyChartForNode(
+  node: ReasoningNode,
+  skillSummaries: SkillSummary[],
+  workspaceId: string
+): Promise<ChartNodeSpec | null> {
+  const availableData = buildAvailableDataBlock(skillSummaries);
+
+  // Short-circuit: no numeric data means no chart is possible
+  if (!availableData.hasNumericData) return null;
+
+  // Step 1: Haiku reasons about VP decision
+  const question = await reasonAboutChart(node, availableData, workspaceId);
+
+  if (question.question_type === 'not_chartable') {
+    console.log(
+      `[ChartIntelligence] ${node.layer}: not chartable — ${question.reasoning}`
+    );
+    return null;
+  }
+
+  // Step 2: Rules resolve ChartQuestion → ChartNodeSpec
+  const spec = resolveChartFromQuestion(question, skillSummaries);
+
+  if (!spec || spec.data_points.length < 2) {
+    return null;
+  }
+
+  // Orientation guard: enforce horizontalBar for any long-label non-donut chart
+  if (
+    spec.chart_type !== 'doughnut' &&
+    spec.chart_type !== 'line' &&
+    spec.data_points.some(d => d.label.length > 12)
+  ) {
+    spec.chart_type = 'horizontalBar';
+  }
+
+  return spec;
+}
+
+// ---------------------------------------------------------------------------
+// Public API — called by the orchestrator
+// ---------------------------------------------------------------------------
+
+/**
+ * Generates chart specifications for reasoning nodes using two-step
+ * Haiku + rules architecture.
+ *
+ * Processes each eligible node independently (cause/action layers only).
+ * Max 2 charts per section. Non-fatal — returns empty map if generation fails.
  */
 export async function generateChartSpecs(
   sectionId: string,
@@ -47,7 +499,6 @@ export async function generateChartSpecs(
   skillSummaries: SkillSummary[],
   workspaceId: string
 ): Promise<Map<number, ChartNodeSpec>> {
-
   const results = new Map<number, ChartNodeSpec>();
 
   // Only chart 'cause' and 'action' layer nodes
@@ -59,243 +510,34 @@ export async function generateChartSpecs(
     return results;
   }
 
-  // Build evidence context for DeepSeek
-  const evidenceContext = buildEvidenceContext(skillSummaries);
-  const nodeDescriptions = chartableNodes.map(({ node, index }) => ({
-    index,
-    layer: node.layer,
-    question: node.question,
-    answer: node.answer,
-    evidence_skill: node.evidence_skill,
-  }));
-
-  const systemPrompt = `
-You are a data visualization expert for revenue operations reports.
-Your job is to decide which reasoning nodes should have charts,
-and generate complete chart specifications with conclusion-first titles.
-
-RULES:
-1. Only chart nodes where data exists to prove the claim
-2. Max 2 charts total - choose the most impactful
-3. Titles MUST state the conclusion, not describe the data:
-   - GOOD: "Nate carries 89% of pipeline"
-   - BAD: "Pipeline by rep"
-4. Chart types:
-   - horizontalBar: comparing named entities (reps, deals, accounts) by dollar amount — ALWAYS use this for rep pipeline comparisons
-   - bar: short abstract labels (stage names, months, quarters)
-   - line: trends over time
-   - doughnut: ONLY for whole-pipeline composition between two abstract buckets (e.g., "Won vs At-Risk pipeline") — NEVER use for rep comparisons even if there are only 2 reps
-5. Orientation:
-   - Use horizontalBar for any rep, deal, or account comparison regardless of label length
-   - Use horizontalBar if any label > 12 characters
-   - Use bar for short labels (stage names, months)
-6. Color hints:
-   - dead: deals lost, stale >30 days, zero activity
-   - at_risk: high risk scores, approaching deadline, stalled
-   - healthy: won deals, on track, strong signals
-   - neutral: time periods, stages, aggregate metrics
-7. why_insight: Write 1-2 sentences explaining the MECHANISM behind the data pattern — the structural reason WHY it exists. Do not restate what the chart shows. Write at the level of diagnosis, not description. Example: "Quarter-end psychology: reps have mentally closed Q1 and shifted focus to Q2 pipeline, leaving in-flight deals without coverage at the moment they need it most."
-
-OUTPUT: Valid JSON only. No preamble.
-
-{
-  "decisions": [
-    {
-      "node_index": number,
-      "should_chart": boolean,
-      "rationale": "string - why this node does/doesn't need a chart",
-      "chart_type": "bar|horizontalBar|line|doughnut or null",
-      "conclusion_title": "string - conclusion-first title or null",
-      "why_insight": "string - 1-2 sentence mechanism behind the pattern, NOT a restatement of the data",
-      "data_points": [
-        {
-          "label": "string",
-          "value": number,
-          "color_hint": "dead|at_risk|healthy|neutral or null"
-        }
-      ] or null
+  // Process nodes sequentially — Haiku is fast, and sequential order
+  // preserves the max-2-charts-per-section limit cleanly.
+  for (const { node, index } of chartableNodes) {
+    if (results.size >= 2) {
+      // Hit section cap — stop processing further nodes
+      break;
     }
-  ]
-}
-`.trim();
 
-  const userMessage = `
-SECTION: ${sectionId}
-
-REASONING NODES:
-${JSON.stringify(nodeDescriptions, null, 2)}
-
-AVAILABLE EVIDENCE:
-${evidenceContext}
-
-Generate chart specifications. Remember: max 2 charts,
-conclusion-first titles, only chart if data exists to prove the claim.
-`.trim();
-
-  try {
-    const response = await callLLM(workspaceId, 'classify', {
-      systemPrompt,
-      messages: [{ role: 'user', content: userMessage }],
-      maxTokens: 2000,
-      temperature: 0.1,
-      _tracking: {
-        workspaceId,
-        skillId: 'chart-intelligence',
-        phase: 'synthesize',
-        stepName: `chart-${sectionId}`,
-      },
-    });
-
-    const tokensUsed =
-      (response.usage?.input || 0) +
-      (response.usage?.output || 0);
-
-    console.log(
-      `[ChartIntelligence] ${sectionId}: ${tokensUsed} tokens`
-    );
-
-    const raw = response.content
-      .replace(/```json\s*/g, '')
-      .replace(/```\s*/g, '')
-      .trim();
-
-    const parsed = JSON.parse(raw);
-    const decisions: ChartDecision[] = parsed.decisions || [];
-
-    // Apply max 2 charts limit
-    const approvedCharts = decisions
-      .filter(d => d.should_chart && d.chart_type && d.data_points)
-      .slice(0, 2);
-
-    for (const decision of approvedCharts) {
-      const spec = buildChartNodeSpec(decision);
+    try {
+      const spec = await classifyChartForNode(node, skillSummaries, workspaceId);
       if (spec) {
-        results.set(decision.node_index, spec);
+        results.set(index, spec);
+        console.log(
+          `[ChartIntelligence] ${sectionId}[${index}]: ` +
+          `${spec.chart_type} chart — "${spec.title}"`
+        );
       }
+    } catch (err) {
+      // Non-fatal: log and continue to next node
+      console.error(
+        `[ChartIntelligence] Failed for ${sectionId}[${index}]:`, err
+      );
     }
-
-    console.log(
-      `[ChartIntelligence] ${sectionId}: Generated ${results.size} charts`
-    );
-
-  } catch (err) {
-    console.error(
-      `[ChartIntelligence] Failed for ${sectionId}:`, err
-    );
-    // Non-fatal - continue without charts
   }
+
+  console.log(
+    `[ChartIntelligence] ${sectionId}: Generated ${results.size} chart(s)`
+  );
 
   return results;
-}
-
-function buildChartNodeSpec(decision: ChartDecision): ChartNodeSpec | null {
-  if (!decision.chart_type || !decision.data_points || !decision.conclusion_title) {
-    return null;
-  }
-
-  // Determine color scheme based on color hints
-  const hasSemanticHints = decision.data_points.some(dp =>
-    dp.color_hint && ['dead', 'at_risk', 'healthy'].includes(dp.color_hint)
-  );
-  const color_scheme = hasSemanticHints ? 'semantic' : 'categorical';
-
-  // Validate and normalize data points
-  const data_points: ChartDataPoint[] = decision.data_points
-    .filter(dp => dp.label && typeof dp.value === 'number')
-    .map(dp => ({
-      label: dp.label,
-      value: dp.value,
-      color_hint: dp.color_hint || undefined,
-    }));
-
-  if (data_points.length === 0) {
-    return null;
-  }
-
-  // Apply orientation rules — unconditional for all non-doughnut, non-line charts.
-  // Label length is the canonical signal: any label > 12 chars → horizontalBar.
-  // Conversely, if ALL labels are ≤ 12 chars the chart should be vertical regardless
-  // of what DeepSeek suggested (prevents "ALWAYS horizontalBar for rep comparisons"
-  // from breaking short-label charts like Nate vs Sara).
-  let chart_type = decision.chart_type;
-  let orientation_rationale: string | undefined;
-
-  if (chart_type !== 'doughnut' && chart_type !== 'line') {
-    const hasLongLabel = data_points.some(dp => dp.label.length > 12);
-    if (hasLongLabel) {
-      chart_type = 'horizontalBar';
-      orientation_rationale = 'Horizontal orientation for long labels';
-    } else if (chart_type === 'horizontalBar') {
-      // Short labels don't need horizontal orientation — vertical is cleaner
-      chart_type = 'bar';
-      orientation_rationale = 'Vertical bar: all labels ≤ 12 chars';
-    }
-  }
-
-  // Named-entity comparison override:
-  // Doughnut loses absolute dollar values. When ALL data points have neutral
-  // color hints (rep names, account names, territory names — not risk buckets),
-  // force horizontalBar so dollar amounts are visible on the x-axis.
-  // Semantic doughnuts (at_risk vs healthy) are kept as doughnuts.
-  if (chart_type === 'doughnut') {
-    const allNeutral = data_points.every(
-      dp => !dp.color_hint || dp.color_hint === 'neutral'
-    );
-    if (allNeutral) {
-      chart_type = 'horizontalBar';
-      orientation_rationale = 'Horizontal bar for named-entity comparison — dollar amounts matter more than percentages';
-    }
-  }
-
-  return {
-    chart_type,
-    title: decision.conclusion_title,
-    data_points,
-    color_scheme,
-    orientation_rationale,
-    insight: decision.why_insight || undefined,
-  };
-}
-
-function buildEvidenceContext(skillSummaries: SkillSummary[]): string {
-  const parts: string[] = [];
-
-  for (const summary of skillSummaries) {
-    const lines: string[] = [`### ${summary.skill_id}`];
-
-    // Key metrics
-    if (Object.keys(summary.key_metrics).length > 0) {
-      lines.push(`Metrics: ${JSON.stringify(summary.key_metrics)}`);
-    }
-
-    // At-risk deals
-    if (summary.at_risk_deals && summary.at_risk_deals.length > 0) {
-      lines.push(`At-risk deals (${summary.at_risk_deals.length}):`);
-      for (const deal of summary.at_risk_deals.slice(0, 3)) {
-        lines.push(
-          `  ${deal.name}: $${Math.round(deal.amount / 1000)}K, ` +
-          `risk ${deal.risk_score}, owner ${deal.owner}`
-        );
-      }
-    }
-
-    // Stale deals
-    if (summary.stale_deals && summary.stale_deals.length > 0) {
-      lines.push(`Stale deals (${summary.stale_deals.length}):`);
-      for (const deal of summary.stale_deals.slice(0, 3)) {
-        lines.push(
-          `  ${deal.name}: $${Math.round(deal.amount / 1000)}K, ` +
-          `${deal.days_stale}d dark, owner ${deal.owner}`
-        );
-      }
-    }
-
-    parts.push(lines.join('\n'));
-  }
-
-  if (parts.length === 0) {
-    return 'No skill evidence available for charting.';
-  }
-
-  return parts.join('\n\n');
 }
