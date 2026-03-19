@@ -822,6 +822,22 @@ agentsWorkspaceRouter.delete('/:workspaceId/reports/:reportId/charts/:chartId', 
   }
 });
 
+// POST preview chart — returns base64 PNG without saving
+agentsWorkspaceRouter.post('/:workspaceId/charts/preview', requirePermission('agents.view'), async (req: Request, res: Response) => {
+  try {
+    const { spec } = req.body;
+    if (!spec) return res.status(400).json({ error: 'spec required' });
+
+    const { renderChartFromSpec } = await import('../orchestrator/chart-renderer.js');
+    const pngBuffer = await renderChartFromSpec(spec);
+    const png_base64 = pngBuffer.toString('base64');
+    res.json({ png_base64 });
+  } catch (err: any) {
+    console.error('[Charts] Preview failed:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET companion XLSX file with chart data
 agentsWorkspaceRouter.get('/:workspaceId/reports/:reportId/charts-data.xlsx', requirePermission('agents.view'), async (req: Request, res: Response) => {
   try {

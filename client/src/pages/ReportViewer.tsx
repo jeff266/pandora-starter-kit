@@ -10,7 +10,8 @@ import OverallBriefingFeedback from '../components/reports/OverallBriefingFeedba
 import SankeyChart from '../components/reports/SankeyChart';
 import ReportAnnotationEditor, { type Annotation } from '../components/reports/ReportAnnotationEditor';
 import AnnotatableSection, { type Annotation as DocAnnotation } from '../components/report/AnnotatableSection';
-import ChartSuggestionPanel from '../components/report/ChartSuggestionPanel';
+import { ContextMenu as DocContextMenu } from '../components/report/ContextMenu';
+import ChartBuilder from '../components/report/ChartBuilder';
 import PrepareForClientModal from '../components/report/PrepareForClientModal';
 import type { ExportConfig } from '../types/export';
 import ReportContextMenu, { type ReportContextTarget } from '../components/reports/ReportContextMenu';
@@ -129,6 +130,10 @@ export default function ReportViewer() {
   const [exportLoading, setExportLoading] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; target: ReportContextTarget } | null>(null);
   const [summaryExpanded, setSummaryExpanded] = useState(false);
+  const [docContextMenu, setDocContextMenu] = useState<{ x: number; y: number; sectionId: string; sectionTitle: string } | null>(null);
+  const [chartBuilderSection, setChartBuilderSection] = useState<{ sectionId: string } | null>(null);
+  const [editingChart, setEditingChart] = useState<any>(null);
+  const [sectionCharts, setSectionCharts] = useState<Record<string, any[]>>({});
   const { canAnnotateReports } = usePermissions();
   const { currentWorkspace } = useWorkspace();
 
@@ -151,6 +156,26 @@ export default function ReportViewer() {
       .then(r => r.json())
       .then(data => setDocAnnotations(Array.isArray(data) ? data : []))
       .catch(err => console.error('Failed to load annotations:', err));
+  }, [reportDocument?.id, currentWorkspace?.id]);
+
+  useEffect(() => {
+    const wid = currentWorkspace?.id;
+    if (!reportDocument?.id || !wid) return;
+    const token = localStorage.getItem('pandora_session');
+    fetch(`/api/workspaces/${wid}/reports/${reportDocument.id}/charts`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(r => r.json())
+      .then(data => {
+        const charts = data.charts || [];
+        const grouped: Record<string, any[]> = {};
+        for (const c of charts) {
+          if (!grouped[c.section_id]) grouped[c.section_id] = [];
+          grouped[c.section_id].push(c);
+        }
+        setSectionCharts(grouped);
+      })
+      .catch(err => console.error('Failed to load section charts:', err));
   }, [reportDocument?.id, currentWorkspace?.id]);
 
   async function loadDirectGeneration() {
@@ -433,6 +458,53 @@ export default function ReportViewer() {
           onAskPandora={handleAskPandora}
           onCopy={(val) => { navigator.clipboard.writeText(val).catch(() => {}); }}
           onClose={() => setContextMenu(null)}
+        />
+      )}
+
+      {/* Doc Section Context Menu */}
+      {docContextMenu && (
+        <DocContextMenu
+          x={docContextMenu.x}
+          y={docContextMenu.y}
+          sectionTitle={docContextMenu.sectionTitle}
+          onNote={() => {
+            setIsAnnotating(true);
+            setDocContextMenu(null);
+          }}
+          onChart={() => {
+            setEditingChart(null);
+            setChartBuilderSection({ sectionId: docContextMenu.sectionId });
+            setDocContextMenu(null);
+          }}
+          onFlag={() => setDocContextMenu(null)}
+          onClose={() => setDocContextMenu(null)}
+        />
+      )}
+
+      {/* Chart Builder Panel */}
+      {chartBuilderSection && reportDocument && (
+        <ChartBuilder
+          workspaceId={currentWorkspace?.id || workspaceId || ''}
+          reportDocumentId={reportDocument.id}
+          sectionId={chartBuilderSection.sectionId}
+          token={localStorage.getItem('pandora_session') || ''}
+          existingChart={editingChart}
+          onInsert={(insertedChart) => {
+            setSectionCharts(prev => {
+              const sid = chartBuilderSection.sectionId;
+              const existing = prev[sid] || [];
+              const updated = editingChart
+                ? existing.map(c => c.id === editingChart.id ? insertedChart : c)
+                : [...existing, insertedChart];
+              return { ...prev, [sid]: updated };
+            });
+            setChartBuilderSection(null);
+            setEditingChart(null);
+          }}
+          onCancel={() => {
+            setChartBuilderSection(null);
+            setEditingChart(null);
+          }}
         />
       )}
 
@@ -916,9 +988,16 @@ export default function ReportViewer() {
                 {/* Sections */}
                 {reportDocument.sections.map((section) => {
                   const wid = currentWorkspace?.id || workspaceId || '';
-                  const tok = localStorage.getItem('pandora_session') || '';
+                  const sectionChartList = sectionCharts[section.id] || [];
                   return (
-                    <div key={section.id} style={{ background: colors.surface, borderRadius: 8, border: `1px solid ${colors.border}`, padding: 24 }}>
+                    <div
+                      key={section.id}
+                      style={{ background: colors.surface, borderRadius: 8, border: `1px solid ${colors.border}`, padding: 24 }}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        setDocContextMenu({ x: e.clientX, y: e.clientY, sectionId: section.id, sectionTitle: section.title });
+                      }}
+                    >
                       <AnnotatableSection
                         section={section}
                         annotations={docAnnotations.filter(a => a.section_id === section.id)}
@@ -954,14 +1033,33 @@ export default function ReportViewer() {
                           setDocAnnotations(prev => prev.filter(a => a.id !== annotationId));
                         }}
                       />
-                      {wid && tok && (
-                        <ChartSuggestionPanel
-                          workspaceId={wid}
-                          reportDocumentId={reportDocument!.id}
-                          sectionId={section.id}
-                          token={tok}
-                        />
-                      )}
+                      {/* Inserted charts for this section */}
+                      {sectionChartList.map(chart => (
+                        <div key={chart.id} style={{ marginTop: 16, border: '0.5px solid #E2E8F0', borderRadius: 8, overflow: 'hidden' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', background: '#F8FAFC', borderBottom: '0.5px solid #E2E8F0' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <span style={{ fontSize: 13, fontWeight: 600, color: '#1E293B' }}>{chart.title}</span>
+                              <span style={{ fontSize: 10, fontWeight: 600, color: '#64748B', background: '#E2E8F0', padding: '2px 6px', borderRadius: 4 }}>
+                                v{chart.version || 1}
+                              </span>
+                            </div>
+                            <button
+                              onClick={() => {
+                                setEditingChart(chart);
+                                setChartBuilderSection({ sectionId: section.id });
+                              }}
+                              style={{ fontSize: 11, color: '#0D9488', background: 'none', border: '0.5px solid #0D9488', borderRadius: 5, padding: '4px 10px', cursor: 'pointer' }}
+                            >
+                              ↻ Edit
+                            </button>
+                          </div>
+                          <img
+                            src={`/api/workspaces/${wid}/reports/${reportDocument!.id}/charts/${chart.id}/image`}
+                            alt={chart.title}
+                            style={{ width: '100%', display: 'block' }}
+                          />
+                        </div>
+                      ))}
                     </div>
                   );
                 })}
