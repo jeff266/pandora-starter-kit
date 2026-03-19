@@ -175,6 +175,8 @@ export default function AgentBuilder() {
   const [modalConversationId, setModalConversationId] = useState<string | null>(null);
 
   const [useIssueTree, setUseIssueTree] = useState(false);
+  const [isAgentActive, setIsAgentActive] = useState(false);
+  const [togglingActive, setTogglingActive] = useState(false);
   const [seedConversationId, setSeedConversationId] = useState<string | null>(null);
   const [fromChat, setFromChat] = useState(false);
   const [systemPickerOpen, setSystemPickerOpen] = useState<'pandora' | 'bull' | 'bear' | null>(null);
@@ -294,6 +296,7 @@ export default function AgentBuilder() {
     setScopeFilters(a.scope_filters || []);
     setSchedule({ type: 'manual' });
     setUseIssueTree(!!(a as any).use_issue_tree);
+    setIsAgentActive(!!a.is_active);
     setEditingAgentId(a.id);
     setSeedConversationId((a as any).seed_conversation_id ?? null);
     setFromChat(false);
@@ -951,6 +954,20 @@ export default function AgentBuilder() {
       console.error('Section generation failed:', err);
     } finally {
       setGeneratingSections(false);
+    }
+  }
+
+  async function handleToggleActive() {
+    if (!editingAgentId) return;
+    setTogglingActive(true);
+    try {
+      await api.patch(`/agents-v2/${editingAgentId}/toggle`, { is_active: !isAgentActive });
+      setIsAgentActive(prev => !prev);
+      await loadData();
+    } catch (err) {
+      console.error('Toggle active failed:', err);
+    } finally {
+      setTogglingActive(false);
     }
   }
 
@@ -1999,11 +2016,30 @@ export default function AgentBuilder() {
       )}
 
       {/* ─── Save Bar ────────────────────────────────── */}
-      <div style={{ marginTop: 32, paddingTop: 20, borderTop: activeTab === 'structure' ? 'none' : `1px solid ${colors.border}`, display: activeTab === 'structure' ? 'none' : 'flex', justifyContent: 'flex-end', gap: 12 }}>
-        <button onClick={() => setView('list')} style={btnSecondary}>Cancel</button>
-        <button onClick={handleSave} disabled={saving} style={btnPrimary}>
-          {saving ? 'Saving...' : <><Save size={14} /> {editingAgentId ? 'Update Agent' : 'Create Agent'}</>}
-        </button>
+      <div style={{ marginTop: 32, paddingTop: 20, borderTop: activeTab === 'structure' ? 'none' : `1px solid ${colors.border}`, display: activeTab === 'structure' ? 'none' : 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+        <div>
+          {editingAgentId && (
+            <button
+              onClick={handleToggleActive}
+              disabled={togglingActive}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                padding: '6px 14px', borderRadius: 8, border: `1px solid ${isAgentActive ? colors.border : colors.accent}`,
+                background: isAgentActive ? colors.surface : colors.accentSoft,
+                color: isAgentActive ? colors.textSecondary : colors.accent,
+                font: `500 13px ${fonts.sans}`, cursor: 'pointer',
+              }}
+            >
+              {togglingActive ? '…' : isAgentActive ? 'Pause Agent' : 'Activate Agent'}
+            </button>
+          )}
+        </div>
+        <div style={{ display: 'flex', gap: 12 }}>
+          <button onClick={() => setView('list')} style={btnSecondary}>Cancel</button>
+          <button onClick={handleSave} disabled={saving} style={btnPrimary}>
+            {saving ? 'Saving...' : <><Save size={14} /> {editingAgentId ? 'Update Agent' : 'Create Agent'}</>}
+          </button>
+        </div>
       </div>
 
       {/* Learned Preferences (only for existing agents) */}
