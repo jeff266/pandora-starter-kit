@@ -1203,164 +1203,207 @@ function ReportSection({ section, isCollapsed, onToggle, anonymizeMode, workspac
       {/* Section Content */}
       {!isCollapsed && (
         <div style={{ padding: '0 24px 24px', display: 'flex', flexDirection: 'column', gap: 24 }}>
-          {/* Metrics */}
-          {section.metrics && section.metrics.length > 0 && (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
-              {section.metrics.map((metric, idx) => {
-                const blockId = `${section.section_id}:metric:${idx}`;
-                const annotation = humanAnnotations?.find(a => a.block_id === blockId);
-                return (
-                  <div
-                    key={idx}
-                    onContextMenu={onContextMenu ? (e) => onContextMenu(e, {
-                      type: 'metric',
-                      label: metric.label,
-                      value: annotation?.new_value || metric.value,
-                      sectionTitle: section.title,
-                      blockId,
-                    }) : undefined}
-                  >
-                    <MetricCardComponent
-                      metric={metric}
-                      annotationOverride={annotation?.new_value ?? undefined}
-                      annotationOriginal={annotation?.type === 'override' ? annotation.original_value : undefined}
-                    />
-                  </div>
-                );
-              })}
-            </div>
-          )}
 
-          {/* Sankey Pipeline Funnel Chart */}
-          {(section as any).chart_data?.type === 'sankey' && (
-            <SankeyChart
-              data={(section as any).chart_data as SankeyChartData}
-              workspaceId={workspaceId}
-            />
-          )}
-
-          {/* Narrative */}
-          {section.narrative && (
-            <div
-              style={{ maxWidth: 'none', color: colors.textSecondary, lineHeight: 1.6, fontFamily: fonts.sans }}
-              onContextMenu={onContextMenu ? (e) => onContextMenu(e, {
-                type: 'narrative',
-                label: 'Narrative',
-                value: section.narrative || '',
-                sectionTitle: section.title,
-                blockId: `${section.section_id}:narrative`,
-              }) : undefined}
-            >
-              {(() => {
-                const narrativeAnnotation = humanAnnotations?.find(a => a.block_id === `${section.section_id}:narrative`);
-                const displayText = narrativeAnnotation?.new_value || section.narrative;
-                return (
-                  <>
-                    {narrativeAnnotation && (
-                      <div style={{ fontSize: 11, color: '#00BFA5', marginBottom: 6, fontWeight: 500, borderLeft: '2px solid #00BFA5', paddingLeft: 8 }}>
-                        ✎ Narrative edited
+          {/* ── Render path detection ──────────────────────────────────────────
+               Full structured render: reasoning_tree present, OR no content field
+               Plain text fallback:    content present but no reasoning_tree
+          ─────────────────────────────────────────────────────────────────── */}
+          {(section.reasoning_tree && section.reasoning_tree.length > 0) || !section.content ? (
+            <>
+              {/* Metrics */}
+              {section.metrics && section.metrics.length > 0 && (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
+                  {section.metrics.map((metric, idx) => {
+                    const blockId = `${section.section_id}:metric:${idx}`;
+                    const annotation = humanAnnotations?.find(a => a.block_id === blockId);
+                    return (
+                      <div
+                        key={idx}
+                        onContextMenu={onContextMenu ? (e) => onContextMenu(e, {
+                          type: 'metric',
+                          label: metric.label,
+                          value: annotation?.new_value || metric.value,
+                          sectionTitle: section.title,
+                          blockId,
+                        }) : undefined}
+                      >
+                        <MetricCardComponent
+                          metric={metric}
+                          annotationOverride={annotation?.new_value ?? undefined}
+                          annotationOriginal={annotation?.type === 'override' ? annotation.original_value : undefined}
+                        />
                       </div>
-                    )}
-                    {displayText.split('\n\n').map((para, idx) => (
-                      <p key={idx} style={{ marginBottom: 16 }}>{renderMarkdown(para)}</p>
-                    ))}
-                  </>
-                );
-              })()}
-            </div>
-          )}
+                    );
+                  })}
+                </div>
+              )}
 
-          {/* Deal Cards */}
-          {section.deal_cards && section.deal_cards.length > 0 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <h3 style={{ fontSize: 14, fontWeight: 600, color: colors.text, textTransform: 'uppercase', letterSpacing: '0.05em', fontFamily: fonts.sans, margin: 0 }}>Deals</h3>
-              {section.deal_cards.map((deal, idx) => (
+              {/* Sankey Pipeline Funnel Chart */}
+              {(section as any).chart_data?.type === 'sankey' && (
+                <SankeyChart
+                  data={(section as any).chart_data as SankeyChartData}
+                  workspaceId={workspaceId}
+                />
+              )}
+
+              {/* Narrative */}
+              {section.narrative && (
                 <div
-                  key={idx}
+                  style={{ maxWidth: 'none', color: colors.textSecondary, lineHeight: 1.6, fontFamily: fonts.sans }}
                   onContextMenu={onContextMenu ? (e) => onContextMenu(e, {
-                    type: 'deal_card',
-                    label: deal.name,
-                    value: deal.amount || '',
+                    type: 'narrative',
+                    label: 'Narrative',
+                    value: section.narrative || '',
                     sectionTitle: section.title,
-                    blockId: `${section.section_id}:deal:${idx}`,
+                    blockId: `${section.section_id}:narrative`,
                   }) : undefined}
                 >
-                  <DealCardComponent deal={deal} anonymizeMode={anonymizeMode} />
+                  {(() => {
+                    const narrativeAnnotation = humanAnnotations?.find(a => a.block_id === `${section.section_id}:narrative`);
+                    const displayText = narrativeAnnotation?.new_value || section.narrative;
+                    return (
+                      <>
+                        {narrativeAnnotation && (
+                          <div style={{ fontSize: 11, color: '#00BFA5', marginBottom: 6, fontWeight: 500, borderLeft: '2px solid #00BFA5', paddingLeft: 8 }}>
+                            ✎ Narrative edited
+                          </div>
+                        )}
+                        {displayText.split('\n\n').map((para, idx) => (
+                          <p key={idx} style={{ marginBottom: 16 }}>{renderMarkdown(para)}</p>
+                        ))}
+                      </>
+                    );
+                  })()}
                 </div>
-              ))}
-            </div>
-          )}
+              )}
 
-          {/* Table */}
-          {section.table && section.table.rows?.length > 0 && (
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', fontSize: 14 }}>
-                <thead style={{ background: colors.surfaceRaised, color: colors.text }}>
-                  <tr>
-                    {section.table.headers.map((header, idx) => (
-                      <th key={idx} style={{ padding: '8px 16px', textAlign: 'left', fontWeight: 600, fontFamily: fonts.sans }}>
-                        {header}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody style={{ borderTop: `1px solid ${colors.border}` }}>
-                  {section.table.rows.slice(0, 20).map((row, rowIdx) => (
-                    <tr
-                      key={rowIdx}
-                      style={{ background: rowIdx % 2 === 0 ? colors.surface : colors.surfaceRaised, borderBottom: `1px solid ${colors.border}` }}
+              {/* Deal Cards */}
+              {section.deal_cards && section.deal_cards.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <h3 style={{ fontSize: 14, fontWeight: 600, color: colors.text, textTransform: 'uppercase', letterSpacing: '0.05em', fontFamily: fonts.sans, margin: 0 }}>Deals</h3>
+                  {section.deal_cards.map((deal, idx) => (
+                    <div
+                      key={idx}
                       onContextMenu={onContextMenu ? (e) => onContextMenu(e, {
-                        type: 'table_row',
-                        label: section.table!.headers[0] ? String(row[section.table!.headers[0]] || '') : 'Row',
-                        value: Object.values(row).slice(0, 3).join(' · '),
+                        type: 'deal_card',
+                        label: deal.name,
+                        value: deal.amount || '',
                         sectionTitle: section.title,
-                        blockId: `${section.section_id}:table:${rowIdx}`,
+                        blockId: `${section.section_id}:deal:${idx}`,
                       }) : undefined}
                     >
-                      {section.table!.headers.map((header, cellIdx) => (
-                        <td key={cellIdx} style={{ padding: '8px 16px', color: colors.textSecondary, fontFamily: fonts.sans }}>
-                          {row[header]?.toString() || '—'}
-                        </td>
-                      ))}
-                    </tr>
+                      <DealCardComponent deal={deal} anonymizeMode={anonymizeMode} />
+                    </div>
                   ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+                </div>
+              )}
 
-          {/* Action Items */}
-          {section.action_items && section.action_items.length > 0 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <h3 style={{ fontSize: 14, fontWeight: 600, color: colors.text, textTransform: 'uppercase', letterSpacing: '0.05em', fontFamily: fonts.sans, margin: 0 }}>Action Items</h3>
-              {section.action_items.map((action, idx) => {
-                const blockId = `${section.section_id}:action:${idx}`;
-                const isStruck = humanAnnotations?.some(a => a.block_id === blockId && a.type === 'strike');
-                const noteAnnotation = humanAnnotations?.find(a => a.block_id === `${blockId}:note`);
-                return (
-                  <div
-                    key={idx}
-                    onContextMenu={onContextMenu ? (e) => onContextMenu(e, {
-                      type: 'action_item',
-                      label: action.action,
-                      value: action.urgency || '',
-                      sectionTitle: section.title,
-                      blockId,
-                    }) : undefined}
-                  >
-                    <ActionItemComponent
-                      action={action}
-                      index={idx}
-                      isStruck={isStruck}
-                      noteText={noteAnnotation?.new_value ?? undefined}
-                    />
+              {/* Table */}
+              {section.table && section.table.rows?.length > 0 && (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', fontSize: 14 }}>
+                    <thead style={{ background: colors.surfaceRaised, color: colors.text }}>
+                      <tr>
+                        {section.table.headers.map((header, idx) => (
+                          <th key={idx} style={{ padding: '8px 16px', textAlign: 'left', fontWeight: 600, fontFamily: fonts.sans }}>
+                            {header}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody style={{ borderTop: `1px solid ${colors.border}` }}>
+                      {section.table.rows.slice(0, 20).map((row, rowIdx) => (
+                        <tr
+                          key={rowIdx}
+                          style={{ background: rowIdx % 2 === 0 ? colors.surface : colors.surfaceRaised, borderBottom: `1px solid ${colors.border}` }}
+                          onContextMenu={onContextMenu ? (e) => onContextMenu(e, {
+                            type: 'table_row',
+                            label: section.table!.headers[0] ? String(row[section.table!.headers[0]] || '') : 'Row',
+                            value: Object.values(row).slice(0, 3).join(' · '),
+                            sectionTitle: section.title,
+                            blockId: `${section.section_id}:table:${rowIdx}`,
+                          }) : undefined}
+                        >
+                          {section.table!.headers.map((header, cellIdx) => (
+                            <td key={cellIdx} style={{ padding: '8px 16px', color: colors.textSecondary, fontFamily: fonts.sans }}>
+                              {row[header]?.toString() || '—'}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* Action Items */}
+              {section.action_items && section.action_items.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <h3 style={{ fontSize: 14, fontWeight: 600, color: colors.text, textTransform: 'uppercase', letterSpacing: '0.05em', fontFamily: fonts.sans, margin: 0 }}>Action Items</h3>
+                  {section.action_items.map((action, idx) => {
+                    const blockId = `${section.section_id}:action:${idx}`;
+                    const isStruck = humanAnnotations?.some(a => a.block_id === blockId && a.type === 'strike');
+                    const noteAnnotation = humanAnnotations?.find(a => a.block_id === `${blockId}:note`);
+                    return (
+                      <div
+                        key={idx}
+                        onContextMenu={onContextMenu ? (e) => onContextMenu(e, {
+                          type: 'action_item',
+                          label: action.action,
+                          value: action.urgency || '',
+                          sectionTitle: section.title,
+                          blockId,
+                        }) : undefined}
+                      >
+                        <ActionItemComponent
+                          action={action}
+                          index={idx}
+                          isStruck={isStruck}
+                          noteText={noteAnnotation?.new_value ?? undefined}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              {/* ── Plain text fallback for free-form agent output ── */}
+              <div style={{ color: colors.textSecondary, lineHeight: 1.7, fontFamily: fonts.sans }}>
+                {section.content!.split('\n\n').map((para, idx) => (
+                  <p key={idx} style={{ marginBottom: 16 }}>{renderMarkdown(para)}</p>
+                ))}
+              </div>
+
+              {/* Actions array — rendered if present */}
+              {(() => {
+                const actionList = section.actions ?? section.action_items;
+                return actionList && actionList.length > 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <h3 style={{ fontSize: 14, fontWeight: 600, color: colors.text, textTransform: 'uppercase', letterSpacing: '0.05em', fontFamily: fonts.sans, margin: 0 }}>Action Items</h3>
+                    {actionList.map((action, idx) => {
+                      const blockId = `${section.section_id}:action:${idx}`;
+                      const isStruck = humanAnnotations?.some(a => a.block_id === blockId && a.type === 'strike');
+                      const noteAnnotation = humanAnnotations?.find(a => a.block_id === `${blockId}:note`);
+                      return (
+                        <div key={idx}>
+                          <ActionItemComponent
+                            action={action}
+                            index={idx}
+                            isStruck={isStruck}
+                            noteText={noteAnnotation?.new_value ?? undefined}
+                          />
+                        </div>
+                      );
+                    })}
                   </div>
-                );
-              })}
-            </div>
+                ) : null;
+              })()}
+            </>
           )}
 
-          {/* Metadata */}
+          {/* Metadata — always shown */}
           {(section.data_freshness || section.confidence != null) && (
             <div style={{ fontSize: 12, color: colors.textMuted, paddingTop: 16, borderTop: `1px solid ${colors.border}`, fontFamily: fonts.sans }}>
               {section.data_freshness && `Data as of ${new Date(section.data_freshness).toLocaleString('en-US')}`}
@@ -1369,7 +1412,7 @@ function ReportSection({ section, isCollapsed, onToggle, anonymizeMode, workspac
             </div>
           )}
 
-          {/* Section Feedback (only for agent-generated briefings) */}
+          {/* Section Feedback — always shown for agent-generated briefings */}
           {workspaceId && agentId && generationId && (
             <SectionFeedback
               workspaceId={workspaceId}

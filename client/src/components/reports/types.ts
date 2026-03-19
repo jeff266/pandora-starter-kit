@@ -96,6 +96,8 @@ export interface SectionContent {
   section_id: string;
   title: string;
   narrative: string;
+  content?: string;
+  reasoning_tree?: any[];
   metrics?: MetricCard[];
   table?: {
     headers: string[];
@@ -103,6 +105,7 @@ export interface SectionContent {
   };
   deal_cards?: DealCard[];
   action_items?: ActionItem[];
+  actions?: ActionItem[];
   chart_data?: SankeyChartData;
   source_skills: string[];
   data_freshness: string;
