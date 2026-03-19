@@ -735,7 +735,7 @@ agentsWorkspaceRouter.get('/:workspaceId/reports/:reportId/charts', requirePermi
 });
 
 // POST create a chart from suggestion or custom
-agentsWorkspaceRouter.post('/:workspaceId/reports/:reportId/charts', requirePermission('agents.edit'), async (req: Request, res: Response) => {
+agentsWorkspaceRouter.post('/:workspaceId/reports/:reportId/charts', requireAnyPermission('agents.edit_own', 'agents.edit_any'), async (req: Request, res: Response) => {
   try {
     const { workspaceId, reportId } = req.params;
     const { section_id, chart_type, title, data_labels, data_values, chart_options, position_in_section } = req.body;
@@ -807,7 +807,7 @@ agentsWorkspaceRouter.get('/:workspaceId/reports/:reportId/charts/:chartId/image
 });
 
 // DELETE a chart
-agentsWorkspaceRouter.delete('/:workspaceId/reports/:reportId/charts/:chartId', requirePermission('agents.edit'), async (req: Request, res: Response) => {
+agentsWorkspaceRouter.delete('/:workspaceId/reports/:reportId/charts/:chartId', requireAnyPermission('agents.edit_own', 'agents.edit_any'), async (req: Request, res: Response) => {
   try {
     const { workspaceId, chartId } = req.params;
     await query(`
