@@ -2308,6 +2308,22 @@ The system will transform raw_annotation into a voice-styled annotation automati
         }
       }
 
+      // ── Chart Intelligence for response ───────────────────────────────────
+      let responseChart: import('./chart-trigger.js').ResponseChart | null = null;
+      if (toolTrace.length > 0) {
+        try {
+          const { maybeGenerateResponseChart } = await import('./chart-trigger.js');
+          responseChart = await maybeGenerateResponseChart(
+            message,
+            parsed.answer,
+            toolTrace,
+            workspaceId
+          );
+        } catch (chartErr) {
+          console.error('[PandoraAgent] Chart trigger failed:', chartErr);
+        }
+      }
+
       return {
         answer: parsed.answer,
         follow_up_questions: parsed.followups,
@@ -2319,6 +2335,7 @@ The system will transform raw_annotation into a voice-styled annotation automati
         tool_call_count: toolTrace.length,
         latency_ms: Date.now() - startTime,
         chart_specs: parsedChartSpecs.length > 0 ? parsedChartSpecs : (charts.length > 0 ? charts : undefined),
+        chart: responseChart ?? undefined,
         sessionContext: currentSessionContext,
         suggested_actions: pandoraSuggestedActions.length > 0 ? pandoraSuggestedActions : undefined,
       };

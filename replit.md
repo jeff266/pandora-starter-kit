@@ -997,3 +997,35 @@ Run delivery-only: `POST /api/workspaces/:wsId/agents/:agentId/run-now` `{"phase
 - 4/4 sections with reasoning trees (4 nodes each)
 - 3 chart suggestions: `the_number` (Forecast Landing Zone $K), `rep_status` (Open Pipeline by Rep $K), `pipeline_health` (Coverage vs Target)
 - Total tokens: 4,678 (vs 1,599 pre-tree) — 4× parallel Claude calls for question trees
+
+## Ask Pandora → Inline Chart Pipeline ("Chart Intelligence")
+
+### Architecture
+When Pandora answers a data question, it automatically decides whether to attach a conclusion-first chart based on the data available in the tool trace.
+
+**Files:**
+- `server/chat/chart-trigger.ts` — entry point: `generateResponseChart(question, responseText, toolTrace, workspaceId)`. Checks tool results for chartable data (`deals[N]`, raw array with `amount`, or numeric map with ≥2 values). Routes to Chart Intelligence via a synthetic `ReasoningNode`.
+- `server/orchestrator/report-orchestrator.ts` — `generateChartSpecs()` / `ChartIntelligence` — LLM-driven spec gen. Uses the same `chart_spec` block format as briefing reports.
+- `server/orchestrator/chart-renderer.ts` — `renderChartSpec()` — QuickChart HTTP render → base64 PNG (v2 Chart.js syntax: `xAxes[]/yAxes[]`, `type:'horizontalBar'`).
+- `server/chat/pandora-agent.ts` — chart trigger fires on BOTH `end_turn` path (inside the for-loop at iter N) AND max-iterations fallback (after the loop). Both paths call `generateResponseChart()` and attach `chart` to the `PandoraResponse`.
+- `server/routes/chat.ts` — passes `chart` through `assistantMetadata` (SSE: `response_chart` event) and `res.json()` response body.
+- `server/routes/conversation-stream.ts` — emits `response_chart` SSE event after `synthesis_complete`.
+- `server/routes/agents.ts` — `GET /reports/current` endpoint returns `{ id, week_label, section_count, sections: [{id, title}] }` for the AddToReport section picker.
+
+**Frontend:**
+- `client/src/components/assistant/useConversationStream.ts` — listens for `response_chart` SSE event, stores in `responseChart` state.
+- `client/src/components/assistant/ConversationView.tsx` — renders chart PNG inline after `synthesisComplete`.
+- `client/src/components/chat/ChatPanel.tsx` — handles `response_chart` message type, renders PNG.
+- `client/src/components/chat/AddToReportButton.tsx` — section picker: fetches `/reports/current`, lets user pick section, POSTs chart to `/reports/:id/charts`.
+- `client/src/components/chat/ChartSuggestionPanel.tsx` — has "Explore ↗" deep-link button using `useNavigate`.
+
+### Section IDs (for routing)
+Chart trigger uses `suggestSectionId(question)` to auto-select which briefing section to suggest:
+- `node-deal-execution` (at-risk deals, deal health)
+- `node-pipeline-conv` (pipeline conversion, win rates, coverage)
+- `node-team-execution` (rep performance, coaching)
+
+### Validated (2026-03-19)
+- At-risk deals question → chart "Dynamo carries 39% of at-risk pipeline", 23KB, 560×220px
+- `/reports/current` returns 3 sections (Deal Execution, Pipeline Conversion, Team Execution)
+- Chart trigger fires on normal `end_turn` path (confirmed by `[AskPandora] Generated chart` log)
