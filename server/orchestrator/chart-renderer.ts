@@ -303,14 +303,23 @@ function buildChartJsConfig(chart: ChartSuggestion): object {
       };
 
     case 'doughnut':
-    case 'pie':
+    case 'pie': {
+      // Build a formatter function string that QuickChart evaluates server-side.
+      // Must be a string (not a real function) so JSON.stringify preserves it.
+      const pieFormatter = isCount
+        ? 'function(v){return String(Math.round(v));}'
+        : suffix === '($M)'
+          ? 'function(v){return "$"+v.toFixed(1)+"M";}'
+          : suffix === '($K)'
+            ? 'function(v){return "$"+Math.round(v)+"K";}'
+            : 'function(v){return String(v);}';
       return {
         type: chart.chart_type === 'pie' ? 'pie' : 'doughnut',
         data: {
           labels,
           datasets: [{
             label: chart.title,
-            data: rawValues,
+            data: normalized,  // pre-normalized so labels aren't raw millions/thousands
             backgroundColor: colors,
             borderWidth: 2,
             borderColor: 'white',
@@ -325,8 +334,16 @@ function buildChartJsConfig(chart: ChartSuggestion): object {
           },
           title: { display: false },  // renderer adds title above image
           cutoutPercentage: chart.chart_type === 'doughnut' ? 65 : 0,  // v2 uses percentage int
+          plugins: {
+            datalabels: {
+              formatter: pieFormatter,
+              color: 'white',
+              font: { weight: 'bold', size: 11 },
+            },
+          },
         },
       };
+    }
 
     default:
       return buildChartJsConfig({ ...chart, chart_type: 'bar' });
@@ -501,7 +518,14 @@ function buildChartJsConfigFromSpec(
         options: baseOptions,
       };
 
-    case 'doughnut':
+    case 'doughnut': {
+      const doughnutFormatter = isCount
+        ? 'function(v){return String(Math.round(v));}'
+        : suffix === '($M)'
+          ? 'function(v){return "$"+v.toFixed(1)+"M";}'
+          : suffix === '($K)'
+            ? 'function(v){return "$"+Math.round(v)+"K";}'
+            : 'function(v){return String(v);}';
       return {
         type: 'doughnut',
         data: {
@@ -523,8 +547,16 @@ function buildChartJsConfigFromSpec(
           },
           title: { display: false },        // renderer adds title above image
           cutoutPercentage: 65,            // v2: integer percentage (not cutout:'65%' which is v3)
+          plugins: {
+            datalabels: {
+              formatter: doughnutFormatter,
+              color: 'white',
+              font: { weight: 'bold', size: 11 },
+            },
+          },
         },
       };
+    }
 
     default:
       // Fallback to bar
