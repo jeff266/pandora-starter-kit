@@ -166,6 +166,7 @@ export default function AgentBuilder() {
   const [suggestedSkills, setSuggestedSkills] = useState<{ skill_id: string; reason: string }[]>([]);
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const lastSuggestionKey = useRef<string>('');
+  const dragIndexRef = useRef<number | null>(null);
 
   const [pickerOpen, setPickerOpen] = useState(false);
   const [guidedChatOpen, setGuidedChatOpen] = useState(false);
@@ -915,7 +916,7 @@ export default function AgentBuilder() {
   }
 
   function addQuestionFromSuggestion(text: string) {
-    if (standingQuestions.length < 5 && !standingQuestions.includes(text)) {
+    if (standingQuestions.length < 8 && !standingQuestions.includes(text)) {
       setStandingQuestions(prev => [...prev, text]);
       setFocusQuestions(prev => [...prev, text]);
     }
@@ -1352,13 +1353,34 @@ export default function AgentBuilder() {
             Without a goal, you get a findings list. With a goal, you get a verdict + evidence.
           </p>
 
-          <SectionLabel>Questions <span style={{ color: colors.textMuted, fontWeight: 400 }}>(optional, max 5)</span></SectionLabel>
+          <SectionLabel>Questions <span style={{ color: colors.textMuted, fontWeight: 400 }}>(optional)</span></SectionLabel>
           <p style={{ margin: '0 0 8px', font: `400 12px ${fonts.sans}`, color: colors.textSecondary }}>
             What specific questions should this Agent answer on every run?
           </p>
 
           {standingQuestions.map((q, i) => (
-            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+            <div
+              key={q + i}
+              draggable
+              onDragStart={() => { dragIndexRef.current = i; }}
+              onDragOver={e => { e.preventDefault(); }}
+              onDrop={e => {
+                e.preventDefault();
+                const from = dragIndexRef.current;
+                if (from === null || from === i) return;
+                const reorder = (arr: string[]) => {
+                  const next = [...arr];
+                  const [moved] = next.splice(from, 1);
+                  next.splice(i, 0, moved);
+                  return next;
+                };
+                setStandingQuestions(prev => reorder(prev));
+                setFocusQuestions(prev => reorder(prev));
+                dragIndexRef.current = null;
+              }}
+              onDragEnd={() => { dragIndexRef.current = null; }}
+              style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, cursor: 'grab' }}
+            >
               <GripVertical size={14} style={{ color: colors.textMuted, flexShrink: 0 }} />
               <span style={{ flex: 1, font: `400 13px ${fonts.sans}`, color: colors.text, padding: '6px 0' }}>
                 {i + 1}. {q}
@@ -1375,13 +1397,24 @@ export default function AgentBuilder() {
             </div>
           ))}
 
-          {standingQuestions.length < 5 && (
+          {standingQuestions.length >= 5 && (
+            <div style={{ fontSize: 11, color: '#D97706', marginTop: 6, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span>⚠</span>
+              <span>
+                {standingQuestions.length === 5
+                  ? 'Reports with 5+ questions can lose focus — consider consolidating'
+                  : `${standingQuestions.length} questions may produce a long report — 4 is the sweet spot`}
+              </span>
+            </div>
+          )}
+
+          {standingQuestions.length < 8 && (
             <div style={{ display: 'flex', gap: 8, marginBottom: 16, marginTop: 8 }}>
               <input
                 value={standingQInput}
                 onChange={e => setStandingQInput(e.target.value)}
                 onKeyDown={e => {
-                  if (e.key === 'Enter' && standingQInput.trim() && standingQuestions.length < 5) {
+                  if (e.key === 'Enter' && standingQInput.trim() && standingQuestions.length < 8) {
                     const q = standingQInput.trim();
                     setStandingQuestions(prev => [...prev, q]);
                     setFocusQuestions(prev => [...prev, q]);
@@ -1393,7 +1426,7 @@ export default function AgentBuilder() {
               />
               <button
                 onClick={() => {
-                  if (standingQInput.trim() && standingQuestions.length < 5) {
+                  if (standingQInput.trim() && standingQuestions.length < 8) {
                     const q = standingQInput.trim();
                     setStandingQuestions(prev => [...prev, q]);
                     setFocusQuestions(prev => [...prev, q]);
@@ -1423,16 +1456,17 @@ export default function AgentBuilder() {
                   <button
                     key={q}
                     onClick={() => {
-                      if (standingQuestions.length < 5) {
+                      if (!standingQuestions.includes(q) && standingQuestions.length < 8) {
                         setStandingQuestions(prev => [...prev, q]);
                         setFocusQuestions(prev => [...prev, q]);
                       }
                     }}
-                    disabled={standingQuestions.length >= 5}
+                    disabled={standingQuestions.includes(q)}
                     style={{
                       background: colors.accentSoft, border: `1px solid ${colors.border}`,
-                      borderRadius: 20, padding: '4px 12px', cursor: standingQuestions.length >= 5 ? 'not-allowed' : 'pointer',
+                      borderRadius: 20, padding: '4px 12px', cursor: standingQuestions.includes(q) ? 'not-allowed' : 'pointer',
                       font: `400 12px ${fonts.sans}`, color: colors.accent,
+                      opacity: standingQuestions.includes(q) ? 0.5 : 1,
                     }}
                   >
                     + {q}

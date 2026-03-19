@@ -1,0 +1,147 @@
+Good catches. Two separate issues.
+
+**Drag and drop broken:**
+
+This is almost certainly the same class of bug as other DnD issues — the drag handle is rendering but the event handlers aren't wired correctly after the questions list re-renders when suggestions are added. When you add a question from the suggestion panel, the new item likely isn't getting the correct drag context or key prop.
+
+Give Replit this fix:
+
+```
+Fix: Question drag-and-drop broken after
+adding questions from suggestion panel
+
+In the Goals tab, find where questions are
+rendered as a draggable list. The drag-and-drop
+library is likely one of:
+  - @dnd-kit/core + @dnd-kit/sortable
+  - react-beautiful-dnd
+  - react-sortable-hoc
+
+Find the issue:
+1. Log the questions array after adding from
+   suggestion panel — confirm the new item
+   has a unique stable id/key
+2. Check if the DnD context wraps the entire
+   list or just existing items
+3. If using @dnd-kit: each SortableItem needs
+   a stable unique id — not array index.
+   If questions are stored as strings, wrap
+   them as { id: uuid(), text: string } when
+   added so each has a stable key.
+
+Most likely fix:
+When addQuestion(text) appends to the list,
+ensure it adds an object with a stable id:
+
+```typescript
+function addQuestion(text: string) {
+  const newQuestion = {
+    id: crypto.randomUUID(),
+    text,
+  };
+  setStandingQuestions(prev => [...prev, newQuestion]);
+}
+```
+
+If questions are currently stored as plain strings,
+migrate the state shape to { id, text } objects.
+The display only shows text, the DnD uses id.
+
+Acceptance criteria:
+1. Drag handle appears on all questions including
+   ones added from suggestion panel
+2. Dragging reorders the list correctly
+3. Questions added via "Add all" are also draggable
+4. Order is preserved when saving
+```
+
+---
+
+**On the 5 question limit:**
+
+No strong practical reason. The original rationale was:
+
+```
+5 questions → 5 sections → ~80K tokens →
+synthesis may lose focus
+```
+
+But that reasoning is about skills, not questions. Questions and sections are 1:1, and the token warning already appears on the Skills tab when you exceed the sweet spot. The questions limit is a proxy for something the skills tab already handles directly.
+
+The real constraints are:
+
+```
+Cognitive: a VP shouldn't need more than 5
+questions to define what they want. If they
+have 8 questions, they probably need to consolidate.
+
+Technical: each section adds ~15K tokens to
+synthesis context. 5 sections = ~75K tokens.
+6-7 sections starts diluting synthesis quality.
+
+Practical: reports with 6+ sections become
+documents that nobody reads end-to-end.
+```
+
+The limit isn't wrong — but 5 is arbitrary. The real answer is: warn when they exceed 4-5, don't hard-block. The same philosophy as the Skills tab sweet spot indicator.
+
+Give Replit this:
+
+```
+Change: Question limit from hard block to
+soft warning
+
+In the Goals tab, find where the 5 question
+limit is enforced. Currently it likely either:
+  - Hides the Add button when count = 5
+  - Shows an error when trying to add a 6th
+
+Change to a soft warning instead:
+
+1. Remove the hard limit on question count
+   (allow up to 8 questions)
+
+2. When question count reaches 5, show a
+   warning below the list:
+
+```typescript
+{questionCount >= 5 && (
+  <div style={{
+    fontSize: 11,
+    color: '#D97706',
+    marginTop: 6,
+    display: 'flex',
+    alignItems: 'center',
+    gap: 4,
+  }}>
+    <span>⚠</span>
+    <span>
+      {questionCount === 5
+        ? 'Reports with 5+ questions can lose
+           focus — consider consolidating'
+        : `${questionCount} questions may produce
+           a long report — 4 is the sweet spot`
+      }
+    </span>
+  </div>
+)}
+```
+
+3. Update the label:
+   QUESTIONS (OPTIONAL, MAX 5)
+   → QUESTIONS (OPTIONAL)
+
+4. The suggestion panel "Add all" should still
+   work even if it would exceed 5 — the warning
+   handles the guidance
+
+Acceptance criteria:
+1. Can add a 6th question without being blocked
+2. Warning appears at 5+ questions
+3. Warning text scales with count
+4. Label no longer says "MAX 5"
+5. Suggestion panel "Add all" works regardless
+   of current count
+```
+
+The combination of these two fixes — DnD working + soft limit — means the Goals tab is actually usable for real agent configuration. Right now a VP who tries to drag-reorder after adding suggestions hits a broken interaction, which is the worst possible moment for friction.
