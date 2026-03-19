@@ -829,9 +829,12 @@ agentsWorkspaceRouter.post('/:workspaceId/charts/preview', requirePermission('ag
     if (!spec) return res.status(400).json({ error: 'spec required' });
 
     const { renderChartFromSpec } = await import('../orchestrator/chart-renderer.js');
+    const t0 = Date.now();
     const pngBuffer = await renderChartFromSpec(spec);
+    const elapsed = Date.now() - t0;
+    console.log(`[Charts] Preview rendered in ${elapsed}ms (${Math.round(pngBuffer.length / 1024)}KB)`);
     const png_base64 = pngBuffer.toString('base64');
-    res.json({ png_base64 });
+    res.json({ png_base64, render_ms: elapsed });
   } catch (err: any) {
     console.error('[Charts] Preview failed:', err.message);
     res.status(500).json({ error: err.message });

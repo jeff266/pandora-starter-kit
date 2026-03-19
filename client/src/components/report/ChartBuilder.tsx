@@ -70,6 +70,69 @@ function suggestTitle(source: DataSourceDef, field: DataSourceField): string {
   return `${source.label} — ${fieldLabel}`;
 }
 
+const BAR_HEIGHTS = [62, 38, 85, 50, 72, 42];
+
+function ChartSkeleton({ label }: { label: string }) {
+  const shimmer: React.CSSProperties = {
+    position: 'relative',
+    overflow: 'hidden',
+    background: '#E9EEF4',
+  };
+  return (
+    <div style={{ height: 208, borderRadius: 8, overflow: 'hidden', background: '#F8FAFC', position: 'relative', flexShrink: 0 }}>
+      {/* Y-axis tick lines */}
+      {[25, 50, 75].map(pct => (
+        <div key={pct} style={{
+          position: 'absolute',
+          bottom: `${24 + pct * 0.62}px`,
+          left: 0, right: 0,
+          height: 1,
+          background: '#EEF2F7',
+        }} />
+      ))}
+      {/* Bars */}
+      <div style={{ position: 'absolute', bottom: 28, left: 16, right: 16, top: 20, display: 'flex', alignItems: 'flex-end', gap: 6 }}>
+        {BAR_HEIGHTS.map((h, i) => (
+          <div
+            key={i}
+            className="cb-shimmer"
+            style={{
+              ...shimmer,
+              flex: 1,
+              height: `${h}%`,
+              borderRadius: '3px 3px 0 0',
+            }}
+          />
+        ))}
+      </div>
+      {/* X-axis baseline */}
+      <div style={{ position: 'absolute', bottom: 28, left: 16, right: 16, height: 1, background: '#DDE3EC' }} />
+      {/* Label chips below bars */}
+      <div style={{ position: 'absolute', bottom: 10, left: 16, right: 16, display: 'flex', gap: 6 }}>
+        {BAR_HEIGHTS.map((_, i) => (
+          <div
+            key={i}
+            className="cb-shimmer"
+            style={{ ...shimmer, flex: 1, height: 8, borderRadius: 3 }}
+          />
+        ))}
+      </div>
+      {/* Status label centered */}
+      <div style={{
+        position: 'absolute',
+        inset: 0,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}>
+        <span style={{ fontSize: 11, color: '#94A3B8', background: 'rgba(248,250,252,0.85)', padding: '3px 8px', borderRadius: 4 }}>
+          {label}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 export default function ChartBuilder({
   workspaceId,
   reportDocumentId,
@@ -363,6 +426,19 @@ export default function ChartBuilder({
       flexDirection: 'column',
       fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
     }}>
+      <style>{`
+        @keyframes cb-shimmer {
+          0%   { transform: translateX(-100%); }
+          100% { transform: translateX(200%); }
+        }
+        .cb-shimmer::after {
+          content: '';
+          position: absolute;
+          inset: 0;
+          background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.65) 50%, transparent 100%);
+          animation: cb-shimmer 1.4s ease-in-out infinite;
+        }
+      `}</style>
       {/* Header */}
       <div style={{
         padding: '16px 20px',
@@ -513,13 +589,9 @@ export default function ChartBuilder({
               </div>
 
               {recordsLoading ? (
-                <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94A3B8', fontSize: 12 }}>
-                  Loading data...
-                </div>
+                <ChartSkeleton label="Fetching data..." />
               ) : previewLoading ? (
-                <div style={{ height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94A3B8', fontSize: 12, background: '#F8FAFC', borderRadius: 6 }}>
-                  Updating chart...
-                </div>
+                <ChartSkeleton label="Rendering preview…" />
               ) : previewPng ? (
                 <img
                   src={`data:image/png;base64,${previewPng}`}
