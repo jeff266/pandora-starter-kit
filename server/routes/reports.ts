@@ -29,16 +29,20 @@ function parseMetricValue(value: string): number {
   return num;
 }
 
-// List all report templates for workspace
+// List all report documents for workspace (Monday Briefings + agent runs)
 router.get('/:workspaceId/reports', async (req: Request, res: Response) => {
   try {
     const { workspaceId } = req.params;
+    const limit = Math.min(parseInt(req.query.limit as string) || 20, 50);
 
-    const result = await query<ReportTemplate>(
-      `SELECT * FROM report_templates
+    const result = await query(
+      `SELECT id, document_type, week_label, headline, generated_at,
+              sections, actions, skills_included, agent_id, config
+       FROM report_documents
        WHERE workspace_id = $1
-       ORDER BY created_at DESC`,
-      [workspaceId]
+       ORDER BY generated_at DESC
+       LIMIT $2`,
+      [workspaceId, limit]
     );
 
     res.json({ reports: result.rows });
@@ -48,13 +52,16 @@ router.get('/:workspaceId/reports', async (req: Request, res: Response) => {
   }
 });
 
-// Get single report template
+// Get single report document (Monday Briefing or agent run)
 router.get('/:workspaceId/reports/:reportId', async (req: Request, res: Response) => {
   try {
     const { workspaceId, reportId } = req.params;
 
-    const result = await query<ReportTemplate>(
-      `SELECT * FROM report_templates
+    const result = await query(
+      `SELECT id, document_type, week_label, headline, generated_at,
+              sections, actions, recommended_next_steps, skills_included,
+              tokens_used, agent_id, config
+       FROM report_documents
        WHERE id = $1 AND workspace_id = $2`,
       [reportId, workspaceId]
     );

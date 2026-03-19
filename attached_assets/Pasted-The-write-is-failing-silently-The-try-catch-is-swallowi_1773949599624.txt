@@ -1,0 +1,130 @@
+The write is failing silently. The try-catch is swallowing the error and the agent run completes successfully without writing to report_documents.
+
+Check the logs first:
+
+```bash
+# Look for the success log or any error
+grep -i "AgentRuntime\|report_documents\|report-document-writer" logs
+```
+
+Then check if anything landed in the DB:
+
+```sql
+SELECT id, document_type, week_label,
+  headline, config->>'agent_name',
+  generated_at
+FROM report_documents
+WHERE workspace_id = '4160191d...'
+ORDER BY generated_at DESC
+LIMIT 5;
+```
+
+If no agent_run row exists, the write is failing. Give Claude Code this diagnostic:
+
+```
+Diagnose: writeAgentRunToReportDocuments
+not writing for Strategic Agent runs
+
+The Strategic Agent completes successfully
+but no report_documents row is created.
+The try-catch is swallowing the error.
+
+Step 1 — Find the error:
+Temporarily change the catch block to rethrow
+in development so we can see what's failing:
+
+```typescript
+} catch (err) {
+  console.error(
+    '[AgentRuntime] report_documents write failed:',
+    err
+  );
+  // Log the full error including stack
+  if (err instanceof Error) {
+    console.error('[AgentRuntime] Stack:', err.stack);
+    console.error('[AgentRuntime] Message:', err.message);
+  }
+  // Log what we were trying to write
+  console.error('[AgentRuntime] Input was:', {
+    workspaceId,
+    agentId,
+    agentName: agent.name,
+    synthesizedOutputLength: synthesizedOutput?.length,
+    runId,
+  });
+  // Keep non-fatal — don't rethrow
+}
+```
+
+Step 2 — Check three likely failure causes:
+
+A) synthesizedOutput is null or undefined
+   The Strategic Agent may store its output
+   differently than the Monday Briefing.
+   Check what field contains the synthesis text
+   on a completed Strategic Agent run:
+
+   SELECT id, status,
+     output->>'synthesizedOutput' as synth,
+     output->>'synthesis' as synth2,
+     output->>'narrative' as narrative,
+     jsonb_object_keys(output) as keys
+   FROM agent_runs
+   WHERE workspace_id = '4160191d...'
+   ORDER BY created_at DESC LIMIT 3;
+
+   Find the actual field name and update
+   the runtime.ts write to use the correct
+   field.
+
+B) report_documents table is missing agent_id
+   or config column (migration 196 may not
+   have run)
+
+   SELECT column_name
+   FROM information_schema.columns
+   WHERE table_name = 'report_documents'
+   AND column_name IN ('agent_id', 'config');
+
+   If missing → run migration 196 manually:
+   psql $DATABASE_URL -c "
+     ALTER TABLE report_documents
+       ADD COLUMN IF NOT EXISTS agent_id UUID
+         REFERENCES agents(id),
+       ADD COLUMN IF NOT EXISTS config JSONB
+         DEFAULT '{}';
+   "
+
+C) writeAgentRunToReportDocuments is called
+   BEFORE synthesizedOutput is assembled
+   (timing issue)
+
+   Check line 505 in runtime.ts — is
+   synthesizedOutput definitely populated
+   at that point? Log its value just before
+   the write call:
+
+   console.log('[AgentRuntime] synthesizedOutput
+     length before write:',
+     synthesizedOutput?.length ?? 'NULL'
+   );
+
+Step 3 — Run Strategic Agent again after
+adding the diagnostic logging. Share the
+console output.
+
+Step 4 — Once root cause found, fix and
+verify:
+  SELECT document_type, week_label,
+    config->>'agent_name'
+  FROM report_documents
+  ORDER BY generated_at DESC LIMIT 3;
+  → Should show agent_run row
+
+Acceptance criteria:
+  Console shows: [AgentRuntime] Wrote agent run
+    to report_documents: {uuid}
+  Reports page shows Strategic Agent in timeline
+```
+
+The most likely cause is B — migration 196 didn't run, so the INSERT fails because the columns don't exist. Check that first before running the agent again.

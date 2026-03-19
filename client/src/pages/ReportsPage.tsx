@@ -23,6 +23,8 @@ interface ReportDocument {
   generated_at: string;
   sections: ReportDocSection[];
   skills_included?: string[];
+  agent_id?: string;
+  config?: { agent_name?: string; agent_goal?: string; run_id?: string };
 }
 
 export default function ReportsPage() {
@@ -163,6 +165,7 @@ const DOC_TYPE_LABELS: Record<string, string> = {
   weekly_business_review: 'Weekly Business Review',
   qbr: 'Quarterly Business Review',
   board_deck: 'Board Deck',
+  agent_run: 'Agent Run',
 };
 
 function ReportDocumentCard({ report, onView }: {
@@ -170,7 +173,9 @@ function ReportDocumentCard({ report, onView }: {
   workspaceId: string;
   onView: () => void;
 }) {
-  const typeLabel = DOC_TYPE_LABELS[report.document_type] || report.document_type;
+  const typeLabel = report.document_type === 'agent_run' && report.config?.agent_name
+    ? report.config.agent_name
+    : (DOC_TYPE_LABELS[report.document_type] || report.document_type);
 
   return (
     <div style={{
@@ -188,8 +193,8 @@ function ReportDocumentCard({ report, onView }: {
             </h3>
             <span style={{
               padding: '2px 8px',
-              background: colors.accentSoft,
-              color: colors.accent,
+              background: report.document_type === 'agent_run' ? colors.surfaceRaised : colors.accentSoft,
+              color: report.document_type === 'agent_run' ? colors.textSecondary : colors.accent,
               fontSize: 12,
               fontWeight: 500,
               borderRadius: 4,

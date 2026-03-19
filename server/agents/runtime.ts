@@ -521,10 +521,15 @@ export class AgentRuntime {
             generatedAt: new Date(),
           });
         } catch (err) {
-          console.error(
-            '[AgentRuntime] Failed to write to report_documents (non-fatal):',
-            err
-          );
+          console.error('[AgentRuntime] report_documents write failed:', err instanceof Error ? err.message : err);
+          if (err instanceof Error) console.error('[AgentRuntime] Stack:', err.stack);
+          console.error('[AgentRuntime] Input was:', {
+            workspaceId,
+            agentId,
+            agentName: agent.name,
+            synthesizedOutputLength: synthesizedOutput?.length ?? 'NULL',
+            runId,
+          });
         }
       }
 
