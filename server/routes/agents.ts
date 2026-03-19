@@ -7,6 +7,7 @@ import { generateWorkbook } from '../delivery/workbook-generator.js';
 import { getSkillRegistry } from '../skills/registry.js';
 import type { AgentDefinition } from '../agents/types.js';
 import { requireAdmin } from '../middleware/auth.js';
+import { callLLM } from '../utils/llm-router.js';
 
 const agentsGlobalRouter = Router();
 const agentsWorkspaceRouter = Router();
@@ -935,6 +936,229 @@ async function verifyAgentOwnership(workspaceId: string, agentId: string): Promi
   return result.rows.length > 0;
 }
 
+agentsWorkspaceRouter.post('/:workspaceId/agents/:agentId/generate-questions', requirePermission('agents.view'), async (req: Request, res: Response) => {
+  const { workspaceId, agentId } = req.params;
+
+  try {
+    // Verify workspace + agent ownership
+    if (!await verifyAgentOwnership(workspaceId, agentId)) {
+      return res.status(404).json({ error: 'Agent not found' });
+    }
+
+    const { goal } = req.body;
+    // goal from request body takes precedence over agent.goal — allows preview before saving
+
+    if (!goal?.trim()) {
+      return res.status(400).json({ error: 'Goal is required' });
+    }
+
+    // Get available skills for this workspace
+    const skillRegistry = getSkillRegistry();
+    const availableSkills = skillRegistry.getAll().map((s: any) => ({
+      id: s.id,
+      name: s.name,
+      description: s.description || s.name,
+      category: s.category,
+    }));
+
+    const skillSummary = availableSkills
+      .slice(0, 20)
+      .map(s => `${s.id}: ${s.name} — ${s.description}`)
+      .join('\n');
+
+    const systemPrompt = `You are helping a Revenue Operations leader structure their weekly intelligence briefing. Given a business goal and available data sources, generate 3-5 specific questions that comprehensively cover the goal.
+
+Rules:
+- Questions must be mutually exclusive (no overlap)
+- Questions must collectively exhaust the goal (nothing important left uncovered)
+- Each question must be answerable with the available data sources
+- Questions should be specific enough to drive a clear answer, not vague
+- Write questions a VP RevOps would actually ask
+- Do not use consulting jargon (no "MECE", no "issue tree", no "workstream")
+- 3 questions minimum, 5 maximum
+
+Respond ONLY with valid JSON:
+{
+  "questions": [
+    {
+      "text": "Will we hit our quarterly number?",
+      "rationale": "One sentence why this is essential",
+      "suggested_skills": ["forecast-rollup", "deal-risk-review"]
+    }
+  ]
+}`;
+
+    const userMessage = `GOAL: ${goal}
+
+AVAILABLE DATA SOURCES:
+${skillSummary}
+
+Generate questions that comprehensively answer this goal using the available data.`;
+
+    const response = await callLLM(workspaceId, 'reason', {
+      systemPrompt,
+      messages: [{ role: 'user', content: userMessage }],
+      maxTokens: 600,
+      temperature: 0.3,
+      _tracking: {
+        workspaceId,
+        skillId: 'agent-builder',
+        phase: 'generate-questions',
+      },
+    });
+
+    const raw = response.content
+      .replace(/```json\s*/g, '')
+      .replace(/```\s*/g, '')
+      .trim();
+
+    const parsed = JSON.parse(raw);
+
+    console.log(`[AgentBuilder] Generated ${parsed.questions.length} questions for agent ${agentId}`);
+
+    return res.json({
+      questions: parsed.questions,
+      goal_used: goal,
+      skills_considered: availableSkills.length,
+    });
+
+  } catch (err: any) {
+    console.error('[AgentBuilder] Question generation failed:', err);
+    return res.status(500).json({
+      error: 'Question generation failed',
+      details: err instanceof Error ? err.message : 'Unknown error',
+    });
+  }
+});
+
+agentsWorkspaceRouter.post('/:workspaceId/agents/:agentId/generate-sections', requirePermission('agents.view'), async (req: Request, res: Response) => {
+  const { workspaceId, agentId } = req.params;
+  const { goal, questions } = req.body;
+  // questions: string[] — the accepted question texts
+
+  try {
+    // Verify workspace + agent ownership
+    if (!await verifyAgentOwnership(workspaceId, agentId)) {
+      return res.status(404).json({ error: 'Agent not found' });
+    }
+
+    if (!goal?.trim()) {
+      return res.status(400).json({ error: 'Goal is required' });
+    }
+    if (!questions?.length || questions.length < 2) {
+      return res.status(400).json({ error: 'At least 2 questions required' });
+    }
+
+    const skillRegistry = getSkillRegistry();
+    const availableSkills = skillRegistry.getAll().map((s: any) => ({
+      id: s.id,
+      name: s.name,
+      description: s.description || s.name,
+      category: s.category,
+    }));
+
+    const skillSummary = availableSkills.slice(0, 20);
+
+    const systemPrompt = `You are structuring a weekly intelligence report for a Revenue Operations leader. Given a business goal and specific questions, design a report structure where each section directly answers one question.
+
+For each section, determine:
+1. A clear title (3-5 words, no jargon)
+2. Which question it answers
+3. What kind of analysis it is:
+   forecast / pipeline_health / execution / hygiene / retention / generation / custom
+4. What action format the section drives:
+   deal_level (specific deals to act on)
+   rep_level (coaching or rep-specific actions)
+   system_level (process or config changes)
+5. Which 1-3 skills from the available list best answer this question
+6. Which data to extract from those skills:
+   deals, contacts, rep metrics, activities
+
+Rules:
+- One section per question
+- Keep section count between 3 and 5
+- Skill assignments must use IDs from the available skills list exactly
+- section_intent must be one of the valid values
+- action_format must match what the section actually drives
+
+Respond ONLY with valid JSON:
+{
+  "sections": [
+    {
+      "title": "Forecast Landing Zone",
+      "standing_question": "Will we hit our number?",
+      "section_intent": "forecast",
+      "action_format": "deal_level",
+      "position": 1,
+      "primary_skill_ids": ["forecast-rollup", "deal-risk-review"],
+      "data_extraction_config": {
+        "extract_deals": true,
+        "extract_contacts": false,
+        "extract_rep_metrics": false,
+        "extract_activities": false,
+        "key_metrics": ["closed_won", "open_pipeline", "coverage_ratio"]
+      },
+      "reasoning_layers": ["cause", "second_order", "action"],
+      "rationale": "One sentence why this structure"
+    }
+  ]
+}`;
+
+    const userMessage = `GOAL: ${goal}
+
+QUESTIONS TO ANSWER:
+${questions.map((q: string, i: number) => `${i + 1}. ${q}`).join('\n')}
+
+AVAILABLE SKILLS:
+${JSON.stringify(skillSummary, null, 2)}
+
+Design a report structure that answers all ${questions.length} questions.`;
+
+    const response = await callLLM(workspaceId, 'reason', {
+      systemPrompt,
+      messages: [{ role: 'user', content: userMessage }],
+      maxTokens: 1200,
+      temperature: 0.2,
+      _tracking: {
+        workspaceId,
+        skillId: 'agent-builder',
+        phase: 'generate-sections',
+      },
+    });
+
+    const raw = response.content
+      .replace(/```json\s*/g, '')
+      .replace(/```\s*/g, '')
+      .trim();
+
+    const parsed = JSON.parse(raw);
+
+    // Validate skill IDs against actual available skills
+    const validSkillIds = new Set(availableSkills.map((s: any) => s.id));
+
+    const validatedSections = parsed.sections.map((section: any, idx: number) => ({
+      ...section,
+      position: idx + 1,
+      primary_skill_ids: (section.primary_skill_ids || []).filter((id: string) => validSkillIds.has(id)),
+    }));
+
+    console.log(`[AgentBuilder] Generated ${validatedSections.length} sections for agent ${agentId}`);
+
+    return res.json({
+      sections: validatedSections,
+      goal_used: goal,
+      questions_used: questions,
+    });
+
+  } catch (err: any) {
+    console.error('[AgentBuilder] Section generation failed:', err);
+    return res.status(500).json({
+      error: 'Section generation failed',
+      details: err instanceof Error ? err.message : 'Unknown error',
+    });
+  }
+});
+
 agentsWorkspaceRouter.get('/:workspaceId/agents/:agentId/issue-tree', requirePermission('agents.view'), async (req: Request, res: Response) => {
   const { workspaceId, agentId } = req.params;
   try {
@@ -943,7 +1167,8 @@ agentsWorkspaceRouter.get('/:workspaceId/agents/:agentId/issue-tree', requirePer
     }
     const result = await query(
       `SELECT node_id, title, standing_question, mece_category, primary_skill_ids,
-              position, confirmed_pattern, pattern_summary
+              position, confirmed_pattern, pattern_summary,
+              section_intent, action_format, data_extraction_config, reasoning_layers
        FROM agent_issue_tree
        WHERE agent_id = $1 AND workspace_id = $2
        ORDER BY position ASC`,
@@ -958,7 +1183,10 @@ agentsWorkspaceRouter.get('/:workspaceId/agents/:agentId/issue-tree', requirePer
 
 agentsWorkspaceRouter.post('/:workspaceId/agents/:agentId/issue-tree', requirePermission('agents.view'), async (req: Request, res: Response) => {
   const { workspaceId, agentId } = req.params;
-  const { node_id, title, standing_question, mece_category, primary_skill_ids, position } = req.body;
+  const {
+    node_id, title, standing_question, mece_category, primary_skill_ids, position,
+    section_intent, action_format, data_extraction_config, reasoning_layers
+  } = req.body;
   try {
     if (!await verifyAgentOwnership(workspaceId, agentId)) {
       return res.status(404).json({ error: 'Agent not found' });
@@ -968,19 +1196,29 @@ agentsWorkspaceRouter.post('/:workspaceId/agents/:agentId/issue-tree', requirePe
     }
     const result = await query(
       `INSERT INTO agent_issue_tree
-         (agent_id, workspace_id, node_id, title, standing_question, mece_category, primary_skill_ids, position)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         (agent_id, workspace_id, node_id, title, standing_question, mece_category, primary_skill_ids, position,
+          section_intent, action_format, data_extraction_config, reasoning_layers)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        ON CONFLICT (agent_id, node_id) DO UPDATE SET
          title = EXCLUDED.title,
          standing_question = EXCLUDED.standing_question,
          mece_category = EXCLUDED.mece_category,
          primary_skill_ids = EXCLUDED.primary_skill_ids,
          position = EXCLUDED.position,
+         section_intent = EXCLUDED.section_intent,
+         action_format = EXCLUDED.action_format,
+         data_extraction_config = EXCLUDED.data_extraction_config,
+         reasoning_layers = EXCLUDED.reasoning_layers,
          updated_at = NOW()
        RETURNING node_id, title, standing_question, mece_category, primary_skill_ids,
-                 position, confirmed_pattern, pattern_summary`,
-      [agentId, workspaceId, node_id, title, standing_question ?? null,
-       mece_category ?? 'custom', primary_skill_ids ?? [], position ?? 1]
+                 position, confirmed_pattern, pattern_summary,
+                 section_intent, action_format, data_extraction_config, reasoning_layers`,
+      [
+        agentId, workspaceId, node_id, title, standing_question ?? null,
+        mece_category ?? 'custom', primary_skill_ids ?? [], position ?? 1,
+        section_intent ?? null, action_format ?? 'deal_level',
+        data_extraction_config ?? {}, reasoning_layers ?? ['cause', 'second_order', 'third_order', 'action']
+      ]
     );
     res.status(201).json(result.rows[0]);
   } catch (err: any) {
@@ -1017,7 +1255,10 @@ agentsWorkspaceRouter.patch('/:workspaceId/agents/:agentId/issue-tree/reorder', 
 
 agentsWorkspaceRouter.patch('/:workspaceId/agents/:agentId/issue-tree/:nodeId', requirePermission('agents.view'), async (req: Request, res: Response) => {
   const { workspaceId, agentId, nodeId } = req.params;
-  const { title, standing_question, mece_category, primary_skill_ids, position, confirmed_pattern, pattern_summary } = req.body;
+  const {
+    title, standing_question, mece_category, primary_skill_ids, position, confirmed_pattern, pattern_summary,
+    section_intent, action_format, data_extraction_config, reasoning_layers
+  } = req.body;
   try {
     if (!await verifyAgentOwnership(workspaceId, agentId)) {
       return res.status(404).json({ error: 'Agent not found' });
@@ -1032,6 +1273,10 @@ agentsWorkspaceRouter.patch('/:workspaceId/agents/:agentId/issue-tree/:nodeId', 
     if (position !== undefined) { updates.push(`position = $${++p}`); values.push(position); }
     if (confirmed_pattern !== undefined) { updates.push(`confirmed_pattern = $${++p}`); values.push(confirmed_pattern); }
     if (pattern_summary !== undefined) { updates.push(`pattern_summary = $${++p}`); values.push(pattern_summary); }
+    if (section_intent !== undefined) { updates.push(`section_intent = $${++p}`); values.push(section_intent); }
+    if (action_format !== undefined) { updates.push(`action_format = $${++p}`); values.push(action_format); }
+    if (data_extraction_config !== undefined) { updates.push(`data_extraction_config = $${++p}`); values.push(data_extraction_config); }
+    if (reasoning_layers !== undefined) { updates.push(`reasoning_layers = $${++p}`); values.push(reasoning_layers); }
     if (updates.length === 0) {
       return res.status(400).json({ error: 'No fields to update' });
     }
@@ -1041,7 +1286,8 @@ agentsWorkspaceRouter.patch('/:workspaceId/agents/:agentId/issue-tree/:nodeId', 
       `UPDATE agent_issue_tree SET ${updates.join(', ')}
        WHERE agent_id = $${++p} AND node_id = $${++p} AND workspace_id = $${++p}
        RETURNING node_id, title, standing_question, mece_category, primary_skill_ids,
-                 position, confirmed_pattern, pattern_summary`,
+                 position, confirmed_pattern, pattern_summary,
+                 section_intent, action_format, data_extraction_config, reasoning_layers`,
       values
     );
     if (result.rows.length === 0) {
