@@ -409,16 +409,22 @@ async function generateSectionCharts(
   skillSummaries: SkillSummary[],
   workspaceId: string
 ): Promise<void> {
+  // Cross-section deduplication: track (chart_type + sorted label list) across
+  // all sections so the same deal set never appears twice in one report.
+  const chartedDataKeys = new Set<string>();
+
   for (const section of sections) {
     try {
-      // Build a synthetic reasoning node from the section content
+      // Build a synthetic reasoning node from the section content.
+      // node.answer is intentionally empty — chart intelligence must never
+      // write chart reasoning into it. Only chart_spec and chart_png are written.
       const layer: ReasoningNode['layer'] =
         section.id.includes('action') || section.id.includes('next') ? 'action' : 'cause';
 
       const syntheticNodes: ReasoningNode[] = [{
         layer,
         question: `What structural pattern is driving this outcome?`,
-        answer: '',  // Will be replaced by spec.insight after chart generation
+        answer: '',
         evidence_skill: section.source_skills?.[0],
       }];
 
@@ -442,10 +448,23 @@ async function generateSectionCharts(
         const node = syntheticNodes[nodeIndex];
         if (!node) continue;
 
+        // Deduplication: skip if the same data set was already charted earlier.
+        // Key = chart_type + sorted labels (stable regardless of title wording).
+        const dataKey = `${spec.chart_type}:${
+          spec.data_points.map(d => d.label).sort().join('|')
+        }`;
+        if (chartedDataKeys.has(dataKey)) {
+          console.log(
+            `[ChartIntelligence] Deduplicating chart — ` +
+            `same data already charted in this report (${section.id})`
+          );
+          continue;
+        }
+        chartedDataKeys.add(dataKey);
+
+        // Only write chart_spec and chart_png — never node.answer.
+        // node.answer must remain '' (section prose carries the analytical content).
         node.chart_spec = spec;
-        // Use the DeepSeek-generated mechanism insight as the WHY answer —
-        // distinct from section prose, adds analytical depth not repetition
-        node.answer = spec.insight || '';
         try {
           node.chart_png = await renderChartFromSpec(spec);
           console.log(

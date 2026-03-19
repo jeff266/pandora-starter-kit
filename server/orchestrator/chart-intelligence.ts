@@ -305,13 +305,14 @@ function resolveChartFromQuestion(
         title: question.chart_question,
         data_points: dataPoints,
         color_scheme: 'semantic',
-        insight: question.reasoning,
+        // insight intentionally omitted — chart reasoning must never surface
+        // as node content; it is logged only, never written to node.answer
       };
     }
 
     case 'rep_comparison': {
       // Bar chart: each rep's pipeline.
-      // First rep is teal (actual), rest are gray (target/neutral).
+      // First rep is teal (actual), rest are gray (neutral).
       const repData = buildRepData(coverageSkill);
       if (repData.length < 2) return null;
 
@@ -329,7 +330,6 @@ function resolveChartFromQuestion(
         title: question.chart_question,
         data_points: dataPoints,
         color_scheme: 'comparative',
-        insight: question.reasoning,
       };
     }
 
@@ -343,6 +343,13 @@ function resolveChartFromQuestion(
         m['pipeline-coverage.quota'] || m['quota'] || 0
       );
       if (actual === 0 && target === 0) return null;
+      // Don't render when no quota is configured — one bar against zero is misleading
+      if (target === 0) {
+        console.log(
+          '[ChartIntelligence] coverage_gap: no quota configured — skipping chart'
+        );
+        return null;
+      }
 
       return {
         chart_type: 'bar',
@@ -360,7 +367,6 @@ function resolveChartFromQuestion(
           },
         ],
         color_scheme: 'comparative',
-        insight: question.reasoning,
       };
     }
 
@@ -392,7 +398,6 @@ function resolveChartFromQuestion(
           },
         ],
         color_scheme: 'semantic',
-        insight: question.reasoning,
       };
     }
 
@@ -415,7 +420,6 @@ function resolveChartFromQuestion(
           value: Math.round(Number(value) / 1000),
         })),
         color_scheme: 'uniform',
-        insight: question.reasoning,
       };
     }
 
@@ -463,6 +467,20 @@ async function classifyChartForNode(
     return null;
   }
 
+  // Override: if Haiku classifies as metric_comparison but preferred_data is
+  // at_risk_deals, the data IS deal-level triage — force deal_triage so we
+  // get a horizontal bar with deal names rather than a vertical aggregate bar.
+  if (
+    question.question_type === 'metric_comparison' &&
+    question.preferred_data === 'at_risk_deals'
+  ) {
+    console.log(
+      `[ChartIntelligence] ${node.layer}: overriding metric_comparison → deal_triage ` +
+      `(preferred_data=at_risk_deals)`
+    );
+    question.question_type = 'deal_triage';
+  }
+
   // Step 2: Rules resolve ChartQuestion → ChartNodeSpec
   const spec = resolveChartFromQuestion(question, skillSummaries);
 
@@ -470,7 +488,7 @@ async function classifyChartForNode(
     return null;
   }
 
-  // Orientation guard: enforce horizontalBar for any long-label non-donut chart
+  // Final orientation guard in classifyChartForNode as a second safety net
   if (
     spec.chart_type !== 'doughnut' &&
     spec.chart_type !== 'line' &&

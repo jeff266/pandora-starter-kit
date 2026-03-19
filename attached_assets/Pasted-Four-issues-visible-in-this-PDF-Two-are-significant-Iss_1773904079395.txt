@@ -1,0 +1,224 @@
+Four issues visible in this PDF. Two are significant.
+
+**Issue 1 — WHY node answers are wrong (critical)**
+
+Page 2, Deal Execution WHY:
+```
+"VP needs to see risk-vs-value positioning to
+allocate rep time to deals most likely to
+close if acted on now."
+```
+
+Page 3, Pipeline Conversion WHY:
+```
+"VP needs to see risk score vs deal value to
+immediately identify which deals warrant
+emergency intervention versus which to accept
+as lost."
+```
+
+That's chart intelligence reasoning leaking into the WHY node content. Haiku's internal reasoning about what chart to build is overwriting the WHY node's analytical content. The WHY node should say something like "Deals are stale because reps moved focus to Q2 without cleaning the forecast" — not a description of what chart would help.
+
+Root cause: somewhere in the question-tree or chart-intelligence wiring, `question.reasoning` or `question.vp_decision` is being written into the node's `answer` field instead of staying internal to the chart spec.
+
+**Issue 2 — First chart is vertical despite long labels**
+
+Page 2 chart shows deal names like "Butterfly Effects Inc - AB + RAB" on a vertical x-axis at 45-degree angles. These are 30+ character labels. The orientation rule should have forced horizontal. It didn't fire — likely because this chart went through a different code path than the page 3 chart which is correctly horizontal.
+
+**Issue 3 — Coverage Target bar invisible**
+
+Page 5 Forward Look chart shows "Open Pipeline" as a teal bar but "Coverage Target" has no bar. The target value is resolving to 0. The `quota` field in key_metrics isn't populated for Frontera because no quota is configured — the section text literally says "No quota configured." The chart should either not render when target is 0, or show a placeholder value.
+
+**Issue 4 — Duplicate chart pages 3 and 4**
+
+The same "Which deals represent the highest dollar risk" horizontal bar appears twice — once at the bottom of page 2/top of page 3, and again on page 4. Two sections are producing the same chart because both Pipeline Conversion and Team Execution resolved to `deal_triage` with the same `at_risk_deals` data.
+
+---
+
+**Fix priority:**
+
+Issue 1 is the most important — it breaks the document's analytical credibility. A VP reading "VP needs to see risk-vs-value positioning" in the WHY section would immediately distrust the document.
+
+Give Claude Code this:
+
+```
+Three fixes to chart intelligence — all in
+server/orchestrator/chart-intelligence.ts and
+server/orchestrator/question-tree.ts
+
+---
+
+Fix 1: Chart reasoning leaking into WHY node answers
+
+The WHY node answers are showing Haiku's chart
+reasoning ("VP needs to see risk-vs-value
+positioning...") instead of analytical content.
+
+This means question.vp_decision or
+question.reasoning is being written into
+node.answer somewhere in the pipeline.
+
+Find where ChartQuestion fields are being written
+to ReasoningNode.answer. This should never happen.
+
+The ChartQuestion is internal to chart intelligence:
+  - question.vp_decision → used to build chart only
+  - question.chart_question → becomes chart title only
+  - question.reasoning → logged only, never rendered
+
+Check two places:
+
+A) In question-tree.ts: does the chart intelligence
+   result get merged back into the node in a way
+   that overwrites node.answer? Find where
+   chart_spec is attached to the node and verify
+   only chart_spec and chart_png are written —
+   nothing else.
+
+B) In chart-intelligence.ts: does reasonAboutChart()
+   return anything that could be misinterpreted as
+   node content? The function should return ONLY
+   ChartQuestion — verify the caller doesn't spread
+   the result onto the node object.
+
+The fix: ensure chart intelligence only writes to:
+  node.chart_spec  ← chart specification
+  node.chart_png   ← rendered PNG buffer
+Never to:
+  node.answer      ← must remain from question-tree
+  node.question    ← must remain from question-tree
+
+---
+
+Fix 2: Orientation rule not firing for first chart
+
+The Deal Execution chart renders as vertical despite
+deal names being 30+ characters. The Pipeline
+Conversion chart correctly renders as horizontal.
+
+Both use at_risk_deals data. The difference is
+likely that one goes through resolveChartFromQuestion()
+correctly and one doesn't — or the orientation
+guard in classifyChartForNode() runs after spec
+is already set to 'bar' and doesn't override it.
+
+In resolveChartFromQuestion(), the deal_triage and
+deal_timing cases already hardcode horizontal_bar:
+  return { chart_type: 'horizontal_bar', ... }
+
+If the first chart is still vertical, it means it's
+NOT going through the deal_triage path. Check what
+question_type Haiku is returning for the Deal
+Execution cause node. Add this log:
+
+  console.log('[ChartIntelligence] question_type:',
+    question.question_type, 'for section:', nodeId);
+
+If it's returning 'metric_comparison' instead of
+'deal_triage', that's why — metric_comparison uses
+vertical bar. Add a rule: if preferred_data is
+'at_risk_deals' and question_type is
+'metric_comparison', override to 'deal_triage'.
+
+Also add a blanket orientation guard at the end
+of resolveChartFromQuestion() as a safety net:
+
+```typescript
+// Final orientation guard — runs regardless of type
+// Any bar chart with labels > 12 chars → horizontal
+if (spec.chart_type === 'bar') {
+  const hasLongLabel = spec.data_points.some(
+    d => d.label.length > 12
+  );
+  if (hasLongLabel) {
+    spec.chart_type = 'horizontal_bar';
+  }
+}
+```
+
+---
+
+Fix 3: Coverage gap chart when quota is 0
+
+The Forward Look chart shows "Open Pipeline" teal
+bar but "Coverage Target" has no visible bar because
+no quota is configured for Frontera (quota = 0).
+
+Two fixes:
+
+A) Don't render a coverage_gap chart when target = 0:
+In resolveChartFromQuestion() coverage_gap case:
+```typescript
+if (actual === 0 && target === 0) return null;
+// Add:
+if (target === 0) {
+  console.log(
+    '[ChartIntelligence] coverage_gap: ' +
+    'no quota configured — skipping chart'
+  );
+  return null;
+}
+```
+
+B) Don't deduplicate chart type across sections:
+The duplicate chart (pages 3 and 4 show same chart)
+happens because Pipeline Conversion and Team
+Execution both resolve to deal_triage with the
+same at_risk_deals data.
+
+Add a section-level deduplication: if two adjacent
+sections produce the same chart_type with the same
+data_points, the second one should return null.
+
+Track which data sources have already been charted
+in the current report run:
+
+```typescript
+// In generateChartSpecs(), add a Set to track
+// data sources already charted this run:
+const chartedDataSources = new Set<string>();
+
+// For each node, after resolving spec:
+const dataKey = `${question.question_type}:${
+  spec.data_points.map(d => d.label).join(',')
+}`;
+
+if (chartedDataSources.has(dataKey)) {
+  console.log(
+    '[ChartIntelligence] Deduplicating chart — ' +
+    'same data already charted in this report'
+  );
+  continue; // skip this node
+}
+
+chartedDataSources.add(dataKey);
+```
+
+---
+
+Acceptance Criteria:
+
+1. WHY node answers contain analytical content:
+   "Deals are stale because reps moved to Q2
+   planning without cleaning the forecast"
+   NOT: "VP needs to see risk-vs-value positioning"
+
+2. Both Deal Execution and Pipeline Conversion
+   charts render as horizontal bars — deal names
+   on y-axis, amounts on x-axis
+
+3. Forward Look chart does not render when
+   quota is 0 — section has text only
+
+4. No duplicate charts — each unique data set
+   appears only once across all sections
+
+5. Log output shows:
+   [ChartIntelligence] coverage_gap: no quota
+     configured — skipping chart
+   [ChartIntelligence] Deduplicating chart —
+     same data already charted in this report
+
+6. chart_spec and chart_png are the only fields
+   written to ReasoningNode by chart intelligence
+```
