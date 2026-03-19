@@ -546,6 +546,7 @@ export async function renderPdf(
   const pdf = new PDFDocument({
     size: 'LETTER',
     margins: { top: 72, bottom: 72, left: 90, right: 90 },
+    bufferPages: true,   // required for post-render footer pass
     info: {
       Title: doc.week_label || 'Pipeline Report',
       Author: config.prepared_by || 'Pandora',
@@ -827,21 +828,41 @@ export async function renderPdf(
        .text(doc.recommended_next_steps, { width: W, lineGap: 2 });
   }
 
-  // ── Footer (last page) ─────────────────────────────────────────────────────
+  // ── Footer on every page — post-render pass using bufferPages ─────────────
+  // IMPORTANT: fy must stay within maxY (= page.height - margins.bottom = 720pt
+  // for LETTER with bottom:72). Drawing text at y > maxY causes PDFKit to add a
+  // new blank page, which was the source of the "6 pages instead of 4" bug.
   const footerLeft  = config.prepared_by
     ? `Prepared by ${config.prepared_by}`
     : 'Prepared by RevOps Impact';
   const footerRight = [doc.week_label || '', 'Confidential']
     .filter(Boolean).join(' · ');
 
-  const fy = pdf.page.height - 45;
-  pdf.strokeColor(hexToRgb(BORDER)).lineWidth(0.5)
-     .moveTo(90, fy - 8).lineTo(90 + W, fy - 8).stroke();
-  pdf.fillColor(hexToRgb(MUTED)).font('Helvetica').fontSize(8)
-     .text(footerLeft, 90, fy, { width: W / 2, align: 'left' });
-  pdf.fillColor(hexToRgb(MUTED)).font('Helvetica').fontSize(8)
-     .text(footerRight, 90 + W / 2, fy, { width: W / 2, align: 'right' });
+  // fy = maxY - 18 keeps the 8pt text (lineHeight ~10pt) safely inside the text area
+  const fy = pdf.page.height - pdf.page.margins.bottom - 18;
 
+  const { start, count } = pdf.bufferedPageRange();
+  for (let i = 0; i < count; i++) {
+    pdf.switchToPage(start + i);
+
+    // Hairline divider above footer text
+    pdf.strokeColor(hexToRgb(BORDER)).lineWidth(0.5)
+       .moveTo(90, fy - 6).lineTo(90 + W, fy - 6).stroke();
+
+    // Left: "Prepared by …"
+    pdf.fillColor(hexToRgb(MUTED)).font('Helvetica').fontSize(8)
+       .text(footerLeft, 90, fy, {
+         width: W / 2, align: 'left', lineBreak: false,
+       });
+
+    // Right: "Week of … · Confidential"
+    pdf.fillColor(hexToRgb(MUTED)).font('Helvetica').fontSize(8)
+       .text(footerRight, 90 + W / 2, fy, {
+         width: W / 2, align: 'right', lineBreak: false,
+       });
+  }
+
+  pdf.flushPages();
   pdf.end();
   await done;
   return Buffer.concat(chunks);
