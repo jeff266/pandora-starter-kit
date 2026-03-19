@@ -905,7 +905,7 @@ agentsWorkspaceRouter.post('/:workspaceId/reports/:reportId/export', requirePerm
     }
 
     if (config.format === 'docx') {
-      const buf = await renderDocx(finalDoc);
+      const buf = await renderDocx(finalDoc, config);
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
       res.setHeader('Content-Disposition', `attachment; filename="${slug}.docx"`);
       return res.send(buf);

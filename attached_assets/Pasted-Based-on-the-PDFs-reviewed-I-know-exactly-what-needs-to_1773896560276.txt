@@ -1,0 +1,465 @@
+Based on the PDFs reviewed, I know exactly what needs to change. Give Replit this:
+
+```
+Replit: Typography and Visual Polish Pass
+
+This is a focused visual upgrade to server/renderers/
+pdf-renderer-v2.ts and server/renderers/docx-renderer.ts.
+
+Read both files in full before changing anything.
+The PDF renderer uses Puppeteer + HTML template.
+The DOCX renderer uses the docx library.
+
+The goal: make the exported documents look like they
+came from a consulting firm, not a SaaS tool.
+
+---
+
+## Problem 1: Font — Georgia serif reads as default
+
+Every section is currently Georgia serif body text.
+This reads as "Word document template" not
+"professional deliverable."
+
+Fix: Switch to system sans-serif throughout.
+
+In the PDF HTML template, update the base font:
+
+```css
+/* REPLACE: */
+font-family: Georgia, serif;
+
+/* WITH: */
+font-family: -apple-system, BlinkMacSystemFont,
+  'Segoe UI', 'Helvetica Neue', Arial,
+  sans-serif;
+```
+
+Apply to:
+- body base style
+- section content paragraphs
+- reasoning tree node text
+- action table rows
+- recommended next steps
+- footer
+
+Keep the section headers (h2 with teal border)
+as-is — they're already correct weight.
+
+For DOCX, update the default run font:
+```typescript
+// In the default paragraph style:
+font: 'Calibri'  // replaces whatever is current
+// or leave unset — Word's default Calibri is fine
+```
+
+---
+
+## Problem 2: Cover page — weak, date appears twice
+
+Current cover:
+```
+Week of March 16, 2026      ← appears as H1
+Monday Pipeline Briefing    ← subtitle
+Week of March 16, 2026      ← appears again
+```
+
+The week label is showing twice and there's no
+visual weight. A consulting firm cover has the
+CLIENT NAME large, the document title smaller,
+and the date once in a muted style.
+
+Replace the cover HTML block with:
+
+```html
+<div class="cover-page">
+  <!-- Top color band — full width, teal -->
+  <div style="
+    background: #0D9488;
+    margin: -48px -48px 0;
+    padding: 56px 48px 48px;
+    margin-bottom: 40px;
+  ">
+    <!-- Prepared by line — small, white -->
+    <div style="
+      font-size: 11px;
+      font-weight: 500;
+      color: rgba(255,255,255,0.65);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 20px;
+      font-family: -apple-system, BlinkMacSystemFont,
+        'Segoe UI', Arial, sans-serif;
+    ">
+      ${preparedBy || 'Prepared by RevOps Impact'}
+    </div>
+
+    <!-- Client name — large, white -->
+    <div style="
+      font-size: 32px;
+      font-weight: 600;
+      color: #ffffff;
+      line-height: 1.15;
+      margin-bottom: 10px;
+      font-family: -apple-system, BlinkMacSystemFont,
+        'Segoe UI', Arial, sans-serif;
+    ">
+      ${forCompany || workspaceName}
+    </div>
+
+    <!-- Document type — medium, white/70 -->
+    <div style="
+      font-size: 16px;
+      font-weight: 400;
+      color: rgba(255,255,255,0.75);
+      font-family: -apple-system, BlinkMacSystemFont,
+        'Segoe UI', Arial, sans-serif;
+    ">
+      ${documentType}
+    </div>
+  </div>
+
+  <!-- Week label — below the band, single instance -->
+  <div style="
+    font-size: 13px;
+    color: #64748B;
+    margin-bottom: 4px;
+    font-family: -apple-system, BlinkMacSystemFont,
+      'Segoe UI', Arial, sans-serif;
+  ">
+    ${weekLabel}
+  </div>
+
+  <!-- Confidential tag -->
+  <div style="
+    font-size: 11px;
+    color: #94A3B8;
+    font-family: -apple-system, BlinkMacSystemFont,
+      'Segoe UI', Arial, sans-serif;
+  ">
+    Confidential
+  </div>
+</div>
+```
+
+The variables used (preparedBy, forCompany,
+workspaceName, documentType, weekLabel) should
+already be available in the template context.
+If documentType is a slug like 'monday_briefing',
+format it: 'Monday Pipeline Briefing'.
+
+For DOCX, update the cover page similarly:
+- Large teal shaded table cell at top
+- Company name in white 28pt
+- Document type in white 14pt
+- Week label below in slate 11pt
+
+---
+
+## Problem 3: Section spacing too tight
+
+The sections run together without enough air.
+Consulting documents breathe.
+
+In the PDF HTML template, update section styles:
+
+```css
+/* Section card — increase padding and margin */
+.section {
+  margin-bottom: 40px;      /* was 24px or less */
+  padding: 28px 32px;       /* was 20px or less */
+  border-radius: 8px;
+  border: 0.5px solid #E2E8F0;
+  page-break-inside: avoid;
+}
+
+/* Section header */
+.section h2 {
+  font-size: 17px;
+  font-weight: 600;
+  color: #1E293B;
+  margin-bottom: 16px;      /* was 8-12px */
+  padding-bottom: 10px;
+  border-left: 3px solid #0D9488;
+  padding-left: 12px;
+  font-family: -apple-system, BlinkMacSystemFont,
+    'Segoe UI', Arial, sans-serif;
+}
+
+/* Body paragraphs */
+.section p {
+  font-size: 13px;
+  line-height: 1.75;         /* was 1.5 or less */
+  color: #374151;
+  margin-bottom: 12px;
+  font-family: -apple-system, BlinkMacSystemFont,
+    'Segoe UI', Arial, sans-serif;
+}
+```
+
+---
+
+## Problem 4: Reasoning tree layer labels too small
+
+The WHY / WHAT THIS MEANS labels are rendering
+very small and getting lost. They should be
+clearly visible as structural elements.
+
+```css
+/* Layer label (WHY, WHAT THIS MEANS, etc.) */
+.reasoning-layer-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-bottom: 3px;
+  margin-top: 20px;         /* more space above each node */
+  font-family: -apple-system, BlinkMacSystemFont,
+    'Segoe UI', Arial, sans-serif;
+}
+
+/* Layer question — italic, slightly larger */
+.reasoning-question {
+  font-size: 12px;
+  font-style: italic;
+  color: #475569;
+  margin-bottom: 6px;
+  line-height: 1.5;
+  font-family: -apple-system, BlinkMacSystemFont,
+    'Segoe UI', Arial, sans-serif;
+}
+
+/* Layer answer — regular weight, readable */
+.reasoning-answer {
+  font-size: 12.5px;
+  color: #1E293B;
+  line-height: 1.7;
+  margin-bottom: 4px;
+  font-family: -apple-system, BlinkMacSystemFont,
+    'Segoe UI', Arial, sans-serif;
+}
+
+/* Reasoning tree container — left indent */
+.reasoning-tree {
+  border-left: 2px solid #F1F5F9;
+  padding-left: 16px;
+  margin-top: 20px;
+  margin-bottom: 8px;
+}
+```
+
+---
+
+## Problem 5: Actions table needs more visual
+## separation from section content above it
+
+Currently the Actions table runs right below
+the last section with no clear break.
+
+Add a visual separator before Actions:
+
+```html
+<!-- Before the Actions section HTML -->
+<div style="
+  border-top: 1.5px solid #0D9488;
+  margin: 36px 0 24px;
+  opacity: 0.3;
+"></div>
+<h2 style="
+  font-size: 13px;
+  font-weight: 700;
+  color: #0D9488;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 16px;
+  font-family: -apple-system, BlinkMacSystemFont,
+    'Segoe UI', Arial, sans-serif;
+">
+  Actions
+</h2>
+```
+
+Update action row styles:
+```css
+.action-row {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 0.5px solid #F8FAFC;
+  align-items: start;
+}
+
+.action-urgency-today {
+  font-size: 10px;
+  font-weight: 700;
+  color: #DC2626;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding-top: 2px;
+  font-family: -apple-system, BlinkMacSystemFont,
+    'Segoe UI', Arial, sans-serif;
+}
+
+.action-urgency-week {
+  font-size: 10px;
+  font-weight: 700;
+  color: #D97706;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding-top: 2px;
+  font-family: -apple-system, BlinkMacSystemFont,
+    'Segoe UI', Arial, sans-serif;
+}
+
+.action-text {
+  font-size: 12.5px;
+  color: #374151;
+  line-height: 1.6;
+  font-family: -apple-system, BlinkMacSystemFont,
+    'Segoe UI', Arial, sans-serif;
+}
+```
+
+---
+
+## Problem 6: Headline too plain
+
+The headline (the bold summary sentence at the top)
+should have more visual weight. Currently it's
+just bold text.
+
+```css
+.headline {
+  font-size: 18px;
+  font-weight: 700;
+  color: #1E293B;
+  line-height: 1.35;
+  margin: 24px 0 32px;
+  padding: 20px 24px;
+  background: #F8FAFC;
+  border-left: 4px solid #0D9488;
+  border-radius: 0 6px 6px 0;
+  font-family: -apple-system, BlinkMacSystemFont,
+    'Segoe UI', Arial, sans-serif;
+}
+```
+
+---
+
+## Problem 7: Footer needs refinement
+
+Current footer: "Prepared by RevOps Impact ·
+  for Frontera Health · March 2026"
+
+Update to match consulting standard:
+
+```css
+.footer {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 12px 48px;
+  border-top: 0.5px solid #E2E8F0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10px;
+  color: #94A3B8;
+  background: white;
+  font-family: -apple-system, BlinkMacSystemFont,
+    'Segoe UI', Arial, sans-serif;
+}
+```
+
+Footer left: "Prepared by ${preparedBy}"
+Footer right: "${weekLabel} · Confidential"
+
+Remove the "· for Frontera Health ·" middle
+segment — it's redundant with the cover page
+and clutters the footer.
+
+---
+
+## Puppeteer page settings
+
+Also update the Puppeteer launch/PDF options:
+
+```typescript
+// In pdf-renderer-v2.ts, update printToPDF options:
+await page.pdf({
+  format: 'Letter',
+  margin: {
+    top: '48px',
+    bottom: '64px',   // more room for footer
+    left: '48px',
+    right: '48px',
+  },
+  printBackground: true,
+  displayHeaderFooter: false,
+  // Let the HTML/CSS control header and footer
+});
+```
+
+---
+
+## What NOT to change:
+- Chart rendering or positioning
+- Section content generation
+- Reasoning tree content
+- Action text content
+- Export endpoint
+- XLSX generation
+- Annotation handling
+- Anonymization logic
+
+---
+
+## Acceptance Criteria:
+
+1. Export PDF — no Georgia serif visible anywhere.
+   Body text is clean sans-serif throughout.
+
+2. Cover page shows:
+   - Full-width teal band at top
+   - Client name ("Frontera Health") large
+     and white inside the band
+   - Document type below client name
+   - Week label appears ONCE below the band
+   - "Confidential" in muted text
+   - "Prepared by RevOps Impact" inside the band
+
+3. Sections have visible breathing room —
+   paragraphs are not cramped together
+
+4. WHY / WHAT THIS MEANS labels are clearly
+   visible as structural elements
+
+5. Actions section has a visual separator from
+   the section content above it
+
+6. Headline has a left teal border and
+   light background — clearly distinct from
+   section body text
+
+7. Footer shows:
+   Left: "Prepared by RevOps Impact"
+   Right: "Week of March 16, 2026 · Confidential"
+   (not "Prepared by ... · for Frontera · date")
+
+8. Page margins feel generous — content doesn't
+   run to the edges
+
+9. Open the PDF in Preview/Acrobat and confirm
+   it looks like a consulting deliverable, not
+   a SaaS export
+
+10. DOCX opens in Word with similar improvements:
+    cover page has visual weight, body is Calibri,
+    sections have spacing
+
+11. Zero regressions — all existing content,
+    charts, reasoning trees, actions still render
+    correctly, just with better typography
+```

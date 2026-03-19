@@ -32,65 +32,104 @@ export async function renderDocx(
     include_actions = true,
   } = config;
 
-  const children: Paragraph[] = [];
+  const children: (Paragraph | Table)[] = [];
 
-  // ── Cover page content ──────────────────────────────
+  // ── Cover page — teal band ──────────────────────────
 
-  // Client company name (large, primary color)
-  children.push(new Paragraph({
-    children: [new TextRun({
-      text: for_company || doc.week_label,
-      bold: true,
-      size: 48,          // 24pt
-      color: '1E293B',
+  // Teal band as a full-width table with shaded cell
+  const coverBandRow = new TableRow({
+    children: [new TableCell({
+      children: [
+        // "PREPARED BY" label — small, tinted white
+        new Paragraph({
+          children: [new TextRun({
+            text: `PREPARED BY ${(prepared_by || 'RevOps Impact').toUpperCase()}`,
+            size: 16,   // 8pt
+            color: 'A7F3D0',
+            font: 'Calibri',
+            characterSpacing: 50,
+          })],
+          spacing: { before: 200, after: 120 },
+        }),
+        // Company name — large, white
+        new Paragraph({
+          children: [new TextRun({
+            text: for_company || doc.week_label || '',
+            bold: true,
+            size: 56,   // 28pt
+            color: 'FFFFFF',
+            font: 'Calibri',
+          })],
+          spacing: { before: 0, after: 120 },
+        }),
+        // Document type — medium, light teal
+        new Paragraph({
+          children: [new TextRun({
+            text: getReportTitle(doc.document_type),
+            size: 28,   // 14pt
+            color: 'A7F3D0',
+            font: 'Calibri',
+          })],
+          spacing: { after: 200 },
+        }),
+      ],
+      shading: { fill: '0D9488', type: ShadingType.CLEAR, color: 'auto' },
+      margins: {
+        top: convertInchesToTwip(0.4),
+        bottom: convertInchesToTwip(0.4),
+        left: convertInchesToTwip(0.5),
+        right: convertInchesToTwip(0.5),
+      },
     })],
-    spacing: { before: 2880 }, // Push down from top
+  });
+
+  children.push(new Table({
+    rows: [coverBandRow],
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    borders: {
+      top:              { style: BorderStyle.NONE, size: 0, color: 'auto' },
+      bottom:           { style: BorderStyle.NONE, size: 0, color: 'auto' },
+      left:             { style: BorderStyle.NONE, size: 0, color: 'auto' },
+      right:            { style: BorderStyle.NONE, size: 0, color: 'auto' },
+      insideHorizontal: { style: BorderStyle.NONE, size: 0, color: 'auto' },
+      insideVertical:   { style: BorderStyle.NONE, size: 0, color: 'auto' },
+    },
   }));
 
-  // Report title
+  // Week label below the band — appears ONCE
   children.push(new Paragraph({
     children: [new TextRun({
-      text: getReportTitle(doc.document_type),
-      size: 32,          // 16pt
-      color: '475569',
+      text: doc.week_label || '',
+      size: 22,   // 11pt
+      color: '64748B',
+      font: 'Calibri',
     })],
-    spacing: { before: 240 },
+    spacing: { before: 240, after: 80 },
   }));
 
-  // Week label
+  // Confidential
   children.push(new Paragraph({
     children: [new TextRun({
-      text: doc.week_label,
-      size: 24,          // 12pt
+      text: 'Confidential',
+      size: 18,
       color: '94A3B8',
+      font: 'Calibri',
+      italics: true,
     })],
-    spacing: { before: 120 },
+    spacing: { after: 480 },
   }));
 
-  // Prepared by line
-  if (prepared_by) {
-    children.push(new Paragraph({
-      children: [new TextRun({
-        text: `Prepared by ${prepared_by}`,
-        size: 20,
-        color: '94A3B8',
-        italics: true,
-      })],
-      spacing: { before: 480 },
-    }));
-  }
-
-  // Horizontal rule after cover content
+  // Teal divider rule
   children.push(new Paragraph({
     border: {
       bottom: {
-        color: 'E2E8F0',
+        color: '0D9488',
         space: 1,
         style: BorderStyle.SINGLE,
         size: 6,
       },
     },
-    spacing: { before: 480, after: 480 },
+    spacing: { before: 0, after: 400 },
   }));
 
   // ── Headline ─────────────────────────────────────────
@@ -524,26 +563,64 @@ export async function renderPdf(
   const W = pdf.page.width - 90 - 90;
 
   // ── Cover ──────────────────────────────────────────────────────────────────
-  pdf.fillColor(hexToRgb(DARK)).font('Helvetica-Bold').fontSize(22)
-     .text(config.for_company || doc.week_label || '', 90, 72, { width: W });
+  const COVER_H = 200;
+  // Full-width teal band at top
+  pdf.rect(0, 0, pdf.page.width, COVER_H).fill(hexToRgb(TEAL));
 
-  pdf.moveDown(0.3);
-  pdf.fillColor(hexToRgb(MUTED)).font('Helvetica').fontSize(11)
-     .text(getReportTitle(doc.document_type));
+  const preparedByStr = config.prepared_by || 'RevOps Impact';
+  const companyName   = config.for_company || '';
+  const docTypeLabel  = getReportTitle(doc.document_type);
 
-  pdf.moveDown(0.2);
-  pdf.fillColor(hexToRgb(MUTED)).fontSize(10).text(doc.week_label || '');
+  // "PREPARED BY …" — small, white/65, uppercase
+  pdf.save();
+  pdf.opacity(0.65);
+  pdf.fillColor(hexToRgb('#FFFFFF')).font('Helvetica').fontSize(9)
+     .text((`PREPARED BY ${preparedByStr}`).toUpperCase(), 90, 28, {
+       width: W, characterSpacing: 0.8,
+     });
+  pdf.restore();
 
-  // Divider
-  pdf.moveDown(0.8);
-  pdf.strokeColor(hexToRgb(BORDER)).lineWidth(1)
+  // Company name inside band — large, white
+  if (companyName) {
+    pdf.fillColor(hexToRgb('#FFFFFF')).font('Helvetica-Bold').fontSize(28)
+       .text(companyName, 90, 54, { width: W });
+  }
+
+  // Document type — medium, white/75
+  const docTypeY = companyName ? 104 : 54;
+  pdf.save();
+  pdf.opacity(0.75);
+  pdf.fillColor(hexToRgb('#FFFFFF')).font('Helvetica').fontSize(15)
+     .text(docTypeLabel, 90, docTypeY, { width: W });
+  pdf.restore();
+
+  // Week label below band — appears ONCE
+  pdf.fillColor(hexToRgb('#64748B')).font('Helvetica').fontSize(12)
+     .text(doc.week_label || '', 90, COVER_H + 22, { width: W });
+
+  // Confidential tag
+  pdf.fillColor(hexToRgb(MUTED)).font('Helvetica').fontSize(10)
+     .text('Confidential', 90, COVER_H + 40, { width: W });
+
+  // Move cursor below cover content
+  pdf.y = COVER_H + 68;
+
+  // Thin teal divider
+  pdf.strokeColor(hexToRgb(TEAL)).lineWidth(1.5)
      .moveTo(90, pdf.y).lineTo(90 + W, pdf.y).stroke();
-  pdf.moveDown(0.8);
+  pdf.y += 26;
 
-  // Headline
-  pdf.fillColor(hexToRgb(DARK)).font('Helvetica-Bold').fontSize(14)
-     .text(doc.headline || '', { width: W });
-  pdf.moveDown(1.2);
+  // Headline — callout box with teal left border and light background
+  if (doc.headline) {
+    const hlY   = pdf.y;
+    const hlBoxH = 62;
+    pdf.rect(90, hlY, W, hlBoxH).fill(hexToRgb('#F8FAFC'));
+    pdf.rect(90, hlY, 4, hlBoxH).fill(hexToRgb(TEAL));
+    pdf.fillColor(hexToRgb(DARK)).font('Helvetica-Bold').fontSize(13.5)
+       .text(doc.headline, 108, hlY + 14, { width: W - 22, lineGap: 3 });
+    pdf.y = Math.max(pdf.y, hlY + hlBoxH + 6);
+  }
+  pdf.moveDown(1.5);
 
   // ── Sections ───────────────────────────────────────────────────────────────
 
@@ -590,8 +667,8 @@ export async function renderPdf(
     pdf.moveDown(0.5);
 
     pdf.fillColor(hexToRgb(MID)).font('Helvetica').fontSize(10.5)
-       .text(section.content || '', { width: W, lineGap: 2 });
-    pdf.moveDown(1.2);
+       .text(section.content || '', { width: W, lineGap: 4 });
+    pdf.moveDown(1.8);
 
     // Render reasoning tree (McKinsey-style reasoning layers)
     if (section.reasoning_tree?.length) {
@@ -612,27 +689,29 @@ export async function renderPdf(
       for (const node of section.reasoning_tree) {
         if (pdf.y > pdf.page.height - 120) pdf.addPage();
 
-        // Layer label
+        // Layer label — bigger, spaced capitals
         const labelColor = layerColors[node.layer] || '#475569';
         pdf.fillColor(hexToRgb(labelColor))
            .font('Helvetica-Bold')
-           .fontSize(8)
-           .text(layerLabels[node.layer] || node.layer.toUpperCase(), 90, pdf.y, { width: W });
-        pdf.moveDown(0.2);
+           .fontSize(10)
+           .text(layerLabels[node.layer] || node.layer.toUpperCase(), 108, pdf.y, {
+             width: W - 18, characterSpacing: 0.5,
+           });
+        pdf.moveDown(0.25);
 
         // Question in italic
         pdf.fillColor(hexToRgb('#475569'))
            .font('Helvetica-Oblique')
-           .fontSize(9)
-           .text(node.question, 102, pdf.y, { width: W - 12, lineGap: 1 });
-        pdf.moveDown(0.3);
+           .fontSize(10.5)
+           .text(node.question, 108, pdf.y, { width: W - 18, lineGap: 2 });
+        pdf.moveDown(0.35);
 
         // Answer
         pdf.fillColor(hexToRgb(node.data_gap ? '#94A3B8' : '#1E293B'))
            .font(node.data_gap ? 'Helvetica-Oblique' : 'Helvetica')
-           .fontSize(10)
-           .text(node.answer, 102, pdf.y, { width: W - 12, lineGap: 2 });
-        pdf.moveDown(0.5);
+           .fontSize(11)
+           .text(node.answer, 108, pdf.y, { width: W - 18, lineGap: 3 });
+        pdf.moveDown(0.6);
 
         // Chart Intelligence: render chart after answer
         if (node.chart_png && node.chart_spec) {
@@ -699,11 +778,20 @@ export async function renderPdf(
   if (config.include_actions !== false && doc.actions?.length) {
     if (pdf.y > pdf.page.height - 180) pdf.addPage();
 
+    // Teal section divider line
+    pdf.moveDown(0.8);
+    pdf.save();
+    pdf.opacity(0.25);
+    pdf.strokeColor(hexToRgb(TEAL)).lineWidth(1.5)
+       .moveTo(90, pdf.y).lineTo(90 + W, pdf.y).stroke();
+    pdf.restore();
+    pdf.y += 18;
+
     const barY = pdf.y;
     pdf.fillColor(hexToRgb(TEAL)).rect(90, barY, 3, 16).fill();
     pdf.fillColor(hexToRgb(DARK)).font('Helvetica-Bold').fontSize(12)
        .text('Actions', 99, barY, { width: W - 9 });
-    pdf.moveDown(0.6);
+    pdf.moveDown(0.7);
 
     for (const action of doc.actions) {
       if (pdf.y > pdf.page.height - 100) pdf.addPage();
@@ -740,17 +828,19 @@ export async function renderPdf(
   }
 
   // ── Footer (last page) ─────────────────────────────────────────────────────
-  const footerParts = [
-    config.prepared_by  ? `Prepared by ${config.prepared_by}` : '',
-    config.for_company  ? `for ${config.for_company}` : '',
-    new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
-  ].filter(Boolean).join(' · ');
+  const footerLeft  = config.prepared_by
+    ? `Prepared by ${config.prepared_by}`
+    : 'Prepared by RevOps Impact';
+  const footerRight = [doc.week_label || '', 'Confidential']
+    .filter(Boolean).join(' · ');
 
   const fy = pdf.page.height - 45;
   pdf.strokeColor(hexToRgb(BORDER)).lineWidth(0.5)
      .moveTo(90, fy - 8).lineTo(90 + W, fy - 8).stroke();
   pdf.fillColor(hexToRgb(MUTED)).font('Helvetica').fontSize(8)
-     .text(footerParts, 90, fy, { width: W, align: 'center' });
+     .text(footerLeft, 90, fy, { width: W / 2, align: 'left' });
+  pdf.fillColor(hexToRgb(MUTED)).font('Helvetica').fontSize(8)
+     .text(footerRight, 90 + W / 2, fy, { width: W / 2, align: 'right' });
 
   pdf.end();
   await done;
@@ -861,35 +951,42 @@ function buildReportHtml(
       <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
-          font-family: Georgia, 'Times New Roman', serif;
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
           font-size: 13px;
-          line-height: 1.6;
+          line-height: 1.7;
           color: #374151;
         }
         p { margin: 0 0 12px 0; }
       </style>
     </head>
     <body>
-      <!-- Cover content -->
-      <div style="margin-bottom:48px; padding-bottom:32px;
-                  border-bottom:1px solid #E2E8F0;">
-        <div style="font-size:28px; font-weight:700;
-                    color:#1E293B; margin-bottom:8px;">
-          ${config.for_company || doc.week_label}
+      <!-- Cover — teal band -->
+      <div style="background:#0D9488; padding:36px 40px 32px; margin-bottom:0;">
+        <div style="font-size:9px; color:#A7F3D0; letter-spacing:1px;
+                    text-transform:uppercase; margin-bottom:10px;">
+          PREPARED BY ${config.prepared_by || 'RevOps Impact'}
         </div>
-        <div style="font-size:16px; color:#475569;
-                    margin-bottom:4px;">
+        ${config.for_company ? `
+        <div style="font-size:28px; font-weight:700; color:#FFFFFF; margin-bottom:8px; line-height:1.2;">
+          ${config.for_company}
+        </div>` : ''}
+        <div style="font-size:15px; color:#A7F3D0;">
           ${getReportTitle(doc.document_type)}
         </div>
-        <div style="font-size:13px; color:#94A3B8;">
-          ${doc.week_label}
-        </div>
       </div>
+      <!-- Week label + confidential — below teal band -->
+      <div style="padding:14px 40px 0; margin-bottom:24px;">
+        <span style="font-size:12px; color:#64748B; margin-right:16px;">${doc.week_label}</span>
+        <span style="font-size:11px; color:#94A3B8; font-style:italic;">Confidential</span>
+      </div>
+      <!-- Teal divider -->
+      <div style="height:2px; background:#0D9488; opacity:0.25; margin:0 40px 24px;"></div>
 
-      <!-- Headline -->
+      <!-- Headline — callout box -->
       <div style="
-        font-size:17px; font-weight:700; color:#1E293B;
-        margin-bottom:32px; line-height:1.4;
+        background:#F8FAFC; border-left:4px solid #0D9488;
+        padding:14px 20px; margin:0 40px 32px;
+        font-size:15px; font-weight:700; color:#1E293B; line-height:1.45;
       ">${doc.headline}</div>
 
       <!-- Sections -->

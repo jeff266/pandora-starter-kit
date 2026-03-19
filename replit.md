@@ -1029,3 +1029,29 @@ Chart trigger uses `suggestSectionId(question)` to auto-select which briefing se
 - At-risk deals question → chart "Dynamo carries 39% of at-risk pipeline", 23KB, 560×220px
 - `/reports/current` returns 3 sections (Deal Execution, Pipeline Conversion, Team Execution)
 - Chart trigger fires on normal `end_turn` path (confirmed by `[AskPandora] Generated chart` log)
+
+---
+
+## Report Renderer Polish (March 2026)
+
+All changes in `server/orchestrator/report-renderer.ts`:
+
+### PDF (`renderPdf`) — 7 fixes
+1. **Cover — teal band**: Full-width 200px teal rect at (0,0). Inside: "PREPARED BY …" at 65% opacity (9pt), company name 28pt white (skipped if empty), document type 15pt white/75%. Week label shown ONCE below band in slate `#64748B`. "Confidential" tag below. Thin teal divider (1.5pt) between cover and content.
+2. **Headline callout box**: 62px light-gray (`#F8FAFC`) rect + 4px teal left border + 13.5pt bold text at `hlY+14` offset. `pdf.y = Math.max(pdf.y, hlY+68)` prevents content overlap.
+3. **Section narrative spacing**: `lineGap: 2` → `4`, `moveDown(1.2)` → `1.8` for better breathing room.
+4. **Reasoning tree labels**: Layer label 8→10pt with `characterSpacing: 0.5`; question 9→10.5pt; answer 10→11pt with `lineGap: 3`. All indented to 108px (was 102px).
+5. **Actions divider**: 25%-opacity teal stroke line above the "Actions" section for visual separation.
+6. **Footer layout**: Split left/right — left: "Prepared by {preparedBy}", right: "{weekLabel} · Confidential". Removed "for company" middle segment.
+7. **DOCX config pass**: `agents.ts` now passes `config` to `renderDocx()` (was missing).
+
+### DOCX (`renderDocx`) — cover redesign
+- `children` typed as `(Paragraph | Table)[]` to support Table elements.
+- Cover uses a `Table` with full-width teal-shaded cell: "PREPARED BY …" (16pt, `A7F3D0`), company name (56pt, white Calibri bold), doc type (28pt, `A7F3D0`). No borders on table.
+- Week label (22pt, `64748B`) and "Confidential" (18pt, `94A3B8`, italic) below the table.
+- Teal divider rule (`0D9488` bottom border) separates cover from content.
+
+### HTML (`buildReportHtml`) — dead code but fixed
+- Font: `Georgia, serif` → `-apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif`; `line-height: 1.7`
+- Cover: Teal band div with company name + doc type. Week label shown ONCE below band.
+- Headline: callout box with `border-left: 4px solid #0D9488` and `background: #F8FAFC`.
