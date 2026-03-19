@@ -35,6 +35,7 @@ import { buildSkillSummaries } from '../orchestrator/skill-summarizers.js';
 import { runReportOrchestrator } from '../orchestrator/report-orchestrator.js';
 import { persistReportDocument, getPriorReportHeadline } from '../orchestrator/persistence.js';
 import { WORD_BUDGETS, type DocumentType } from '../orchestrator/playbooks.js';
+import { writeAgentRunToReportDocuments } from './report-document-writer.js';
 
 export class AgentRuntime {
   private static instance: AgentRuntime;
@@ -503,6 +504,29 @@ export class AgentRuntime {
       };
 
       await this.logAgentRun(runId, agentId, workspaceId, result.status, { ...result, synthesisMode });
+
+      // Write to report_documents so agent runs appear in Reports timeline
+      // Non-fatal — if this fails, the agent run still succeeded
+      if (synthesizedOutput) {
+        try {
+          await writeAgentRunToReportDocuments({
+            workspaceId,
+            agentId,
+            agentName: agent.name,
+            agentDescription: agent.description,
+            agentGoal: agent.goal,
+            synthesizedOutput,
+            runId,
+            skillsRun: agent.skills.map(s => s.skillId),
+            generatedAt: new Date(),
+          });
+        } catch (err) {
+          console.error(
+            '[AgentRuntime] Failed to write to report_documents (non-fatal):',
+            err
+          );
+        }
+      }
 
       console.log(`[Agent ${agentId}] Completed in ${result.duration}ms, ${result.tokenUsage.total} tokens`);
       return result;
