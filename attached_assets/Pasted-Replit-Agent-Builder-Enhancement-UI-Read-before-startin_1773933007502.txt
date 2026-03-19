@@ -1,0 +1,809 @@
+Replit: Agent Builder Enhancement UI
+
+Read before starting:
+1. The Agent Builder component — find where
+   Goals tab and Report Structure tab render.
+   Understand the current state shape for each.
+   Note: these may be in a single file or split
+   across tabs. Find exactly where questions
+   are rendered and where issue tree sections
+   are rendered.
+
+2. The two new endpoints:
+   POST /:workspaceId/agents/:agentId/
+     generate-questions
+   Body: { goal: string }
+   Returns: { questions: [{text, rationale,
+     suggested_skills}] }
+
+   POST /:workspaceId/agents/:agentId/
+     generate-sections
+   Body: { goal: string, questions: string[] }
+   Returns: { sections: [{title,
+     standing_question, section_intent,
+     action_format, primary_skill_ids,
+     data_extraction_config,
+     reasoning_layers, rationale}] }
+
+3. The existing section save endpoint —
+   POST /:workspaceId/agents/:agentId/issue-tree
+   This is what "Use this structure" calls.
+   It now accepts the new config fields.
+
+4. How skill names are displayed in the Skills
+   tab. You need to map primary_skill_ids
+   (e.g. "deal-risk-review") to display names
+   (e.g. "Deal Risk Assessment") in the preview.
+   Find the skill registry or skills list the
+   frontend already uses.
+
+5. The Report Viewer component — find where
+   sections are rendered. The question summary
+   block goes above the first section.
+
+Zero changes to Ask Pandora.
+Zero changes to existing agent run behavior.
+Zero changes to any tab except Goals and
+Report Structure.
+
+---
+
+## Build 1: Goals tab — Suggest questions
+
+When the goal textarea has ≥20 characters,
+show a "✦ Suggest questions" button below it.
+
+State needed:
+```typescript
+const [generatingQuestions, setGeneratingQuestions]
+  = useState(false);
+const [suggestedQuestions, setSuggestedQuestions]
+  = useState<Array<{
+    text: string;
+    rationale: string;
+    suggested_skills: string[];
+  }>>([]);
+const [showSuggestions, setShowSuggestions]
+  = useState(false);
+```
+
+Button (appears below goal textarea when
+goal.length >= 20):
+```typescript
+<button
+  onClick={handleGenerateQuestions}
+  disabled={generatingQuestions}
+  style={{
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+    fontSize: 12,
+    padding: '6px 12px',
+    background: generatingQuestions
+      ? 'transparent' : '#F0FDF9',
+    border: '1px solid #0D9488',
+    borderRadius: 6,
+    color: '#0D9488',
+    cursor: generatingQuestions
+      ? 'not-allowed' : 'pointer',
+    fontWeight: 500,
+    marginTop: 8,
+    transition: 'opacity 0.15s',
+  }}
+>
+  {generatingQuestions
+    ? 'Thinking...' : '✦ Suggest questions'}
+</button>
+```
+
+Handler:
+```typescript
+async function handleGenerateQuestions() {
+  setGeneratingQuestions(true);
+  setShowSuggestions(false);
+  try {
+    const res = await fetch(
+      `/api/workspaces/${workspaceId}/agents/` +
+      `${agentId}/generate-questions`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ goal: goalText }),
+      }
+    );
+    if (!res.ok) throw new Error(
+      await res.text()
+    );
+    const data = await res.json();
+    setSuggestedQuestions(data.questions);
+    setShowSuggestions(true);
+  } catch (err) {
+    console.error('Question generation failed:', err);
+  } finally {
+    setGeneratingQuestions(false);
+  }
+}
+```
+
+Suggestion panel (renders below button when
+showSuggestions = true):
+```typescript
+{showSuggestions && suggestedQuestions.length > 0 && (
+  <div style={{
+    marginTop: 12,
+    padding: '14px 16px',
+    background: '#FAFAFA',
+    border: '0.5px solid #E2E8F0',
+    borderRadius: 8,
+  }}>
+    <div style={{
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 12,
+    }}>
+      <span style={{
+        fontSize: 11,
+        fontWeight: 600,
+        color: '#64748B',
+        letterSpacing: '0.06em',
+        textTransform: 'uppercase',
+      }}>
+        Suggested questions
+      </span>
+      <button
+        onClick={() => setShowSuggestions(false)}
+        style={{
+          background: 'none',
+          border: 'none',
+          fontSize: 14,
+          color: '#94A3B8',
+          cursor: 'pointer',
+          padding: '0 4px',
+        }}
+      >
+        ×
+      </button>
+    </div>
+
+    {suggestedQuestions.map((q, i) => {
+      const alreadyAdded = existingQuestions
+        .some(eq => eq.text === q.text);
+      return (
+        <div key={i} style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'flex-start',
+          padding: '8px 0',
+          borderBottom: i < suggestedQuestions.length - 1
+            ? '0.5px solid #F1F5F9' : 'none',
+          gap: 12,
+        }}>
+          <div style={{ flex: 1 }}>
+            <div style={{
+              fontSize: 12.5,
+              color: '#1E293B',
+              lineHeight: 1.5,
+              marginBottom: 2,
+            }}>
+              {q.text}
+            </div>
+            <div style={{
+              fontSize: 11,
+              color: '#94A3B8',
+            }}>
+              {q.rationale}
+            </div>
+          </div>
+          <div style={{
+            display: 'flex',
+            gap: 6,
+            flexShrink: 0,
+          }}>
+            {alreadyAdded ? (
+              <span style={{
+                fontSize: 11,
+                color: '#0D9488',
+                padding: '3px 8px',
+              }}>
+                ✓ Added
+              </span>
+            ) : (
+              <button
+                onClick={() => addQuestion(q.text)}
+                style={{
+                  fontSize: 11,
+                  padding: '3px 10px',
+                  background: '#0D9488',
+                  border: 'none',
+                  borderRadius: 4,
+                  color: 'white',
+                  cursor: 'pointer',
+                  fontWeight: 500,
+                }}
+              >
+                Add
+              </button>
+            )}
+          </div>
+        </div>
+      );
+    })}
+
+    {/* Add all button — only shows if any
+        suggestions aren't already added */}
+    {suggestedQuestions.some(q =>
+      !existingQuestions.some(
+        eq => eq.text === q.text
+      )
+    ) && (
+      <button
+        onClick={() => {
+          suggestedQuestions
+            .filter(q => !existingQuestions.some(
+              eq => eq.text === q.text
+            ))
+            .forEach(q => addQuestion(q.text));
+        }}
+        style={{
+          marginTop: 12,
+          fontSize: 11,
+          padding: '5px 12px',
+          background: 'none',
+          border: '0.5px solid #0D9488',
+          borderRadius: 4,
+          color: '#0D9488',
+          cursor: 'pointer',
+          width: '100%',
+        }}
+      >
+        Add all questions
+      </button>
+    )}
+  </div>
+)}
+```
+
+`addQuestion(text)` appends to the existing
+questions list using whatever mechanism the
+Goals tab currently uses to add questions.
+Find the existing "Add" button handler and
+reuse it.
+
+---
+
+## Build 2: Report Structure tab —
+## Generate report structure button
+
+State needed:
+```typescript
+const [generatingSections, setGeneratingSections]
+  = useState(false);
+const [suggestedSections, setSuggestedSections]
+  = useState<any[]>([]);
+const [showSectionPreview, setShowSectionPreview]
+  = useState(false);
+```
+
+The generate button renders at the top of the
+Report Structure tab when:
+- agentGoal has text
+- agentQuestions.length >= 2
+
+Find agentGoal and agentQuestions from the
+parent agent state — they come from the
+Goals tab. If they're not in shared state,
+pass them as props or read from the agent
+object that's already loaded.
+```typescript
+const canGenerate =
+  (agentGoal?.trim().length || 0) > 0 &&
+  (agentQuestions?.length || 0) >= 2;
+
+{canGenerate && !showSectionPreview && (
+  <div style={{
+    marginBottom: 20,
+    padding: '14px 16px',
+    background: '#F0FDF9',
+    borderRadius: 8,
+    border: '1px solid #CCFBF1',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  }}>
+    <div>
+      <div style={{
+        fontSize: 13,
+        fontWeight: 500,
+        color: '#0D9488',
+        marginBottom: 2,
+      }}>
+        Generate from your questions
+      </div>
+      <div style={{
+        fontSize: 11,
+        color: '#64748B',
+      }}>
+        {agentQuestions.length} questions ready
+        → build report structure
+      </div>
+    </div>
+    <button
+      onClick={handleGenerateSections}
+      disabled={generatingSections}
+      style={{
+        padding: '8px 16px',
+        background: generatingSections
+          ? '#94A3B8' : '#0D9488',
+        border: 'none',
+        borderRadius: 6,
+        color: 'white',
+        fontSize: 12,
+        fontWeight: 500,
+        cursor: generatingSections
+          ? 'not-allowed' : 'pointer',
+      }}
+    >
+      {generatingSections
+        ? 'Building...' : '✦ Generate structure'}
+    </button>
+  </div>
+)}
+```
+
+Handler:
+```typescript
+async function handleGenerateSections() {
+  setGeneratingSections(true);
+  try {
+    const res = await fetch(
+      `/api/workspaces/${workspaceId}/agents/` +
+      `${agentId}/generate-sections`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          goal: agentGoal,
+          questions: agentQuestions.map(
+            (q: any) => q.text || q
+          ),
+        }),
+      }
+    );
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    setSuggestedSections(data.sections);
+    setShowSectionPreview(true);
+  } catch (err) {
+    console.error('Section generation failed:', err);
+  } finally {
+    setGeneratingSections(false);
+  }
+}
+```
+
+Section preview (renders when showSectionPreview):
+```typescript
+{showSectionPreview && suggestedSections.length > 0 && (
+  <div style={{
+    marginBottom: 24,
+    border: '1px solid #E2E8F0',
+    borderRadius: 8,
+    overflow: 'hidden',
+  }}>
+    <div style={{
+      padding: '12px 16px',
+      background: '#F8FAFC',
+      borderBottom: '0.5px solid #E2E8F0',
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    }}>
+      <span style={{
+        fontSize: 12,
+        fontWeight: 600,
+        color: '#374151',
+      }}>
+        Generated report structure
+      </span>
+      <span style={{
+        fontSize: 11,
+        color: '#94A3B8',
+      }}>
+        Review before saving
+      </span>
+    </div>
+
+    {suggestedSections.map((section, i) => (
+      <div key={i} style={{
+        padding: '14px 16px',
+        borderBottom: i < suggestedSections.length - 1
+          ? '0.5px solid #F1F5F9' : 'none',
+      }}>
+        <div style={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          gap: 10,
+        }}>
+          <span style={{
+            fontSize: 11,
+            fontWeight: 700,
+            color: '#0D9488',
+            minWidth: 20,
+            marginTop: 2,
+          }}>
+            {i + 1}
+          </span>
+          <div style={{ flex: 1 }}>
+            <div style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: '#1E293B',
+              marginBottom: 3,
+            }}>
+              {section.title}
+            </div>
+            <div style={{
+              fontSize: 11,
+              color: '#64748B',
+              marginBottom: 6,
+              fontStyle: 'italic',
+            }}>
+              "{section.standing_question}"
+            </div>
+            <div style={{
+              display: 'flex',
+              gap: 6,
+              flexWrap: 'wrap',
+            }}>
+              {/* Skills as pills */}
+              {(section.primary_skill_ids || [])
+                .map((skillId: string) => (
+                  <span key={skillId} style={{
+                    fontSize: 10,
+                    padding: '2px 8px',
+                    background: '#F1F5F9',
+                    borderRadius: 10,
+                    color: '#475569',
+                  }}>
+                    {getSkillName(skillId)}
+                  </span>
+                ))
+              }
+              {/* Intent badge */}
+              <span style={{
+                fontSize: 10,
+                padding: '2px 8px',
+                background: '#F0FDF9',
+                borderRadius: 10,
+                color: '#0D9488',
+                border: '0.5px solid #CCFBF1',
+              }}>
+                {section.section_intent}
+              </span>
+              {/* Action format */}
+              <span style={{
+                fontSize: 10,
+                padding: '2px 8px',
+                background: '#FAFAFA',
+                borderRadius: 10,
+                color: '#94A3B8',
+                border: '0.5px solid #E2E8F0',
+              }}>
+                {section.action_format?.replace(
+                  '_', ' '
+                )} actions
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    ))}
+
+    <div style={{
+      padding: '12px 16px',
+      background: '#F8FAFC',
+      borderTop: '0.5px solid #E2E8F0',
+      display: 'flex',
+      gap: 8,
+      justifyContent: 'flex-end',
+    }}>
+      <button
+        onClick={() => {
+          setShowSectionPreview(false);
+          setSuggestedSections([]);
+        }}
+        style={{
+          padding: '7px 14px',
+          background: 'none',
+          border: '0.5px solid #CBD5E1',
+          borderRadius: 6,
+          color: '#64748B',
+          fontSize: 12,
+          cursor: 'pointer',
+        }}
+      >
+        Edit manually
+      </button>
+      <button
+        onClick={handleSaveGeneratedSections}
+        style={{
+          padding: '7px 16px',
+          background: '#0D9488',
+          border: 'none',
+          borderRadius: 6,
+          color: 'white',
+          fontSize: 12,
+          fontWeight: 500,
+          cursor: 'pointer',
+        }}
+      >
+        Use this structure
+      </button>
+    </div>
+  </div>
+)}
+```
+
+`getSkillName(skillId)` maps skill IDs to
+display names. Find how the Skills tab renders
+skill names — use the same lookup.
+Fallback: title-case the skill ID with hyphens
+replaced by spaces.
+
+`handleSaveGeneratedSections`:
+```typescript
+async function handleSaveGeneratedSections() {
+  // Save each section via existing endpoint
+  // POST /:workspaceId/agents/:agentId/issue-tree
+  // Include all new config fields
+
+  for (const section of suggestedSections) {
+    await fetch(
+      `/api/workspaces/${workspaceId}/agents/` +
+      `${agentId}/issue-tree`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          title: section.title,
+          standing_question: section.standing_question,
+          mece_category: section.section_intent,
+          primary_skill_ids: section.primary_skill_ids,
+          position: section.position,
+          section_intent: section.section_intent,
+          action_format: section.action_format,
+          data_extraction_config:
+            section.data_extraction_config,
+          reasoning_layers: section.reasoning_layers,
+        }),
+      }
+    );
+  }
+
+  // Refresh the sections list
+  await refetchIssueTre();
+  setShowSectionPreview(false);
+  setSuggestedSections([]);
+}
+```
+
+After save: sections appear in the existing
+section list. The generate button hides because
+sections now exist (add this condition to
+canGenerate: existingScetions.length === 0 OR
+show it always with a "Replace structure" label
+if sections already exist).
+
+---
+
+## Build 3: Report Viewer — Question summary
+
+In the Report Viewer, above the first section,
+add a collapsible question summary block.
+```typescript
+const [summaryExpanded, setSummaryExpanded]
+  = useState(false);
+
+// Build question list from sections
+// Each section has a standing_question field
+const questionSummary = (sections || [])
+  .filter(s => s.standing_question)
+  .map(s => ({
+    question: s.standing_question,
+    verdict: extractVerdict(s.content || s.headline),
+    sectionId: s.id,
+  }));
+
+// Only render if we have questions
+{questionSummary.length > 0 && (
+  <div style={{
+    marginBottom: 24,
+    padding: '14px 18px',
+    background: '#F8FAFC',
+    borderRadius: 8,
+    border: '0.5px solid #E2E8F0',
+  }}>
+    <div
+      onClick={() =>
+        setSummaryExpanded(!summaryExpanded)
+      }
+      style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        cursor: 'pointer',
+        userSelect: 'none',
+      }}
+    >
+      <span style={{
+        fontSize: 11,
+        fontWeight: 600,
+        color: '#64748B',
+        letterSpacing: '0.08em',
+        textTransform: 'uppercase',
+      }}>
+        Questions this report answers
+      </span>
+      <span style={{
+        fontSize: 10,
+        color: '#94A3B8',
+      }}>
+        {summaryExpanded ? '▲ collapse' : '▼ expand'}
+      </span>
+    </div>
+
+    {summaryExpanded && (
+      <div style={{ marginTop: 12 }}>
+        {questionSummary.map((q, i) => (
+          <div
+            key={q.sectionId}
+            onClick={() => scrollToSection(q.sectionId)}
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '16px 1fr',
+              gap: 8,
+              marginBottom: 10,
+              cursor: 'pointer',
+              padding: '4px 0',
+            }}
+          >
+            <span style={{
+              color: '#0D9488',
+              fontSize: 12,
+              marginTop: 1,
+            }}>✓</span>
+            <div>
+              <div style={{
+                fontSize: 12,
+                fontWeight: 500,
+                color: '#374151',
+                marginBottom: 2,
+              }}>
+                {q.question}
+              </div>
+              {q.verdict && (
+                <div style={{
+                  fontSize: 11,
+                  color: '#64748B',
+                  lineHeight: 1.5,
+                }}>
+                  {q.verdict}
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    )}
+  </div>
+)}
+```
+
+`extractVerdict(content)`:
+```typescript
+function extractVerdict(content?: string): string {
+  if (!content) return '';
+  // Get first sentence
+  const firstSentence = content.split(/[.!?]/)[0]
+    .trim();
+  // Truncate at 100 chars
+  return firstSentence.length > 100
+    ? firstSentence.slice(0, 97) + '...'
+    : firstSentence;
+}
+```
+
+`scrollToSection(sectionId)`:
+```typescript
+function scrollToSection(sectionId: string) {
+  const el = document.getElementById(
+    `section-${sectionId}`
+  );
+  if (el) {
+    el.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start',
+    });
+  }
+}
+```
+
+This requires each section in the Report Viewer
+to have id={`section-${section.id}`} on its
+container div. Find where sections render and
+add this id if not already present.
+
+---
+
+## What NOT to change:
+- Ask Pandora — zero changes
+- Existing section save/delete/reorder
+- Agent run logic
+- Report generation
+- PDF/DOCX export
+- Skill runner
+- Any tab except Goals and Report Structure
+
+---
+
+## Acceptance Criteria:
+
+1. Goals tab: "✦ Suggest questions" appears
+   when goal has 20+ characters
+
+2. Clicking shows panel with 3-5 questions,
+   each with rationale shown below the text
+
+3. "Add" on a question appends to existing
+   question list — does not replace
+
+4. Already-added questions show "✓ Added"
+   instead of Add button
+
+5. "Add all questions" adds only the ones
+   not already in the list
+
+6. Panel dismisses with × button
+
+7. Report Structure tab: teal banner with
+   "✦ Generate structure" appears when goal
+   exists and ≥2 questions exist
+
+8. Clicking shows section preview with:
+   - Numbered sections
+   - Standing question in italics
+   - Skill pills showing skill display names
+   - Intent badge (teal)
+   - Action format badge (gray)
+
+9. "Use this structure" saves all sections,
+   they appear in the existing section list,
+   preview dismisses
+
+10. "Edit manually" dismisses preview without
+    saving anything
+
+11. Report Viewer: question summary block
+    appears above first section
+
+12. Block is collapsed by default
+
+13. Expanding shows questions with verdicts
+    (first sentence of section content)
+
+14. Clicking a question scrolls to that section
+
+15. Zero regressions on existing Agent Builder
+    behavior
+
+16. Zero changes to Ask Pandora

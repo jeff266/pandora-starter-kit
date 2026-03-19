@@ -153,6 +153,15 @@ export default function AgentBuilder() {
   const [allSkills, setAllSkills] = useState<Array<{ id: string; name: string }>>([]);
   const [skillsLoading, setSkillsLoading] = useState(true);
   const [runHistoryKey, setRunHistoryKey] = useState(0);
+  const [issueTreeKey, setIssueTreeKey] = useState(0);
+
+  const [generatingQuestions, setGeneratingQuestions] = useState(false);
+  const [aiSuggestedQuestions, setAiSuggestedQuestions] = useState<Array<{ text: string; rationale: string; suggested_skills: string[] }>>([]);
+  const [showAiSuggestions, setShowAiSuggestions] = useState(false);
+
+  const [generatingSections, setGeneratingSections] = useState(false);
+  const [suggestedSections, setSuggestedSections] = useState<any[]>([]);
+  const [showSectionPreview, setShowSectionPreview] = useState(false);
 
   const [suggestedSkills, setSuggestedSkills] = useState<{ skill_id: string; reason: string }[]>([]);
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
@@ -899,6 +908,71 @@ export default function AgentBuilder() {
     new Set(skills.flatMap(s => SKILL_QUESTION_SUGGESTIONS[s] || []))
   ).filter(q => !standingQuestions.includes(q));
 
+  function getSkillName(skillId: string): string {
+    const found = allSkills.find(s => s.id === skillId);
+    if (found) return found.name;
+    return skillId.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  }
+
+  function addQuestionFromSuggestion(text: string) {
+    if (standingQuestions.length < 5 && !standingQuestions.includes(text)) {
+      setStandingQuestions(prev => [...prev, text]);
+      setFocusQuestions(prev => [...prev, text]);
+    }
+  }
+
+  async function handleGenerateQuestions() {
+    if (!editingAgentId) return;
+    setGeneratingQuestions(true);
+    setShowAiSuggestions(false);
+    try {
+      const data = await api.post(`/agents/${editingAgentId}/generate-questions`, { goal });
+      setAiSuggestedQuestions(data.questions || []);
+      setShowAiSuggestions(true);
+    } catch (err) {
+      console.error('Question generation failed:', err);
+    } finally {
+      setGeneratingQuestions(false);
+    }
+  }
+
+  async function handleGenerateSections() {
+    if (!editingAgentId) return;
+    setGeneratingSections(true);
+    try {
+      const data = await api.post(`/agents/${editingAgentId}/generate-sections`, {
+        goal,
+        questions: standingQuestions,
+      });
+      setSuggestedSections(data.sections || []);
+      setShowSectionPreview(true);
+    } catch (err) {
+      console.error('Section generation failed:', err);
+    } finally {
+      setGeneratingSections(false);
+    }
+  }
+
+  async function handleSaveGeneratedSections() {
+    if (!editingAgentId) return;
+    for (const section of suggestedSections) {
+      await api.post(`/agents/${editingAgentId}/issue-tree`, {
+        title: section.title,
+        standing_question: section.standing_question,
+        mece_category: section.section_intent,
+        primary_skill_ids: section.primary_skill_ids,
+        position: section.position,
+        section_intent: section.section_intent,
+        action_format: section.action_format,
+        data_extraction_config: section.data_extraction_config,
+        reasoning_layers: section.reasoning_layers,
+      });
+    }
+    setIssueTreeKey(k => k + 1);
+    setShowSectionPreview(false);
+    setSuggestedSections([]);
+  }
+
   return (
     <div style={{ padding: 32, maxWidth: 900, margin: '0 auto' }}>
       <IntelligenceNav activeTab="agents" pendingCount={pendingCount} />
@@ -1140,7 +1214,141 @@ export default function AgentBuilder() {
             rows={3}
             style={{ ...input, width: '100%', boxSizing: 'border-box', resize: 'vertical', marginBottom: 8 }}
           />
-          <p style={{ margin: '0 0 24px', font: `400 11px ${fonts.sans}`, color: colors.textMuted }}>
+
+          {goal.length >= 20 && editingAgentId && (
+            <button
+              onClick={handleGenerateQuestions}
+              disabled={generatingQuestions}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                fontSize: 12,
+                padding: '6px 12px',
+                background: generatingQuestions ? 'transparent' : '#F0FDF9',
+                border: '1px solid #0D9488',
+                borderRadius: 6,
+                color: '#0D9488',
+                cursor: generatingQuestions ? 'not-allowed' : 'pointer',
+                fontWeight: 500,
+                marginTop: 8,
+                transition: 'opacity 0.15s',
+              }}
+            >
+              {generatingQuestions ? 'Thinking...' : '✦ Suggest questions'}
+            </button>
+          )}
+
+          {showAiSuggestions && aiSuggestedQuestions.length > 0 && (
+            <div style={{
+              marginTop: 12,
+              padding: '14px 16px',
+              background: '#FAFAFA',
+              border: '0.5px solid #E2E8F0',
+              borderRadius: 8,
+            }}>
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: 12,
+              }}>
+                <span style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: '#64748B',
+                  letterSpacing: '0.06em',
+                  textTransform: 'uppercase',
+                }}>
+                  Suggested questions
+                </span>
+                <button
+                  onClick={() => setShowAiSuggestions(false)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    fontSize: 14,
+                    color: '#94A3B8',
+                    cursor: 'pointer',
+                    padding: '0 4px',
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+
+              {aiSuggestedQuestions.map((q, i) => {
+                const alreadyAdded = standingQuestions.includes(q.text);
+                return (
+                  <div key={i} style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'flex-start',
+                    padding: '8px 0',
+                    borderBottom: i < aiSuggestedQuestions.length - 1 ? '0.5px solid #F1F5F9' : 'none',
+                    gap: 12,
+                  }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 12.5, color: '#1E293B', lineHeight: 1.5, marginBottom: 2 }}>
+                        {q.text}
+                      </div>
+                      <div style={{ fontSize: 11, color: '#94A3B8' }}>
+                        {q.rationale}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                      {alreadyAdded ? (
+                        <span style={{ fontSize: 11, color: '#0D9488', padding: '3px 8px' }}>
+                          ✓ Added
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => addQuestionFromSuggestion(q.text)}
+                          style={{
+                            fontSize: 11,
+                            padding: '3px 10px',
+                            background: '#0D9488',
+                            border: 'none',
+                            borderRadius: 4,
+                            color: 'white',
+                            cursor: 'pointer',
+                            fontWeight: 500,
+                          }}
+                        >
+                          Add
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {aiSuggestedQuestions.some(q => !standingQuestions.includes(q.text)) && (
+                <button
+                  onClick={() => {
+                    aiSuggestedQuestions
+                      .filter(q => !standingQuestions.includes(q.text))
+                      .forEach(q => addQuestionFromSuggestion(q.text));
+                  }}
+                  style={{
+                    marginTop: 12,
+                    fontSize: 11,
+                    padding: '5px 12px',
+                    background: 'none',
+                    border: '0.5px solid #0D9488',
+                    borderRadius: 4,
+                    color: '#0D9488',
+                    cursor: 'pointer',
+                    width: '100%',
+                  }}
+                >
+                  Add all questions
+                </button>
+              )}
+            </div>
+          )}
+
+          <p style={{ margin: '8px 0 24px', font: `400 11px ${fonts.sans}`, color: colors.textMuted }}>
             Without a goal, you get a findings list. With a goal, you get a verdict + evidence.
           </p>
 
@@ -1556,12 +1764,168 @@ export default function AgentBuilder() {
       {activeTab === 'structure' && editingAgentId && (
         <div>
           {useIssueTree ? (
-            <IssueTreeEditor
-              workspaceId={getWorkspaceId()}
-              agentId={editingAgentId}
-              agentGoal={goal}
-              onSave={() => {}}
-            />
+            <>
+              {/* Generate structure banner */}
+              {!showSectionPreview && goal.trim().length > 0 && standingQuestions.length >= 2 && (
+                <div style={{
+                  marginBottom: 20,
+                  padding: '14px 16px',
+                  background: '#F0FDF9',
+                  borderRadius: 8,
+                  border: '1px solid #CCFBF1',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                }}>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 500, color: '#0D9488', marginBottom: 2 }}>
+                      Generate from your questions
+                    </div>
+                    <div style={{ fontSize: 11, color: '#64748B' }}>
+                      {standingQuestions.length} questions ready → build report structure
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleGenerateSections}
+                    disabled={generatingSections}
+                    style={{
+                      padding: '8px 16px',
+                      background: generatingSections ? '#94A3B8' : '#0D9488',
+                      border: 'none',
+                      borderRadius: 6,
+                      color: 'white',
+                      fontSize: 12,
+                      fontWeight: 500,
+                      cursor: generatingSections ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    {generatingSections ? 'Building...' : '✦ Generate structure'}
+                  </button>
+                </div>
+              )}
+
+              {/* Section preview */}
+              {showSectionPreview && suggestedSections.length > 0 && (
+                <div style={{ marginBottom: 24, border: '1px solid #E2E8F0', borderRadius: 8, overflow: 'hidden' }}>
+                  <div style={{
+                    padding: '12px 16px',
+                    background: '#F8FAFC',
+                    borderBottom: '0.5px solid #E2E8F0',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                  }}>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>Generated report structure</span>
+                    <span style={{ fontSize: 11, color: '#94A3B8' }}>Review before saving</span>
+                  </div>
+
+                  {suggestedSections.map((section, i) => (
+                    <div key={i} style={{
+                      padding: '14px 16px',
+                      borderBottom: i < suggestedSections.length - 1 ? '0.5px solid #F1F5F9' : 'none',
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: '#0D9488', minWidth: 20, marginTop: 2 }}>
+                          {i + 1}
+                        </span>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: '#1E293B', marginBottom: 3 }}>
+                            {section.title}
+                          </div>
+                          <div style={{ fontSize: 11, color: '#64748B', marginBottom: 6, fontStyle: 'italic' }}>
+                            "{section.standing_question}"
+                          </div>
+                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                            {(section.primary_skill_ids || []).map((skillId: string) => (
+                              <span key={skillId} style={{
+                                fontSize: 10,
+                                padding: '2px 8px',
+                                background: '#F1F5F9',
+                                borderRadius: 10,
+                                color: '#475569',
+                              }}>
+                                {getSkillName(skillId)}
+                              </span>
+                            ))}
+                            {section.section_intent && (
+                              <span style={{
+                                fontSize: 10,
+                                padding: '2px 8px',
+                                background: '#F0FDF9',
+                                borderRadius: 10,
+                                color: '#0D9488',
+                                border: '0.5px solid #CCFBF1',
+                              }}>
+                                {section.section_intent}
+                              </span>
+                            )}
+                            {section.action_format && (
+                              <span style={{
+                                fontSize: 10,
+                                padding: '2px 8px',
+                                background: '#FAFAFA',
+                                borderRadius: 10,
+                                color: '#94A3B8',
+                                border: '0.5px solid #E2E8F0',
+                              }}>
+                                {section.action_format?.replace('_', ' ')} actions
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+
+                  <div style={{
+                    padding: '12px 16px',
+                    background: '#F8FAFC',
+                    borderTop: '0.5px solid #E2E8F0',
+                    display: 'flex',
+                    gap: 8,
+                    justifyContent: 'flex-end',
+                  }}>
+                    <button
+                      onClick={() => { setShowSectionPreview(false); setSuggestedSections([]); }}
+                      style={{
+                        padding: '7px 14px',
+                        background: 'none',
+                        border: '0.5px solid #CBD5E1',
+                        borderRadius: 6,
+                        color: '#64748B',
+                        fontSize: 12,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Edit manually
+                    </button>
+                    <button
+                      onClick={handleSaveGeneratedSections}
+                      style={{
+                        padding: '7px 16px',
+                        background: '#0D9488',
+                        border: 'none',
+                        borderRadius: 6,
+                        color: 'white',
+                        fontSize: 12,
+                        fontWeight: 500,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Use this structure
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <IssueTreeEditor
+                key={issueTreeKey}
+                workspaceId={getWorkspaceId()}
+                agentId={editingAgentId}
+                agentGoal={goal}
+                onSave={() => {}}
+              />
+            </>
           ) : (
             <div style={{ padding: 32, textAlign: 'center', color: '#64748B' }}>
               <div style={{ fontSize: 32, marginBottom: 12 }}>📋</div>

@@ -128,6 +128,7 @@ export default function ReportViewer() {
   const [exportModalFormat, setExportModalFormat] = useState<'pdf' | 'docx' | 'pptx'>('pdf');
   const [exportLoading, setExportLoading] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; target: ReportContextTarget } | null>(null);
+  const [summaryExpanded, setSummaryExpanded] = useState(false);
   const { canAnnotateReports } = usePermissions();
   const { currentWorkspace } = useWorkspace();
 
@@ -227,6 +228,19 @@ export default function ReportViewer() {
       localStorage.setItem('collapsed-sections', JSON.stringify(Array.from(next)));
       return next;
     });
+  }
+
+  function extractVerdict(content?: string): string {
+    if (!content) return '';
+    const firstSentence = content.split(/[.!?]/)[0].trim();
+    return firstSentence.length > 100 ? firstSentence.slice(0, 97) + '...' : firstSentence;
+  }
+
+  function scrollToSection(sectionId: string) {
+    const el = document.getElementById(`section-${sectionId}`) || document.getElementById(sectionId);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
   }
 
   async function downloadFormat(format: string) {
@@ -1014,23 +1028,97 @@ export default function ReportViewer() {
                   </div>
                 )}
 
+                {(() => {
+                  const questionSummary = (sections || [])
+                    .filter((s: any) => s.standing_question)
+                    .map((s: any) => ({
+                      question: s.standing_question,
+                      verdict: extractVerdict(s.content || s.headline),
+                      sectionId: s.section_id,
+                    }));
+                  return questionSummary.length > 0 ? (
+                    <div style={{
+                      marginBottom: 24,
+                      padding: '14px 18px',
+                      background: '#F8FAFC',
+                      borderRadius: 8,
+                      border: '0.5px solid #E2E8F0',
+                    }}>
+                      <div
+                        onClick={() => setSummaryExpanded(!summaryExpanded)}
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          cursor: 'pointer',
+                          userSelect: 'none',
+                        }}
+                      >
+                        <span style={{
+                          fontSize: 11,
+                          fontWeight: 600,
+                          color: '#64748B',
+                          letterSpacing: '0.08em',
+                          textTransform: 'uppercase',
+                        }}>
+                          Questions this report answers
+                        </span>
+                        <span style={{ fontSize: 10, color: '#94A3B8' }}>
+                          {summaryExpanded ? '▲ collapse' : '▼ expand'}
+                        </span>
+                      </div>
+                      {summaryExpanded && (
+                        <div style={{ marginTop: 12 }}>
+                          {questionSummary.map((q: any) => (
+                            <div
+                              key={q.sectionId}
+                              onClick={() => scrollToSection(q.sectionId)}
+                              style={{
+                                display: 'grid',
+                                gridTemplateColumns: '16px 1fr',
+                                gap: 8,
+                                marginBottom: 10,
+                                cursor: 'pointer',
+                                padding: '4px 0',
+                              }}
+                            >
+                              <span style={{ color: '#0D9488', fontSize: 12, marginTop: 1 }}>✓</span>
+                              <div>
+                                <div style={{ fontSize: 12, fontWeight: 500, color: '#374151', marginBottom: 2 }}>
+                                  {q.question}
+                                </div>
+                                {q.verdict && (
+                                  <div style={{ fontSize: 11, color: '#64748B', lineHeight: 1.5 }}>
+                                    {q.verdict}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : null;
+                })()}
+
                 {sections?.map((section: any, idx: number) => {
                   const sectionId = section.section_id || `section-${idx}`;
                   const isCollapsed = collapsedSections.has(sectionId);
                   return (
-                    <ReportSection
-                      key={sectionId}
-                      section={{ ...section, section_id: sectionId }}
-                      isCollapsed={isCollapsed}
-                      onToggle={() => toggleSection(sectionId)}
-                      anonymizeMode={anonymizeMode}
-                      workspaceId={workspaceId}
-                      agentId={generation?.agent_id}
-                      generationId={generation?.id}
-                      existingSignal={feedbackSummary?.sections?.[section.section_id]?.signals?.[0] || null}
-                      onContextMenu={handleContextMenu}
-                      humanAnnotations={annotations}
-                    />
+                    <div key={sectionId} id={`section-${sectionId}`}>
+                      <ReportSection
+                        section={{ ...section, section_id: sectionId }}
+                        isCollapsed={isCollapsed}
+                        onToggle={() => toggleSection(sectionId)}
+                        anonymizeMode={anonymizeMode}
+                        workspaceId={workspaceId}
+                        agentId={generation?.agent_id}
+                        generationId={generation?.id}
+                        existingSignal={feedbackSummary?.sections?.[section.section_id]?.signals?.[0] || null}
+                        onContextMenu={handleContextMenu}
+                        humanAnnotations={annotations}
+                      />
+                    </div>
                   );
                 })}
 
