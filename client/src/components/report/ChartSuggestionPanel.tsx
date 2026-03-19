@@ -149,13 +149,22 @@ export default function ChartSuggestionPanel({
         section_id: sectionId,
         chart_type: chartType,
         title: src.title,
-        data_labels: src.data_labels,
-        data_values: src.data_values,
+        data_labels: Array.isArray(src.data_labels) ? src.data_labels : [],
+        data_values: Array.isArray(src.data_values) ? src.data_values : [],
       }),
     });
-    if (!res.ok) throw new Error('Chart POST failed');
-    const { chart } = await res.json();
-    return chart as ReportChart;
+    if (!res.ok) {
+      const errText = await res.text().catch(() => `HTTP ${res.status}`);
+      console.error('[ChartSwitcher] POST failed:', res.status, errText);
+      throw new Error(`Chart POST failed (${res.status}): ${errText}`);
+    }
+    const body = await res.json();
+    console.log('[ChartSwitcher] POST success, saved:', body.chart);
+    if (!body.chart?.id) {
+      console.error('[ChartSwitcher] Response missing chart.id:', body);
+      throw new Error('Server returned chart without id');
+    }
+    return body.chart as ReportChart;
   }
 
   async function handleAddToReport() {
@@ -177,17 +186,24 @@ export default function ChartSuggestionPanel({
 
   async function handleChangeType(newType: ChartType) {
     if (!acceptedChart && !suggestion) return;
+    const prevType = selectedType;
     setSelectedType(newType);
     setAdding(true);
     try {
       const chart = await postChart(newType);
-      if (!chart) return;
+      if (!chart) {
+        setSelectedType(prevType);
+        return;
+      }
       setAcceptedChart(chart);
       setSelectedType(chart.chart_type);
       const url = await loadChartImage(chart.id);
       revokeUrl(prevPreviewUrl.current);
       prevPreviewUrl.current = url;
       setPreviewUrl(url);
+    } catch (err) {
+      console.error('[ChartSwitcher] handleChangeType failed:', err);
+      setSelectedType(prevType);   // roll back button highlight to previous type
     } finally {
       setAdding(false);
     }

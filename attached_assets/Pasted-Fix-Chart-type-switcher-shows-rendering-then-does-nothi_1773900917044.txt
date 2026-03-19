@@ -1,0 +1,130 @@
+Fix: Chart type switcher shows "rendering" then
+does nothing — silent failure
+
+In client/src/components/report/
+ChartSuggestionPanel.tsx, find handleChangeType().
+
+The function shows a loading state then fails
+silently. Add error handling to surface what's
+going wrong:
+
+Step 1 — Add console logging to diagnose:
+```typescript
+async function handleChangeType(newType: ChartType) {
+  console.log('[ChartSwitcher] Switching to:', newType);
+  console.log('[ChartSwitcher] acceptedChart:', acceptedChart);
+  console.log('[ChartSwitcher] suggestion:', suggestion);
+  console.log('[ChartSwitcher] sectionId:', sectionId);
+  console.log('[ChartSwitcher] reportDocumentId:', reportDocumentId);
+
+  // ... existing code ...
+
+  const res = await fetch(...);
+  console.log('[ChartSwitcher] POST status:', res.status);
+  if (!res.ok) {
+    const err = await res.text();
+    console.error('[ChartSwitcher] POST failed:', err);
+    setRendering(false); // reset loading state
+    return;
+  }
+  // ... rest of function
+}
+```
+
+Step 2 — Check the POST body being sent.
+The most likely failure causes:
+
+A) chart data is undefined or empty:
+   If acceptedChart.data is null or
+   chart_spec.data_points is undefined,
+   the POST body has no data array and
+   the endpoint rejects it.
+
+   Fix: ensure data is always an array:
+```typescript
+   data: (
+     acceptedChart?.data ||
+     suggestion?.data ||
+     nodeChart?.chart_spec?.data_points ||
+     []
+   ).map((d: any) => ({
+     label: d.label,
+     value: d.value,
+   })).filter((d: any) =>
+     d.label && d.value !== undefined
+   )
+```
+
+B) section_id is wrong:
+   Node-level charts have section_id like
+   'node-deal-execution' but the chart may
+   have been stored with a different key.
+   Log the section_id being sent and verify
+   it matches what's in report_charts table:
+```sql
+   SELECT section_id, chart_type, title
+   FROM report_charts
+   WHERE workspace_id =
+     '4160191d-73bc-414b-97dd-5a1853190378'
+   ORDER BY created_at DESC LIMIT 5;
+```
+
+C) The chart ID for the image fetch is wrong:
+   After a successful POST, the image fetch
+   uses saved.id but if saved is malformed
+   the id is undefined.
+
+   Fix: validate saved before image fetch:
+```typescript
+   const saved = await res.json();
+   console.log('[ChartSwitcher] saved:', saved);
+   if (!saved?.id) {
+     console.error('[ChartSwitcher] No id in response');
+     setRendering(false);
+     return;
+   }
+```
+
+Step 3 — Also check the Donut case specifically.
+The Donut type may be sending 'donut' but the
+endpoint validates against:
+  CHECK (chart_type IN
+    ('bar', 'horizontal_bar', 'line', 'donut'))
+
+If the frontend is sending 'doughnut' (Chart.js
+name) instead of 'donut' (DB constraint), the
+INSERT fails with a check violation.
+
+Fix: normalize chart type before sending:
+```typescript
+const normalizedType = newType === 'doughnut'
+  ? 'donut'
+  : newType === 'horizontalBar'
+  ? 'horizontal_bar'
+  : newType;
+```
+
+Apply this normalization in handleChangeType()
+before building the POST body.
+
+---
+
+After adding logging, click Donut/Horizontal,
+check the browser console, and report:
+1. What does '[ChartSwitcher] POST status:' show?
+2. What does the error message say if it fails?
+3. What section_id is being sent?
+4. What does the saved object look like?
+
+Fix whichever of A, B, or C is the root cause.
+
+---
+
+Acceptance criteria:
+1. Click Donut → chart re-renders as donut
+2. Click Horizontal → chart re-renders as
+   horizontal bar
+3. No "rendering" stuck state — either
+   succeeds or shows an error state
+4. Console shows the POST status and response
+   (keep logging in dev, can remove later)
