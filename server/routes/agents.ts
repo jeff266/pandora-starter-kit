@@ -503,8 +503,7 @@ agentsWorkspaceRouter.patch('/:workspaceId/report-documents/:documentId', requir
          $1::text[],
          $2::jsonb,
          true
-       ),
-       updated_at = NOW()
+       )
        WHERE id = $3 AND workspace_id = $4
        RETURNING id, tiptap_content`,
       [

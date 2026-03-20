@@ -13,6 +13,24 @@ const CHARTABLE_SKILLS = [
   'forecast-rollup',
 ];
 
+const QUERYABLE_FIELDS: Record<string, { table: string; fields: string[] }> = {
+  deals: {
+    table: 'deals',
+    fields: ['id', 'name', 'stage', 'amount', 'close_date', 'probability', 'owner_id', 'created_at', 'last_activity_at'],
+  },
+  contacts: {
+    table: 'contacts',
+    fields: ['id', 'name', 'email', 'title', 'account_name', 'created_at'],
+  },
+  activities: {
+    table: 'activities',
+    fields: ['id', 'type', 'subject', 'deal_id', 'contact_id', 'owner_id', 'completed_at', 'created_at'],
+  },
+};
+
+const OPERATORS = ['=', '!=', '>', '<', '>=', '<=', 'LIKE', 'IN', 'IS NULL', 'IS NOT NULL'];
+const AGGREGATES = ['COUNT', 'SUM', 'AVG', 'MIN', 'MAX'];
+
 router.get('/:workspaceId/chart-data/sources', requirePermission('agents.view'), async (req: Request, res: Response) => {
   try {
     const { workspaceId } = req.params;
@@ -37,6 +55,55 @@ router.get('/:workspaceId/chart-data/sources', requirePermission('agents.view'),
   } catch (err: any) {
     console.error('[ChartData] Failed to get sources:', err.message);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Living Document: Get schema — must be before /:skillId wildcard to avoid route capture
+router.get('/:workspaceId/chart-data/schema', requirePermission('agents.view'), async (_req: Request, res: Response) => {
+  try {
+    const schema = Object.entries(QUERYABLE_FIELDS).map(([entityType, config]) => ({
+      entity_type: entityType,
+      fields: config.fields.map(field => ({
+        name: field,
+        label: field.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+      })),
+    }));
+
+    res.json({ schema });
+  } catch (err: any) {
+    console.error('[ChartData] Failed to get schema:', err);
+    res.status(500).json({ error: 'Failed to get schema' });
+  }
+});
+
+// Living Document: Get saved queries — must be before /:skillId wildcard
+router.get('/:workspaceId/chart-data/queries', requirePermission('agents.view'), async (req: Request, res: Response) => {
+  try {
+    const { workspaceId } = req.params;
+
+    const result = await query(
+      `SELECT
+        id,
+        name,
+        description,
+        sql_text,
+        last_run_rows,
+        last_run_ms,
+        created_at,
+        updated_at
+      FROM workspace_saved_queries
+      WHERE workspace_id = $1
+      ORDER BY updated_at DESC`,
+      [workspaceId]
+    );
+
+    res.json({
+      queries: result.rows,
+      count: result.rows.length,
+    });
+  } catch (err: any) {
+    console.error('[ChartData] Failed to get saved queries:', err);
+    res.status(500).json({ error: 'Failed to get saved queries' });
   }
 });
 
@@ -76,25 +143,6 @@ router.get('/:workspaceId/chart-data/:skillId', requirePermission('agents.view')
     res.status(500).json({ error: err.message });
   }
 });
-
-// Living Document: Query live data for charts/tables (with field whitelisting)
-const QUERYABLE_FIELDS: Record<string, { table: string; fields: string[] }> = {
-  deals: {
-    table: 'deals',
-    fields: ['id', 'name', 'stage', 'amount', 'close_date', 'probability', 'owner_id', 'created_at', 'last_activity_at'],
-  },
-  contacts: {
-    table: 'contacts',
-    fields: ['id', 'name', 'email', 'title', 'account_name', 'created_at'],
-  },
-  activities: {
-    table: 'activities',
-    fields: ['id', 'type', 'subject', 'deal_id', 'contact_id', 'owner_id', 'completed_at', 'created_at'],
-  },
-};
-
-const OPERATORS = ['=', '!=', '>', '<', '>=', '<=', 'LIKE', 'IN', 'IS NULL', 'IS NOT NULL'];
-const AGGREGATES = ['COUNT', 'SUM', 'AVG', 'MIN', 'MAX'];
 
 router.post('/:workspaceId/chart-data/query', requirePermission('agents.view'), async (req: Request, res: Response) => {
   try {
@@ -233,55 +281,6 @@ router.post('/:workspaceId/chart-data/query', requirePermission('agents.view'), 
   } catch (err: any) {
     console.error('[ChartData] Query failed:', err);
     res.status(500).json({ error: 'Query failed' });
-  }
-});
-
-// Living Document: Get schema (whitelisted fields only, no SQL column names exposed)
-router.get('/:workspaceId/chart-data/schema', requirePermission('agents.view'), async (_req: Request, res: Response) => {
-  try {
-    const schema = Object.entries(QUERYABLE_FIELDS).map(([entityType, config]) => ({
-      entity_type: entityType,
-      fields: config.fields.map(field => ({
-        name: field,
-        label: field.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
-      })),
-    }));
-
-    res.json({ schema });
-  } catch (err: any) {
-    console.error('[ChartData] Failed to get schema:', err);
-    res.status(500).json({ error: 'Failed to get schema' });
-  }
-});
-
-// Living Document: Get saved queries for chart builder
-router.get('/:workspaceId/chart-data/queries', requirePermission('agents.view'), async (req: Request, res: Response) => {
-  try {
-    const { workspaceId } = req.params;
-
-    const result = await query(
-      `SELECT
-        id,
-        name,
-        description,
-        sql_text,
-        last_run_rows,
-        last_run_ms,
-        created_at,
-        updated_at
-      FROM workspace_saved_queries
-      WHERE workspace_id = $1
-      ORDER BY updated_at DESC`,
-      [workspaceId]
-    );
-
-    res.json({
-      queries: result.rows,
-      count: result.rows.length,
-    });
-  } catch (err: any) {
-    console.error('[ChartData] Failed to get saved queries:', err);
-    res.status(500).json({ error: 'Failed to get saved queries' });
   }
 });
 
