@@ -78,6 +78,65 @@ router.get('/:workspaceId/reports/:reportId', async (req: Request, res: Response
   }
 });
 
+// Living Document: Get TipTap content for a report document
+router.get('/:workspaceId/report-documents/:documentId/content', async (req: Request, res: Response) => {
+  try {
+    const { workspaceId, documentId } = req.params;
+
+    const result = await query(
+      `SELECT tiptap_content FROM report_documents
+       WHERE id = $1 AND workspace_id = $2`,
+      [documentId, workspaceId]
+    );
+
+    if (result.rows.length === 0) {
+      res.status(404).json({ error: 'Document not found' });
+      return;
+    }
+
+    res.json({ tiptap_content: result.rows[0].tiptap_content || {} });
+  } catch (err) {
+    logger.error('Failed to get tiptap content', err instanceof Error ? err : undefined);
+    res.status(500).json({ error: 'Failed to get tiptap content' });
+  }
+});
+
+// Living Document: Update TipTap content for a specific section (merge, not overwrite)
+router.patch('/:workspaceId/report-documents/:documentId', async (req: Request, res: Response) => {
+  try {
+    const { workspaceId, documentId } = req.params;
+    const { section_id, content } = req.body;
+
+    if (!section_id || !content) {
+      res.status(400).json({ error: 'section_id and content are required' });
+      return;
+    }
+
+    // Use JSONB merge operator to update only the specified section_id
+    // This preserves all other section contents
+    const result = await query(
+      `UPDATE report_documents
+       SET tiptap_content = COALESCE(tiptap_content, '{}'::jsonb) || jsonb_build_object($3, $4)
+       WHERE id = $1 AND workspace_id = $2
+       RETURNING tiptap_content`,
+      [documentId, workspaceId, section_id, JSON.stringify(content)]
+    );
+
+    if (result.rows.length === 0) {
+      res.status(404).json({ error: 'Document not found' });
+      return;
+    }
+
+    res.json({
+      success: true,
+      tiptap_content: result.rows[0].tiptap_content
+    });
+  } catch (err) {
+    logger.error('Failed to update tiptap content', err instanceof Error ? err : undefined);
+    res.status(500).json({ error: 'Failed to update tiptap content' });
+  }
+});
+
 // Create new report template
 router.post('/:workspaceId/reports', async (req: Request, res: Response) => {
   try {
