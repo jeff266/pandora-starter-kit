@@ -151,6 +151,7 @@ export async function getLatestReportDocument(
     total_word_count: row.total_word_count,
     tokens_used: row.tokens_used,
     orchestrator_run_id: row.orchestrator_run_id,
+    tiptap_content: row.tiptap_content ?? null,
   };
 }
 
@@ -200,6 +201,7 @@ export async function getAllReportsForWorkspace(
       total_word_count: row.total_word_count,
       tokens_used: row.tokens_used,
       orchestrator_run_id: row.orchestrator_run_id,
+      tiptap_content: row.tiptap_content ?? null,
     };
   }));
 }
@@ -238,5 +240,6 @@ export async function getReportDocumentById(
     total_word_count: row.total_word_count,
     tokens_used: row.tokens_used,
     orchestrator_run_id: row.orchestrator_run_id,
+    tiptap_content: row.tiptap_content ?? null,
   };
 }

@@ -483,7 +483,7 @@ agentsWorkspaceRouter.get('/:workspaceId/reports/:reportId', requirePermission('
 
 // ── Living Document: Per-section TipTap content save ─────────────────────────
 
-agentsWorkspaceRouter.patch('/:workspaceId/report-documents/:documentId', requirePermission('agents.view'), async (req: Request, res: Response) => {
+agentsWorkspaceRouter.patch('/:workspaceId/report-documents/:documentId', requireAnyPermission('agents.edit_own', 'agents.edit_any'), async (req: Request, res: Response) => {
   const workspaceId = req.params.workspaceId as string;
   const documentId = req.params.documentId as string;
   const { section_id, tiptap_content } = req.body;

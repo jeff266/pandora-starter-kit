@@ -190,6 +190,7 @@ export interface ReportDocument {
   total_word_count: number;
   tokens_used: number;
   orchestrator_run_id: string;
+  tiptap_content?: Record<string, any> | null;
 }
 
 export interface PriorContext {

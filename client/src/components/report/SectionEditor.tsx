@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
+import { generateHTML } from '@tiptap/core';
 import { StarterKit } from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import Strike from '@tiptap/extension-strike';
@@ -33,18 +34,13 @@ interface SectionEditorProps {
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
-interface SlashMenuItem {
-  id: string;
-  label: string;
-  description: string;
-  icon: string;
-}
-
-const SLASH_MENU_ITEMS: SlashMenuItem[] = [
-  { id: 'chart', label: 'Chart', description: 'Insert a data chart', icon: '▤' },
-  { id: 'divider', label: 'Divider', description: 'Insert a horizontal rule', icon: '—' },
-  { id: 'table', label: 'Table', description: 'Insert a table (coming soon)', icon: '⊞' },
-  { id: 'metric', label: 'Metric Card', description: 'Insert a KPI card (coming soon)', icon: '◈' },
+const TIPTAP_EXTENSIONS = [
+  StarterKit,
+  Placeholder.configure({
+    placeholder: 'Write something, or type / to add a chart, table, or divider…',
+  }),
+  Strike,
+  Image.configure({ inline: false }),
 ];
 
 function convertPlainTextToDoc(text: string): any {
@@ -58,6 +54,33 @@ function convertPlainTextToDoc(text: string): any {
     })),
   };
 }
+
+function TiptapReadView({ content }: { content: any }) {
+  const html = generateHTML(content, TIPTAP_EXTENSIONS);
+  return (
+    <>
+      <style>{`
+        .tiptap-read-view p { margin: 0 0 12px; font-size: 16px; line-height: 1.65; color: #334155; }
+        .tiptap-read-view hr { border: none; border-top: 1.5px solid #E2E8F0; margin: 20px 0; }
+        .tiptap-read-view img { max-width: 100%; border-radius: 6px; margin: 8px 0; display: block; }
+        .tiptap-read-view h1, .tiptap-read-view h2, .tiptap-read-view h3 { color: #1E293B; margin: 0 0 10px; }
+        .tiptap-read-view ul, .tiptap-read-view ol { padding-left: 20px; margin: 0 0 12px; }
+        .tiptap-read-view li { margin-bottom: 4px; font-size: 16px; line-height: 1.65; color: #334155; }
+      `}</style>
+      <div
+        className="tiptap-read-view"
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+    </>
+  );
+}
+
+const SLASH_MENU_ITEMS = [
+  { id: 'chart', label: 'Chart', description: 'Insert a data chart', icon: '▤' },
+  { id: 'divider', label: 'Divider', description: 'Insert a horizontal rule', icon: '—' },
+  { id: 'table', label: 'Table', description: 'Insert a table (coming soon)', icon: '⊞' },
+  { id: 'metric', label: 'Metric Card', description: 'Insert a KPI card (coming soon)', icon: '◈' },
+];
 
 export default function SectionEditor({
   section,
@@ -101,14 +124,7 @@ export default function SectionEditor({
   }, [workspaceId, documentId, token, section.id]);
 
   const editor = useEditor({
-    extensions: [
-      StarterKit,
-      Placeholder.configure({
-        placeholder: 'Write something, or type / to add a chart, table, or divider…',
-      }),
-      Strike,
-      Image.configure({ inline: false }),
-    ],
+    extensions: TIPTAP_EXTENSIONS,
     content: initialContent,
     onUpdate: ({ editor }) => {
       const { state } = editor;
@@ -184,9 +200,9 @@ export default function SectionEditor({
   }
 
   function handleChartInsertedFromEditor(chart: any) {
-    if (fromEditorRef.current && editor && chart.preview_png) {
-      const src = `data:image/png;base64,${chart.preview_png}`;
-      editor.chain().focus().setImage({ src, alt: chart.title || 'Chart' }).run();
+    if (fromEditorRef.current && editor && chart.id) {
+      const imageUrl = `/api/workspaces/${workspaceId}/reports/${documentId}/charts/${chart.id}/image`;
+      editor.chain().focus().setImage({ src: imageUrl, alt: chart.title || 'Chart' }).run();
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(() => autoSave(editor.getJSON()), 300);
     }
@@ -242,14 +258,21 @@ export default function SectionEditor({
         >
           ✎ Edit
         </button>
-        <AnnotatableSection
-          section={section}
-          annotations={annotations}
-          isAnnotating={isAnnotating}
-          highlightedParagraphIndex={highlightedParagraphIndex}
-          onAnnotationSave={onAnnotationSave}
-          onAnnotationDelete={onAnnotationDelete}
-        />
+        {tiptapContent ? (
+          <div>
+            <h2 style={{ fontSize: 20, fontWeight: 700, color: '#1E293B', marginBottom: 12 }}>{section.title}</h2>
+            <TiptapReadView content={tiptapContent} />
+          </div>
+        ) : (
+          <AnnotatableSection
+            section={section}
+            annotations={annotations}
+            isAnnotating={isAnnotating}
+            highlightedParagraphIndex={highlightedParagraphIndex}
+            onAnnotationSave={onAnnotationSave}
+            onAnnotationDelete={onAnnotationDelete}
+          />
+        )}
       </div>
     );
   }
