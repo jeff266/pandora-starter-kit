@@ -29,7 +29,7 @@ interface FieldDef {
   owner_field?: boolean;
 }
 
-const QUERYABLE_FIELDS: Record<string, { table: string; owner_field: string; fields: FieldDef[] }> = {
+const QUERYABLE_FIELDS: Record<string, { table: string; owner_field: string | null; fields: FieldDef[] }> = {
   deals: {
     table: 'deals',
     owner_field: 'owner',
@@ -46,28 +46,36 @@ const QUERYABLE_FIELDS: Record<string, { table: string; owner_field: string; fie
       { name: 'days_in_stage',     field_type: 'numeric' },
       { name: 'health_score',      field_type: 'numeric' },
       { name: 'deal_risk',         field_type: 'numeric' },
+      { name: 'lead_source',       field_type: 'categorical' },
+      { name: 'last_activity_date', field_type: 'date' },
       { name: 'created_at',        field_type: 'date' },
     ],
   },
   contacts: {
     table: 'contacts',
-    owner_field: 'owner_email',
+    owner_field: null,
     fields: [
-      { name: 'name',         field_type: 'text' },
-      { name: 'email',        field_type: 'text' },
-      { name: 'title',        field_type: 'categorical' },
-      { name: 'account_name', field_type: 'categorical' },
-      { name: 'created_at',   field_type: 'date' },
+      { name: 'first_name',       field_type: 'text' },
+      { name: 'last_name',        field_type: 'text' },
+      { name: 'email',            field_type: 'text' },
+      { name: 'title',            field_type: 'categorical' },
+      { name: 'seniority',        field_type: 'categorical' },
+      { name: 'department',       field_type: 'categorical' },
+      { name: 'lifecycle_stage',  field_type: 'categorical' },
+      { name: 'engagement_score', field_type: 'numeric' },
+      { name: 'created_at',       field_type: 'date' },
     ],
   },
   activities: {
     table: 'activities',
-    owner_field: 'owner_id',
+    owner_field: null,
     fields: [
-      { name: 'type',         field_type: 'categorical' },
-      { name: 'subject',      field_type: 'text' },
-      { name: 'completed_at', field_type: 'date' },
-      { name: 'created_at',   field_type: 'date' },
+      { name: 'activity_type',     field_type: 'categorical' },
+      { name: 'subject',           field_type: 'text' },
+      { name: 'actor',             field_type: 'categorical' },
+      { name: 'direction',         field_type: 'categorical' },
+      { name: 'duration_seconds',  field_type: 'numeric' },
+      { name: 'created_at',        field_type: 'date' },
     ],
   },
 };
@@ -176,9 +184,9 @@ router.get('/:workspaceId/chart-data/field-values/:entityType/:fieldName', requi
     const conditions: string[] = [`${table}.workspace_id = $1`];
     const values: any[] = [workspaceId];
 
-    // Rep enforcement: if ae role, restrict to their own records
+    // Rep enforcement: if ae role and table has an owner field, restrict to their own records
     const workspaceMemberRole = req.workspaceMember?.role ?? '';
-    if (REP_ROLES.has(workspaceMemberRole) && req.user?.email) {
+    if (REP_ROLES.has(workspaceMemberRole) && owner_field && req.user?.email) {
       const repName = await resolveRepName(workspaceId, req.user.email);
       if (repName) {
         conditions.push(`${table}.${owner_field} = $2`);
@@ -307,7 +315,7 @@ router.post('/:workspaceId/chart-data/query', requirePermission('agents.view'), 
     const workspaceMemberRole = req.workspaceMember?.role ?? '';
     const isRep = REP_ROLES.has(workspaceMemberRole);
 
-    if (isRep) {
+    if (isRep && owner_field) {
       if (!req.user?.email) {
         res.status(403).json({ error: 'User identity required for rep-level queries' });
         return;
