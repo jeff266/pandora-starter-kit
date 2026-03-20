@@ -202,6 +202,127 @@ function ChartSkeleton({ label }: { label: string }) {
   );
 }
 
+// ─── FieldPicker ─────────────────────────────────────────────────────────────
+
+const FIELD_PICKER_TOP_N = 5;
+
+interface FieldPickerProps {
+  fields: LiveSchemaField[];
+  fillRates: Record<string, number>;
+  value: string;
+  onChange: (name: string) => void;
+}
+
+function FieldPicker({ fields, fillRates, value, onChange }: FieldPickerProps) {
+  const [expanded, setExpanded] = useState(false);
+  const [search, setSearch] = useState('');
+
+  const sorted = useMemo(() => {
+    if (Object.keys(fillRates).length === 0) return fields;
+    return [...fields].sort((a, b) => (fillRates[b.name] ?? -1) - (fillRates[a.name] ?? -1));
+  }, [fields, fillRates]);
+
+  const topFields = sorted.slice(0, FIELD_PICKER_TOP_N);
+  const hasMore = sorted.length > FIELD_PICKER_TOP_N;
+  const selectedInTop = topFields.some(f => f.name === value);
+  const selectedField = fields.find(f => f.name === value);
+
+  const displayed = expanded
+    ? (search ? sorted.filter(f => f.label.toLowerCase().includes(search.toLowerCase())) : sorted)
+    : topFields;
+
+  return (
+    <div>
+      {!selectedInTop && selectedField && (
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '5px 10px', marginBottom: 4,
+          background: '#F0FDFA', border: '0.5px solid #0D9488', borderRadius: 5,
+          fontSize: 12, color: '#0D9488',
+        }}>
+          <span>✓ {selectedField.label}</span>
+          {fillRates[value] !== undefined && (
+            <span style={{ fontSize: 9, background: '#CCFBF1', borderRadius: 3, padding: '1px 4px' }}>
+              {fillRates[value]}%
+            </span>
+          )}
+        </div>
+      )}
+      {displayed.map(f => {
+        const isSelected = f.name === value;
+        const rate = fillRates[f.name];
+        return (
+          <button
+            key={f.name}
+            onClick={() => onChange(f.name)}
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              width: '100%', padding: '6px 10px', marginBottom: 4,
+              background: isSelected ? '#F0FDFA' : 'white',
+              border: `0.5px solid ${isSelected ? '#0D9488' : '#E2E8F0'}`,
+              borderRadius: 5, cursor: 'pointer',
+              fontSize: 12, color: isSelected ? '#0D9488' : '#374151',
+            }}
+            onMouseEnter={e => { if (!isSelected) (e.currentTarget as HTMLElement).style.borderColor = '#94A3B8'; }}
+            onMouseLeave={e => { if (!isSelected) (e.currentTarget as HTMLElement).style.borderColor = '#E2E8F0'; }}
+          >
+            <span>{f.label}</span>
+            {rate !== undefined && (
+              <span style={{
+                fontSize: 9, color: '#94A3B8', background: '#F1F5F9',
+                borderRadius: 3, padding: '1px 4px', fontVariantNumeric: 'tabular-nums',
+                flexShrink: 0, marginLeft: 8,
+              }}>
+                {rate}%
+              </span>
+            )}
+          </button>
+        );
+      })}
+      {expanded && (
+        <input
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Search fields…"
+          autoFocus
+          style={{
+            width: '100%', boxSizing: 'border-box',
+            padding: '5px 8px', marginBottom: 4,
+            border: '0.5px solid #CBD5E1', borderRadius: 5,
+            fontSize: 11, color: '#1E293B',
+          }}
+        />
+      )}
+      {!expanded && hasMore && (
+        <button
+          onClick={() => setExpanded(true)}
+          style={{
+            fontSize: 11, color: '#64748B', background: 'none', border: 'none',
+            cursor: 'pointer', padding: '2px 0', display: 'block', width: '100%',
+            textAlign: 'left',
+          }}
+        >
+          See more ({sorted.length - FIELD_PICKER_TOP_N} more) →
+        </button>
+      )}
+      {expanded && (
+        <button
+          onClick={() => { setExpanded(false); setSearch(''); }}
+          style={{
+            fontSize: 11, color: '#64748B', background: 'none', border: 'none',
+            cursor: 'pointer', padding: '2px 0', display: 'block', width: '100%',
+            textAlign: 'left',
+          }}
+        >
+          ↑ See less
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export default function ChartBuilder({
   workspaceId,
   reportDocumentId,
@@ -239,6 +360,9 @@ export default function ChartBuilder({
   const [liveLimit, setLiveLimit] = useState(100);
   const [fieldValues, setFieldValues] = useState<Record<string, Record<string, string[]>>>({});
   const [fieldValuesLoading, setFieldValuesLoading] = useState<Record<string, Record<string, boolean>>>({});
+
+  const [liveFillRates, setLiveFillRates] = useState<Record<string, Record<string, number>>>({});
+  const [filterExpandedIdx, setFilterExpandedIdx] = useState<number | null>(null);
 
   const [chartTitle, setChartTitle] = useState('');
   const [chartType, setChartType] = useState<ChartTypeOption>('bar');
@@ -365,6 +489,7 @@ export default function ChartBuilder({
         setLiveEntityType(firstEntity);
         setLiveGroupBy(schemaMap[firstEntity][0]?.name || '');
         setLiveAggField(schemaMap[firstEntity][1]?.name || '*');
+        loadFillRates(firstEntity);
       }
     } catch (err) {
       console.error('[ChartBuilder] Schema error:', err);
@@ -402,6 +527,23 @@ export default function ChartBuilder({
         ...prev,
         [entityType]: { ...(prev[entityType] || {}), [fieldName]: false },
       }));
+    }
+  }
+
+  async function loadFillRates(entityType: string) {
+    if (!entityType) return;
+    if (liveFillRates[entityType]) return;
+    try {
+      const res = await fetch(`${base}/chart-data/fill-rates/${entityType}`, { headers: authHeader });
+      if (!res.ok) return;
+      const data = await res.json();
+      const rates: Record<string, number> = {};
+      (data.fill_rates || []).forEach((r: { field_name: string; fill_rate: number }) => {
+        rates[r.field_name] = r.fill_rate;
+      });
+      setLiveFillRates(prev => ({ ...prev, [entityType]: rates }));
+    } catch {
+      // silent fallback — schema field order preserved
     }
   }
 
@@ -900,6 +1042,8 @@ export default function ChartBuilder({
                             setLiveGroupBy(fields[0]?.name || '');
                             setLiveAggField(fields[1]?.name || '*');
                             setLiveFilters([]);
+                            setFilterExpandedIdx(null);
+                            loadFillRates(et);
                           }}
                           style={{ width: '100%', padding: '7px 10px', border: '0.5px solid #E2E8F0', borderRadius: 6, fontSize: 12, background: 'white', color: '#1E293B' }}
                         >
@@ -911,15 +1055,12 @@ export default function ChartBuilder({
 
                       <div style={{ marginBottom: 16 }}>
                         <label style={{ display: 'block', fontSize: 10, fontWeight: 600, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Group by</label>
-                        <select
+                        <FieldPicker
+                          fields={liveSchema[liveEntityType] || []}
+                          fillRates={liveFillRates[liveEntityType] || {}}
                           value={liveGroupBy}
-                          onChange={e => setLiveGroupBy(e.target.value)}
-                          style={{ width: '100%', padding: '7px 10px', border: '0.5px solid #E2E8F0', borderRadius: 6, fontSize: 12, background: 'white', color: '#1E293B' }}
-                        >
-                          {(liveSchema[liveEntityType] || []).map(f => (
-                            <option key={f.name} value={f.name}>{f.label}</option>
-                          ))}
-                        </select>
+                          onChange={setLiveGroupBy}
+                        />
                       </div>
 
                       <div style={{ marginBottom: 16 }}>
@@ -969,62 +1110,88 @@ export default function ChartBuilder({
                           const isNumericOrDate = fieldDef?.field_type === 'numeric' || fieldDef?.field_type === 'date';
                           const picklist = fieldValues[liveEntityType]?.[f.field] || [];
                           const picklistLoading = fieldValuesLoading[liveEntityType]?.[f.field] || false;
+                          const currentFillRate = (liveFillRates[liveEntityType] || {})[f.field];
+                          const isFieldExpanded = filterExpandedIdx === i;
                           return (
-                            <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center' }}>
-                              <select
-                                value={f.field}
-                                onChange={e => {
-                                  const newField = e.target.value;
-                                  setLiveFilters(prev => prev.map((x, j) => j === i ? { ...x, field: newField, value: '' } : x));
-                                  const newFieldDef = (liveSchema[liveEntityType] || []).find(fld => fld.name === newField);
-                                  if (newFieldDef?.field_type === 'categorical') {
-                                    loadFieldValues(liveEntityType, newField);
-                                  }
-                                }}
-                                style={{ flex: 2, padding: '5px 8px', border: '0.5px solid #E2E8F0', borderRadius: 5, fontSize: 11, background: 'white', color: '#1E293B' }}
-                              >
-                                {(liveSchema[liveEntityType] || []).map(fld => (
-                                  <option key={fld.name} value={fld.name}>{fld.label}</option>
-                                ))}
-                              </select>
-                              <select
-                                value={f.operator}
-                                onChange={e => setLiveFilters(prev => prev.map((x, j) => j === i ? { ...x, operator: e.target.value } : x))}
-                                style={{ flex: 1, padding: '5px 8px', border: '0.5px solid #E2E8F0', borderRadius: 5, fontSize: 11, background: 'white', color: '#1E293B' }}
-                              >
-                                <option value="=">=</option>
-                                <option value="!=">!=</option>
-                                {isNumericOrDate && <option value=">">&gt;</option>}
-                                {isNumericOrDate && <option value="<">&lt;</option>}
-                                {isNumericOrDate && <option value=">=">&gt;=</option>}
-                                {isNumericOrDate && <option value="<=">&lt;=</option>}
-                                {!isCategorical && <option value="LIKE">LIKE</option>}
-                              </select>
-                              {isCategorical ? (
-                                <select
-                                  value={f.value}
-                                  onChange={e => setLiveFilters(prev => prev.map((x, j) => j === i ? { ...x, value: e.target.value } : x))}
-                                  onFocus={() => loadFieldValues(liveEntityType, f.field)}
-                                  style={{ flex: 2, padding: '5px 8px', border: '0.5px solid #E2E8F0', borderRadius: 5, fontSize: 11, background: 'white', color: '#1E293B' }}
+                            <div key={i} style={{ marginBottom: 6 }}>
+                              {/* Compact row: field trigger + operator + value + × */}
+                              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                                <button
+                                  onClick={() => setFilterExpandedIdx(isFieldExpanded ? null : i)}
+                                  style={{
+                                    flex: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                                    padding: '5px 8px', border: `0.5px solid ${isFieldExpanded ? '#0D9488' : '#E2E8F0'}`,
+                                    borderRadius: 5, fontSize: 11, background: isFieldExpanded ? '#F0FDFA' : 'white',
+                                    color: '#1E293B', cursor: 'pointer', textAlign: 'left',
+                                  }}
                                 >
-                                  <option value="">{picklistLoading ? 'Loading…' : '— pick value —'}</option>
-                                  {picklist.map(v => (
-                                    <option key={v} value={v}>{v}</option>
-                                  ))}
+                                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {fieldDef?.label || f.field || '— field —'}
+                                  </span>
+                                  <span style={{ display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0 }}>
+                                    {currentFillRate !== undefined && (
+                                      <span style={{ fontSize: 9, color: '#94A3B8', background: '#F1F5F9', borderRadius: 3, padding: '1px 3px' }}>{currentFillRate}%</span>
+                                    )}
+                                    <span style={{ fontSize: 8, color: '#94A3B8' }}>▾</span>
+                                  </span>
+                                </button>
+                                <select
+                                  value={f.operator}
+                                  onChange={e => setLiveFilters(prev => prev.map((x, j) => j === i ? { ...x, operator: e.target.value } : x))}
+                                  style={{ flex: 1, padding: '5px 8px', border: '0.5px solid #E2E8F0', borderRadius: 5, fontSize: 11, background: 'white', color: '#1E293B' }}
+                                >
+                                  <option value="=">=</option>
+                                  <option value="!=">!=</option>
+                                  {isNumericOrDate && <option value=">">&gt;</option>}
+                                  {isNumericOrDate && <option value="<">&lt;</option>}
+                                  {isNumericOrDate && <option value=">=">&gt;=</option>}
+                                  {isNumericOrDate && <option value="<=">&lt;=</option>}
+                                  {!isCategorical && <option value="LIKE">LIKE</option>}
                                 </select>
-                              ) : (
-                                <input
-                                  value={f.value}
-                                  onChange={e => setLiveFilters(prev => prev.map((x, j) => j === i ? { ...x, value: e.target.value } : x))}
-                                  placeholder="value"
-                                  type={fieldDef?.field_type === 'numeric' ? 'number' : 'text'}
-                                  style={{ flex: 2, padding: '5px 8px', border: '0.5px solid #E2E8F0', borderRadius: 5, fontSize: 11, color: '#1E293B' }}
-                                />
+                                {isCategorical ? (
+                                  <select
+                                    value={f.value}
+                                    onChange={e => setLiveFilters(prev => prev.map((x, j) => j === i ? { ...x, value: e.target.value } : x))}
+                                    onFocus={() => loadFieldValues(liveEntityType, f.field)}
+                                    style={{ flex: 2, padding: '5px 8px', border: '0.5px solid #E2E8F0', borderRadius: 5, fontSize: 11, background: 'white', color: '#1E293B' }}
+                                  >
+                                    <option value="">{picklistLoading ? 'Loading…' : '— pick value —'}</option>
+                                    {picklist.map(v => (
+                                      <option key={v} value={v}>{v}</option>
+                                    ))}
+                                  </select>
+                                ) : (
+                                  <input
+                                    value={f.value}
+                                    onChange={e => setLiveFilters(prev => prev.map((x, j) => j === i ? { ...x, value: e.target.value } : x))}
+                                    placeholder="value"
+                                    type={fieldDef?.field_type === 'numeric' ? 'number' : 'text'}
+                                    style={{ flex: 2, padding: '5px 8px', border: '0.5px solid #E2E8F0', borderRadius: 5, fontSize: 11, color: '#1E293B' }}
+                                  />
+                                )}
+                                <button
+                                  onClick={() => { setLiveFilters(prev => prev.filter((_, j) => j !== i)); if (isFieldExpanded) setFilterExpandedIdx(null); }}
+                                  style={{ fontSize: 13, color: '#94A3B8', background: 'none', border: 'none', cursor: 'pointer', padding: '0 4px', flexShrink: 0 }}
+                                >×</button>
+                              </div>
+                              {/* Expanded field picker panel */}
+                              {isFieldExpanded && (
+                                <div style={{ marginTop: 4, padding: 8, border: '0.5px solid #E2E8F0', borderRadius: 6, background: '#FAFAFA' }}>
+                                  <FieldPicker
+                                    fields={liveSchema[liveEntityType] || []}
+                                    fillRates={liveFillRates[liveEntityType] || {}}
+                                    value={f.field}
+                                    onChange={newField => {
+                                      setLiveFilters(prev => prev.map((x, j) => j === i ? { ...x, field: newField, value: '' } : x));
+                                      const newFieldDef = (liveSchema[liveEntityType] || []).find(fld => fld.name === newField);
+                                      if (newFieldDef?.field_type === 'categorical') {
+                                        loadFieldValues(liveEntityType, newField);
+                                      }
+                                      setFilterExpandedIdx(null);
+                                    }}
+                                  />
+                                </div>
                               )}
-                              <button
-                                onClick={() => setLiveFilters(prev => prev.filter((_, j) => j !== i))}
-                                style={{ fontSize: 13, color: '#94A3B8', background: 'none', border: 'none', cursor: 'pointer', padding: '0 4px', flexShrink: 0 }}
-                              >×</button>
                             </div>
                           );
                         })}

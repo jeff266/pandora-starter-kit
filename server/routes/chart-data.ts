@@ -155,6 +155,62 @@ router.get('/:workspaceId/chart-data/schema', requirePermission('agents.view'), 
   }
 });
 
+// ─── FILL RATES — must be before /:skillId wildcard ──────────────────────────
+
+// In-memory cache: key = `${workspaceId}:${entityType}`, value = { data, expiresAt }
+const fillRateCache = new Map<string, { data: Array<{ field_name: string; fill_rate: number }>; expiresAt: number }>();
+const FILL_RATE_TTL_MS = 60_000;
+
+router.get('/:workspaceId/chart-data/fill-rates/:entityType', requirePermission('agents.view'), async (req: Request, res: Response) => {
+  try {
+    const { workspaceId, entityType } = req.params;
+
+    const entityConfig = QUERYABLE_FIELDS[entityType];
+    if (!entityConfig) {
+      return res.status(400).json({ error: 'Invalid entity_type' });
+    }
+
+    const cacheKey = `${workspaceId}:${entityType}`;
+    const cached = fillRateCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return res.json({ fill_rates: cached.data });
+    }
+
+    const { table, fields: fieldDefs } = entityConfig;
+
+    // Only compute fill rate for non-system fields
+    const targetFields = fieldDefs.filter(f => f.name !== 'workspace_id');
+
+    if (targetFields.length === 0) {
+      return res.json({ fill_rates: [] });
+    }
+
+    // Single-query approach: SELECT COUNT(f1)/COUNT(*)*100 AS f1, COUNT(f2)/COUNT(*)*100 AS f2, ...
+    // Field names come from a hardcoded whitelist so safe to interpolate
+    const selectParts = targetFields.map(f =>
+      `ROUND(COUNT(${f.name}) * 100.0 / NULLIF(COUNT(*), 0)) AS "${f.name}"`
+    ).join(', ');
+
+    const result = await query(
+      `SELECT ${selectParts} FROM ${table} WHERE workspace_id = $1`,
+      [workspaceId]
+    );
+
+    const row = result.rows[0] || {};
+    const fillRates = targetFields.map(f => ({
+      field_name: f.name,
+      fill_rate: Number(row[f.name] ?? 0),
+    })).sort((a, b) => b.fill_rate - a.fill_rate);
+
+    fillRateCache.set(cacheKey, { data: fillRates, expiresAt: Date.now() + FILL_RATE_TTL_MS });
+
+    res.json({ fill_rates: fillRates });
+  } catch (err: any) {
+    console.error('[ChartData] Failed to get fill rates:', err.message);
+    res.status(500).json({ error: 'Failed to get fill rates' });
+  }
+});
+
 // ─── FIELD VALUES (picklist) — must be before /:skillId wildcard ──────────────
 
 router.get('/:workspaceId/chart-data/field-values/:entityType/:fieldName', requirePermission('agents.view'), async (req: Request, res: Response) => {
