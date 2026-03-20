@@ -12,6 +12,7 @@ import ReportAnnotationEditor, { type Annotation } from '../components/reports/R
 import AnnotatableSection, { type Annotation as DocAnnotation } from '../components/report/AnnotatableSection';
 import { ContextMenu as DocContextMenu } from '../components/report/ContextMenu';
 import ChartBuilder from '../components/report/ChartBuilder';
+import SectionEditor from '../components/report/SectionEditor';
 import PrepareForClientModal from '../components/report/PrepareForClientModal';
 import type { ExportConfig } from '../types/export';
 import ReportContextMenu, { type ReportContextTarget } from '../components/reports/ReportContextMenu';
@@ -87,6 +88,7 @@ interface ReportDocumentData {
   skills_included: string[];
   tokens_used: number;
   generated_at: string;
+  tiptap_content?: Record<string, any>;
 }
 
 interface DocListEntry {
@@ -131,7 +133,7 @@ export default function ReportViewer() {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; target: ReportContextTarget } | null>(null);
   const [summaryExpanded, setSummaryExpanded] = useState(false);
   const [docContextMenu, setDocContextMenu] = useState<{ x: number; y: number; sectionId: string; sectionTitle: string; paragraphIndex: number | null } | null>(null);
-  const [chartBuilderSection, setChartBuilderSection] = useState<{ sectionId: string } | null>(null);
+  const [chartBuilderSection, setChartBuilderSection] = useState<{ sectionId: string; fromEditor?: boolean } | null>(null);
   const [editingChart, setEditingChart] = useState<any>(null);
   const [sectionCharts, setSectionCharts] = useState<Record<string, any[]>>({});
   const [hoveredSection, setHoveredSection] = useState<string | null>(null);
@@ -503,14 +505,19 @@ export default function ReportViewer() {
           token={localStorage.getItem('pandora_session') || ''}
           existingChart={editingChart}
           onInsert={(insertedChart) => {
+            const sid = chartBuilderSection.sectionId;
             setSectionCharts(prev => {
-              const sid = chartBuilderSection.sectionId;
               const existing = prev[sid] || [];
               const updated = editingChart
                 ? existing.map(c => c.id === editingChart.id ? insertedChart : c)
                 : [...existing, insertedChart];
               return { ...prev, [sid]: updated };
             });
+            if (chartBuilderSection.fromEditor) {
+              window.dispatchEvent(new CustomEvent('section-editor-chart-inserted', {
+                detail: { sectionId: sid, chart: insertedChart },
+              }));
+            }
             setChartBuilderSection(null);
             setEditingChart(null);
           }}
@@ -1024,8 +1031,9 @@ export default function ReportViewer() {
                         setDocContextMenu({ x: e.clientX, y: e.clientY, sectionId: section.id, sectionTitle: section.title, paragraphIndex });
                       }}
                     >
-                      <AnnotatableSection
+                      <SectionEditor
                         section={section}
+                        tiptapContent={reportDocument.tiptap_content?.[section.id]}
                         annotations={docAnnotations.filter(a => a.section_id === section.id)}
                         isAnnotating={isAnnotating}
                         highlightedParagraphIndex={
@@ -1033,6 +1041,22 @@ export default function ReportViewer() {
                             ? docContextMenu.paragraphIndex
                             : null
                         }
+                        workspaceId={wid}
+                        documentId={reportDocument!.id}
+                        token={localStorage.getItem('pandora_session') || ''}
+                        onOpenChartBuilder={(sectionId, fromEditor) => {
+                          setEditingChart(null);
+                          setChartBuilderSection({ sectionId, fromEditor });
+                        }}
+                        onChartInserted={(sectionId, chart) => {
+                          setSectionCharts(prev => {
+                            const list = [...(prev[sectionId] || [])];
+                            const idx = list.findIndex(c => c.id === chart.id);
+                            if (idx >= 0) list[idx] = chart;
+                            else list.push(chart);
+                            return { ...prev, [sectionId]: list };
+                          });
+                        }}
                         onAnnotationSave={async (data) => {
                           const token = localStorage.getItem('pandora_session');
                           const docId = reportDocument!.id;

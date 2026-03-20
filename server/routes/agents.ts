@@ -481,6 +481,51 @@ agentsWorkspaceRouter.get('/:workspaceId/reports/:reportId', requirePermission('
   }
 });
 
+// ── Living Document: Per-section TipTap content save ─────────────────────────
+
+agentsWorkspaceRouter.patch('/:workspaceId/report-documents/:documentId', requirePermission('agents.view'), async (req: Request, res: Response) => {
+  const workspaceId = req.params.workspaceId as string;
+  const documentId = req.params.documentId as string;
+  const { section_id, tiptap_content } = req.body;
+
+  if (!section_id || typeof section_id !== 'string') {
+    return res.status(400).json({ error: 'section_id is required' });
+  }
+  if (!tiptap_content || typeof tiptap_content !== 'object') {
+    return res.status(400).json({ error: 'tiptap_content must be a JSON object' });
+  }
+
+  try {
+    const result = await query(
+      `UPDATE report_documents
+       SET tiptap_content = jsonb_set(
+         COALESCE(tiptap_content, '{}'::jsonb),
+         $1::text[],
+         $2::jsonb,
+         true
+       ),
+       updated_at = NOW()
+       WHERE id = $3 AND workspace_id = $4
+       RETURNING id, tiptap_content`,
+      [
+        `{${section_id}}`,
+        JSON.stringify(tiptap_content),
+        documentId,
+        workspaceId,
+      ]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Report document not found' });
+    }
+
+    res.json({ ok: true, section_id, saved_at: new Date().toISOString() });
+  } catch (err: any) {
+    console.error('[ReportDocs] Failed to save tiptap content:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Hypothesis Tracking Endpoint ─────────────────────────────────────────────
 
 agentsWorkspaceRouter.get('/:workspaceId/hypotheses', requirePermission('agents.view'), async (req: Request, res: Response) => {
