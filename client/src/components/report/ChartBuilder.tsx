@@ -70,6 +70,59 @@ function suggestTitle(source: DataSourceDef, field: DataSourceField): string {
   return `${source.label} — ${fieldLabel}`;
 }
 
+function defaultNumberFormat(fld: DataSourceField): NumberFormat {
+  if (fld.type === 'currency') return 'K';
+  if (fld.label.includes('(%)') || fld.key.includes('probability')) return 'pct';
+  return 'raw';
+}
+
+const WORD = ['Zero','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten'];
+function generateVerdict(src: DataSourceDef, fld: DataSourceField, recs: any[], topN: number): string {
+  if (recs.length === 0) return suggestTitle(src, fld);
+  const count = Math.min(recs.length, topN);
+  const n = WORD[count] ?? String(count);
+  const deal = count === 1 ? 'deal' : 'deals';
+
+  if (src.id === 'stale_deals' && fld.key === 'fields.days_since_activity') {
+    const sorted = [...recs]
+      .sort((a, b) => Number(b.fields?.days_since_activity) - Number(a.fields?.days_since_activity))
+      .slice(0, topN);
+    const minDays = Math.min(...sorted.map(r => Number(r.fields?.days_since_activity) || 0));
+    const threshold = Math.floor(minDays / 10) * 10;
+    return `${n} ${deal} dark ${threshold}+ days`;
+  }
+
+  if (src.id === 'at_risk_deals' && fld.key === 'fields.risk_score') {
+    const sorted = [...recs]
+      .sort((a, b) => Number(b.fields?.risk_score) - Number(a.fields?.risk_score))
+      .slice(0, topN);
+    const minScore = Math.min(...sorted.map(r => Number(r.fields?.risk_score) || 0));
+    const threshold = Math.floor(minScore / 10) * 10;
+    return `${n} ${deal} at risk, ${threshold}+ score`;
+  }
+
+  if (src.id === 'at_risk_deals' && fld.key === 'fields.amount') {
+    const total = [...recs].slice(0, topN).reduce((s, r) => s + Number(r.fields?.amount || 0), 0);
+    return `$${Math.round(total / 1000)}K at risk across ${n.toLowerCase()} ${deal}`;
+  }
+
+  if (src.id === 'pipeline_by_rep' && fld.type === 'currency') {
+    const fieldKey = fld.key.split('.').pop()!;
+    const total = [...recs].slice(0, topN).reduce((s, r) => s + Number(r.fields?.[fieldKey] || 0), 0);
+    const label = fld.label.replace(' ($K)', '').toLowerCase();
+    return `$${Math.round(total / 1000)}K ${label} across ${n.toLowerCase()} rep${count !== 1 ? 's' : ''}`;
+  }
+
+  if (src.id === 'forecast_pipeline' && fld.type === 'currency') {
+    const fieldKey = fld.key.split('.').pop()!;
+    const total = [...recs].slice(0, topN).reduce((s, r) => s + Number(r.fields?.[fieldKey] || 0), 0);
+    const weighted = fld.key.includes('weighted') ? 'weighted ' : '';
+    return `$${Math.round(total / 1000)}K ${weighted}forecast pipeline`;
+  }
+
+  return suggestTitle(src, fld);
+}
+
 const BAR_HEIGHTS = [62, 38, 85, 50, 72, 42];
 
 function ChartSkeleton({ label }: { label: string }) {
@@ -221,9 +274,11 @@ export default function ChartBuilder({
     setColorScheme(src.defaultColorScheme as ColorScheme);
     setSortField(src.defaultSort.field);
     setSortDir(src.defaultSort.dir);
+    setLimit(6);
     setShowLegend(src.defaultChartType === 'donut');
-    setChartTitle(suggestTitle(src, fld));
-    await loadRecords(src);
+    setNumberFormat(defaultNumberFormat(fld));
+    const recs = await loadRecords(src);
+    setChartTitle(generateVerdict(src, fld, recs, 6));
     setView('refine');
     setTimeout(() => triggerPreview(src, fld), 100);
   }
@@ -250,7 +305,7 @@ export default function ChartBuilder({
   function buildChartSpec() {
     if (!selectedSource || !selectedField) return null;
     const dataPoints = filteredRecords.map(r => ({
-      label: String(r.entity_name || r[selectedSource.nameField] || '').split(' - ')[0].trim(),
+      label: String(r.entity_name || r[selectedSource.nameField] || '').split(/\s*-\s+/)[0].trim(),
       value: Math.round(
         Number(extractField(r, selectedField.key, selectedField)) /
         (numberFormat === 'K' ? 1000 : numberFormat === 'M' ? 1_000_000 : 1)
@@ -363,7 +418,7 @@ export default function ChartBuilder({
           chart_type: chartType === 'horizontal_bar' ? 'horizontalBar' : chartType === 'donut' ? 'doughnut' : chartType,
           title: chartTitle,
           data_labels: filteredRecords.map(r =>
-            String(r.entity_name || r[selectedSource.nameField] || '').split(' - ')[0].trim()
+            String(r.entity_name || r[selectedSource.nameField] || '').split(/\s*-\s+/)[0].trim()
           ),
           data_values: filteredRecords.map(r =>
             Math.round(
@@ -690,7 +745,7 @@ export default function ChartBuilder({
                 <div style={{ maxHeight: 180, overflowY: 'auto', border: '0.5px solid #E2E8F0', borderRadius: 6 }}>
                   {filteredRecords.map((record, i) => {
                     const name = record.entity_name || record[selectedSource.nameField] || `Item ${i + 1}`;
-                    const displayName = String(name).split(' - ')[0].trim();
+                    const displayName = String(name).split(/\s*-\s+/)[0].trim();
                     const value = extractField(record, selectedField.key, selectedField);
                     return (
                       <div key={i} style={{
@@ -758,7 +813,7 @@ export default function ChartBuilder({
                 <label style={labelStyle}>Sort by</label>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <select
-                    value={sortField}
+                    value={sortField || selectedSource.defaultSort.field}
                     onChange={e => { setSortField(e.target.value); debouncedPreview(); }}
                     style={{ flex: 1, ...inputStyle }}
                   >
