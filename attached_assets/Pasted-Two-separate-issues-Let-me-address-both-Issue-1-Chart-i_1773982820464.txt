@@ -1,0 +1,221 @@
+Two separate issues. Let me address both.
+
+---
+
+**Issue 1 — Chart insertion gone:**
+
+The right-click context menu build likely overwrote or conflicted with the existing chart insertion path. The "Insert chart" button that previously appeared on sections is probably gone because the context menu is now the only entry point, and something in the wiring broke.
+
+Quick diagnostic first:
+
+```
+Replit diagnostic — no changes.
+
+1. Where did the old "Add chart" / chart
+   suggestion panel entry point live?
+   Find ChartSuggestionPanel usage in
+   ReportViewer or ReportSection.
+   Is it still rendered?
+
+2. Is the right-click context menu firing?
+   Right-click a paragraph — does the
+   Note/Chart/Flag menu appear at all?
+
+3. Check the onContextMenu handler —
+   is it wired to the section content
+   or to the entire report area?
+   Report the exact element it's attached to
+   and whether e.preventDefault() is called.
+
+4. Is ChartBuilder rendering at all?
+   Is chartBuilderOpen state being set to true
+   anywhere? Check if any console errors fire
+   on right-click.
+
+Report file names and line numbers.
+No changes.
+```
+
+---
+
+**Issue 2 — Direct table queries as data sources:**
+
+Yes. This is the right instinct and it's architecturally sound.
+
+Skill runs give you pre-computed, classified data. But they only run once a week and only cover what the skill was designed to compute. Direct table queries give you:
+
+```
+SKILL RUN DATA (current):
+  deal-risk-review → at_risk_deals
+  pipeline-hygiene → stale_deals
+  pipeline-coverage → pipeline by rep
+  forecast-rollup → forecast categories
+
+  Limitations:
+  - Weekly cadence only
+  - Only fields the skill chose to surface
+  - Can't filter/group differently than
+    the skill was designed to
+
+DIRECT TABLE QUERIES (new):
+  deals table → any field, any filter,
+    any grouping, real-time
+  contacts table → contact coverage,
+    role distribution
+  activities table → activity patterns,
+    engagement recency
+
+  Examples a VP could build:
+  - Pipeline by stage (not available from skills)
+  - Deals by owner AND stage (cross-tab)
+  - Close date distribution (histogram)
+  - Activity count by rep last 30 days
+  - Deal age by stage
+  - Win rate by deal size bucket
+```
+
+The chart builder data picker would have two sections:
+
+```
+FROM YOUR SKILLS (pre-computed, last run)
+  At-risk deals          10 records
+  Stale deals            12 records
+  Pipeline by rep         2 records
+  Forecast pipeline      41 records
+
+FROM YOUR DATA (live query)
+  Deals                2,980 records
+    Fields: name, amount, stage, owner,
+      close_date, days_since_activity,
+      deal_risk, pipeline, created_at...
+  Contacts               180K records
+    Fields: name, email, title, account...
+  Activities               420 records
+    Fields: type, owner, deal_id, created_at...
+```
+
+When a VP selects "Deals" from live data, they get a field picker plus filter controls:
+
+```
+SELECT FIELD TO CHART:
+  ○ Amount ($)
+  ● Stage          ← selected
+  ○ Owner
+  ○ Close date
+  ○ Days since activity
+  ○ Deal risk score
+  ○ Pipeline
+
+GROUP BY:
+  [Stage ▼]
+
+FILTERS:
+  + Add filter
+  [Pipeline] [is] [Core Sales ▼]
+  [Stage] [is not] [Closed Won ▼]
+
+AGGREGATE:
+  ○ Count of deals
+  ● Sum of amount    ← selected
+  ○ Average amount
+```
+
+This is a lightweight query builder — not SQL, not a full BI tool. Just enough to let a VP answer "show me open pipeline grouped by stage" without writing code.
+
+The backend builds a parameterized SQL query from the selections and returns aggregated results. The same security rules that apply to skill queries apply here — always scoped to `workspace_id`, never raw SQL from the client.
+
+---
+
+**Architecture for direct table queries:**
+
+```typescript
+// New endpoint:
+// POST /:workspaceId/chart-data/query
+
+// Request body:
+{
+  table: 'deals' | 'contacts' | 'activities',
+  x_field: string,           // field to use as labels
+  y_field: string,           // field to aggregate
+  aggregate: 'count' | 'sum' | 'avg',
+  group_by?: string,         // optional grouping
+  filters: Array<{
+    field: string,
+    operator: 'eq' | 'neq' | 'gt' | 'lt'
+      | 'in' | 'not_null',
+    value: any,
+  }>,
+  limit: number,             // max 20
+  sort_dir: 'asc' | 'desc',
+}
+
+// Backend builds parameterized query:
+// SELECT x_field, {aggregate}(y_field)
+// FROM {table}
+// WHERE workspace_id = $1
+//   AND {filters}
+// GROUP BY x_field
+// ORDER BY 2 DESC
+// LIMIT {limit}
+```
+
+The security model is simple — the backend whitelists which fields are queryable per table. A VP can never access another workspace's data because workspace_id is always injected server-side.
+
+---
+
+**Updated data source picker in ChartBuilder:**
+
+```
+┌─────────────────────────────────────────────┐
+│  What do you want to show?                  │
+│                                             │
+│  FROM YOUR SKILLS                           │
+│  Pre-computed insights from last skill run  │
+│                                             │
+│  [At-risk deals]      10 records            │
+│  [Stale deals]        12 records            │
+│  [Pipeline by rep]     2 records            │
+│  [Forecast pipeline]  41 records            │
+│                                             │
+│  FROM YOUR DATA                             │
+│  Live query against your CRM data           │
+│                                             │
+│  [Deals]           2,980 records  →         │
+│  [Contacts]          180K records →         │
+│  [Activities]          420 records →        │
+└─────────────────────────────────────────────┘
+```
+
+Clicking a live data source opens a filter/group builder before the refine panel. The skill sources go directly to field picker (existing behavior).
+
+---
+
+**Build sequence:**
+
+```
+Fix 1 — Restore chart insertion (urgent)
+  Diagnostic first, then fix
+  Whatever broke with the context menu
+  refactor needs to be unwound
+
+Fix 2 — Sort field selector bug
+  Empty dropdown on left of "High → Low"
+
+Fix 3 — Default color/format by data source
+  Semantic for stale/risk, uniform for rep
+  Days → raw, currency → $K
+
+Build A — Direct table query endpoint
+  Claude Code
+  POST /chart-data/query
+  Whitelist fields per table
+  Parameterized SQL, workspace-scoped
+
+Build B — Live data sources in picker
+  Replit
+  "From Your Data" section in ChartBuilder
+  Filter builder UI
+  Field whitelist from server
+```
+
+Share the diagnostic output for Issue 1 and I'll write the fix prompt. Then we can spec the live query build properly.
