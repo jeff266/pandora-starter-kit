@@ -294,9 +294,11 @@ export default function ChartBuilder({
   );
 
   const debounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const triggerPreviewRef = React.useRef(triggerPreview);
+  React.useEffect(() => { triggerPreviewRef.current = triggerPreview; }, [triggerPreview]);
   function debouncedPreview() {
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => triggerPreview(), 300);
+    debounceRef.current = setTimeout(() => triggerPreviewRef.current(), 300);
   }
 
   function runValidations(): Validation[] {
