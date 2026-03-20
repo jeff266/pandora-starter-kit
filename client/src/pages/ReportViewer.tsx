@@ -130,7 +130,7 @@ export default function ReportViewer() {
   const [exportLoading, setExportLoading] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; target: ReportContextTarget } | null>(null);
   const [summaryExpanded, setSummaryExpanded] = useState(false);
-  const [docContextMenu, setDocContextMenu] = useState<{ x: number; y: number; sectionId: string; sectionTitle: string } | null>(null);
+  const [docContextMenu, setDocContextMenu] = useState<{ x: number; y: number; sectionId: string; sectionTitle: string; paragraphIndex: number | null } | null>(null);
   const [chartBuilderSection, setChartBuilderSection] = useState<{ sectionId: string } | null>(null);
   const [editingChart, setEditingChart] = useState<any>(null);
   const [sectionCharts, setSectionCharts] = useState<Record<string, any[]>>({});
@@ -468,7 +468,16 @@ export default function ReportViewer() {
           y={docContextMenu.y}
           sectionTitle={docContextMenu.sectionTitle}
           onNote={() => {
-            setIsAnnotating(true);
+            const { sectionId, paragraphIndex } = docContextMenu || {};
+            if (sectionId !== undefined && paragraphIndex !== null && paragraphIndex !== undefined) {
+              window.dispatchEvent(
+                new CustomEvent('open-annotation-bubble', {
+                  detail: { sectionId, paragraphIndex },
+                })
+              );
+            } else {
+              setIsAnnotating(true);
+            }
             setDocContextMenu(null);
           }}
           onChart={() => {
@@ -995,13 +1004,28 @@ export default function ReportViewer() {
                       style={{ background: colors.surface, borderRadius: 8, border: `1px solid ${colors.border}`, padding: 24 }}
                       onContextMenu={(e) => {
                         e.preventDefault();
-                        setDocContextMenu({ x: e.clientX, y: e.clientY, sectionId: section.id, sectionTitle: section.title });
+                        let paragraphIndex: number | null = null;
+                        let el = e.target as HTMLElement | null;
+                        while (el && el !== e.currentTarget) {
+                          const idx = el.dataset.paragraph;
+                          if (idx !== undefined) {
+                            paragraphIndex = parseInt(idx, 10);
+                            break;
+                          }
+                          el = el.parentElement;
+                        }
+                        setDocContextMenu({ x: e.clientX, y: e.clientY, sectionId: section.id, sectionTitle: section.title, paragraphIndex });
                       }}
                     >
                       <AnnotatableSection
                         section={section}
                         annotations={docAnnotations.filter(a => a.section_id === section.id)}
                         isAnnotating={isAnnotating}
+                        highlightedParagraphIndex={
+                          docContextMenu?.sectionId === section.id
+                            ? docContextMenu.paragraphIndex
+                            : null
+                        }
                         onAnnotationSave={async (data) => {
                           const token = localStorage.getItem('pandora_session');
                           const docId = reportDocument!.id;

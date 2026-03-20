@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import FloatingBubble from './FloatingBubble';
 import { renderMarkdown } from '../../lib/render-markdown';
 
@@ -29,6 +29,7 @@ interface AnnotatableSectionProps {
   section: ReportSection;
   annotations: Annotation[];
   isAnnotating: boolean;
+  highlightedParagraphIndex?: number | null;
   onAnnotationSave: (
     data: Pick<Annotation, 'section_id' | 'paragraph_index' |
       'annotation_type' | 'content' | 'original_content'>
@@ -40,6 +41,7 @@ export default function AnnotatableSection({
   section,
   annotations,
   isAnnotating,
+  highlightedParagraphIndex,
   onAnnotationSave,
   onAnnotationDelete,
 }: AnnotatableSectionProps) {
@@ -47,19 +49,37 @@ export default function AnnotatableSection({
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const paragraphRefs = useRef<(HTMLParagraphElement | null)[]>([]);
 
-  // Split content into paragraphs
   const paragraphs = section.content
     .split(/\n\n+/)
     .filter(p => p.trim().length > 0);
 
-  function openBubble(index: number) {
+  function handleParagraphClick(index: number) {
     setActiveParagraph(index);
   }
+
+  useEffect(() => {
+    const handler = (e: CustomEvent) => {
+      const { sectionId: targetSectionId, paragraphIndex: targetIndex } = e.detail as {
+        sectionId: string;
+        paragraphIndex: number;
+      };
+
+      if (targetSectionId !== section.id) return;
+      if (targetIndex < 0 || targetIndex >= paragraphs.length) return;
+
+      setActiveParagraph(targetIndex);
+    };
+
+    window.addEventListener('open-annotation-bubble', handler as EventListener);
+    return () => window.removeEventListener('open-annotation-bubble', handler as EventListener);
+  }, [section.id, paragraphs.length]);
 
   function getParagraphStyle(index: number): React.CSSProperties {
     const annotation = annotations.find(
       a => a.section_id === section.id && a.paragraph_index === index
     );
+
+    const isHighlighted = highlightedParagraphIndex === index;
 
     const baseStyle: React.CSSProperties = {
       fontSize: '16px',
@@ -67,11 +87,12 @@ export default function AnnotatableSection({
       color: '#334155',
       marginBottom: '16px',
       cursor: isAnnotating ? 'pointer' : 'default',
-      transition: 'background 150ms',
+      transition: 'background 0.15s',
       padding: '8px',
       borderRadius: '4px',
       outline: 'none',
       position: 'relative',
+      background: isHighlighted ? 'rgba(13, 148, 136, 0.06)' : 'transparent',
     };
 
     if (isAnnotating && hoveredIndex === index) {
@@ -80,13 +101,12 @@ export default function AnnotatableSection({
 
     if (!annotation) return baseStyle;
 
-    // Apply annotation-specific styles
     if (annotation.annotation_type === 'override') {
       return {
         ...baseStyle,
         borderLeft: '3px solid #3B82F6',
         paddingLeft: '12px',
-        background: '#F0F7FF',
+        background: isHighlighted ? 'rgba(13, 148, 136, 0.06)' : '#F0F7FF',
         borderRadius: '0 4px 4px 0',
       };
     }
@@ -94,14 +114,13 @@ export default function AnnotatableSection({
     if (annotation.annotation_type === 'flag') {
       return {
         ...baseStyle,
-        background: '#EFF6FF',
+        background: isHighlighted ? 'rgba(13, 148, 136, 0.06)' : '#EFF6FF',
         border: '1px solid #BFDBFE',
         borderRadius: '6px',
         padding: '12px',
       };
     }
 
-    // note type - return base style, will add indicator separately
     return baseStyle;
   }
 
@@ -125,12 +144,11 @@ export default function AnnotatableSection({
 
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
-      openBubble(index);
+      handleParagraphClick(index);
     }
 
     if (e.key === 'Tab' && !e.shiftKey) {
       e.preventDefault();
-      // Navigate to next paragraph across ALL sections
       const all = document.querySelectorAll('[data-paragraph]');
       const flat = Array.from(all);
       const current = flat.findIndex(el =>
@@ -144,7 +162,6 @@ export default function AnnotatableSection({
 
   return (
     <div style={{ marginBottom: '32px' }}>
-      {/* Section Title */}
       <h2 style={{
         fontSize: '20px',
         fontWeight: 700,
@@ -154,7 +171,6 @@ export default function AnnotatableSection({
         {section.title}
       </h2>
 
-      {/* Paragraphs */}
       <div>
         {paragraphs.map((paragraph, index) => {
           const annotation = annotations.find(
@@ -169,7 +185,7 @@ export default function AnnotatableSection({
               data-section={section.id}
               data-paragraph={String(index)}
               tabIndex={isAnnotating ? 0 : -1}
-              onClick={() => isAnnotating && openBubble(index)}
+              onClick={() => isAnnotating && handleParagraphClick(index)}
               onKeyDown={(e) => handleKeyDown(e, index)}
               onFocus={() => isAnnotating && setHoveredIndex(index)}
               onBlur={() => isAnnotating && setHoveredIndex(null)}
@@ -179,7 +195,6 @@ export default function AnnotatableSection({
             >
               {renderMarkdown(getParagraphContent(index))}
 
-              {/* Annotation indicators */}
               {isAnnotating && (
                 <span style={{
                   position: 'absolute',
@@ -189,7 +204,6 @@ export default function AnnotatableSection({
                   alignItems: 'center',
                   gap: '6px',
                 }}>
-                  {/* Type badge */}
                   {annotation && (
                     <span style={{
                       fontSize: '10px',
@@ -213,7 +227,6 @@ export default function AnnotatableSection({
                     </span>
                   )}
 
-                  {/* Comment icon */}
                   <span style={{
                     opacity: hoveredIndex === index ? 1 : 0,
                     transition: 'opacity 150ms',
@@ -223,7 +236,6 @@ export default function AnnotatableSection({
                 </span>
               )}
 
-              {/* Note indicator (read mode) */}
               {!isAnnotating && hasNote && (
                 <span style={{
                   color: '#F59E0B',
@@ -237,7 +249,6 @@ export default function AnnotatableSection({
         })}
       </div>
 
-      {/* Floating Bubble */}
       {activeParagraph !== null && (
         <FloatingBubble
           paragraphText={paragraphs[activeParagraph]}
