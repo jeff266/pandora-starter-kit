@@ -834,10 +834,30 @@ agentsWorkspaceRouter.post('/:workspaceId/reports/:reportId/charts', requireAnyP
   }
 });
 
-// GET chart PNG image
-agentsWorkspaceRouter.get('/:workspaceId/reports/:reportId/charts/:chartId/image', requirePermission('agents.view'), async (req: Request, res: Response) => {
+// GET chart PNG image — supports ?t=<session_token> for <img> src usage in TipTap
+agentsWorkspaceRouter.get('/:workspaceId/reports/:reportId/charts/:chartId/image', async (req: Request, res: Response) => {
   try {
     const { workspaceId, chartId } = req.params;
+    const tokenParam = req.query.t as string | undefined;
+
+    // Resolve auth: Bearer header takes priority, then ?t= query param
+    if (!req.user && tokenParam) {
+      const sessionResult = await query(`
+        SELECT us.user_id, u.email, u.name, u.role as platform_role
+        FROM user_sessions us
+        JOIN users u ON u.id = us.user_id
+        WHERE us.token = $1 AND us.expires_at > NOW()
+      `, [tokenParam]);
+      if (sessionResult.rows[0]) {
+        req.user = sessionResult.rows[0];
+        req.authMethod = 'session';
+      }
+    }
+
+    if (!req.user && req.authMethod !== 'api_key') {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
     const result = await query(`
       SELECT chart_png FROM report_charts
       WHERE workspace_id = $1 AND id = $2
@@ -848,6 +868,7 @@ agentsWorkspaceRouter.get('/:workspaceId/reports/:reportId/charts/:chartId/image
     }
 
     res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'private, max-age=3600');
     res.send(result.rows[0].chart_png);
   } catch (err: any) {
     console.error('[Charts] Failed to get chart image:', err.message);

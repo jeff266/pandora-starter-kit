@@ -126,6 +126,7 @@ export default function SectionEditor({
   const [isEditing, setIsEditing] = useState(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const [localTiptapContent, setLocalTiptapContent] = useState<any>(tiptapContent ?? null);
+  const [sectionHovered, setSectionHovered] = useState(false);
   const [slashMenuActive, setSlashMenuActive] = useState(false);
   const [slashMenuIndex, setSlashMenuIndex] = useState(0);
   const [slashMenuAbsPos, setSlashMenuAbsPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
@@ -223,8 +224,9 @@ export default function SectionEditor({
   }
 
   function handleChartInsertedFromEditor(chart: any) {
-    if (fromEditorRef.current && editor && chart.preview_png) {
-      const src = `data:image/png;base64,${chart.preview_png}`;
+    if (fromEditorRef.current && editor && chart.id) {
+      const encodedToken = encodeURIComponent(token);
+      const src = `/api/workspaces/${workspaceId}/reports/${documentId}/charts/${chart.id}/image?t=${encodedToken}`;
       editor.chain().focus().setImage({ src, alt: chart.title || 'Chart' }).run();
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(() => autoSave(editor.getJSON()), 300);
@@ -249,7 +251,11 @@ export default function SectionEditor({
 
   if (!isEditing) {
     return (
-      <div style={{ position: 'relative' }}>
+      <div
+        style={{ position: 'relative' }}
+        onMouseEnter={() => setSectionHovered(true)}
+        onMouseLeave={() => setSectionHovered(false)}
+      >
         <button
           onClick={() => setIsEditing(true)}
           title="Edit this section"
@@ -269,6 +275,8 @@ export default function SectionEditor({
             gap: 4,
             zIndex: 1,
             transition: 'all 0.15s',
+            opacity: sectionHovered ? 1 : 0,
+            pointerEvents: sectionHovered ? 'auto' : 'none',
           }}
           onMouseEnter={e => {
             (e.currentTarget as HTMLElement).style.color = '#0D9488';
