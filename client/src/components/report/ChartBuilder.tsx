@@ -328,7 +328,7 @@ export default function ChartBuilder({
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       const cols = data.columns || [];
-      setQueryRunData({ rows: data.rows || [], columns: cols });
+      setQueryRunData({ rows: data.data || [], columns: cols });
       const firstStr = cols[0] || '';
       const firstNum = cols.find((c: string) => c !== firstStr) || cols[1] || '';
       setQueryLabelCol(firstStr);
@@ -613,7 +613,7 @@ export default function ChartBuilder({
       });
       if (!res.ok) throw new Error(`Insert failed: ${res.status}`);
       const saved = await res.json();
-      onInsert({ ...(saved.chart || saved), preview_png: previewPng });
+      onInsert({ ...(saved.chart || saved), preview_png: saved.chart_png_base64 || previewPng });
     } catch (err) {
       console.error('[ChartBuilder] Insert error:', err);
     } finally {

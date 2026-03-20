@@ -96,7 +96,7 @@ const QUERYABLE_FIELDS: Record<string, { table: string; fields: string[] }> = {
 const OPERATORS = ['=', '!=', '>', '<', '>=', '<=', 'LIKE', 'IN', 'IS NULL', 'IS NOT NULL'];
 const AGGREGATES = ['COUNT', 'SUM', 'AVG', 'MIN', 'MAX'];
 
-router.post('/:workspaceId/chart-data/query', async (req: Request, res: Response) => {
+router.post('/:workspaceId/chart-data/query', requirePermission('agents.view'), async (req: Request, res: Response) => {
   try {
     const { workspaceId } = req.params;
     const { entity_type, filters = [], group_by, aggregate, render_chart } = req.body;
@@ -237,7 +237,7 @@ router.post('/:workspaceId/chart-data/query', async (req: Request, res: Response
 });
 
 // Living Document: Get schema (whitelisted fields only, no SQL column names exposed)
-router.get('/:workspaceId/chart-data/schema', async (_req: Request, res: Response) => {
+router.get('/:workspaceId/chart-data/schema', requirePermission('agents.view'), async (_req: Request, res: Response) => {
   try {
     const schema = Object.entries(QUERYABLE_FIELDS).map(([entityType, config]) => ({
       entity_type: entityType,
@@ -255,7 +255,7 @@ router.get('/:workspaceId/chart-data/schema', async (_req: Request, res: Respons
 });
 
 // Living Document: Get saved queries for chart builder
-router.get('/:workspaceId/chart-data/queries', async (req: Request, res: Response) => {
+router.get('/:workspaceId/chart-data/queries', requirePermission('agents.view'), async (req: Request, res: Response) => {
   try {
     const { workspaceId } = req.params;
 
@@ -290,7 +290,7 @@ const QUERY_TIMEOUT_MS = 30_000;
 const MAX_ROWS = 10_000;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-router.post('/:workspaceId/chart-data/queries/:queryId/run', async (req: Request, res: Response) => {
+router.post('/:workspaceId/chart-data/queries/:queryId/run', requirePermission('agents.view'), async (req: Request, res: Response) => {
   try {
     const { workspaceId, queryId } = req.params;
 
@@ -353,7 +353,7 @@ router.post('/:workspaceId/chart-data/queries/:queryId/run', async (req: Request
         query_id: queryId,
         query_name: savedQuery.name,
         columns,
-        rows,
+        data: rows,
         row_count: rowCount,
         duration_ms: duration,
       });

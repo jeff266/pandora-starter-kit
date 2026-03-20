@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
-import { generateHTML } from '@tiptap/core';
+import { generateHTML, Extension } from '@tiptap/core';
 import { StarterKit } from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import Strike from '@tiptap/extension-strike';
@@ -34,7 +34,7 @@ interface SectionEditorProps {
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
-const TIPTAP_EXTENSIONS = [
+const BASE_EXTENSIONS = [
   StarterKit,
   Placeholder.configure({
     placeholder: 'Write something, or type / to add a chart, table, or divider…',
@@ -56,7 +56,12 @@ function convertPlainTextToDoc(text: string): any {
 }
 
 function TiptapReadView({ content }: { content: any }) {
-  const html = generateHTML(content, TIPTAP_EXTENSIONS);
+  let html = '';
+  try {
+    html = generateHTML(content, BASE_EXTENSIONS);
+  } catch {
+    html = '<p>Content unavailable</p>';
+  }
   return (
     <>
       <style>{`
@@ -67,10 +72,7 @@ function TiptapReadView({ content }: { content: any }) {
         .tiptap-read-view ul, .tiptap-read-view ol { padding-left: 20px; margin: 0 0 12px; }
         .tiptap-read-view li { margin-bottom: 4px; font-size: 16px; line-height: 1.65; color: #334155; }
       `}</style>
-      <div
-        className="tiptap-read-view"
-        dangerouslySetInnerHTML={{ __html: html }}
-      />
+      <div className="tiptap-read-view" dangerouslySetInnerHTML={{ __html: html }} />
     </>
   );
 }
@@ -81,6 +83,31 @@ const SLASH_MENU_ITEMS = [
   { id: 'table', label: 'Table', description: 'Insert a table (coming soon)', icon: '⊞' },
   { id: 'metric', label: 'Metric Card', description: 'Insert a KPI card (coming soon)', icon: '◈' },
 ];
+
+function createSlashCommandExtension(onSlash: (pos: { top: number; left: number }) => void, onDismiss: () => void) {
+  return Extension.create({
+    name: 'slashCommand',
+    addKeyboardShortcuts() {
+      return {};
+    },
+    onUpdate() {
+      const { state, view } = this.editor;
+      const { selection } = state;
+      const { $from } = selection;
+      const charBefore = $from.parent.textBetween(
+        Math.max(0, $from.parentOffset - 1),
+        $from.parentOffset,
+        '',
+      );
+      if (charBefore === '/') {
+        const coords = view.coordsAtPos(selection.from);
+        onSlash({ top: coords.bottom, left: coords.left });
+      } else {
+        onDismiss();
+      }
+    },
+  });
+}
 
 export default function SectionEditor({
   section,
@@ -98,9 +125,10 @@ export default function SectionEditor({
 }: SectionEditorProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
+  const [localTiptapContent, setLocalTiptapContent] = useState<any>(tiptapContent ?? null);
   const [slashMenuActive, setSlashMenuActive] = useState(false);
   const [slashMenuIndex, setSlashMenuIndex] = useState(0);
-  const [slashMenuPos, setSlashMenuPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
+  const [slashMenuAbsPos, setSlashMenuAbsPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const fromEditorRef = useRef(false);
@@ -116,6 +144,7 @@ export default function SectionEditor({
         body: JSON.stringify({ section_id: section.id, tiptap_content: json }),
       });
       if (!res.ok) throw new Error(`Save failed: ${res.status}`);
+      setLocalTiptapContent(json);
       setSaveStatus('saved');
       setTimeout(() => setSaveStatus('idle'), 2000);
     } catch {
@@ -123,34 +152,28 @@ export default function SectionEditor({
     }
   }, [workspaceId, documentId, token, section.id]);
 
-  const editor = useEditor({
-    extensions: TIPTAP_EXTENSIONS,
-    content: initialContent,
-    onUpdate: ({ editor }) => {
-      const { state } = editor;
-      const { selection } = state;
-      const { $from } = selection;
-      const charBefore = $from.parent.textBetween(
-        Math.max(0, $from.parentOffset - 1),
-        $from.parentOffset,
-        '',
-      );
-
-      if (charBefore === '/') {
-        const coords = editor.view.coordsAtPos(selection.from);
+  const slashExtension = useRef(
+    createSlashCommandExtension(
+      (absPos) => {
         const containerRect = containerRef.current?.getBoundingClientRect();
-        if (containerRect) {
-          setSlashMenuPos({
-            top: coords.bottom - containerRect.top + 4,
-            left: coords.left - containerRect.left,
-          });
-        }
+        setSlashMenuAbsPos({
+          top: absPos.top - (containerRect?.top ?? 0) + 4,
+          left: absPos.left - (containerRect?.left ?? 0),
+        });
         setSlashMenuActive(true);
         setSlashMenuIndex(0);
-      } else {
-        setSlashMenuActive(false);
-      }
+      },
+      () => setSlashMenuActive(false),
+    )
+  ).current;
 
+  const editor = useEditor({
+    extensions: [
+      ...BASE_EXTENSIONS,
+      slashExtension,
+    ],
+    content: initialContent,
+    onUpdate: ({ editor }) => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(() => autoSave(editor.getJSON()), 2000);
     },
@@ -200,9 +223,9 @@ export default function SectionEditor({
   }
 
   function handleChartInsertedFromEditor(chart: any) {
-    if (fromEditorRef.current && editor && chart.id) {
-      const imageUrl = `/api/workspaces/${workspaceId}/reports/${documentId}/charts/${chart.id}/image`;
-      editor.chain().focus().setImage({ src: imageUrl, alt: chart.title || 'Chart' }).run();
+    if (fromEditorRef.current && editor && chart.preview_png) {
+      const src = `data:image/png;base64,${chart.preview_png}`;
+      editor.chain().focus().setImage({ src, alt: chart.title || 'Chart' }).run();
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(() => autoSave(editor.getJSON()), 300);
     }
@@ -258,10 +281,10 @@ export default function SectionEditor({
         >
           ✎ Edit
         </button>
-        {tiptapContent ? (
+        {localTiptapContent ? (
           <div>
             <h2 style={{ fontSize: 20, fontWeight: 700, color: '#1E293B', marginBottom: 12 }}>{section.title}</h2>
-            <TiptapReadView content={tiptapContent} />
+            <TiptapReadView content={localTiptapContent} />
           </div>
         ) : (
           <AnnotatableSection
@@ -288,25 +311,11 @@ export default function SectionEditor({
           color: #334155;
           font-family: -apple-system, BlinkMacSystemFont, sans-serif;
         }
-        .section-editor-content .ProseMirror p {
-          margin: 0 0 12px;
-        }
-        .section-editor-content .ProseMirror hr {
-          border: none;
-          border-top: 1.5px solid #E2E8F0;
-          margin: 20px 0;
-        }
-        .section-editor-content .ProseMirror img {
-          max-width: 100%;
-          border-radius: 6px;
-          margin: 8px 0;
-        }
+        .section-editor-content .ProseMirror p { margin: 0 0 12px; }
+        .section-editor-content .ProseMirror hr { border: none; border-top: 1.5px solid #E2E8F0; margin: 20px 0; }
+        .section-editor-content .ProseMirror img { max-width: 100%; border-radius: 6px; margin: 8px 0; }
         .section-editor-content .ProseMirror p.is-editor-empty:first-child::before {
-          color: #CBD5E1;
-          content: attr(data-placeholder);
-          float: left;
-          height: 0;
-          pointer-events: none;
+          color: #CBD5E1; content: attr(data-placeholder); float: left; height: 0; pointer-events: none;
         }
       `}</style>
 
@@ -330,13 +339,7 @@ export default function SectionEditor({
 
       <div
         className="section-editor-content"
-        style={{
-          border: '1.5px solid #0D9488',
-          borderRadius: 8,
-          padding: '12px 16px',
-          background: '#FAFFFE',
-          position: 'relative',
-        }}
+        style={{ border: '1.5px solid #0D9488', borderRadius: 8, padding: '12px 16px', background: '#FAFFFE', position: 'relative' }}
         onKeyDown={handleEditorKeyDown}
       >
         <EditorContent editor={editor} />
@@ -345,8 +348,8 @@ export default function SectionEditor({
           <div
             style={{
               position: 'absolute',
-              top: slashMenuPos.top,
-              left: Math.max(0, slashMenuPos.left),
+              top: slashMenuAbsPos.top,
+              left: Math.max(0, slashMenuAbsPos.left),
               zIndex: 100,
               background: 'white',
               border: '1px solid #E2E8F0',
@@ -364,16 +367,9 @@ export default function SectionEditor({
                 key={item.id}
                 onClick={() => executeSlashCommand(item.id)}
                 style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 10,
-                  width: '100%',
-                  padding: '8px 12px',
-                  background: i === slashMenuIndex ? '#F0FDF9' : 'white',
-                  border: 'none',
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                  borderBottom: i < SLASH_MENU_ITEMS.length - 1 ? '0.5px solid #F8FAFC' : 'none',
+                  display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '8px 12px',
+                  background: i === slashMenuIndex ? '#F0FDF9' : 'white', border: 'none', cursor: 'pointer',
+                  textAlign: 'left', borderBottom: i < SLASH_MENU_ITEMS.length - 1 ? '0.5px solid #F8FAFC' : 'none',
                 }}
                 onMouseEnter={() => setSlashMenuIndex(i)}
               >

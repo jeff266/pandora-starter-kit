@@ -824,7 +824,10 @@ agentsWorkspaceRouter.post('/:workspaceId/reports/:reportId/charts', requireAnyP
       (req as any).user?.id || null,
     ]);
 
-    res.status(201).json({ chart: result.rows[0] });
+    res.status(201).json({
+      chart: result.rows[0],
+      chart_png_base64: chartPNG.toString('base64'),
+    });
   } catch (err: any) {
     console.error('[Charts] Failed to create chart:', err.message);
     res.status(500).json({ error: err.message });
