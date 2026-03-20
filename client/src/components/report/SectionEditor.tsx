@@ -224,9 +224,8 @@ export default function SectionEditor({
   }
 
   function handleChartInsertedFromEditor(chart: any) {
-    if (fromEditorRef.current && editor && chart.id) {
-      const encodedToken = encodeURIComponent(token);
-      const src = `/api/workspaces/${workspaceId}/reports/${documentId}/charts/${chart.id}/image?t=${encodedToken}`;
+    if (fromEditorRef.current && editor && chart.preview_png) {
+      const src = `data:image/png;base64,${chart.preview_png}`;
       editor.chain().focus().setImage({ src, alt: chart.title || 'Chart' }).run();
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(() => autoSave(editor.getJSON()), 300);

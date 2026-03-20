@@ -21,10 +21,6 @@ interface LiveSchemaField {
   label: string;
 }
 
-interface LiveSchemaEntity {
-  entity_type: string;
-  fields: LiveSchemaField[];
-}
 
 interface Validation {
   type: 'error' | 'warning';
@@ -231,13 +227,14 @@ export default function ChartBuilder({
   const [queryLabelCol, setQueryLabelCol] = useState('');
   const [queryValueCol, setQueryValueCol] = useState('');
 
-  const [liveSchema, setLiveSchema] = useState<LiveSchemaEntity[]>([]);
+  const [liveSchema, setLiveSchema] = useState<Record<string, LiveSchemaField[]>>({});
   const [schemaLoading, setSchemaLoading] = useState(false);
   const [liveEntityType, setLiveEntityType] = useState('');
   const [liveGroupBy, setLiveGroupBy] = useState('');
   const [liveAggFunc, setLiveAggFunc] = useState('COUNT');
   const [liveAggField, setLiveAggField] = useState('*');
   const [liveRunLoading, setLiveRunLoading] = useState(false);
+  const [liveFilters, setLiveFilters] = useState<Array<{ field: string; operator: string; value: string }>>([]);
 
   const [chartTitle, setChartTitle] = useState('');
   const [chartType, setChartType] = useState<ChartTypeOption>('bar');
@@ -349,15 +346,17 @@ export default function ChartBuilder({
     try {
       const res = await fetch(`${base}/chart-data/schema`, { headers: authHeader });
       const data = await res.json();
-      const entities: LiveSchemaEntity[] = (data.schema || []).map((s: any) => ({
-        entity_type: s.entity_type,
-        fields: (s.fields || []).map((f: any) => ({ name: f.name, label: f.label })),
-      }));
-      setLiveSchema(entities);
-      if (entities.length > 0) {
-        setLiveEntityType(entities[0].entity_type);
-        setLiveGroupBy(entities[0].fields[0]?.name || '');
-        setLiveAggField(entities[0].fields[1]?.name || '*');
+      const schemaMap: Record<string, LiveSchemaField[]> = {};
+      (data.schema || []).forEach((s: any) => {
+        schemaMap[s.entity_type] = (s.fields || []).map((f: any) => ({ name: f.name, label: f.label }));
+      });
+      setLiveSchema(schemaMap);
+      const entityTypes = Object.keys(schemaMap);
+      if (entityTypes.length > 0) {
+        const firstEntity = entityTypes[0];
+        setLiveEntityType(firstEntity);
+        setLiveGroupBy(schemaMap[firstEntity][0]?.name || '');
+        setLiveAggField(schemaMap[firstEntity][1]?.name || '*');
       }
     } catch (err) {
       console.error('[ChartBuilder] Schema error:', err);
@@ -369,10 +368,12 @@ export default function ChartBuilder({
   async function runLiveQuery() {
     setLiveRunLoading(true);
     try {
+      const activeFilters = liveFilters.filter(f => f.field && f.value.trim());
       const body: any = {
         entity_type: liveEntityType,
         group_by: liveGroupBy,
         aggregate: { func: liveAggFunc, field: liveAggField === '*' ? undefined : liveAggField },
+        filters: activeFilters.map(f => ({ field: f.field, operator: f.operator, value: f.value })),
       };
       const res = await fetch(`${base}/chart-data/query`, {
         method: 'POST',
@@ -851,14 +852,17 @@ export default function ChartBuilder({
                         <select
                           value={liveEntityType}
                           onChange={e => {
-                            setLiveEntityType(e.target.value);
-                            const ent = liveSchema.find(s => s.entity_type === e.target.value);
-                            if (ent) { setLiveGroupBy(ent.fields[0]?.name || ''); setLiveAggField(ent.fields[1]?.name || '*'); }
+                            const et = e.target.value;
+                            setLiveEntityType(et);
+                            const fields = liveSchema[et] || [];
+                            setLiveGroupBy(fields[0]?.name || '');
+                            setLiveAggField(fields[1]?.name || '*');
+                            setLiveFilters([]);
                           }}
                           style={{ width: '100%', padding: '7px 10px', border: '0.5px solid #E2E8F0', borderRadius: 6, fontSize: 12, background: 'white', color: '#1E293B' }}
                         >
-                          {liveSchema.map(e => (
-                            <option key={e.entity_type} value={e.entity_type}>{e.entity_type.replace(/_/g, ' ')}</option>
+                          {Object.keys(liveSchema).map(et => (
+                            <option key={et} value={et}>{et.replace(/_/g, ' ')}</option>
                           ))}
                         </select>
                       </div>
@@ -870,7 +874,7 @@ export default function ChartBuilder({
                           onChange={e => setLiveGroupBy(e.target.value)}
                           style={{ width: '100%', padding: '7px 10px', border: '0.5px solid #E2E8F0', borderRadius: 6, fontSize: 12, background: 'white', color: '#1E293B' }}
                         >
-                          {(liveSchema.find(s => s.entity_type === liveEntityType)?.fields || []).map(f => (
+                          {(liveSchema[liveEntityType] || []).map(f => (
                             <option key={f.name} value={f.name}>{f.label}</option>
                           ))}
                         </select>
@@ -894,11 +898,57 @@ export default function ChartBuilder({
                             style={{ flex: 2, padding: '7px 10px', border: '0.5px solid #E2E8F0', borderRadius: 6, fontSize: 12, background: 'white', color: '#1E293B' }}
                           >
                             <option value="*">* (all rows)</option>
-                            {(liveSchema.find(s => s.entity_type === liveEntityType)?.fields || []).map(f => (
+                            {(liveSchema[liveEntityType] || []).map(f => (
                               <option key={f.name} value={f.name}>{f.label}</option>
                             ))}
                           </select>
                         </div>
+                      </div>
+
+                      <div style={{ marginBottom: 16 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                          <label style={{ fontSize: 10, fontWeight: 600, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Filters</label>
+                          <button
+                            onClick={() => setLiveFilters(prev => [...prev, { field: (liveSchema[liveEntityType] || [])[0]?.name || '', operator: '=', value: '' }])}
+                            style={{ fontSize: 11, color: '#0D9488', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                          >
+                            + Add filter
+                          </button>
+                        </div>
+                        {liveFilters.map((f, i) => (
+                          <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center' }}>
+                            <select
+                              value={f.field}
+                              onChange={e => setLiveFilters(prev => prev.map((x, j) => j === i ? { ...x, field: e.target.value } : x))}
+                              style={{ flex: 2, padding: '5px 8px', border: '0.5px solid #E2E8F0', borderRadius: 5, fontSize: 11, background: 'white', color: '#1E293B' }}
+                            >
+                              {(liveSchema[liveEntityType] || []).map(fld => (
+                                <option key={fld.name} value={fld.name}>{fld.label}</option>
+                              ))}
+                            </select>
+                            <select
+                              value={f.operator}
+                              onChange={e => setLiveFilters(prev => prev.map((x, j) => j === i ? { ...x, operator: e.target.value } : x))}
+                              style={{ flex: 1, padding: '5px 8px', border: '0.5px solid #E2E8F0', borderRadius: 5, fontSize: 11, background: 'white', color: '#1E293B' }}
+                            >
+                              <option value="=">=</option>
+                              <option value="!=">!=</option>
+                              <option value=">">&gt;</option>
+                              <option value="<">&lt;</option>
+                              <option value="LIKE">LIKE</option>
+                            </select>
+                            <input
+                              value={f.value}
+                              onChange={e => setLiveFilters(prev => prev.map((x, j) => j === i ? { ...x, value: e.target.value } : x))}
+                              placeholder="value"
+                              style={{ flex: 2, padding: '5px 8px', border: '0.5px solid #E2E8F0', borderRadius: 5, fontSize: 11, color: '#1E293B' }}
+                            />
+                            <button
+                              onClick={() => setLiveFilters(prev => prev.filter((_, j) => j !== i))}
+                              style={{ fontSize: 13, color: '#94A3B8', background: 'none', border: 'none', cursor: 'pointer', padding: '0 4px', flexShrink: 0 }}
+                            >×</button>
+                          </div>
+                        ))}
                       </div>
 
                       <button
