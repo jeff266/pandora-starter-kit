@@ -1,0 +1,126 @@
+Fair. Here's what I need to one-shot this correctly.
+
+---
+
+**What I need from you:**
+
+**1. The current TipTap version**
+```
+From client/package.json — exact versions of:
+  @tiptap/react
+  @tiptap/starter-kit
+  @tiptap/extension-placeholder
+  @tiptap/extension-strike
+```
+TipTap v2 and v3 have different APIs. Getting this wrong breaks everything.
+
+**2. The exact shape of report_documents.sections**
+Run this and paste the full output:
+```sql
+SELECT sections->0 as first_section,
+  sections->1 as second_section
+FROM report_documents
+WHERE workspace_id = '4160191d...'
+  AND document_type = 'monday_briefing'
+ORDER BY generated_at DESC
+LIMIT 1;
+```
+I need to see the exact JSON structure — every field name, every nested object.
+
+**3. The current save/update endpoint for reports**
+What endpoint does the frontend call when anything about a report changes? Is there one? If not, what's the closest write endpoint for report_documents?
+
+**4. How the Orchestrator tags evidence today**
+Does `report_documents.sections` have any evidence references (skill_id, record_id) attached to claims? Or is it pure text? If pure text, show me one full section's `content` field.
+
+**5. The ReportViewer component — file size and key sections**
+```
+Replit diagnostic:
+  wc -l client/src/components/report/ReportViewer.tsx
+  
+  Then report:
+  - Line range where sections are rendered
+  - Line range where annotations are rendered
+  - Line range where charts are rendered
+  - What imports are at the top (lines 1-20)
+```
+
+---
+
+**What I need to confirm architecturally before writing:**
+
+**Decision 1 — Storage format**
+
+Option A: Store TipTap JSON in a new column, keep existing `sections` JSONB untouched. New editor reads/writes `tiptap_content`. Old renderer reads `sections` as fallback.
+
+Option B: Replace `sections` content strings with TipTap JSON in-place.
+
+My recommendation: Option A. Zero risk to existing reports. Tell me if you agree.
+
+**Decision 2 — Save model**
+
+Option A: Auto-save on every change, debounced 2 seconds. Silent saves. VP never clicks Save.
+
+Option B: Explicit save button. VP controls when changes commit.
+
+My recommendation: Option A with a "saving..." indicator. Tell me if you agree.
+
+**Decision 3 — Evidence markers for Show Math**
+
+Option A: Build Show Math foundation now — Orchestrator emits evidence markers on next run, existing reports get it on next Monday.
+
+Option B: Skip Show Math for this build. Focus on editing + data blocks. Show Math is Session 2.
+
+My recommendation: Option B. Show Math requires Orchestrator changes that add scope risk. Get the editing layer right first.
+
+**Decision 4 — Data editor scope**
+
+You said enterprise-grade. I want to confirm exactly what that means for this build:
+
+```
+CONFIRMED IN:
+  ✓ Skills as data sources (existing 4)
+  ✓ Live table queries (deals, contacts,
+      activities)
+  ✓ Chart block (8 chart types)
+  ✓ Table block (sortable, filterable)
+  ✓ Metric card block
+  ✓ Filter builder (field/operator/value)
+  ✓ Group by + aggregate
+  ✓ Number formatting
+  ✓ Slash command menu (/)
+
+CONFIRM OR REMOVE:
+  ? Custom SQL editor (power user)
+  ? Multi-series charts (two measures
+      on one chart)
+  ? Pivot tables
+  ? Export data block as CSV
+  ? Scheduled refresh of data blocks
+```
+
+Tell me which of the "confirm or remove" items are in scope.
+
+**Decision 5 — Collaboration**
+
+Is this single-user for now (Jeff only on Frontera) or do you need multi-cursor like Google Docs? Multi-cursor requires a real-time sync layer (Y.js + WebSocket). Single-user is TipTap alone.
+
+My recommendation: Single-user for now. Tell me if you agree.
+
+---
+
+**Once I have those answers I write one prompt.**
+
+Not five prompts in sequence. One complete spec that Replit or Claude Code can execute end-to-end with no back-and-forth mid-build.
+
+The prompt will specify:
+- Every file to create or modify
+- Every migration needed
+- Every TypeScript interface
+- Every API endpoint
+- Every TipTap extension with exact implementation
+- Every acceptance criterion
+- What NOT to build (explicit scope boundary)
+- Test sequence to validate
+
+That's the one-shot approach. Give me those answers and I'll write it.
