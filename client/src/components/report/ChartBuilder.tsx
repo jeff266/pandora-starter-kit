@@ -19,6 +19,7 @@ interface SavedQuery {
 interface LiveSchemaField {
   name: string;
   label: string;
+  field_type: 'id' | 'categorical' | 'numeric' | 'date' | 'text';
 }
 
 
@@ -235,6 +236,9 @@ export default function ChartBuilder({
   const [liveAggField, setLiveAggField] = useState('*');
   const [liveRunLoading, setLiveRunLoading] = useState(false);
   const [liveFilters, setLiveFilters] = useState<Array<{ field: string; operator: string; value: string }>>([]);
+  const [liveLimit, setLiveLimit] = useState(100);
+  const [fieldValues, setFieldValues] = useState<Record<string, Record<string, string[]>>>({});
+  const [fieldValuesLoading, setFieldValuesLoading] = useState<Record<string, Record<string, boolean>>>({});
 
   const [chartTitle, setChartTitle] = useState('');
   const [chartType, setChartType] = useState<ChartTypeOption>('bar');
@@ -348,7 +352,11 @@ export default function ChartBuilder({
       const data = await res.json();
       const schemaMap: Record<string, LiveSchemaField[]> = {};
       (data.schema || []).forEach((s: any) => {
-        schemaMap[s.entity_type] = (s.fields || []).map((f: any) => ({ name: f.name, label: f.label }));
+        schemaMap[s.entity_type] = (s.fields || []).map((f: any) => ({
+          name: f.name,
+          label: f.label,
+          field_type: f.field_type || 'text',
+        }));
       });
       setLiveSchema(schemaMap);
       const entityTypes = Object.keys(schemaMap);
@@ -365,6 +373,38 @@ export default function ChartBuilder({
     }
   }
 
+  async function loadFieldValues(entityType: string, fieldName: string) {
+    if (!entityType || !fieldName) return;
+    if (fieldValues[entityType]?.[fieldName] !== undefined) return;
+    if (fieldValuesLoading[entityType]?.[fieldName]) return;
+
+    setFieldValuesLoading(prev => ({
+      ...prev,
+      [entityType]: { ...(prev[entityType] || {}), [fieldName]: true },
+    }));
+
+    try {
+      const res = await fetch(`${base}/chart-data/field-values/${entityType}/${fieldName}`, { headers: authHeader });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setFieldValues(prev => ({
+        ...prev,
+        [entityType]: { ...(prev[entityType] || {}), [fieldName]: data.values || [] },
+      }));
+    } catch (err) {
+      console.error('[ChartBuilder] Field values error:', err);
+      setFieldValues(prev => ({
+        ...prev,
+        [entityType]: { ...(prev[entityType] || {}), [fieldName]: [] },
+      }));
+    } finally {
+      setFieldValuesLoading(prev => ({
+        ...prev,
+        [entityType]: { ...(prev[entityType] || {}), [fieldName]: false },
+      }));
+    }
+  }
+
   async function runLiveQuery() {
     setLiveRunLoading(true);
     try {
@@ -374,6 +414,7 @@ export default function ChartBuilder({
         group_by: liveGroupBy,
         aggregate: { func: liveAggFunc, field: liveAggField === '*' ? undefined : liveAggField },
         filters: activeFilters.map(f => ({ field: f.field, operator: f.operator, value: f.value })),
+        limit: liveLimit,
       };
       const res = await fetch(`${base}/chart-data/query`, {
         method: 'POST',
@@ -910,46 +951,95 @@ export default function ChartBuilder({
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
                           <label style={{ fontSize: 10, fontWeight: 600, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Filters</label>
                           <button
-                            onClick={() => setLiveFilters(prev => [...prev, { field: (liveSchema[liveEntityType] || [])[0]?.name || '', operator: '=', value: '' }])}
+                            onClick={() => {
+                              const firstField = (liveSchema[liveEntityType] || [])[0];
+                              setLiveFilters(prev => [...prev, { field: firstField?.name || '', operator: '=', value: '' }]);
+                              if (firstField?.field_type === 'categorical') {
+                                loadFieldValues(liveEntityType, firstField.name);
+                              }
+                            }}
                             style={{ fontSize: 11, color: '#0D9488', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
                           >
                             + Add filter
                           </button>
                         </div>
-                        {liveFilters.map((f, i) => (
-                          <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center' }}>
-                            <select
-                              value={f.field}
-                              onChange={e => setLiveFilters(prev => prev.map((x, j) => j === i ? { ...x, field: e.target.value } : x))}
-                              style={{ flex: 2, padding: '5px 8px', border: '0.5px solid #E2E8F0', borderRadius: 5, fontSize: 11, background: 'white', color: '#1E293B' }}
-                            >
-                              {(liveSchema[liveEntityType] || []).map(fld => (
-                                <option key={fld.name} value={fld.name}>{fld.label}</option>
-                              ))}
-                            </select>
-                            <select
-                              value={f.operator}
-                              onChange={e => setLiveFilters(prev => prev.map((x, j) => j === i ? { ...x, operator: e.target.value } : x))}
-                              style={{ flex: 1, padding: '5px 8px', border: '0.5px solid #E2E8F0', borderRadius: 5, fontSize: 11, background: 'white', color: '#1E293B' }}
-                            >
-                              <option value="=">=</option>
-                              <option value="!=">!=</option>
-                              <option value=">">&gt;</option>
-                              <option value="<">&lt;</option>
-                              <option value="LIKE">LIKE</option>
-                            </select>
-                            <input
-                              value={f.value}
-                              onChange={e => setLiveFilters(prev => prev.map((x, j) => j === i ? { ...x, value: e.target.value } : x))}
-                              placeholder="value"
-                              style={{ flex: 2, padding: '5px 8px', border: '0.5px solid #E2E8F0', borderRadius: 5, fontSize: 11, color: '#1E293B' }}
-                            />
-                            <button
-                              onClick={() => setLiveFilters(prev => prev.filter((_, j) => j !== i))}
-                              style={{ fontSize: 13, color: '#94A3B8', background: 'none', border: 'none', cursor: 'pointer', padding: '0 4px', flexShrink: 0 }}
-                            >×</button>
-                          </div>
-                        ))}
+                        {liveFilters.map((f, i) => {
+                          const fieldDef = (liveSchema[liveEntityType] || []).find(fld => fld.name === f.field);
+                          const isCategorical = fieldDef?.field_type === 'categorical';
+                          const isNumericOrDate = fieldDef?.field_type === 'numeric' || fieldDef?.field_type === 'date';
+                          const picklist = fieldValues[liveEntityType]?.[f.field] || [];
+                          const picklistLoading = fieldValuesLoading[liveEntityType]?.[f.field] || false;
+                          return (
+                            <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center' }}>
+                              <select
+                                value={f.field}
+                                onChange={e => {
+                                  const newField = e.target.value;
+                                  setLiveFilters(prev => prev.map((x, j) => j === i ? { ...x, field: newField, value: '' } : x));
+                                  const newFieldDef = (liveSchema[liveEntityType] || []).find(fld => fld.name === newField);
+                                  if (newFieldDef?.field_type === 'categorical') {
+                                    loadFieldValues(liveEntityType, newField);
+                                  }
+                                }}
+                                style={{ flex: 2, padding: '5px 8px', border: '0.5px solid #E2E8F0', borderRadius: 5, fontSize: 11, background: 'white', color: '#1E293B' }}
+                              >
+                                {(liveSchema[liveEntityType] || []).map(fld => (
+                                  <option key={fld.name} value={fld.name}>{fld.label}</option>
+                                ))}
+                              </select>
+                              <select
+                                value={f.operator}
+                                onChange={e => setLiveFilters(prev => prev.map((x, j) => j === i ? { ...x, operator: e.target.value } : x))}
+                                style={{ flex: 1, padding: '5px 8px', border: '0.5px solid #E2E8F0', borderRadius: 5, fontSize: 11, background: 'white', color: '#1E293B' }}
+                              >
+                                <option value="=">=</option>
+                                <option value="!=">!=</option>
+                                {isNumericOrDate && <option value=">">&gt;</option>}
+                                {isNumericOrDate && <option value="<">&lt;</option>}
+                                {isNumericOrDate && <option value=">=">&gt;=</option>}
+                                {isNumericOrDate && <option value="<=">&lt;=</option>}
+                                {!isCategorical && <option value="LIKE">LIKE</option>}
+                              </select>
+                              {isCategorical ? (
+                                <select
+                                  value={f.value}
+                                  onChange={e => setLiveFilters(prev => prev.map((x, j) => j === i ? { ...x, value: e.target.value } : x))}
+                                  onFocus={() => loadFieldValues(liveEntityType, f.field)}
+                                  style={{ flex: 2, padding: '5px 8px', border: '0.5px solid #E2E8F0', borderRadius: 5, fontSize: 11, background: 'white', color: '#1E293B' }}
+                                >
+                                  <option value="">{picklistLoading ? 'Loading…' : '— pick value —'}</option>
+                                  {picklist.map(v => (
+                                    <option key={v} value={v}>{v}</option>
+                                  ))}
+                                </select>
+                              ) : (
+                                <input
+                                  value={f.value}
+                                  onChange={e => setLiveFilters(prev => prev.map((x, j) => j === i ? { ...x, value: e.target.value } : x))}
+                                  placeholder="value"
+                                  type={fieldDef?.field_type === 'numeric' ? 'number' : 'text'}
+                                  style={{ flex: 2, padding: '5px 8px', border: '0.5px solid #E2E8F0', borderRadius: 5, fontSize: 11, color: '#1E293B' }}
+                                />
+                              )}
+                              <button
+                                onClick={() => setLiveFilters(prev => prev.filter((_, j) => j !== i))}
+                                style={{ fontSize: 13, color: '#94A3B8', background: 'none', border: 'none', cursor: 'pointer', padding: '0 4px', flexShrink: 0 }}
+                              >×</button>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      <div style={{ marginBottom: 16 }}>
+                        <label style={{ display: 'block', fontSize: 10, fontWeight: 600, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Limit (rows returned)</label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={1000}
+                          value={liveLimit}
+                          onChange={e => setLiveLimit(Math.min(1000, Math.max(1, parseInt(e.target.value) || 100)))}
+                          style={{ width: '100%', padding: '7px 10px', border: '0.5px solid #E2E8F0', borderRadius: 6, fontSize: 12, color: '#1E293B' }}
+                        />
                       </div>
 
                       <button
