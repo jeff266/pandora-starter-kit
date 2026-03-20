@@ -134,6 +134,10 @@ export default function ReportViewer() {
   const [chartBuilderSection, setChartBuilderSection] = useState<{ sectionId: string } | null>(null);
   const [editingChart, setEditingChart] = useState<any>(null);
   const [sectionCharts, setSectionCharts] = useState<Record<string, any[]>>({});
+  const [hoveredSection, setHoveredSection] = useState<string | null>(null);
+  const [hasUsedRightClick] = useState(
+    () => localStorage.getItem('pandora-rightclick-hint-dismissed') === 'true'
+  );
   const { canAnnotateReports } = usePermissions();
   const { currentWorkspace } = useWorkspace();
 
@@ -995,15 +999,18 @@ export default function ReportViewer() {
                 </div>
 
                 {/* Sections */}
-                {reportDocument.sections.map((section) => {
+                {reportDocument.sections.map((section, sectionIndex) => {
                   const wid = currentWorkspace?.id || workspaceId || '';
                   const sectionChartList = sectionCharts[section.id] || [];
                   return (
                     <div
                       key={section.id}
                       style={{ background: colors.surface, borderRadius: 8, border: `1px solid ${colors.border}`, padding: 24 }}
+                      onMouseEnter={() => setHoveredSection(section.id)}
+                      onMouseLeave={() => setHoveredSection(null)}
                       onContextMenu={(e) => {
                         e.preventDefault();
+                        localStorage.setItem('pandora-rightclick-hint-dismissed', 'true');
                         let paragraphIndex: number | null = null;
                         let el = e.target as HTMLElement | null;
                         while (el && el !== e.currentTarget) {
@@ -1057,6 +1064,13 @@ export default function ReportViewer() {
                           setDocAnnotations(prev => prev.filter(a => a.id !== annotationId));
                         }}
                       />
+                      {/* Tip: right-click hint — first section only, dismissed after first right-click */}
+                      {!hasUsedRightClick && sectionIndex === 0 && (
+                        <div style={{ fontSize: 10, color: '#CBD5E1', marginTop: -8, marginBottom: 8 }}>
+                          Tip: right-click any paragraph for more options
+                        </div>
+                      )}
+
                       {/* Inserted charts for this section */}
                       {sectionChartList.map(chart => (
                         <div key={chart.id} style={{ marginTop: 16, border: '0.5px solid #E2E8F0', borderRadius: 8, overflow: 'hidden' }}>
@@ -1084,6 +1098,67 @@ export default function ReportViewer() {
                           />
                         </div>
                       ))}
+
+                      {/* Hover action strip */}
+                      {hoveredSection === section.id && (
+                        <div style={{
+                          display: 'flex',
+                          gap: 6,
+                          padding: '8px 0 2px',
+                          borderTop: '0.5px solid #F1F5F9',
+                          marginTop: 12,
+                        }}>
+                          <button
+                            onClick={() => {
+                              setEditingChart(null);
+                              setChartBuilderSection({ sectionId: section.id });
+                            }}
+                            style={{
+                              display: 'flex', alignItems: 'center', gap: 4,
+                              padding: '4px 10px', background: 'none',
+                              border: '0.5px solid #E2E8F0', borderRadius: 5,
+                              fontSize: 11, color: '#64748B', cursor: 'pointer',
+                              transition: 'all 0.1s',
+                            }}
+                            onMouseEnter={e => {
+                              (e.currentTarget as HTMLElement).style.borderColor = '#0D9488';
+                              (e.currentTarget as HTMLElement).style.color = '#0D9488';
+                            }}
+                            onMouseLeave={e => {
+                              (e.currentTarget as HTMLElement).style.borderColor = '#E2E8F0';
+                              (e.currentTarget as HTMLElement).style.color = '#64748B';
+                            }}
+                          >
+                            <span style={{ fontSize: 13 }}>▤</span>
+                            Add chart
+                          </button>
+                          <button
+                            onClick={() => {
+                              window.dispatchEvent(new CustomEvent('open-annotation-bubble', {
+                                detail: { sectionId: section.id, paragraphIndex: 0 },
+                              }));
+                            }}
+                            style={{
+                              display: 'flex', alignItems: 'center', gap: 4,
+                              padding: '4px 10px', background: 'none',
+                              border: '0.5px solid #E2E8F0', borderRadius: 5,
+                              fontSize: 11, color: '#64748B', cursor: 'pointer',
+                              transition: 'all 0.1s',
+                            }}
+                            onMouseEnter={e => {
+                              (e.currentTarget as HTMLElement).style.borderColor = '#0D9488';
+                              (e.currentTarget as HTMLElement).style.color = '#0D9488';
+                            }}
+                            onMouseLeave={e => {
+                              (e.currentTarget as HTMLElement).style.borderColor = '#E2E8F0';
+                              (e.currentTarget as HTMLElement).style.color = '#64748B';
+                            }}
+                          >
+                            <span style={{ fontSize: 13 }}>✎</span>
+                            Add note
+                          </button>
+                        </div>
+                      )}
                     </div>
                   );
                 })}

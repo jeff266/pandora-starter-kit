@@ -1,0 +1,225 @@
+Clean diagnosis. The fix is straightforward — add a visible entry point. Give Replit this:
+
+```
+Replit: Add visible chart insertion affordance
+to each report section
+
+## Context
+
+Right-click → "Insert chart" works mechanically
+but users have no way to discover it.
+ChartSuggestionPanel.tsx is orphaned dead code
+from the old path — do not resurrect it.
+
+The fix: add a hover action strip to each
+section that makes chart insertion discoverable.
+Two entry points needed:
+
+1. A "+ Chart" button visible on section hover
+2. Keep right-click → "Insert chart" as-is
+   (power user shortcut)
+
+---
+
+## The fix
+
+In ReportViewer.tsx, find the outer div that
+wraps each section card (line 1005 area).
+
+Add a hover action strip below the section
+content. The strip is hidden by default and
+appears on section hover:
+
+```typescript
+// State per section: track which section
+// is hovered for showing the action strip
+const [hoveredSection, setHoveredSection] =
+  useState<string | null>(null);
+
+// On the section wrapper div, add:
+onMouseEnter={() => setHoveredSection(section.id)}
+onMouseLeave={() => setHoveredSection(null)}
+```
+
+Action strip (renders at bottom of each section):
+
+```typescript
+{hoveredSection === section.id && (
+  <div style={{
+    display: 'flex',
+    gap: 6,
+    padding: '8px 0 2px',
+    borderTop: '0.5px solid #F1F5F9',
+    marginTop: 12,
+  }}>
+    <button
+      onClick={() => {
+        setChartBuilderSection(section.id);
+        setEditingChart(null);
+      }}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 4,
+        padding: '4px 10px',
+        background: 'none',
+        border: '0.5px solid #E2E8F0',
+        borderRadius: 5,
+        fontSize: 11,
+        color: '#64748B',
+        cursor: 'pointer',
+        transition: 'all 0.1s',
+      }}
+      onMouseEnter={e => {
+        (e.currentTarget as HTMLElement)
+          .style.borderColor = '#0D9488';
+        (e.currentTarget as HTMLElement)
+          .style.color = '#0D9488';
+      }}
+      onMouseLeave={e => {
+        (e.currentTarget as HTMLElement)
+          .style.borderColor = '#E2E8F0';
+        (e.currentTarget as HTMLElement)
+          .style.color = '#64748B';
+      }}
+    >
+      <span style={{ fontSize: 13 }}>▤</span>
+      Add chart
+    </button>
+
+    <button
+      onClick={() => {
+        // Open FloatingBubble on first paragraph
+        // of this section — same as right-click
+        // → Add note on paragraph 0
+        window.dispatchEvent(
+          new CustomEvent('open-annotation-bubble', {
+            detail: {
+              sectionId: section.id,
+              paragraphIndex: 0,
+            },
+          })
+        );
+      }}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 4,
+        padding: '4px 10px',
+        background: 'none',
+        border: '0.5px solid #E2E8F0',
+        borderRadius: 5,
+        fontSize: 11,
+        color: '#64748B',
+        cursor: 'pointer',
+        transition: 'all 0.1s',
+      }}
+      onMouseEnter={e => {
+        (e.currentTarget as HTMLElement)
+          .style.borderColor = '#0D9488';
+        (e.currentTarget as HTMLElement)
+          .style.color = '#0D9488';
+      }}
+      onMouseLeave={e => {
+        (e.currentTarget as HTMLElement)
+          .style.borderColor = '#E2E8F0';
+        (e.currentTarget as HTMLElement)
+          .style.color = '#64748B';
+      }}
+    >
+      <span style={{ fontSize: 13 }}>✎</span>
+      Add note
+    </button>
+  </div>
+)}
+```
+
+The action strip replaces the old
+ChartSuggestionPanel inline button.
+Do NOT import or render ChartSuggestionPanel.
+
+---
+
+## Also fix: right-click hint text
+
+Add a subtle hint below the section title
+so users discover the right-click shortcut:
+
+```typescript
+// NOT visible on every render — only show
+// if user has never right-clicked a section
+// Use localStorage to track this:
+
+const [hasUsedRightClick] = useState(
+  () => localStorage.getItem(
+    'pandora-rightclick-hint-dismissed'
+  ) === 'true'
+);
+
+// On first render of the first section only:
+{!hasUsedRightClick && sectionIndex === 0 && (
+  <div style={{
+    fontSize: 10,
+    color: '#CBD5E1',
+    marginTop: -8,
+    marginBottom: 8,
+  }}>
+    Tip: right-click any paragraph for
+    more options
+  </div>
+)}
+```
+
+Dismiss after first right-click:
+```typescript
+// In the onContextMenu handler, add:
+localStorage.setItem(
+  'pandora-rightclick-hint-dismissed', 'true'
+);
+```
+
+---
+
+## What NOT to change:
+- ChartSuggestionPanel.tsx — leave as dead code,
+  do not import or render
+- Right-click context menu behavior
+- ChartBuilder component
+- Annotation system
+- Anything in Ask Pandora
+
+---
+
+## Acceptance Criteria:
+
+1. Hover over any report section →
+   action strip appears at bottom with
+   "▤ Add chart" and "✎ Add note" buttons
+
+2. Click "Add chart" → ChartBuilder opens
+   for that section (same as right-click
+   → Insert chart)
+
+3. Click "Add note" → FloatingBubble opens
+   on the first paragraph of that section
+
+4. Action strip disappears when mouse
+   leaves the section
+
+5. Right-click still works as before —
+   context menu with Note/Chart/Flag appears
+   on the clicked paragraph
+
+6. Tip text appears below first section
+   title on first visit, disappears after
+   first right-click
+
+7. Existing charts in a section still render
+   correctly with "↻ Edit" button
+
+8. ChartBuilder opens with section context
+   correctly set for both entry points
+
+9. Zero regressions on Monday Briefing,
+   Ask Pandora, Agent Builder
+```
