@@ -224,11 +224,18 @@ export default function SectionEditor({
   }
 
   function handleChartInsertedFromEditor(chart: any) {
-    if (fromEditorRef.current && editor && chart.preview_png) {
-      const src = `data:image/png;base64,${chart.preview_png}`;
-      editor.chain().focus().setImage({ src, alt: chart.title || 'Chart' }).run();
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = setTimeout(() => autoSave(editor.getJSON()), 300);
+    if (fromEditorRef.current && editor) {
+      let src: string | null = null;
+      if (chart.id) {
+        src = `/api/workspaces/${workspaceId}/reports/${documentId}/charts/${chart.id}/image`;
+      } else if (chart.preview_png) {
+        src = `data:image/png;base64,${chart.preview_png}`;
+      }
+      if (src) {
+        editor.chain().focus().setImage({ src, alt: chart.title || 'Chart' }).run();
+        if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = setTimeout(() => autoSave(editor.getJSON()), 300);
+      }
     }
     fromEditorRef.current = false;
     if (onChartInserted) onChartInserted(section.id, chart);

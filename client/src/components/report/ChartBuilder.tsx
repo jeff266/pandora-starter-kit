@@ -614,7 +614,8 @@ export default function ChartBuilder({
       });
       if (!res.ok) throw new Error(`Insert failed: ${res.status}`);
       const saved = await res.json();
-      onInsert({ ...(saved.chart || saved), preview_png: saved.chart_png_base64 || previewPng });
+      const chart = saved.chart || saved;
+      onInsert({ ...chart, preview_png: saved.chart_png_base64 || previewPng });
     } catch (err) {
       console.error('[ChartBuilder] Insert error:', err);
     } finally {
@@ -733,7 +734,7 @@ export default function ChartBuilder({
                   onClick={() => {
                     setSourceMode(tab.id);
                     if (tab.id === 'queries' && savedQueries.length === 0) loadSavedQueries();
-                    if (tab.id === 'live' && liveSchema.length === 0) loadLiveSchema();
+                    if (tab.id === 'live' && Object.keys(liveSchema).length === 0) loadLiveSchema();
                   }}
                   style={{
                     padding: '12px 16px 10px',
