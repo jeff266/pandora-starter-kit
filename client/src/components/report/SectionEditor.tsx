@@ -132,6 +132,7 @@ export default function SectionEditor({
   const [slashMenuAbsPos, setSlashMenuAbsPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const readViewRef = useRef<HTMLDivElement>(null);
   const fromEditorRef = useRef(false);
 
   const initialContent = tiptapContent ?? convertPlainTextToDoc(section.content);
@@ -227,7 +228,7 @@ export default function SectionEditor({
     if (fromEditorRef.current && editor) {
       let src: string | null = null;
       if (chart.id) {
-        src = `/api/workspaces/${workspaceId}/reports/${documentId}/charts/${chart.id}/image`;
+        src = `/api/workspaces/${workspaceId}/reports/${documentId}/charts/${chart.id}/image?token=${encodeURIComponent(token)}`;
       } else if (chart.preview_png) {
         src = `data:image/png;base64,${chart.preview_png}`;
       }
@@ -240,6 +241,20 @@ export default function SectionEditor({
     fromEditorRef.current = false;
     if (onChartInserted) onChartInserted(section.id, chart);
   }
+
+  // Fix up any chart image URLs that were saved without a token query param.
+  // Browser <img> requests cannot send Authorization headers, so we embed the
+  // session token as a query parameter so the server can authenticate the request.
+  useEffect(() => {
+    if (isEditing || !readViewRef.current || !token) return;
+    const imgs = readViewRef.current.querySelectorAll<HTMLImageElement>('img[src*="/api/workspaces/"]');
+    imgs.forEach(img => {
+      const src = img.getAttribute('src');
+      if (src && !src.includes('?token=') && !src.includes('&token=')) {
+        img.setAttribute('src', `${src}?token=${encodeURIComponent(token)}`);
+      }
+    });
+  }, [isEditing, localTiptapContent, token]);
 
   useEffect(() => {
     if (!isEditing) return;
@@ -296,7 +311,7 @@ export default function SectionEditor({
           ✎ Edit
         </button>
         {localTiptapContent ? (
-          <div>
+          <div ref={readViewRef}>
             <h2 style={{ fontSize: 20, fontWeight: 700, color: '#1E293B', marginBottom: 12 }}>{section.title}</h2>
             <TiptapReadView content={localTiptapContent} />
           </div>

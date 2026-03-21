@@ -22,8 +22,12 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 
 function extractBearerToken(req: Request): string | null {
   const header = req.headers.authorization;
-  if (!header || !header.startsWith('Bearer ')) return null;
-  return header.slice(7).trim() || null;
+  if (header?.startsWith('Bearer ')) return header.slice(7).trim() || null;
+  // Allow session token as a query param — used by <img> requests which cannot
+  // send Authorization headers (browser image loading ignores fetch options)
+  const queryToken = req.query.token;
+  if (typeof queryToken === 'string' && queryToken.trim()) return queryToken.trim();
+  return null;
 }
 
 async function lookupWorkspaceByKey(apiKey: string): Promise<{ id: string; name: string } | null> {
