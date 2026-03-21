@@ -13,6 +13,7 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { seedWbrQbrTemplates } from '../lib/seed-report-templates.js';
 
 const router = Router();
 const logger = createLogger('ReportsAPI');
@@ -34,6 +35,10 @@ router.get('/:workspaceId/reports', async (req: Request, res: Response) => {
   try {
     const { workspaceId } = req.params;
     const limit = Math.min(parseInt(req.query.limit as string) || 20, 50);
+
+    seedWbrQbrTemplates(workspaceId).catch(err =>
+      logger.warn('WBR/QBR seed failed (non-fatal)', { error: err?.message })
+    );
 
     const result = await query(
       `SELECT id, document_type, week_label, headline, generated_at,
@@ -364,21 +369,58 @@ router.delete('/:workspaceId/reports/:reportId', async (req: Request, res: Respo
 router.post('/:workspaceId/reports/:reportId/generate', async (req: Request, res: Response) => {
   try {
     const { workspaceId, reportId } = req.params as { workspaceId: string; reportId: string };
-    // Accept preview flag from query param or request body
     const preview = req.query.preview === 'true' || req.body.preview === true;
+    const periodLabel: string | undefined = req.body.period_label;
+    const docType: string | undefined = req.body.document_type;
 
-    logger.info('Manual report generation requested', { workspace_id: workspaceId, report_id: reportId, preview });
+    logger.info('Manual report generation requested', { workspace_id: workspaceId, report_id: reportId, preview, docType, periodLabel });
 
     const request: GenerateReportRequest = {
       workspace_id: workspaceId,
       report_template_id: reportId,
       triggered_by: 'manual',
       preview_only: preview,
+      period_label: periodLabel,
+      document_type: docType,
     };
 
     const generation = await generateReport(request);
 
-    res.json(generation);
+    let documentId: string | undefined;
+
+    if ((docType === 'wbr' || docType === 'qbr') && !preview) {
+      const sections = (generation.sections_content || []).map((sc: any) => ({
+        id: sc.section_id,
+        title: sc.title,
+        content: sc.narrative || '',
+        word_count: sc.narrative ? Math.round(sc.narrative.split(/\s+/).length) : 0,
+        source_skills: sc.source_skills || [],
+      }));
+
+      const docResult = await query<{ id: string }>(
+        `INSERT INTO report_documents
+           (workspace_id, document_type, week_label, headline, sections,
+            actions, skills_included, skills_omitted, tokens_used,
+            orchestrator_run_id, generated_at, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, gen_random_uuid(), NOW(), NOW())
+         RETURNING id`,
+        [
+          workspaceId,
+          docType,
+          periodLabel || new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }),
+          '',
+          JSON.stringify(sections),
+          JSON.stringify([]),
+          generation.skills_run || [],
+          [],
+          0,
+        ]
+      );
+      documentId = docResult.rows[0].id;
+      logger.info('WBR/QBR report_document created', { document_id: documentId, docType, periodLabel });
+    }
+
+    res.json({ ...generation, document_id: documentId });
   } catch (err) {
     logger.error('Report generation failed', err instanceof Error ? err : undefined);
     res.status(500).json({ error: err instanceof Error ? err.message : 'Report generation failed' });
@@ -775,6 +817,24 @@ router.get('/:workspaceId/report-sections', async (_req: Request, res: Response)
   } catch (err) {
     logger.error('Failed to get section library', err instanceof Error ? err : undefined);
     res.status(500).json({ error: 'Failed to get section library' });
+  }
+});
+
+// List report templates for a workspace (summary — for generation modal template lookup)
+router.get('/:workspaceId/report-templates', async (req: Request, res: Response) => {
+  try {
+    const { workspaceId } = req.params;
+    const result = await query(
+      `SELECT id, name, description, cadence, created_from_template, is_active, created_at
+       FROM report_templates
+       WHERE workspace_id = $1
+       ORDER BY created_at ASC`,
+      [workspaceId]
+    );
+    res.json({ templates: result.rows });
+  } catch (err) {
+    logger.error('Failed to list report templates', err instanceof Error ? err : undefined);
+    res.status(500).json({ error: 'Failed to list report templates' });
   }
 });
 

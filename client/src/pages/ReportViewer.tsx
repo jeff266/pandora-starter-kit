@@ -100,8 +100,26 @@ interface DocListEntry {
 const DOC_TYPE_LABELS: Record<string, string> = {
   monday_briefing: 'Monday Briefing',
   weekly_business_review: 'Weekly Business Review',
+  wbr: 'Weekly Business Review',
   qbr: 'Quarterly Business Review',
   board_deck: 'Board Deck',
+};
+
+const DOC_TYPE_BANNER: Record<string, { label: string; accent: string; bg: string; pill: string; pillText: string }> = {
+  wbr: {
+    label: 'Weekly Business Review',
+    accent: '#2dd4bf',
+    bg: 'linear-gradient(135deg, #042f2e 0%, #0d3330 100%)',
+    pill: '#0f766e',
+    pillText: '#ccfbf1',
+  },
+  qbr: {
+    label: 'Quarterly Business Review',
+    accent: '#fb923c',
+    bg: 'linear-gradient(135deg, #431407 0%, #7c2d12 100%)',
+    pill: '#c2410c',
+    pillText: '#ffedd5',
+  },
 };
 
 export default function ReportViewer() {
@@ -723,6 +741,62 @@ export default function ReportViewer() {
             ✓ V{(generation?.version || 1) + 1} saved — annotations recorded and feedback signals captured
           </div>
         )}
+
+        {/* WBR / QBR document banner */}
+        {reportDocument && DOC_TYPE_BANNER[reportDocument.document_type] && (() => {
+          const banner = DOC_TYPE_BANNER[reportDocument.document_type];
+          const sectionCount = (reportDocument.sections || []).length;
+          return (
+            <div style={{
+              background: banner.bg,
+              borderBottom: `1px solid ${banner.accent}33`,
+              padding: '14px 24px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexShrink: 0,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <span style={{
+                  padding: '3px 10px', fontSize: 11, fontWeight: 700, letterSpacing: '0.08em',
+                  background: banner.pill, color: banner.pillText, borderRadius: 20,
+                  fontFamily: fonts.sans, textTransform: 'uppercase',
+                }}>
+                  {reportDocument.document_type.toUpperCase()}
+                </span>
+                <span style={{ fontSize: 15, fontWeight: 700, color: '#fff', fontFamily: fonts.sans }}>
+                  {reportDocument.week_label || banner.label}
+                </span>
+                <span style={{ fontSize: 13, color: banner.accent, fontFamily: fonts.sans }}>
+                  {sectionCount} section{sectionCount !== 1 ? 's' : ''}
+                </span>
+              </div>
+              <button
+                onClick={() => {
+                  alert('Export to Gamma is coming soon. This will push the document directly to your Gamma presentation.');
+                }}
+                style={{
+                  padding: '7px 16px',
+                  background: 'rgba(255,255,255,0.08)',
+                  border: `1px solid ${banner.accent}44`,
+                  borderRadius: 8,
+                  color: banner.accent,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  fontFamily: fonts.sans,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.15)')}
+                onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.08)')}
+              >
+                ↗ Export to Gamma
+              </button>
+            </div>
+          );
+        })()}
 
         {/* Header Bar */}
         <div style={{ background: colors.surface, borderBottom: `1px solid ${colors.border}`, padding: '16px 24px' }}>

@@ -65,6 +65,8 @@ router.post('/', requireAdmin, async (req, res) => {
     const workspace = result.rows[0];
     const { seedDictionary } = await import('../dictionary/dictionary-seeder.js');
     seedDictionary(workspace.id).catch(err => console.warn('[Dictionary] Seed failed:', err));
+    const { seedWbrQbrTemplates } = await import('../lib/seed-report-templates.js');
+    seedWbrQbrTemplates(workspace.id).catch(err => console.warn('[Reports] WBR/QBR seed failed:', err));
 
     res.status(201).json({
       id: workspace.id,
