@@ -8,6 +8,8 @@ import { getSkillRegistry } from '../skills/registry.js';
 import type { AgentDefinition } from '../agents/types.js';
 import { requireAdmin } from '../middleware/auth.js';
 import { callLLM } from '../utils/llm-router.js';
+import { getCredentials } from '../connectors/adapters/credentials.js';
+import { GoogleDriveClient, type GoogleDriveCredentials } from '../connectors/google-drive/client.js';
 
 const agentsGlobalRouter = Router();
 const agentsWorkspaceRouter = Router();
@@ -990,6 +992,63 @@ agentsWorkspaceRouter.post('/:workspaceId/reports/:reportId/export', requirePerm
   } catch (err: any) {
     console.error('[Reports] Failed to export report:', err.message);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Export a report document as a native Google Doc via Drive API conversion.
+// Requires Google Drive connected for this workspace (OAuth).
+// Returns { doc_url, doc_id, title }.
+agentsWorkspaceRouter.post('/:workspaceId/reports/:reportId/export/google-docs', requirePermission('agents.view'), async (req: Request, res: Response) => {
+  const workspaceId = req.params.workspaceId as string;
+  const reportId = req.params.reportId as string;
+
+  try {
+    // 1. Check Google Drive credentials
+    const conn = await getCredentials(workspaceId, 'google-drive');
+    if (!conn) {
+      return res.status(400).json({
+        error: 'google_drive_not_connected',
+        message: 'Connect Google Drive in Settings → Integrations first.',
+        settings_url: '/settings/integrations',
+      });
+    }
+
+    // 2. Load document using the same persistence layer as the DOCX export
+    const { getReportDocumentById } = await import('../orchestrator/persistence.js');
+    const reportDoc = await getReportDocumentById(workspaceId, reportId);
+    if (!reportDoc) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+
+    const { mergeAnnotationsForExport } = await import('../orchestrator/annotation-merge.js');
+    const finalDoc = await mergeAnnotationsForExport(reportDoc, workspaceId);
+
+    // 3. Render as DOCX buffer (same renderer as the existing DOCX export)
+    const { renderDocx } = await import('../orchestrator/report-renderer.js');
+    const buf = await renderDocx(finalDoc, {
+      format: 'docx',
+      audience: 'internal',
+      prepared_by: 'RevOps Impact',
+      include_actions: true,
+    });
+
+    // 4. Build a clean document title
+    const docType = (finalDoc.document_type || 'Report').toUpperCase();
+    const periodLabel = finalDoc.week_label || '';
+    const title = [docType, periodLabel].filter(Boolean).join(' — ');
+
+    // 5. Upload to Google Drive — metadata mimeType triggers DOCX → Google Doc conversion
+    const client = new GoogleDriveClient();
+    const { id, webViewLink } = await client.createGoogleDoc(
+      conn.credentials as GoogleDriveCredentials,
+      title,
+      buf
+    );
+
+    return res.json({ doc_url: webViewLink, doc_id: id, title });
+  } catch (err: any) {
+    console.error('[google-docs-export] failed:', err.message);
+    return res.status(500).json({ error: 'Export failed', message: err.message });
   }
 });
 

@@ -153,7 +153,9 @@ export default function ReportViewer() {
   const [summaryExpanded, setSummaryExpanded] = useState(false);
   const [docContextMenu, setDocContextMenu] = useState<{ x: number; y: number; sectionId: string; sectionTitle: string; paragraphIndex: number | null } | null>(null);
   const [chartBuilderSection, setChartBuilderSection] = useState<{ sectionId: string; fromEditor?: boolean } | null>(null);
-  const [gammaSoonVisible, setGammaSoonVisible] = useState(false);
+  const [exportingToGoogleDocs, setExportingToGoogleDocs] = useState(false);
+  const [googleDocsUrl, setGoogleDocsUrl] = useState<string | null>(null);
+  const [googleDocsError, setGoogleDocsError] = useState<string | null>(null);
   const [editingChart, setEditingChart] = useState<any>(null);
   const [sectionCharts, setSectionCharts] = useState<Record<string, any[]>>({});
   const [hoveredSection, setHoveredSection] = useState<string | null>(null);
@@ -496,6 +498,36 @@ export default function ReportViewer() {
     } catch (err) {
       console.error('Failed to create share link:', err);
       alert('Failed to create share link');
+    }
+  }
+
+  async function handleExportToGoogleDocs() {
+    if (!reportDocument?.id) return;
+    const wid = currentWorkspace?.id || workspaceId;
+    if (!wid) return;
+    setExportingToGoogleDocs(true);
+    setGoogleDocsError(null);
+    try {
+      const token = localStorage.getItem('pandora_session');
+      const res = await fetch(
+        `/api/workspaces/${wid}/reports/${reportDocument.id}/export/google-docs`,
+        { method: 'POST', headers: { Authorization: `Bearer ${token}` } }
+      );
+      const data = await res.json();
+      if (!res.ok) {
+        if (data.error === 'google_drive_not_connected') {
+          setGoogleDocsError('Google Drive not connected. Go to Settings → Integrations to connect.');
+        } else {
+          setGoogleDocsError(data.message ?? 'Export failed.');
+        }
+        return;
+      }
+      setGoogleDocsUrl(data.doc_url);
+      window.open(data.doc_url, '_blank', 'noopener,noreferrer');
+    } catch (err) {
+      setGoogleDocsError('Export failed. Please try again.');
+    } finally {
+      setExportingToGoogleDocs(false);
     }
   }
 
@@ -942,44 +974,56 @@ export default function ReportViewer() {
                 </button>
                 <div style={{ position: 'relative', display: 'inline-block' }}>
                   <button
-                    onClick={() => {
-                      setGammaSoonVisible(true);
-                      setTimeout(() => setGammaSoonVisible(false), 2500);
-                    }}
+                    onClick={handleExportToGoogleDocs}
+                    disabled={exportingToGoogleDocs || !reportDocument}
                     style={{
                       padding: '6px 14px',
-                      background: 'rgba(255,255,255,0.04)',
-                      border: `1px solid ${banner.accent}22`,
+                      background: 'rgba(255,255,255,0.08)',
+                      border: `1px solid ${banner.accent}44`,
                       borderRadius: 7,
-                      color: `${banner.accent}66`,
+                      color: banner.accent,
                       fontSize: 12,
                       fontWeight: 600,
                       fontFamily: fonts.sans,
-                      cursor: 'pointer',
+                      cursor: exportingToGoogleDocs ? 'wait' : 'pointer',
                       display: 'flex',
                       alignItems: 'center',
                       gap: 6,
+                      opacity: exportingToGoogleDocs ? 0.7 : 1,
                     }}
                   >
-                    Export to Gamma →
-                    <span style={{ fontSize: 10, padding: '1px 5px', background: `${banner.accent}22`, borderRadius: 8, letterSpacing: '0.04em' }}>soon</span>
+                    {exportingToGoogleDocs
+                      ? 'Exporting...'
+                      : googleDocsUrl
+                        ? '✓ Opened in Google Docs'
+                        : 'Export to Google Docs →'}
                   </button>
-                  {gammaSoonVisible && (
+                  {googleDocsError && (
                     <div style={{
                       position: 'absolute',
-                      bottom: '110%',
-                      left: '50%',
-                      transform: 'translateX(-50%)',
-                      background: 'rgba(0,0,0,0.85)',
-                      color: '#fff',
-                      fontSize: 12,
-                      padding: '6px 12px',
+                      top: '110%',
+                      left: 0,
+                      fontSize: 11,
+                      color: '#dc2626',
+                      background: '#fff1f2',
+                      border: '1px solid #fecaca',
                       borderRadius: 6,
+                      padding: '4px 8px',
                       whiteSpace: 'nowrap',
-                      pointerEvents: 'none',
                       zIndex: 100,
                     }}>
-                      Coming soon
+                      {googleDocsError}
+                      {googleDocsError.includes('not connected') && (
+                        <a href="/settings/integrations" style={{ marginLeft: 6, textDecoration: 'underline', color: '#dc2626' }}>Connect now →</a>
+                      )}
+                    </div>
+                  )}
+                  {googleDocsUrl && (
+                    <div style={{ position: 'absolute', top: '110%', left: 0, zIndex: 100 }}>
+                      <a href={googleDocsUrl} target="_blank" rel="noopener noreferrer"
+                        style={{ fontSize: 11, color: banner.accent, textDecoration: 'underline', whiteSpace: 'nowrap' }}>
+                        Open again →
+                      </a>
                     </div>
                   )}
                 </div>
@@ -1108,10 +1152,43 @@ export default function ReportViewer() {
                       </button>
                     )}
                     <div style={{ height: 1, background: colors.border, margin: '4px 0' }} />
-                    <div style={{ ...dropdownItemStyle, cursor: 'default', opacity: 0.5 }}>
-                      Export to Gamma →
-                      <span style={{ fontSize: 10, padding: '1px 5px', background: colors.accentSoft, color: colors.accent, borderRadius: 8, marginLeft: 4 }}>soon</span>
-                    </div>
+                    {reportDocument && (
+                      <button
+                        onClick={() => { handleExportToGoogleDocs(); setShareMenuOpen(false); }}
+                        disabled={exportingToGoogleDocs}
+                        style={{
+                          ...dropdownItemStyle,
+                          cursor: exportingToGoogleDocs ? 'wait' : 'pointer',
+                          opacity: 1,
+                          width: '100%',
+                          textAlign: 'left',
+                          background: 'none',
+                          border: 'none',
+                        }}
+                      >
+                        {exportingToGoogleDocs
+                          ? 'Exporting...'
+                          : googleDocsUrl
+                            ? '✓ Opened in Google Docs'
+                            : 'Export to Google Docs →'}
+                      </button>
+                    )}
+                    {googleDocsUrl && (
+                      <div style={{ padding: '2px 12px 6px' }}>
+                        <a href={googleDocsUrl} target="_blank" rel="noopener noreferrer"
+                          style={{ fontSize: 11, color: colors.accent, textDecoration: 'underline' }}>
+                          Open again →
+                        </a>
+                      </div>
+                    )}
+                    {googleDocsError && (
+                      <div style={{ fontSize: 11, color: '#dc2626', padding: '2px 12px 6px' }}>
+                        {googleDocsError}
+                        {googleDocsError.includes('not connected') && (
+                          <a href="/settings/integrations" style={{ marginLeft: 6, textDecoration: 'underline', color: '#dc2626' }}>Connect now →</a>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

@@ -1,0 +1,301 @@
+Clean finding. The path is already paved — DOCX renderer exists, GoogleDriveClient exists, Drive auto-converts DOCX to Google Doc on upload. One new endpoint, one UI change.
+
+```
+# Google Docs Export
+
+## What the investigation confirmed
+
+DO NOT re-read the codebase — trust this summary:
+
+Single-call path using existing infrastructure:
+1. renderDOCX() — already works, produces a Buffer
+2. GoogleDriveClient.uploadFile() with mimeType:
+   'application/vnd.google-apps.document' — Drive auto-converts
+   DOCX → Google Doc server-side, returns { id }
+3. Construct URL: https://docs.google.com/document/d/${id}/edit
+4. Return to client
+
+Key files confirmed:
+- server/routes/reports.ts lines 810–886 — existing DOCX export
+  endpoint. Mirror this pattern exactly.
+- server/integrations/google-drive/client.ts — GoogleDriveClient
+  with uploadFile(), getFile(), ensureFreshToken() already built
+- workspace_integrations table — stores OAuth credentials,
+  already used by the Drive connector
+- client/src/pages/ReportViewer.tsx lines 1111–1113 — the dead
+  "Export to Gamma →" div in the Share dropdown. Replace this.
+- The WBR/QBR banner also has a Gamma stub (lines 944–984) with
+  setGammaSoonVisible(). Update this too.
+
+Prerequisite: workspace must have Google Drive connected (OAuth).
+The credential check pattern already exists — follow whatever
+the existing Drive connector uses to check for credentials.
+
+---
+
+## Part 1 — Server Endpoint
+
+File: server/routes/reports.ts
+
+Add one new route, mirroring the existing export endpoint pattern:
+
+```typescript
+// POST /:workspaceId/reports/:reportId/documents/:documentId/export/google-docs
+router.post(
+  '/:workspaceId/reports/:reportId/documents/:documentId/export/google-docs',
+  requireAuth,
+  async (req, res) => {
+    const { workspaceId, reportId, documentId } = req.params
+
+    try {
+      // 1. Check Google Drive credentials for this workspace
+      const credentials = await getWorkspaceGoogleCredentials(workspaceId)
+      if (!credentials) {
+        return res.status(400).json({
+          error: 'google_drive_not_connected',
+          message: 'Connect Google Drive in Settings → Integrations first.',
+          settings_url: '/settings/integrations',
+        })
+      }
+
+      // 2. Load the report document
+      const doc = await db.query(
+        `SELECT * FROM report_documents
+         WHERE id = $1 AND workspace_id = $2`,
+        [documentId, workspaceId]
+      )
+      if (!doc.rows.length) {
+        return res.status(404).json({ error: 'Document not found' })
+      }
+      const reportDocument = doc.rows[0]
+
+      // 3. Render as DOCX buffer
+      // Use the same renderDOCX() call the existing export endpoint uses.
+      // Pass reportDocument — follow the exact same context shape.
+      const docxBuffer = await renderDOCX(reportDocument, workspaceId)
+
+      // 4. Compose a clean filename
+      const title = [
+        reportDocument.document_type?.toUpperCase() ?? 'Report',
+        reportDocument.week_label ?? '',
+      ].filter(Boolean).join(' — ')
+      // e.g. "WBR — Week of March 17, 2026"
+
+      // 5. Upload to Google Drive with DOCX→Google Doc conversion
+      const freshCredentials = await ensureFreshToken(credentials)
+
+      const uploaded = await GoogleDriveClient.uploadFile(
+        freshCredentials,
+        null,          // no specific folder — root Drive
+        `${title}.docx`,
+        docxBuffer,
+        'application/vnd.google-apps.document'
+        // This mimeType triggers server-side DOCX → Google Doc conversion
+      )
+
+      if (!uploaded?.id) {
+        return res.status(500).json({
+          error: 'Upload failed',
+          message: 'Google Drive upload did not return a file ID.',
+        })
+      }
+
+      // 6. Return the Google Doc URL
+      const docUrl = `https://docs.google.com/document/d/${uploaded.id}/edit`
+
+      return res.json({
+        doc_url: docUrl,
+        doc_id: uploaded.id,
+        title,
+      })
+
+    } catch (err) {
+      console.error('[google-docs-export] failed:', err)
+      return res.status(500).json({
+        error: 'Export failed',
+        message: (err as Error).message,
+      })
+    }
+  }
+)
+```
+
+Note: find the exact function signatures for renderDOCX(),
+GoogleDriveClient.uploadFile(), getWorkspaceGoogleCredentials(),
+and ensureFreshToken() by reading the existing export endpoint
+(lines 810–886) and the GoogleDriveClient. Match them exactly —
+do not guess parameter shapes.
+
+---
+
+## Part 2 — Share Dropdown UI
+
+File: client/src/pages/ReportViewer.tsx
+
+### 2a — Replace the dead Gamma div
+
+Find lines 1111–1113 (the inert Export to Gamma div):
+```typescript
+<div style={{ ...dropdownItemStyle, cursor: 'default', opacity: 0.5 }}>
+  Export to Gamma →
+  <span ...>soon</span>
+</div>
+```
+
+Replace with a live button:
+```typescript
+<button
+  onClick={handleExportToGoogleDocs}
+  disabled={exportingToGoogleDocs}
+  style={{
+    ...dropdownItemStyle,
+    cursor: exportingToGoogleDocs ? 'wait' : 'pointer',
+    opacity: 1,
+    width: '100%',
+    textAlign: 'left',
+    background: 'none',
+    border: 'none',
+  }}
+>
+  {exportingToGoogleDocs
+    ? 'Exporting...'
+    : 'Export to Google Docs →'}
+</button>
+```
+
+### 2b — Update the WBR/QBR banner stub
+
+Find the banner button (lines 944–984) that calls
+setGammaSoonVisible(true). Replace it with the same
+handleExportToGoogleDocs handler:
+
+```typescript
+<button onClick={handleExportToGoogleDocs}
+        disabled={exportingToGoogleDocs}>
+  {exportingToGoogleDocs
+    ? 'Exporting...'
+    : 'Export to Google Docs →'}
+</button>
+```
+
+Remove the setGammaSoonVisible state and the "Coming soon"
+tooltip — no longer needed.
+
+### 2c — Add state and handler
+
+```typescript
+const [exportingToGoogleDocs, setExportingToGoogleDocs] =
+  useState(false)
+const [googleDocsUrl, setGoogleDocsUrl] = useState<string | null>(null)
+
+async function handleExportToGoogleDocs() {
+  if (!reportDocument?.id) return
+  setExportingToGoogleDocs(true)
+
+  try {
+    const res = await fetch(
+      `/api/workspaces/${workspaceId}/reports/${reportId}` +
+      `/documents/${reportDocument.id}/export/google-docs`,
+      { method: 'POST' }
+    )
+    const data = await res.json()
+
+    if (!res.ok) {
+      if (data.error === 'google_drive_not_connected') {
+        // Show a connect prompt
+        setGoogleDocsError(
+          'Google Drive not connected. ' +
+          'Go to Settings → Integrations to connect.'
+        )
+      } else {
+        setGoogleDocsError(data.message ?? 'Export failed')
+      }
+      return
+    }
+
+    setGoogleDocsUrl(data.doc_url)
+    // Open in new tab immediately
+    window.open(data.doc_url, '_blank', 'noopener,noreferrer')
+
+  } catch (err) {
+    setGoogleDocsError('Export failed. Please try again.')
+  } finally {
+    setExportingToGoogleDocs(false)
+  }
+}
+
+const [googleDocsError, setGoogleDocsError] = useState<string | null>(null)
+```
+
+### 2d — Success and error states
+
+After a successful export, replace the button text with:
+```typescript
+googleDocsUrl
+  ? <span>✓ Opened in Google Docs
+      <a href={googleDocsUrl} target="_blank"
+         rel="noopener noreferrer"
+         style={{ marginLeft: 8, textDecoration: 'underline' }}>
+        Open again →
+      </a>
+    </span>
+  : 'Export to Google Docs →'
+```
+
+For the error state, show a small inline message below the
+Share dropdown (or below the banner button):
+```typescript
+{googleDocsError && (
+  <div style={{
+    fontSize: 12,
+    color: '#dc2626',
+    marginTop: 4,
+    padding: '4px 8px',
+  }}>
+    {googleDocsError}
+    {googleDocsError.includes('not connected') && (
+      <a href="/settings/integrations"
+         style={{ marginLeft: 6, textDecoration: 'underline' }}>
+        Connect now →
+      </a>
+    )}
+  </div>
+)}
+```
+
+---
+
+## What NOT to Build
+
+- No Gamma export (leave the Gamma idea for later — replace
+  both stubs with Google Docs now)
+- No Google Docs editing after export (read-only export only)
+- No folder picker — export to Drive root
+- No sync back from Google Docs (that's the feedback loop,
+  a separate build)
+- No formatting configuration — DOCX renderer handles
+  formatting, Drive handles conversion
+
+---
+
+## Acceptance Criteria
+
+1. POST .../export/google-docs endpoint returns { doc_url,
+   doc_id, title } for a valid WBR/QBR document
+2. The exported Google Doc opens with correct section headings,
+   bold text, and metric cards (from DOCX → Google Doc
+   conversion)
+3. Document title in Google Drive is "WBR — Week of March 17,
+   2026" format
+4. Share dropdown "Export to Google Docs →" button is live —
+   not greyed out, not a div
+5. WBR/QBR banner button works identically
+6. Clicking export opens the Google Doc in a new tab
+7. "✓ Opened in Google Docs" + "Open again →" link replaces
+   button after success
+8. If Google Drive is not connected, error message appears
+   with "Connect now →" link to /settings/integrations
+9. Button shows "Exporting..." and is disabled during the
+   upload — no double-clicks
+10. Both Gamma stubs removed — no "Coming soon" anywhere
+```

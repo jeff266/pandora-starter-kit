@@ -384,6 +384,62 @@ export class GoogleDriveClient {
   }
 
   /**
+   * Create a native Google Doc from a DOCX buffer.
+   * Uses the Drive multipart upload API with DOCX → Google Doc server-side conversion.
+   * The metadata mimeType tells Drive the TARGET format; the content Content-Type tells
+   * Drive the SOURCE format. Returns the new document's id and webViewLink.
+   */
+  async createGoogleDoc(
+    credentials: GoogleDriveCredentials,
+    title: string,
+    docxBuffer: Buffer
+  ): Promise<{ id: string; webViewLink: string }> {
+    const accessToken = await this.ensureFreshToken(credentials);
+
+    const boundary = '-------314159265358979323846';
+    const delimiter = `\r\n--${boundary}\r\n`;
+    const closeDelimiter = `\r\n--${boundary}--`;
+
+    const metadata = {
+      name: title,
+      mimeType: 'application/vnd.google-apps.document',
+    };
+
+    const multipartBody =
+      delimiter +
+      'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
+      JSON.stringify(metadata) +
+      delimiter +
+      'Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document\r\n' +
+      'Content-Transfer-Encoding: base64\r\n\r\n' +
+      docxBuffer.toString('base64') +
+      closeDelimiter;
+
+    const response = await fetch(
+      'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id%2CwebViewLink',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': `multipart/related; boundary=${boundary}`,
+        },
+        body: multipartBody,
+      }
+    );
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Google Drive createGoogleDoc error: ${response.status} ${errText}`);
+    }
+
+    const result = await response.json() as { id: string; webViewLink?: string };
+    return {
+      id: result.id,
+      webViewLink: result.webViewLink || `https://docs.google.com/document/d/${result.id}/edit`,
+    };
+  }
+
+  /**
    * Find file in folder by name
    */
   async findFileInFolder(
