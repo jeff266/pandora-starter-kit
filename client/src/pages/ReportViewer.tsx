@@ -774,13 +774,18 @@ export default function ReportViewer() {
                   {reportDocument.document_type.toUpperCase()}
                 </span>
                 <span style={{ fontSize: 15, fontWeight: 700, color: '#fff', fontFamily: fonts.sans }}>
-                  {reportDocument.week_label || banner.label}
+                  {banner.label}
                 </span>
-                <span style={{ fontSize: 13, color: banner.accent, fontFamily: fonts.sans }}>
+                {reportDocument.week_label && (
+                  <span style={{ fontSize: 13, color: banner.accent, fontFamily: fonts.sans }}>
+                    · {reportDocument.week_label}
+                  </span>
+                )}
+                <span style={{ fontSize: 13, color: `${banner.accent}88`, fontFamily: fonts.sans }}>
                   {sectionCount} section{sectionCount !== 1 ? 's' : ''}
                 </span>
                 {generatedAgo && (
-                  <span style={{ fontSize: 12, color: `${banner.accent}88`, fontFamily: fonts.sans }}>
+                  <span style={{ fontSize: 12, color: `${banner.accent}66`, fontFamily: fonts.sans }}>
                     · Generated {generatedAgo}
                   </span>
                 )}
@@ -828,7 +833,7 @@ export default function ReportViewer() {
                       gap: 6,
                     }}
                   >
-                    ↗ Export to Gamma
+                    Export to Gamma →
                     <span style={{ fontSize: 10, padding: '1px 5px', background: `${banner.accent}22`, borderRadius: 8, letterSpacing: '0.04em' }}>soon</span>
                   </button>
                   {gammaSoonVisible && (

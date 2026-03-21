@@ -330,7 +330,11 @@ export async function generateReport(request: GenerateReportRequest): Promise<Re
       return { rows: [] as { id: string }[] };
     });
     documentId = docResult.rows[0]?.id;
-    logger.info('WBR/QBR document persisted', { document_id: documentId, document_type, period_label });
+    if (documentId) {
+      logger.info('Report document persisted', { document_id: documentId, document_type, period_label });
+    } else {
+      logger.warn('report_documents INSERT returned no id — document may not have been saved', { document_type, period_label });
+    }
   }
 
   return {
