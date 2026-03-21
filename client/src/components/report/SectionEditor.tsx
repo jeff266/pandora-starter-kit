@@ -3,7 +3,6 @@ import { useEditor, EditorContent } from '@tiptap/react';
 import { generateHTML, Extension } from '@tiptap/core';
 import { StarterKit } from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
-import Strike from '@tiptap/extension-strike';
 import Image from '@tiptap/extension-image';
 import AnnotatableSection, { type Annotation } from './AnnotatableSection';
 
@@ -39,7 +38,6 @@ const BASE_EXTENSIONS = [
   Placeholder.configure({
     placeholder: 'Write something, or type / to add a chart, table, or divider…',
   }),
-  Strike,
   Image.configure({ inline: false }),
 ];
 
@@ -200,6 +198,7 @@ export default function SectionEditor({
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const [localTiptapContent, setLocalTiptapContent] = useState<any>(tiptapContent ?? null);
   const [sectionHovered, setSectionHovered] = useState(false);
+  const [, setEditorTick] = useState(0);
   const [slashMenuActive, setSlashMenuActive] = useState(false);
   const [slashMenuIndex, setSlashMenuIndex] = useState(0);
   const [slashMenuAbsPos, setSlashMenuAbsPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
@@ -251,6 +250,8 @@ export default function SectionEditor({
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(() => autoSave(editor.getJSON()), 2000);
     },
+    onSelectionUpdate: () => setEditorTick(t => t + 1),
+    onTransaction: () => setEditorTick(t => t + 1),
   }, []);
 
   useEffect(() => {
@@ -424,9 +425,54 @@ export default function SectionEditor({
         </div>
       </div>
 
+      {/* Formatting toolbar */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 2, padding: '4px 8px',
+        background: '#F8FAFC', border: '1.5px solid #0D9488', borderBottom: 'none',
+        borderRadius: '8px 8px 0 0',
+      }}>
+        {([
+          { label: 'B', title: 'Bold (⌘B)', action: () => editor?.chain().focus().toggleBold().run(), active: () => editor?.isActive('bold') },
+          { label: 'I', title: 'Italic (⌘I)', action: () => editor?.chain().focus().toggleItalic().run(), active: () => editor?.isActive('italic') },
+          { label: 'S̶', title: 'Strikethrough', action: () => editor?.chain().focus().toggleStrike().run(), active: () => editor?.isActive('strike') },
+          { label: '—', title: 'Separator', action: null, active: () => false },
+          { label: 'H2', title: 'Heading 2', action: () => editor?.chain().focus().toggleHeading({ level: 2 }).run(), active: () => editor?.isActive('heading', { level: 2 }) },
+          { label: 'H3', title: 'Heading 3', action: () => editor?.chain().focus().toggleHeading({ level: 3 }).run(), active: () => editor?.isActive('heading', { level: 3 }) },
+          { label: '—', title: 'Separator', action: null, active: () => false },
+          { label: '≡', title: 'Bullet list', action: () => editor?.chain().focus().toggleBulletList().run(), active: () => editor?.isActive('bulletList') },
+          { label: '1.', title: 'Ordered list', action: () => editor?.chain().focus().toggleOrderedList().run(), active: () => editor?.isActive('orderedList') },
+          { label: '—', title: 'Separator', action: null, active: () => false },
+          { label: '╌', title: 'Divider', action: () => editor?.chain().focus().setHorizontalRule().run(), active: () => false },
+        ] as const).map((btn, i) => {
+          if (btn.action === null) {
+            return <div key={i} style={{ width: 1, height: 16, background: '#E2E8F0', margin: '0 4px' }} />;
+          }
+          const isActive = btn.active?.() ?? false;
+          return (
+            <button
+              key={i}
+              title={btn.title}
+              onMouseDown={e => { e.preventDefault(); btn.action?.(); }}
+              style={{
+                background: isActive ? '#CCFBF1' : 'none',
+                border: 'none', borderRadius: 4,
+                padding: '3px 7px', fontSize: btn.label === 'H2' || btn.label === 'H3' ? 10 : 13,
+                fontWeight: btn.label === 'B' ? 700 : btn.label === 'I' ? 400 : 500,
+                fontStyle: btn.label === 'I' ? 'italic' : 'normal',
+                color: isActive ? '#0D9488' : '#475569',
+                cursor: 'pointer', lineHeight: 1,
+                minWidth: 26, textAlign: 'center',
+              }}
+            >
+              {btn.label}
+            </button>
+          );
+        })}
+      </div>
+
       <div
         className="section-editor-content"
-        style={{ border: '1.5px solid #0D9488', borderRadius: 8, padding: '12px 16px', background: '#FAFFFE', position: 'relative' }}
+        style={{ border: '1.5px solid #0D9488', borderTop: 'none', borderRadius: '0 0 8px 8px', padding: '12px 16px', background: '#FAFFFE', position: 'relative' }}
         onKeyDown={handleEditorKeyDown}
       >
         <EditorContent editor={editor} />
