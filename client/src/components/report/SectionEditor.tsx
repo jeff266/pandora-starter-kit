@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
+import { registerSectionEditor, unregisterSectionEditor } from '../../lib/sectionEditorRegistry';
 import { generateHTML, Extension } from '@tiptap/core';
 import { StarterKit } from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
@@ -280,6 +281,13 @@ export default function SectionEditor({
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    if (editor && section.id) {
+      registerSectionEditor(section.id, editor);
+      return () => unregisterSectionEditor(section.id);
+    }
+  }, [editor, section.id]);
 
   function executeSlashCommand(cmdId: string) {
     if (!editor) return;

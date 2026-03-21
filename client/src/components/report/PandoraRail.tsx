@@ -2,6 +2,8 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { api } from '../../lib/api';
 import { colors, fonts } from '../../styles/theme';
 import { renderMarkdown } from '../../lib/render-markdown';
+import { getActiveSectionEditor, getAnyActiveEditor } from '../../lib/sectionEditorRegistry';
+import { insertTextIntoEditor } from '../../lib/insertBlock';
 
 interface ReportContext {
   documentId?: string;
@@ -75,6 +77,9 @@ export default function PandoraRail({ workspaceId, reportContext = {}, forcedMod
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [threadId, setThreadId] = useState<string | null>(null);
+  const [hoveredMsgIdx, setHoveredMsgIdx] = useState<number | null>(null);
+  const [insertedMsgIdx, setInsertedMsgIdx] = useState<number | null>(null);
+  const [noSectionMsgIdx, setNoSectionMsgIdx] = useState<number | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const prevSectionRef = useRef<string | null | undefined>(null);
@@ -140,6 +145,20 @@ export default function PandoraRail({ workspaceId, reportContext = {}, forcedMod
     setThreadId(null);
     setInput('');
   };
+
+  const handleInsert = useCallback((idx: number, content: string) => {
+    const editor =
+      getActiveSectionEditor(reportContext.activeSectionId ?? null) ??
+      getAnyActiveEditor();
+    if (!editor || editor.isDestroyed) {
+      setNoSectionMsgIdx(idx);
+      setTimeout(() => setNoSectionMsgIdx(n => n === idx ? null : n), 3000);
+      return;
+    }
+    insertTextIntoEditor(editor, content);
+    setInsertedMsgIdx(idx);
+    setTimeout(() => setInsertedMsgIdx(n => n === idx ? null : n), 2000);
+  }, [reportContext.activeSectionId]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', background: colors.surface }}>
@@ -234,7 +253,12 @@ export default function PandoraRail({ workspaceId, reportContext = {}, forcedMod
           </div>
         ) : (
           messages.map((msg, i) => (
-            <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
+            <div
+              key={i}
+              style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start' }}
+              onMouseEnter={() => msg.role === 'assistant' && setHoveredMsgIdx(i)}
+              onMouseLeave={() => msg.role === 'assistant' && setHoveredMsgIdx(null)}
+            >
               {msg.role === 'user' ? (
                 <div style={{
                   maxWidth: '85%', padding: '8px 12px', borderRadius: '12px 12px 4px 12px',
@@ -243,10 +267,40 @@ export default function PandoraRail({ workspaceId, reportContext = {}, forcedMod
                   {msg.content}
                 </div>
               ) : (
-                <div style={{ maxWidth: '100%', display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-                  <span style={{ fontSize: 14, flexShrink: 0, marginTop: 2 }}>✦</span>
-                  <div style={{ fontSize: 13, lineHeight: 1.6, color: colors.text, fontFamily: fonts.sans }}>
-                    {renderMarkdown(msg.content)}
+                <div style={{ maxWidth: '100%', position: 'relative' }}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                    <span style={{ fontSize: 14, flexShrink: 0, marginTop: 2 }}>✦</span>
+                    <div style={{ fontSize: 13, lineHeight: 1.6, color: colors.text, fontFamily: fonts.sans, flex: 1 }}>
+                      {renderMarkdown(msg.content)}
+                    </div>
+                  </div>
+                  {/* Insert button — appears on hover */}
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    marginTop: 4, marginLeft: 22,
+                    opacity: hoveredMsgIdx === i || insertedMsgIdx === i || noSectionMsgIdx === i ? 1 : 0,
+                    transition: 'opacity 150ms ease',
+                    pointerEvents: hoveredMsgIdx === i ? 'auto' : 'none',
+                  }}>
+                    <button
+                      onClick={() => handleInsert(i, msg.content)}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 4,
+                        padding: '3px 10px', borderRadius: 12, cursor: 'pointer',
+                        border: `1px solid ${insertedMsgIdx === i ? colors.accent : colors.border}`,
+                        background: insertedMsgIdx === i ? `${colors.accent}18` : colors.surface,
+                        color: insertedMsgIdx === i ? colors.accent : colors.textSecondary,
+                        fontSize: 11, fontFamily: fonts.sans, fontWeight: 600,
+                        transition: 'all 120ms ease',
+                      }}
+                    >
+                      {insertedMsgIdx === i ? '✓ Inserted' : '↓ Insert'}
+                    </button>
+                    {noSectionMsgIdx === i && (
+                      <span style={{ fontSize: 11, color: colors.textMuted, fontFamily: fonts.sans, fontStyle: 'italic' }}>
+                        Click into a section first
+                      </span>
+                    )}
                   </div>
                 </div>
               )}
