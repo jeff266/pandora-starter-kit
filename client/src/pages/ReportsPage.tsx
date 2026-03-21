@@ -757,6 +757,7 @@ function TemplateGallery({ workspaceId, onSelect, onClose, onOpenWbr, onOpenQbr 
       icon: '📋',
       accentColor: '#2dd4bf',
       borderColor: '#0d3330',
+      badge: 'OPERATIONAL',
     },
     {
       type: 'qbr' as const,
@@ -767,6 +768,7 @@ function TemplateGallery({ workspaceId, onSelect, onClose, onOpenWbr, onOpenQbr 
       icon: '📊',
       accentColor: '#fb923c',
       borderColor: '#431407',
+      badge: 'STRATEGIC',
     },
   ];
 
@@ -853,7 +855,7 @@ function TemplateGallery({ workspaceId, onSelect, onClose, onOpenWbr, onOpenQbr 
               e.currentTarget.style.boxShadow = 'none';
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
               <span style={{ fontSize: 28 }}>{t.icon}</span>
               <span style={{
                 fontSize: 10, fontWeight: 700, letterSpacing: '0.08em',
@@ -861,6 +863,14 @@ function TemplateGallery({ workspaceId, onSelect, onClose, onOpenWbr, onOpenQbr 
                 background: t.accentColor, color: '#000', fontFamily: fonts.sans, textTransform: 'uppercase',
               }}>
                 {t.type.toUpperCase()}
+              </span>
+              <span style={{
+                fontSize: 10, fontWeight: 700, letterSpacing: '0.08em',
+                padding: '2px 8px', borderRadius: 12,
+                background: 'rgba(255,255,255,0.12)', color: 'rgba(255,255,255,0.7)',
+                fontFamily: fonts.sans, textTransform: 'uppercase',
+              }}>
+                {t.badge}
               </span>
             </div>
             <h3 style={{ fontSize: 17, fontWeight: 700, color: '#fff', marginBottom: 6, fontFamily: fonts.sans }}>{t.name}</h3>

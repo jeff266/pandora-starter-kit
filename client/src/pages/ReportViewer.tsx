@@ -152,6 +152,7 @@ export default function ReportViewer() {
   const [summaryExpanded, setSummaryExpanded] = useState(false);
   const [docContextMenu, setDocContextMenu] = useState<{ x: number; y: number; sectionId: string; sectionTitle: string; paragraphIndex: number | null } | null>(null);
   const [chartBuilderSection, setChartBuilderSection] = useState<{ sectionId: string; fromEditor?: boolean } | null>(null);
+  const [gammaSoonVisible, setGammaSoonVisible] = useState(false);
   const [editingChart, setEditingChart] = useState<any>(null);
   const [sectionCharts, setSectionCharts] = useState<Record<string, any[]>>({});
   const [hoveredSection, setHoveredSection] = useState<string | null>(null);
@@ -806,27 +807,49 @@ export default function ReportViewer() {
                 >
                   ↓ Download PDF
                 </button>
-                <button
-                  disabled
-                  title="Export to Gamma — coming soon"
-                  style={{
-                    padding: '6px 14px',
-                    background: 'rgba(255,255,255,0.04)',
-                    border: `1px solid ${banner.accent}22`,
-                    borderRadius: 7,
-                    color: `${banner.accent}66`,
-                    fontSize: 12,
-                    fontWeight: 600,
-                    fontFamily: fonts.sans,
-                    cursor: 'not-allowed',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 6,
-                  }}
-                >
-                  ↗ Export to Gamma
-                  <span style={{ fontSize: 10, padding: '1px 5px', background: `${banner.accent}22`, borderRadius: 8, letterSpacing: '0.04em' }}>soon</span>
-                </button>
+                <div style={{ position: 'relative', display: 'inline-block' }}>
+                  <button
+                    onClick={() => {
+                      setGammaSoonVisible(true);
+                      setTimeout(() => setGammaSoonVisible(false), 2500);
+                    }}
+                    style={{
+                      padding: '6px 14px',
+                      background: 'rgba(255,255,255,0.04)',
+                      border: `1px solid ${banner.accent}22`,
+                      borderRadius: 7,
+                      color: `${banner.accent}66`,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      fontFamily: fonts.sans,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                    }}
+                  >
+                    ↗ Export to Gamma
+                    <span style={{ fontSize: 10, padding: '1px 5px', background: `${banner.accent}22`, borderRadius: 8, letterSpacing: '0.04em' }}>soon</span>
+                  </button>
+                  {gammaSoonVisible && (
+                    <div style={{
+                      position: 'absolute',
+                      bottom: '110%',
+                      left: '50%',
+                      transform: 'translateX(-50%)',
+                      background: 'rgba(0,0,0,0.85)',
+                      color: '#fff',
+                      fontSize: 12,
+                      padding: '6px 12px',
+                      borderRadius: 6,
+                      whiteSpace: 'nowrap',
+                      pointerEvents: 'none',
+                      zIndex: 100,
+                    }}>
+                      Coming soon
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           );

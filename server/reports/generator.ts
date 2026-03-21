@@ -20,9 +20,56 @@ import { generateEditorialReport } from './editorial-generator.js';
 
 const logger = createLogger('ReportGenerator');
 
+const SKILL_DISPLAY_NAMES: Record<string, string> = {
+  'pipeline-hygiene': 'Pipeline Hygiene',
+  'pipeline-coverage': 'Pipeline Coverage',
+  'forecast-rollup': 'Forecast Rollup',
+  'deal-risk-review': 'Deal Risk Review',
+  'pipeline-waterfall': 'Pipeline Waterfall',
+  'rep-scorecard': 'Rep Scorecard',
+  'conversation-intelligence': 'Conversation Intelligence',
+};
+
+function humanizeSkillId(id: string): string {
+  return SKILL_DISPLAY_NAMES[id] || id
+    .split('-')
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
+async function checkSkillFreshness(
+  workspace_id: string,
+  skillIds: string[],
+  thresholdMs: number
+): Promise<Map<string, 'fresh' | 'stale' | 'missing'>> {
+  const result = new Map<string, 'fresh' | 'stale' | 'missing'>();
+  if (skillIds.length === 0) return result;
+  try {
+    const rows = await query<{ skill_id: string; created_at: string; status: string }>(
+      `SELECT DISTINCT ON (skill_id) skill_id, created_at, status
+       FROM skill_runs
+       WHERE workspace_id = $1 AND skill_id = ANY($2)
+       ORDER BY skill_id, created_at DESC`,
+      [workspace_id, skillIds]
+    );
+    const seen = new Set<string>();
+    for (const r of rows.rows) {
+      seen.add(r.skill_id);
+      const age = Date.now() - new Date(r.created_at).getTime();
+      result.set(r.skill_id, r.status === 'completed' && age <= thresholdMs ? 'fresh' : 'stale');
+    }
+    for (const sid of skillIds) {
+      if (!seen.has(sid)) result.set(sid, 'missing');
+    }
+  } catch {
+    for (const sid of skillIds) result.set(sid, 'missing');
+  }
+  return result;
+}
+
 export async function generateReport(request: GenerateReportRequest): Promise<ReportGeneration> {
   const startTime = Date.now();
-  const { workspace_id, report_template_id, triggered_by, preview_only = false } = request;
+  const { workspace_id, report_template_id, triggered_by, preview_only = false, period_label, document_type } = request;
 
   logger.info('Starting report generation', { workspace_id, report_template_id, triggered_by });
 
@@ -71,11 +118,43 @@ export async function generateReport(request: GenerateReportRequest): Promise<Re
   const requiredSkills = getRequiredSkills(enabledSections);
   logger.info('Required skills', { skills: requiredSkills, count: requiredSkills.length });
 
+  // 4a. For WBR/QBR: check skill freshness upfront (7-day window per spec)
+  const isWbrOrQbr = document_type === 'wbr' || document_type === 'qbr';
+  const FRESHNESS_THRESHOLD_MS = 7 * 24 * 3600 * 1000;
+  const skillFreshness = isWbrOrQbr
+    ? await checkSkillFreshness(workspace_id, requiredSkills, FRESHNESS_THRESHOLD_MS)
+    : new Map<string, 'fresh' | 'stale' | 'missing'>();
+
   // 5. Generate content for each section
   logger.info('Generating section content', { section_count: enabledSections.length });
   const sectionsContent: SectionContent[] = [];
 
   for (const section of enabledSections) {
+    // WBR/QBR: if any required skill for this section lacks a completed run within 7 days,
+    // replace narrative with a degraded placeholder instead of attempting generation
+    if (isWbrOrQbr && section.skills.length > 0) {
+      const notReadySkills = section.skills.filter(sid => {
+        const status = skillFreshness.get(sid);
+        return status === 'missing' || status === 'stale';
+      });
+      if (notReadySkills.length > 0) {
+        const names = notReadySkills.map(humanizeSkillId).join(', ');
+        const firstStatus = skillFreshness.get(notReadySkills[0]);
+        const reason = firstStatus === 'missing'
+          ? `${names} ${notReadySkills.length === 1 ? 'has' : 'have'} not completed a run in the last 7 days`
+          : `Data from ${names} is older than 7 days`;
+        sectionsContent.push({
+          section_id: section.id,
+          title: section.label,
+          narrative: `[Awaiting data — ${reason}. Schedule the skill and regenerate to populate this section.]`,
+          source_skills: section.skills,
+          data_freshness: new Date().toISOString(),
+          confidence: 0,
+        });
+        continue;
+      }
+    }
+
     try {
       const content = await generateSectionContent(workspace_id, section, template.voice_config);
       sectionsContent.push(content);

@@ -389,39 +389,15 @@ router.post('/:workspaceId/reports/:reportId/generate', async (req: Request, res
     let documentId: string | undefined;
 
     if ((docType === 'wbr' || docType === 'qbr') && !preview) {
-      const STALE_THRESHOLD_MS = docType === 'wbr' ? 24 * 3600 * 1000 : 7 * 24 * 3600 * 1000;
-      const skillRunsResult = await query<{ skill_id: string; created_at: string; status: string }>(
-        `SELECT DISTINCT ON (skill_id) skill_id, created_at, status
-         FROM skill_runs
-         WHERE workspace_id = $1
-         ORDER BY skill_id, created_at DESC`,
-        [workspaceId]
-      ).catch(() => ({ rows: [] as { skill_id: string; created_at: string; status: string }[] }));
-      const skillFreshnessMap = new Map<string, { stale: boolean }>();
-      for (const r of skillRunsResult.rows) {
-        const age = Date.now() - new Date(r.created_at).getTime();
-        skillFreshnessMap.set(r.skill_id, { stale: r.status !== 'completed' || age > STALE_THRESHOLD_MS });
-      }
-
+      // Sections are already populated by generator.ts (with degraded placeholders for stale/missing skills)
       const sections = (generation.sections_content || []).map((sc: any) => {
-        const usedSkills: string[] = sc.source_skills || [];
-        const missingSkills = usedSkills.filter(sid => !skillFreshnessMap.has(sid));
-        const staleSkills = usedSkills.filter(sid => {
-          const s = skillFreshnessMap.get(sid);
-          return s && s.stale;
-        });
-        let content = sc.narrative || '';
-        if (missingSkills.length > 0 && !content) {
-          content = `[Data unavailable — ${missingSkills.join(', ')} has not run yet. Schedule the skill and regenerate to populate this section.]`;
-        } else if (staleSkills.length > 0 && content) {
-          content = `[Note: Data for ${staleSkills.join(', ')} may be outdated. Consider re-running those skills before distributing.]\n\n${content}`;
-        }
+        const content = sc.narrative || '';
         return {
           id: sc.section_id,
           title: sc.title,
           content,
           word_count: content ? Math.round(content.split(/\s+/).length) : 0,
-          source_skills: usedSkills,
+          source_skills: sc.source_skills || [],
         };
       });
 
