@@ -33,13 +33,27 @@ interface SectionEditorProps {
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
-const BASE_EXTENSIONS = [
-  StarterKit,
-  Placeholder.configure({
-    placeholder: 'Write something, or type / to add a chart, table, or divider…',
-  }),
+const LINK_CONFIG = {
+  openOnClick: false,
+  HTMLAttributes: { target: '_blank', rel: 'noopener noreferrer', class: 'tiptap-link' },
+};
+
+// Extensions used for read-only HTML generation
+const READ_EXTENSIONS = [
+  StarterKit.configure({ link: LINK_CONFIG }),
   Image.configure({ inline: false }),
 ];
+
+// Factory so each SectionEditor gets its own fresh extension instances
+function makeEditorExtensions() {
+  return [
+    StarterKit.configure({ link: LINK_CONFIG }),
+    Placeholder.configure({
+      placeholder: 'Write something, or type / to add a chart, table, or divider…',
+    }),
+    Image.configure({ inline: false }),
+  ];
+}
 
 // ── Markdown → TipTap conversion ────────────────────────────────────────────
 
@@ -129,7 +143,7 @@ function sanitizeTiptapContent(node: any, token: string): any {
 function TiptapReadView({ content }: { content: any }) {
   let html = '';
   try {
-    html = generateHTML(content, BASE_EXTENSIONS);
+    html = generateHTML(content, READ_EXTENSIONS);
   } catch {
     html = '<p>Content unavailable</p>';
   }
@@ -142,6 +156,8 @@ function TiptapReadView({ content }: { content: any }) {
         .tiptap-read-view h1, .tiptap-read-view h2, .tiptap-read-view h3 { color: #1E293B; margin: 0 0 10px; }
         .tiptap-read-view ul, .tiptap-read-view ol { padding-left: 20px; margin: 0 0 12px; }
         .tiptap-read-view li { margin-bottom: 4px; font-size: 16px; line-height: 1.65; color: #334155; }
+        .tiptap-read-view a, .tiptap-read-view .tiptap-link { color: #0D9488; text-decoration: underline; }
+        .tiptap-read-view a:hover { color: #0F766E; }
       `}</style>
       <div className="tiptap-read-view" dangerouslySetInnerHTML={{ __html: html }} />
     </>
@@ -202,8 +218,10 @@ export default function SectionEditor({
   const [slashMenuActive, setSlashMenuActive] = useState(false);
   const [slashMenuIndex, setSlashMenuIndex] = useState(0);
   const [slashMenuAbsPos, setSlashMenuAbsPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
+  const [linkPopover, setLinkPopover] = useState<{ open: boolean; url: string }>({ open: false, url: '' });
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const fromEditorRef = useRef(false);
 
   const initialContent = tiptapContent ?? convertPlainTextToDoc(section.content);
@@ -242,7 +260,7 @@ export default function SectionEditor({
 
   const editor = useEditor({
     extensions: [
-      ...BASE_EXTENSIONS,
+      ...makeEditorExtensions(),
       slashExtension,
     ],
     content: initialContent,
@@ -295,6 +313,37 @@ export default function SectionEditor({
     } else if (e.key === 'Escape') {
       setSlashMenuActive(false);
     }
+  }
+
+  function handleImageFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !editor) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const src = reader.result as string;
+      editor.chain().focus().setImage({ src, alt: file.name }).run();
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = setTimeout(() => autoSave(editor.getJSON()), 300);
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  }
+
+  function applyLink() {
+    if (!editor) return;
+    const url = linkPopover.url.trim();
+    if (!url) {
+      editor.chain().focus().unsetLink().run();
+    } else {
+      const href = url.startsWith('http') ? url : `https://${url}`;
+      editor.chain().focus().setLink({ href }).run();
+    }
+    setLinkPopover({ open: false, url: '' });
+  }
+
+  function openLinkPopover() {
+    const existing = editor?.getAttributes('link').href ?? '';
+    setLinkPopover({ open: true, url: existing });
   }
 
   function handleChartInsertedFromEditor(chart: any) {
@@ -429,45 +478,128 @@ export default function SectionEditor({
       <div style={{
         display: 'flex', alignItems: 'center', gap: 2, padding: '4px 8px',
         background: '#F8FAFC', border: '1.5px solid #0D9488', borderBottom: 'none',
-        borderRadius: '8px 8px 0 0',
+        borderRadius: '8px 8px 0 0', flexWrap: 'wrap', position: 'relative',
       }}>
+        {/* Undo / Redo */}
+        {[
+          { label: '↩', title: 'Undo (⌘Z)', action: () => editor?.chain().focus().undo().run(), disabled: () => !editor?.can().undo() },
+          { label: '↪', title: 'Redo (⌘⇧Z)', action: () => editor?.chain().focus().redo().run(), disabled: () => !editor?.can().redo() },
+        ].map((btn, i) => (
+          <button key={`ur-${i}`} title={btn.title}
+            onMouseDown={e => { e.preventDefault(); btn.action(); }}
+            style={{ background: 'none', border: 'none', borderRadius: 4, padding: '3px 7px', fontSize: 14, color: btn.disabled() ? '#CBD5E1' : '#475569', cursor: btn.disabled() ? 'default' : 'pointer', lineHeight: 1, minWidth: 26 }}>
+            {btn.label}
+          </button>
+        ))}
+
+        <div style={{ width: 1, height: 16, background: '#E2E8F0', margin: '0 4px' }} />
+
+        {/* Text formatting */}
         {([
-          { label: 'B', title: 'Bold (⌘B)', action: () => editor?.chain().focus().toggleBold().run(), active: () => editor?.isActive('bold') },
-          { label: 'I', title: 'Italic (⌘I)', action: () => editor?.chain().focus().toggleItalic().run(), active: () => editor?.isActive('italic') },
-          { label: 'S̶', title: 'Strikethrough', action: () => editor?.chain().focus().toggleStrike().run(), active: () => editor?.isActive('strike') },
-          { label: '—', title: 'Separator', action: null, active: () => false },
-          { label: 'H2', title: 'Heading 2', action: () => editor?.chain().focus().toggleHeading({ level: 2 }).run(), active: () => editor?.isActive('heading', { level: 2 }) },
-          { label: 'H3', title: 'Heading 3', action: () => editor?.chain().focus().toggleHeading({ level: 3 }).run(), active: () => editor?.isActive('heading', { level: 3 }) },
-          { label: '—', title: 'Separator', action: null, active: () => false },
-          { label: '≡', title: 'Bullet list', action: () => editor?.chain().focus().toggleBulletList().run(), active: () => editor?.isActive('bulletList') },
-          { label: '1.', title: 'Ordered list', action: () => editor?.chain().focus().toggleOrderedList().run(), active: () => editor?.isActive('orderedList') },
-          { label: '—', title: 'Separator', action: null, active: () => false },
-          { label: '╌', title: 'Divider', action: () => editor?.chain().focus().setHorizontalRule().run(), active: () => false },
+          { label: 'B', title: 'Bold (⌘B)', action: () => editor?.chain().focus().toggleBold().run(), active: () => editor?.isActive('bold'), style: { fontWeight: 700 } },
+          { label: 'I', title: 'Italic (⌘I)', action: () => editor?.chain().focus().toggleItalic().run(), active: () => editor?.isActive('italic'), style: { fontStyle: 'italic' } },
+          { label: 'S̶', title: 'Strikethrough', action: () => editor?.chain().focus().toggleStrike().run(), active: () => editor?.isActive('strike'), style: {} },
         ] as const).map((btn, i) => {
-          if (btn.action === null) {
-            return <div key={i} style={{ width: 1, height: 16, background: '#E2E8F0', margin: '0 4px' }} />;
-          }
           const isActive = btn.active?.() ?? false;
           return (
-            <button
-              key={i}
-              title={btn.title}
+            <button key={`fmt-${i}`} title={btn.title}
               onMouseDown={e => { e.preventDefault(); btn.action?.(); }}
-              style={{
-                background: isActive ? '#CCFBF1' : 'none',
-                border: 'none', borderRadius: 4,
-                padding: '3px 7px', fontSize: btn.label === 'H2' || btn.label === 'H3' ? 10 : 13,
-                fontWeight: btn.label === 'B' ? 700 : btn.label === 'I' ? 400 : 500,
-                fontStyle: btn.label === 'I' ? 'italic' : 'normal',
-                color: isActive ? '#0D9488' : '#475569',
-                cursor: 'pointer', lineHeight: 1,
-                minWidth: 26, textAlign: 'center',
-              }}
-            >
+              style={{ background: isActive ? '#CCFBF1' : 'none', border: 'none', borderRadius: 4, padding: '3px 7px', fontSize: 13, color: isActive ? '#0D9488' : '#475569', cursor: 'pointer', lineHeight: 1, minWidth: 26, textAlign: 'center', ...btn.style }}>
               {btn.label}
             </button>
           );
         })}
+
+        <div style={{ width: 1, height: 16, background: '#E2E8F0', margin: '0 4px' }} />
+
+        {/* Headings */}
+        {([
+          { label: 'H2', level: 2 as const },
+          { label: 'H3', level: 3 as const },
+        ]).map(h => {
+          const isActive = editor?.isActive('heading', { level: h.level }) ?? false;
+          return (
+            <button key={h.label} title={`Heading ${h.level}`}
+              onMouseDown={e => { e.preventDefault(); editor?.chain().focus().toggleHeading({ level: h.level }).run(); }}
+              style={{ background: isActive ? '#CCFBF1' : 'none', border: 'none', borderRadius: 4, padding: '3px 7px', fontSize: 10, fontWeight: 700, color: isActive ? '#0D9488' : '#475569', cursor: 'pointer', lineHeight: 1, minWidth: 26, textAlign: 'center' }}>
+              {h.label}
+            </button>
+          );
+        })}
+
+        <div style={{ width: 1, height: 16, background: '#E2E8F0', margin: '0 4px' }} />
+
+        {/* Lists */}
+        {([
+          { label: '≡', title: 'Bullet list', action: () => editor?.chain().focus().toggleBulletList().run(), active: () => editor?.isActive('bulletList') },
+          { label: '1.', title: 'Ordered list', action: () => editor?.chain().focus().toggleOrderedList().run(), active: () => editor?.isActive('orderedList') },
+        ] as const).map((btn, i) => {
+          const isActive = btn.active?.() ?? false;
+          return (
+            <button key={`list-${i}`} title={btn.title}
+              onMouseDown={e => { e.preventDefault(); btn.action?.(); }}
+              style={{ background: isActive ? '#CCFBF1' : 'none', border: 'none', borderRadius: 4, padding: '3px 7px', fontSize: 13, color: isActive ? '#0D9488' : '#475569', cursor: 'pointer', lineHeight: 1, minWidth: 26, textAlign: 'center' }}>
+              {btn.label}
+            </button>
+          );
+        })}
+
+        <div style={{ width: 1, height: 16, background: '#E2E8F0', margin: '0 4px' }} />
+
+        {/* Link button */}
+        <button title="Insert / edit link (⌘K)"
+          onMouseDown={e => { e.preventDefault(); openLinkPopover(); }}
+          style={{ background: editor?.isActive('link') ? '#CCFBF1' : 'none', border: 'none', borderRadius: 4, padding: '3px 7px', fontSize: 13, color: editor?.isActive('link') ? '#0D9488' : '#475569', cursor: 'pointer', lineHeight: 1, minWidth: 26, textAlign: 'center' }}>
+          🔗
+        </button>
+
+        {/* Image upload button */}
+        <button title="Insert image from file"
+          onMouseDown={e => { e.preventDefault(); imageInputRef.current?.click(); }}
+          style={{ background: 'none', border: 'none', borderRadius: 4, padding: '3px 7px', fontSize: 13, color: '#475569', cursor: 'pointer', lineHeight: 1, minWidth: 26, textAlign: 'center' }}>
+          🖼
+        </button>
+
+        {/* Divider rule */}
+        <button title="Insert horizontal divider"
+          onMouseDown={e => { e.preventDefault(); editor?.chain().focus().setHorizontalRule().run(); }}
+          style={{ background: 'none', border: 'none', borderRadius: 4, padding: '3px 7px', fontSize: 13, color: '#475569', cursor: 'pointer', lineHeight: 1, minWidth: 26, textAlign: 'center' }}>
+          ╌
+        </button>
+
+        {/* Hidden file input for image upload */}
+        <input ref={imageInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleImageFile} />
+
+        {/* Link popover */}
+        {linkPopover.open && (
+          <div style={{
+            position: 'absolute', top: '100%', left: 0, zIndex: 200,
+            background: 'white', border: '1px solid #E2E8F0', borderRadius: 8,
+            boxShadow: '0 8px 24px rgba(0,0,0,0.12)', padding: '10px 12px',
+            display: 'flex', alignItems: 'center', gap: 8, minWidth: 320, marginTop: 4,
+          }}>
+            <span style={{ fontSize: 12, color: '#94A3B8', flexShrink: 0 }}>URL</span>
+            <input
+              autoFocus
+              type="url"
+              placeholder="https://example.com"
+              value={linkPopover.url}
+              onChange={e => setLinkPopover(p => ({ ...p, url: e.target.value }))}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); applyLink(); } if (e.key === 'Escape') setLinkPopover({ open: false, url: '' }); }}
+              style={{ flex: 1, border: '1px solid #E2E8F0', borderRadius: 5, padding: '4px 8px', fontSize: 13, outline: 'none' }}
+            />
+            <button onMouseDown={e => { e.preventDefault(); applyLink(); }}
+              style={{ background: '#0D9488', color: 'white', border: 'none', borderRadius: 5, padding: '4px 10px', fontSize: 12, fontWeight: 600, cursor: 'pointer', flexShrink: 0 }}>
+              Apply
+            </button>
+            {editor?.isActive('link') && (
+              <button onMouseDown={e => { e.preventDefault(); editor.chain().focus().unsetLink().run(); setLinkPopover({ open: false, url: '' }); }}
+                style={{ background: 'none', color: '#EF4444', border: '1px solid #FCA5A5', borderRadius: 5, padding: '4px 8px', fontSize: 12, cursor: 'pointer', flexShrink: 0 }}>
+                Remove
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       <div
