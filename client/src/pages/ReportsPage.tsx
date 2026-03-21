@@ -840,9 +840,9 @@ function TemplateGallery({ workspaceId, onSelect, onClose, onOpenWbr, onOpenQbr 
     {
       id: 'quarterly-business-review',
       name: 'Quarterly Business Review',
-      description: 'Full-quarter recap for board and exec audiences with attainment, win/loss, and next quarter plan',
+      description: 'Full-quarter recap for exec audiences with attainment, deal analysis, forecast review, and next quarter plan',
       cadence: 'quarterly',
-      sections: ['the-number', 'win-loss-analysis', 'forecast-accuracy', 'capacity-plan', 'next-quarter-plan'],
+      sections: ['the-number', 'forecast-waterfall', 'rep-performance', 'deals-needing-attention', 'actions-summary'],
       icon: '🏆',
     },
   ];

@@ -290,9 +290,9 @@ export async function generateReport(request: GenerateReportRequest): Promise<Re
     logger.info('Preview generation complete', { duration_ms: Date.now() - startTime });
   }
 
-  // 8. For WBR/QBR: assemble and persist report_documents record
+  // 8. When document_type is provided: persist a report_documents record with period_label override
   let documentId: string | undefined;
-  if ((document_type === 'wbr' || document_type === 'qbr') && !preview_only) {
+  if (document_type && !preview_only) {
     const sections = sectionsContent.map(sc => ({
       id: sc.section_id,
       title: sc.title,
@@ -306,7 +306,7 @@ export async function generateReport(request: GenerateReportRequest): Promise<Re
     const skillsOmitted = sections
       .filter(s => s.content.startsWith('⚠'))
       .flatMap(s => s.source_skills);
-    const headline = `${document_type === 'wbr' ? 'Weekly Business Review' : 'Quarterly Business Review'} — ${period_label ?? new Date().toLocaleDateString()}`;
+    const headline = `${template.name} — ${period_label ?? new Date().toLocaleDateString()}`;
     const docResult = await query<{ id: string }>(
       `INSERT INTO report_documents
          (workspace_id, document_type, week_label, headline, sections,

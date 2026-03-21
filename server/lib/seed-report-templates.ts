@@ -177,7 +177,7 @@ export async function seedWbrQbrTemplates(workspaceId: string): Promise<void> {
     [workspaceId]
   );
 
-  const seededKeys = new Set(existing.rows.map((r: any) => r.created_from_template));
+  const seededKeys = new Set(existing.rows.map(r => r.created_from_template));
   if (seededKeys.has('wbr_standard') && seededKeys.has('qbr_standard')) return;
 
   if (!seededKeys.has('wbr_standard')) {
