@@ -137,6 +137,32 @@ router.patch('/:workspaceId/report-documents/:documentId', async (req: Request, 
   }
 });
 
+// Create chart in report document
+router.post('/:workspaceId/reports/:reportDocumentId/charts', async (req: Request, res: Response) => {
+  try {
+    const { workspaceId, reportDocumentId } = req.params;
+    const { chart_type, title, source_type, chart_spec } = req.body;
+
+    if (!chart_spec) {
+      res.status(400).json({ error: 'chart_spec is required' });
+      return;
+    }
+
+    const result = await query(
+      `INSERT INTO report_charts (
+        report_document_id, chart_type, title, source_type, chart_spec, created_at
+      ) VALUES ($1, $2, $3, $4, $5, NOW())
+      RETURNING id, chart_type, title, chart_spec`,
+      [reportDocumentId, chart_type, title || 'Untitled Chart', source_type || 'query', JSON.stringify(chart_spec)]
+    );
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    logger.error('Failed to create chart', err instanceof Error ? err : undefined);
+    res.status(500).json({ error: 'Failed to create chart' });
+  }
+});
+
 // Create new report template
 router.post('/:workspaceId/reports', async (req: Request, res: Response) => {
   try {

@@ -4,6 +4,7 @@ import { generateHTML, Extension } from '@tiptap/core';
 import { StarterKit } from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import Image from '@tiptap/extension-image';
+import { ChartNode } from './extensions/ChartNode';
 import AnnotatableSection, { type Annotation } from './AnnotatableSection';
 
 interface ReportSection {
@@ -42,6 +43,7 @@ const LINK_CONFIG = {
 const READ_EXTENSIONS = [
   StarterKit.configure({ link: LINK_CONFIG }),
   Image.configure({ inline: false }),
+  ChartNode,
 ];
 
 // Factory so each SectionEditor gets its own fresh extension instances
@@ -52,6 +54,7 @@ function makeEditorExtensions() {
       placeholder: 'Write something, or type / to add a chart, table, or divider…',
     }),
     Image.configure({ inline: false }),
+    ChartNode,
   ];
 }
 
@@ -348,14 +351,12 @@ export default function SectionEditor({
 
   function handleChartInsertedFromEditor(chart: any) {
     if (fromEditorRef.current && editor) {
-      let src: string | null = null;
-      if (chart.id) {
-        src = `/api/workspaces/${workspaceId}/reports/${documentId}/charts/${chart.id}/image?token=${encodeURIComponent(token)}`;
-      } else if (chart.preview_png) {
-        src = `data:image/png;base64,${chart.preview_png}`;
-      }
-      if (src) {
-        editor.chain().focus().setImage({ src, alt: chart.title || 'Chart' }).run();
+      const { chart_spec, id, title } = chart;
+      if (chart_spec) {
+        editor.chain().focus().insertContent({
+          type: 'pandoraChart',
+          attrs: { spec: chart_spec, chartId: id ?? null },
+        }).run();
         if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
         saveTimerRef.current = setTimeout(() => autoSave(editor.getJSON()), 300);
       }

@@ -380,6 +380,10 @@ export default function ChartBuilder({
   const [showLegend, setShowLegend] = useState(false);
   const [targetValue, setTargetValue] = useState<number | ''>('');
   const [comboSeriesLabel, setComboSeriesLabel] = useState('');
+  const [referenceValue, setReferenceValue] = useState<number | ''>('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [dateField, setDateField] = useState('');
 
   const [previewPng, setPreviewPng] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -559,6 +563,13 @@ export default function ChartBuilder({
     setLiveRunLoading(true);
     try {
       const activeFilters = liveFilters.filter(f => f.field && f.value.trim());
+      // Add date range filters if specified
+      if (dateFrom && dateField) {
+        activeFilters.push({ field: dateField, operator: '>=', value: dateFrom });
+      }
+      if (dateTo && dateField) {
+        activeFilters.push({ field: dateField, operator: '<=', value: dateTo });
+      }
       const body: any = {
         entity_type: liveEntityType,
         group_by: liveGroupBy,
@@ -579,7 +590,11 @@ export default function ChartBuilder({
       setQueryValueCol('value');
       const entityLabel = liveEntityType.replace(/_/g, ' ');
       const groupLabel = liveGroupBy.replace(/_/g, ' ');
-      setChartTitle(`${entityLabel} by ${groupLabel}`);
+      let title = `${entityLabel} by ${groupLabel}`;
+      if (dateFrom && dateTo && dateField) {
+        title += ` (${dateFrom} to ${dateTo})`;
+      }
+      setChartTitle(title);
       setChartType('bar');
       setColorScheme('uniform');
       setSourceMode('live');
@@ -668,6 +683,7 @@ export default function ChartBuilder({
       show_legend: showLegend,
       ...(chartType === 'bullet' && targetValue !== '' ? { targetValue } : {}),
       ...(chartType === 'combo' && comboSeriesLabel ? { comboSeriesLabel } : {}),
+      ...(referenceValue !== '' ? { referenceValue } : {}),
     };
   }
 
@@ -1210,6 +1226,40 @@ export default function ChartBuilder({
                       </div>
 
                       <div style={{ marginBottom: 16 }}>
+                        <label style={{ display: 'block', fontSize: 10, fontWeight: 600, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>
+                          Date range (optional)
+                        </label>
+                        <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                          <input
+                            type="date"
+                            value={dateFrom}
+                            onChange={e => setDateFrom(e.target.value)}
+                            placeholder="From"
+                            style={{ flex: 1, padding: '5px 8px', border: '0.5px solid #E2E8F0', borderRadius: 5, fontSize: 11, color: '#1E293B' }}
+                          />
+                          <input
+                            type="date"
+                            value={dateTo}
+                            onChange={e => setDateTo(e.target.value)}
+                            placeholder="To"
+                            style={{ flex: 1, padding: '5px 8px', border: '0.5px solid #E2E8F0', borderRadius: 5, fontSize: 11, color: '#1E293B' }}
+                          />
+                        </div>
+                        <select
+                          value={dateField}
+                          onChange={e => setDateField(e.target.value)}
+                          style={{ width: '100%', padding: '5px 8px', border: '0.5px solid #E2E8F0', borderRadius: 5, fontSize: 11, background: 'white', color: '#1E293B' }}
+                        >
+                          <option value="">— select date field —</option>
+                          {(liveSchema[liveEntityType] || [])
+                            .filter(f => f.field_type === 'date')
+                            .map(f => (
+                              <option key={f.name} value={f.name}>{f.label}</option>
+                            ))}
+                        </select>
+                      </div>
+
+                      <div style={{ marginBottom: 16 }}>
                         <label style={{ display: 'block', fontSize: 10, fontWeight: 600, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Limit (rows returned)</label>
                         <input
                           type="number"
@@ -1594,6 +1644,21 @@ export default function ChartBuilder({
                   </div>
                 </div>
               )}
+
+              {/* Reference value for benchmarking */}
+              <div style={{ marginBottom: 20 }}>
+                <label style={labelStyle}>Reference value (optional)</label>
+                <input
+                  type="number"
+                  value={referenceValue}
+                  onChange={e => { setReferenceValue(e.target.value === '' ? '' : Number(e.target.value)); debouncedPreview(); }}
+                  placeholder="e.g. 100000"
+                  style={{ width: '100%', ...inputStyle }}
+                />
+                <div style={{ fontSize: 10, color: '#64748B', marginTop: 4 }}>
+                  Benchmark line for comparison (renders across all series)
+                </div>
+              </div>
 
               {/* Actions */}
               <div style={{ display: 'flex', gap: 8, paddingTop: 12, borderTop: '0.5px solid #E2E8F0' }}>
