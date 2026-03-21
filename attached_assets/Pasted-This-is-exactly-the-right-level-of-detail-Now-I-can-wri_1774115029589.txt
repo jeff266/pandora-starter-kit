@@ -1,0 +1,467 @@
+This is exactly the right level of detail. Now I can write a precise prompt. The section structures are locked — I'll map each to the skills that already exist.
+
+---
+
+```
+# WBR + QBR Document Skeletons
+
+## Context
+
+Reports supports report_templates with sections JSONB and document_type
+on report_documents. No WBR or QBR templates exist today. This build
+adds two pre-built templates with correct section structures, skill
+mappings, and a one-click generation flow from the Reports list page.
+
+## Before Starting — Read These Files
+
+1. client/src/pages/ReportsPage.tsx — full file. Find:
+   - How the template gallery renders (the 4 pre-built + blank cards)
+   - What happens when a template card is clicked
+   - The "New Report" button flow
+
+2. client/src/pages/ReportBuilder.tsx — find:
+   - The section library (the 10 section types available)
+   - How sections are structured in the JSONB (id, title, skills,
+     detail_level, etc.)
+   - How a template is saved to report_templates
+
+3. server/routes/reports.ts — find:
+   - POST /reports (create template)
+   - POST /reports/:id/generate (trigger generation)
+   - What body params generate accepts
+
+4. The skill registry — find all registered skill IDs. Confirm which
+   of these exist: pipeline-hygiene, deal-risk-review, pipeline-coverage,
+   forecast-rollup, pipeline-waterfall, rep-scorecard, conversation-
+   intelligence, win-loss-analysis
+
+Report what you find before building. Specifically:
+- Exact section JSONB shape for an existing template
+- What the template gallery card click does (navigates to builder?
+  triggers generation directly?)
+- Which of the 8 skill IDs above are confirmed registered
+
+---
+
+## Part 1 — Section Definitions
+
+These are the canonical section structures for WBR and QBR. Each maps
+to one or more skills. Use exactly these titles and skill mappings.
+
+### WBR Sections (8 sections)
+
+```typescript
+const WBR_SECTIONS = [
+  {
+    id: 'wbr-pipeline-health',
+    title: 'Pipeline Health Snapshot',
+    description: 'Stage distribution, coverage ratio, net new pipeline, at-risk deals',
+    skills: ['pipeline-hygiene', 'pipeline-coverage'],
+    detail_level: 'executive',
+    chart_type: 'waterfall',        // suggested default chart
+    required: true,
+  },
+  {
+    id: 'wbr-forecast',
+    title: 'Forecast Review',
+    description: 'Commit vs. Best Case vs. Pipeline, forecast movement, gap to quota, slippage',
+    skills: ['forecast-rollup'],
+    detail_level: 'executive',
+    chart_type: 'bar',
+    required: true,
+  },
+  {
+    id: 'wbr-deal-velocity',
+    title: 'Deal Velocity Metrics',
+    description: 'Sales cycle trends, deal size, recent closed-won/lost, deal desk flags',
+    skills: ['deal-risk-review', 'pipeline-waterfall'],
+    detail_level: 'manager',
+    chart_type: 'line',
+    required: true,
+  },
+  {
+    id: 'wbr-rep-performance',
+    title: 'Rep-Level Performance',
+    description: 'QTD attainment, activity metrics, pipeline generation per rep, leaderboard',
+    skills: ['rep-scorecard', 'pipeline-coverage'],
+    detail_level: 'manager',
+    chart_type: 'horizontal_bar',
+    required: true,
+  },
+  {
+    id: 'wbr-demand',
+    title: 'Lead & Demand Signal',
+    description: 'MQL→SQL conversion, inbound vs outbound split, lead response time, routing',
+    skills: ['pipeline-coverage'],
+    detail_level: 'executive',
+    chart_type: 'funnel',
+    required: false,
+  },
+  {
+    id: 'wbr-hygiene',
+    title: 'Process & Hygiene Flags',
+    description: 'CRM hygiene score, overdue tasks, stale opportunities, forecast category accuracy',
+    skills: ['pipeline-hygiene'],
+    detail_level: 'manager',
+    chart_type: 'bullet',
+    required: true,
+  },
+  {
+    id: 'wbr-actions',
+    title: 'Key Actions & Owners',
+    description: 'Last week\'s actions — done or not. This week\'s actions with owner and due date.',
+    skills: [],                     // narrative only, no skill
+    detail_level: 'executive',
+    chart_type: null,
+    required: true,
+  },
+  {
+    id: 'wbr-watchlist',
+    title: 'What to Watch',
+    description: 'Deals expected to close this week, at-risk accounts, external factors',
+    skills: ['deal-risk-review'],
+    detail_level: 'executive',
+    chart_type: null,
+    required: true,
+  },
+]
+```
+
+### QBR Sections (10 sections)
+
+```typescript
+const QBR_SECTIONS = [
+  {
+    id: 'qbr-the-number',
+    title: 'Quarter in Review: The Number',
+    description: 'Final attainment, bookings vs target, ARR impact, vs prior quarter and prior year, segment breakdown',
+    skills: ['forecast-rollup', 'rep-scorecard'],
+    detail_level: 'executive',
+    chart_type: 'bullet',
+    required: true,
+  },
+  {
+    id: 'qbr-pipeline-funnel',
+    title: 'Pipeline & Funnel Analysis',
+    description: 'Pipeline entering vs exiting quarter, coverage at quarter start, stage conversion rates, sales cycle, deal size trends, waterfall',
+    skills: ['pipeline-waterfall', 'pipeline-coverage', 'pipeline-hygiene'],
+    detail_level: 'executive',
+    chart_type: 'waterfall',
+    required: true,
+  },
+  {
+    id: 'qbr-forecast-accuracy',
+    title: 'Forecast Accuracy Review',
+    description: 'Commit accuracy by rep and manager, best case accuracy, slippage rate, who forecasts well',
+    skills: ['forecast-rollup'],
+    detail_level: 'manager',
+    chart_type: 'heatmap',
+    required: true,
+  },
+  {
+    id: 'qbr-win-loss',
+    title: 'Win/Loss Analysis',
+    description: 'Win rate overall and by competitor, top reasons for loss, top reasons for win, deal size won vs lost, no-decision analysis',
+    skills: ['deal-risk-review'],
+    detail_level: 'executive',
+    chart_type: 'horizontal_bar',
+    required: true,
+  },
+  {
+    id: 'qbr-rep-performance',
+    title: 'Rep & Team Performance',
+    description: 'Attainment distribution, ramp performance, top and bottom performer analysis, tenure vs performance',
+    skills: ['rep-scorecard'],
+    detail_level: 'manager',
+    chart_type: 'horizontal_bar',
+    required: true,
+  },
+  {
+    id: 'qbr-capacity',
+    title: 'Sales Capacity & Coverage',
+    description: 'Headcount plan vs actual, capacity model, territory and account coverage, rep pipeline load',
+    skills: ['pipeline-coverage'],
+    detail_level: 'manager',
+    chart_type: 'bar',
+    required: false,
+  },
+  {
+    id: 'qbr-process-health',
+    title: 'Process & Systems Health',
+    description: 'CRM data quality scorecard, tool adoption, process compliance, automation performance, top friction points',
+    skills: ['pipeline-hygiene'],
+    detail_level: 'manager',
+    chart_type: 'bullet',
+    required: true,
+  },
+  {
+    id: 'qbr-marketing',
+    title: 'Marketing & Pipeline Sourcing',
+    description: 'Pipeline by source, MQL→SQL→Opp conversion, marketing-sourced contribution, SDR/BDR performance, lead response time',
+    skills: ['pipeline-coverage'],
+    detail_level: 'executive',
+    chart_type: 'funnel',
+    required: false,
+  },
+  {
+    id: 'qbr-next-quarter',
+    title: 'Next Quarter Plan',
+    description: 'Pipeline entering Q+1, coverage ratio, quota plan, key initiatives, hiring plan, top risks and opportunities',
+    skills: ['forecast-rollup', 'pipeline-coverage'],
+    detail_level: 'executive',
+    chart_type: 'bar',
+    required: true,
+  },
+  {
+    id: 'qbr-asks',
+    title: 'Asks & Commitments',
+    description: 'What RevOps needs from sales leadership, what RevOps is committing to, cross-functional asks',
+    skills: [],                     // narrative only
+    detail_level: 'executive',
+    chart_type: null,
+    required: true,
+  },
+]
+```
+
+---
+
+## Part 2 — Seed Templates on Server
+
+File: server/lib/seed-report-templates.ts  (new)
+
+On workspace creation OR on first load if templates don't exist, seed
+two report_templates rows for the workspace.
+
+```typescript
+export async function seedWbrQbrTemplates(
+  workspaceId: string
+): Promise<void> {
+  // Check if WBR template already exists for this workspace
+  const existing = await db.query(
+    `SELECT id FROM report_templates
+     WHERE workspace_id = $1
+       AND created_from_template IN ('wbr_standard', 'qbr_standard')`,
+    [workspaceId]
+  )
+  if (existing.rows.length >= 2) return  // already seeded
+
+  // Insert WBR template
+  await db.query(
+    `INSERT INTO report_templates
+       (workspace_id, name, description, sections, cadence,
+        formats, created_from_template, is_active)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     ON CONFLICT DO NOTHING`,
+    [
+      workspaceId,
+      'Weekly Business Review',
+      'Operational pipeline review for RevOps and sales leadership. 15-20 minutes. Lead with the number, close with actions.',
+      JSON.stringify(WBR_SECTIONS),
+      'weekly',
+      JSON.stringify(['pdf']),
+      'wbr_standard',
+      true,
+    ]
+  )
+
+  // Insert QBR template
+  await db.query(
+    `INSERT INTO report_templates
+       (workspace_id, name, description, sections, cadence,
+        formats, created_from_template, is_active)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     ON CONFLICT DO NOTHING`,
+    [
+      workspaceId,
+      'Quarterly Business Review',
+      'Strategic quarter review for RevOps presenting to sales leadership and executives. 45-60 minutes. What happened, why, and what changes.',
+      JSON.stringify(QBR_SECTIONS),
+      'quarterly',
+      JSON.stringify(['pdf']),
+      'qbr_standard',
+      true,
+    ]
+  )
+}
+```
+
+Call seedWbrQbrTemplates() in two places:
+1. After workspace creation (wherever that happens)
+2. In the GET /reports route — before returning the list, check if WBR
+   and QBR templates exist for this workspace; if not, seed them silently
+
+---
+
+## Part 3 — ReportsPage UI
+
+File: client/src/pages/ReportsPage.tsx
+
+### 3a — Promote WBR and QBR in the template gallery
+
+The template gallery currently shows 4 pre-built + blank cards.
+Find those cards. Add WBR and QBR as the first two cards, visually
+distinct from the others.
+
+WBR card:
+- Title: "Weekly Business Review"
+- Subtitle: "15–20 min · 8 sections · Pipeline to actions"
+- Icon or accent: teal
+- Badge: "OPERATIONAL"
+- Click action: see 3b
+
+QBR card:
+- Title: "Quarterly Business Review"
+- Subtitle: "45–60 min · 10 sections · Full quarter review"
+- Icon or accent: coral (#f97316)
+- Badge: "STRATEGIC"
+- Click action: see 3b
+
+### 3b — One-click generation flow
+
+When WBR or QBR card is clicked, do NOT navigate to ReportBuilder
+(template configuration). Instead, show a small inline modal:
+
+```
+┌─────────────────────────────────────┐
+│ Generate Weekly Business Review     │
+│                                     │
+│ Period                              │
+│ [Week of March 17, 2026 ▾]         │
+│                                     │
+│ Generate from latest skill data     │
+│ Pipeline Hygiene    ✓ 2h ago        │
+│ Forecast Rollup     ✓ 6h ago        │
+│ Deal Risk Review    ✓ 2h ago        │
+│ Rep Scorecard       ⚠ 3 days ago   │
+│ Pipeline Waterfall  ✗ Never run     │
+│                                     │
+│ [Cancel]  [Generate WBR →]          │
+└─────────────────────────────────────┘
+```
+
+Period picker: a dropdown with options:
+- "Week of [current Monday]" (default for WBR)
+- "Week of [prior Monday]"
+- "Q1 2026" / "Q4 2025" (for QBR, show quarters)
+- "Custom..."
+
+Skill status: for each skill in the template's sections[].skills
+(deduplicated), fetch the latest run timestamp from
+GET /api/workspaces/:id/skills. Show:
+- ✓ green: run within 24h (WBR) or 7 days (QBR)
+- ⚠ amber: run but stale
+- ✗ red: never run
+
+"Generate" button fires POST /reports/:templateId/generate with
+{ period_label, document_type }.
+
+On success, navigate directly to the ReportViewer for the new document.
+
+### 3c — Add document_type pill to report list cards
+
+The existing list cards show a document_type pill mapped to human
+labels. Add mappings:
+
+```typescript
+const DOC_TYPE_LABELS: Record<string, { label: string; color: string }> = {
+  // existing:
+  monday_briefing: { label: 'Monday Brief', color: 'teal' },
+  agent_run:       { label: 'Agent Run',    color: 'slate' },
+  // new:
+  wbr:             { label: 'WBR',          color: 'teal' },
+  qbr:             { label: 'QBR',          color: 'orange' },
+}
+```
+
+---
+
+## Part 4 — Generation Endpoint Update
+
+File: server/routes/reports.ts — POST /reports/:reportId/generate
+
+Accept two new optional body params:
+
+```typescript
+{
+  period_label?: string,    // "Week of March 17, 2026" or "Q1 2026"
+  document_type?: string,   // 'wbr' | 'qbr' — overrides template default
+}
+```
+
+When generating a WBR or QBR:
+1. Set report_documents.document_type to 'wbr' or 'qbr'
+2. Set report_documents.week_label to period_label
+3. For each section in the template, pull the most recent skill_run
+   output for each skill in section.skills and use it to populate
+   the section content
+4. If a skill has no recent run, set the section content to a
+   degraded placeholder:
+   ```
+   ⚠ [Skill Name] has not run recently. 
+   Run it from the Skills page to populate this section.
+   ```
+
+The content generation logic already exists — this just ensures
+document_type and week_label are correctly set from the new params.
+
+---
+
+## Part 5 — ReportViewer: Period Label + Document Type Header
+
+File: client/src/pages/ReportViewer.tsx
+
+When document_type is 'wbr' or 'qbr', show a header above the
+sections:
+
+```
+┌──────────────────────────────────────────────────┐
+│ 📊 Weekly Business Review                        │
+│ Week of March 17, 2026  ·  Generated 2h ago      │
+│                                                  │
+│ [8 sections]  [Download PDF]  [Export to Gamma →]│
+└──────────────────────────────────────────────────┘
+```
+
+Document type label: "Weekly Business Review" or
+"Quarterly Business Review" from document_type mapping.
+
+Period: week_label field from report_documents.
+
+"Export to Gamma →" button: stubbed for now — shows a tooltip
+"Coming soon" on click. Placeholder for the Gamma export build.
+
+---
+
+## What NOT to Build
+
+- No Gamma export implementation (stub only in the header)
+- No custom section reordering in the generation flow
+- No AI re-generation of individual sections from the viewer
+- No scheduling UI changes — WBR/QBR can be scheduled via the
+  existing ReportBuilder if needed
+- No migration needed — report_templates and report_documents
+  tables already support all required fields
+
+---
+
+## Acceptance Criteria
+
+1. GET /reports for any workspace auto-seeds WBR and QBR templates
+   if they don't exist — silently, no user action required
+2. WBR and QBR appear as the first two cards in the template gallery
+   with correct labels, badges, and accent colors
+3. Clicking WBR or QBR opens the generation modal — not ReportBuilder
+4. Generation modal shows period picker and skill freshness status
+   for all skills in that template
+5. "Generate" fires POST .../generate with period_label and
+   document_type, navigates to ReportViewer on success
+6. Generated document has correct document_type ('wbr' or 'qbr')
+   and week_label (the selected period)
+7. Sections with no recent skill data show the degraded placeholder
+   with the skill name — not a blank section
+8. WBR and QBR cards show correct color-coded pills in the report list
+9. ReportViewer shows the document type header and period label for
+   WBR/QBR documents
+10. "Export to Gamma" button is present but stubbed with "Coming soon"
+```
