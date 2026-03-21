@@ -96,6 +96,7 @@ const QUERYABLE_FIELDS: Record<string, { table: string; owner_field: string | nu
       { name: 'actor',                field_type: 'categorical' },
       { name: 'direction',            field_type: 'categorical' },
       { name: 'duration_seconds',     field_type: 'numeric' },
+      { name: 'timestamp',            field_type: 'date' },
       { name: 'created_at',           field_type: 'date' },
       { name: 'updated_at',           field_type: 'date' },
     ],
