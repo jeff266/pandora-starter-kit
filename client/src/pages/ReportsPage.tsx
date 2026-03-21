@@ -105,13 +105,17 @@ interface WbrQbrGenerateModalProps {
   workspaceId: string;
   type: 'wbr' | 'qbr';
   templateId: string;
+  templateSections?: Array<{ id: string; skills?: string[] }>;
   onClose: () => void;
   onSuccess: (documentId: string) => void;
 }
 
-function WbrQbrGenerateModal({ workspaceId, type, templateId, onClose, onSuccess }: WbrQbrGenerateModalProps) {
+function WbrQbrGenerateModal({ workspaceId, type, templateId, templateSections, onClose, onSuccess }: WbrQbrGenerateModalProps) {
   const isWbr = type === 'wbr';
-  const skillIds = isWbr ? WBR_SKILL_IDS : QBR_SKILL_IDS;
+  // Derive skill IDs from template sections; fall back to static lists only if sections absent
+  const derivedSkillIds: string[] = templateSections
+    ? Array.from(new Set(templateSections.flatMap(s => s.skills || [])))
+    : (isWbr ? WBR_SKILL_IDS : QBR_SKILL_IDS);
   const getFreshness = isWbr ? getWbrFreshness : getQbrFreshness;
 
   const [skills, setSkills] = useState<SkillInfo[]>([]);
@@ -134,17 +138,18 @@ function WbrQbrGenerateModal({ workspaceId, type, templateId, onClose, onSuccess
         const all: SkillInfo[] = (Array.isArray(data) ? data : (data.skills || [])).map((s: any) => ({
           id: s.id,
           name: s.name,
-          lastRunAt: s.lastRunAt || null,
-          lastRunStatus: s.lastRunStatus || null,
+          // Handle both API shapes: flat fields and nested last_run object
+          lastRunAt: s.lastRunAt || s.last_run?.at || null,
+          lastRunStatus: s.lastRunStatus || s.last_run?.status || null,
         }));
-        const relevant = skillIds.map(sid => {
+        const relevant = derivedSkillIds.map(sid => {
           const found = all.find(s => s.id === sid);
           return found || { id: sid, name: SKILL_LABELS[sid] || sid, lastRunAt: null, lastRunStatus: null };
         });
         setSkills(relevant);
       })
       .catch(() => {
-        setSkills(skillIds.map(sid => ({ id: sid, name: SKILL_LABELS[sid] || sid, lastRunAt: null, lastRunStatus: null })));
+        setSkills(derivedSkillIds.map(sid => ({ id: sid, name: SKILL_LABELS[sid] || sid, lastRunAt: null, lastRunStatus: null })));
       })
       .finally(() => setSkillsLoading(false));
   }, []);
@@ -424,7 +429,11 @@ function timeSince(iso: string): string {
   return `${Math.round(diff / 86400)}d`;
 }
 
-interface SeededTemplate { id: string; created_from_template: string; }
+interface SeededTemplate {
+  id: string;
+  created_from_template: string;
+  sections?: Array<{ id: string; skills?: string[] }>;
+}
 
 export default function ReportsPage() {
   const navigate = useNavigate();
@@ -649,6 +658,7 @@ export default function ReportsPage() {
           workspaceId={workspaceId}
           type="wbr"
           templateId={wbrTemplateId}
+          templateSections={seededTemplates.find(t => t.id === wbrTemplateId)?.sections}
           onClose={() => setWbrModal(false)}
           onSuccess={(docId) => navigate(`/workspace/${workspaceId}/briefing/${docId}`)}
         />
@@ -660,6 +670,7 @@ export default function ReportsPage() {
           workspaceId={workspaceId}
           type="qbr"
           templateId={qbrTemplateId}
+          templateSections={seededTemplates.find(t => t.id === qbrTemplateId)?.sections}
           onClose={() => setQbrModal(false)}
           onSuccess={(docId) => navigate(`/workspace/${workspaceId}/briefing/${docId}`)}
         />
@@ -815,6 +826,14 @@ function TemplateGallery({ workspaceId, onSelect, onClose, onOpenWbr, onOpenQbr 
       cadence: 'weekly',
       sections: ['deals-needing-attention', 'pipeline-hygiene', 'pipeline-coverage', 'call-intelligence'],
       icon: '🎯',
+    },
+    {
+      id: 'quarterly-business-review',
+      name: 'Quarterly Business Review',
+      description: 'Full-quarter recap for board and exec audiences with attainment, win/loss, and next quarter plan',
+      cadence: 'quarterly',
+      sections: ['the-number', 'win-loss-analysis', 'forecast-accuracy', 'capacity-plan', 'next-quarter-plan'],
+      icon: '🏆',
     },
   ];
 

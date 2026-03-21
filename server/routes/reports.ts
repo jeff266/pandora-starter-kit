@@ -831,7 +831,7 @@ router.get('/:workspaceId/report-templates', async (req: Request, res: Response)
     // Ensure WBR/QBR templates are seeded before returning results
     await seedWbrQbrTemplates(workspaceId);
     const result = await query(
-      `SELECT id, name, description, cadence, created_from_template, is_active, created_at
+      `SELECT id, name, description, cadence, created_from_template, is_active, sections, created_at
        FROM report_templates
        WHERE workspace_id = $1
        ORDER BY created_at ASC`,
