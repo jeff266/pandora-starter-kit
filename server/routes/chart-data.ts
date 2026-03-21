@@ -25,6 +25,8 @@ type FieldType = 'id' | 'categorical' | 'numeric' | 'date' | 'text';
 interface FieldDef {
   name: string;
   field_type: FieldType;
+  // Human-readable label override; falls back to snake_case → Title Case if absent
+  label?: string;
   // For owner field: reps cannot filter on this — it is auto-injected
   owner_field?: boolean;
 }
@@ -52,7 +54,7 @@ const QUERYABLE_FIELDS: Record<string, { table: string; owner_field: string | nu
       { name: 'last_activity_date',   field_type: 'date' },
       { name: 'stage_changed_at',     field_type: 'date' },
       { name: 'created_at',           field_type: 'date' },
-      { name: 'updated_at',           field_type: 'date' },
+      { name: 'updated_at',           field_type: 'date', label: 'Last Modified Date' },
       // Scoring & risk
       { name: 'health_score',         field_type: 'numeric' },
       { name: 'deal_risk',            field_type: 'numeric' },
@@ -84,7 +86,7 @@ const QUERYABLE_FIELDS: Record<string, { table: string; owner_field: string | nu
       { name: 'engagement_score',     field_type: 'numeric' },
       { name: 'last_activity_date',   field_type: 'date' },
       { name: 'created_at',           field_type: 'date' },
-      { name: 'updated_at',           field_type: 'date' },
+      { name: 'updated_at',           field_type: 'date', label: 'Last Modified Date' },
     ],
   },
   activities: {
@@ -98,7 +100,7 @@ const QUERYABLE_FIELDS: Record<string, { table: string; owner_field: string | nu
       { name: 'duration_seconds',     field_type: 'numeric' },
       { name: 'timestamp',            field_type: 'date' },
       { name: 'created_at',           field_type: 'date' },
-      { name: 'updated_at',           field_type: 'date' },
+      { name: 'updated_at',           field_type: 'date', label: 'Last Modified Date' },
     ],
   },
 };
@@ -166,7 +168,7 @@ router.get('/:workspaceId/chart-data/schema', requirePermission('agents.view'), 
         .filter(f => !(isRep && f.owner_field))
         .map(f => ({
           name: f.name,
-          label: f.name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+          label: f.label ?? f.name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
           field_type: f.field_type,
         })),
     }));
