@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { Download, Share2, Settings, ChevronLeft, ChevronRight, Eye, Edit3, X } from 'lucide-react';
+import { Download, Share2, Settings, ChevronLeft, ChevronRight, Eye, Edit3, X, Clock, Plus, MoreHorizontal } from 'lucide-react';
+import PandoraRail from '../components/report/PandoraRail';
 import type { SectionContent, MetricCard, DealCard, ActionItem, SankeyChartData } from '../components/reports/types';
 import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
@@ -162,6 +163,23 @@ export default function ReportViewer() {
   const { canAnnotateReports } = usePermissions();
   const { currentWorkspace } = useWorkspace();
 
+  // Collapsible rails
+  const [timelineOpen, setTimelineOpen] = useState(() => {
+    try { return localStorage.getItem('report_timeline_open') !== 'false'; } catch { return true; }
+  });
+  const [pandoraOpen, setPandoraOpen] = useState(() => {
+    try { return localStorage.getItem('report_pandora_open') === 'true'; } catch { return false; }
+  });
+  const [pandoraMode, setPandoraMode] = useState<string | null>(null);
+  const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
+  const sectionRefs = useRef<Map<string, HTMLElement>>(new Map());
+
+  // Header dropdowns
+  const [shareMenuOpen, setShareMenuOpen] = useState(false);
+  const [overflowMenuOpen, setOverflowMenuOpen] = useState(false);
+  const shareMenuRef = useRef<HTMLDivElement>(null);
+  const overflowMenuRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     if (isDirectBriefing) {
       loadDirectGeneration();
@@ -202,6 +220,41 @@ export default function ReportViewer() {
       })
       .catch(err => console.error('Failed to load section charts:', err));
   }, [reportDocument?.id, currentWorkspace?.id]);
+
+  // Persist rail open/closed state
+  useEffect(() => { try { localStorage.setItem('report_timeline_open', String(timelineOpen)); } catch {} }, [timelineOpen]);
+  useEffect(() => { try { localStorage.setItem('report_pandora_open', String(pandoraOpen)); } catch {} }, [pandoraOpen]);
+
+  // Close dropdown menus on outside click
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (shareMenuRef.current && !shareMenuRef.current.contains(e.target as Node)) setShareMenuOpen(false);
+      if (overflowMenuRef.current && !overflowMenuRef.current.contains(e.target as Node)) setOverflowMenuOpen(false);
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Active section tracking via IntersectionObserver
+  useEffect(() => {
+    const map = sectionRefs.current;
+    if (map.size === 0) return;
+    const ratioMap = new Map<string, number>();
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        const id = (entry.target as HTMLElement).dataset.sectionId;
+        if (id) ratioMap.set(id, entry.intersectionRatio);
+      });
+      let bestId: string | null = null;
+      let bestRatio = 0;
+      ratioMap.forEach((ratio, id) => {
+        if (ratio > bestRatio) { bestRatio = ratio; bestId = id; }
+      });
+      if (bestId) setActiveSectionId(bestId);
+    }, { threshold: [0, 0.1, 0.25, 0.5, 0.75, 1.0] });
+    map.forEach((el) => observer.observe(el));
+    return () => observer.disconnect();
+  }, [reportDocument?.id]);
 
   async function loadDirectGeneration() {
     try {
@@ -471,8 +524,25 @@ export default function ReportViewer() {
   const isV2 = (generation?.version || 1) > 1;
   const annotations = generation?.human_annotations || [];
 
+  const timelineWidth = timelineOpen ? 256 : 48;
+  const pandoraWidth = pandoraOpen ? 360 : 48;
+
+  const dropdownItemStyle: React.CSSProperties = {
+    display: 'flex', alignItems: 'center', gap: 6,
+    padding: '8px 14px', width: '100%', textAlign: 'left',
+    background: 'none', border: 'none', cursor: 'pointer',
+    fontSize: 13, fontFamily: fonts.sans, color: colors.text,
+    boxSizing: 'border-box',
+  };
+
+  const activeSectionTitle = (() => {
+    if (!activeSectionId || !reportDocument) return null;
+    const sec = reportDocument.sections.find(s => s.id === activeSectionId);
+    return sec?.title ?? null;
+  })();
+
   return (
-    <div style={{ display: 'flex', height: '100vh', background: colors.bg }}>
+    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', background: colors.bg }}>
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       {/* Context Menu */}
       {contextMenu && (
@@ -558,8 +628,51 @@ export default function ReportViewer() {
         />
       )}
 
-      {/* Timeline Sidebar */}
-      <div style={{ width: 256, background: colors.surface, borderRight: `1px solid ${colors.border}`, display: 'flex', flexDirection: 'column' }}>
+      {/* Timeline Rail — collapsible left */}
+      <div style={{ width: timelineWidth, transition: 'width 150ms ease', flexShrink: 0, position: 'relative', background: colors.surface, borderRight: `1px solid ${colors.border}`, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+
+        {/* Collapsed icon strip */}
+        {!timelineOpen && (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '12px 0', gap: 10, flex: 1, overflow: 'hidden' }}>
+            <button
+              title="Timeline"
+              onClick={() => setTimelineOpen(true)}
+              style={{ width: 32, height: 32, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: `1px solid ${colors.border}`, cursor: 'pointer', color: colors.textSecondary, flexShrink: 0, padding: 0 }}
+            >
+              <Clock style={{ width: 15, height: 15 }} />
+            </button>
+            {(isDirectBriefing ? docList : generations).slice(0, 5).map((item: any) => {
+              const isActive = isDirectBriefing ? item.id === generationId : item.id === generation?.id;
+              const label = isDirectBriefing
+                ? item.week_label
+                : new Date(item.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+              return (
+                <button
+                  key={item.id}
+                  title={label}
+                  onClick={() => isDirectBriefing
+                    ? navigate(`/workspace/${workspaceId}/briefing/${item.id}`)
+                    : navigate(`/workspace/${workspaceId}/reports/${reportId}/generations/${item.id}`)
+                  }
+                  style={{ width: 10, height: 10, borderRadius: '50%', background: isActive ? colors.accent : colors.border, border: 'none', cursor: 'pointer', padding: 0, flexShrink: 0 }}
+                />
+              );
+            })}
+            <div style={{ flex: 1 }} />
+            {!isDirectBriefing && reportId && (
+              <button
+                title="Generate new"
+                onClick={() => navigate(`/workspace/${workspaceId}/reports/${reportId}/edit`)}
+                style={{ width: 32, height: 32, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: colors.accentSoft, border: `1px solid ${colors.accent}44`, cursor: 'pointer', color: colors.accent, flexShrink: 0, padding: 0 }}
+              >
+                <Plus style={{ width: 15, height: 15 }} />
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Expanded state */}
+        {timelineOpen && (<>
         <div style={{ padding: 16, borderBottom: `1px solid ${colors.border}` }}>
           <h3 style={{ fontWeight: 600, fontSize: 14, color: colors.text, fontFamily: fonts.sans, margin: 0 }}>Timeline</h3>
         </div>
@@ -687,10 +800,25 @@ export default function ReportViewer() {
             Compare
           </button>
         </div>
+        </>)}
+
+        {/* Toggle chevron */}
+        <button
+          onClick={() => setTimelineOpen(o => !o)}
+          title={timelineOpen ? 'Collapse timeline' : 'Expand timeline'}
+          style={{
+            position: 'absolute', right: -12, top: '50%', transform: 'translateY(-50%)',
+            width: 24, height: 24, borderRadius: '50%', border: `1px solid ${colors.border}`,
+            background: colors.surface, cursor: 'pointer', display: 'flex', alignItems: 'center',
+            justifyContent: 'center', zIndex: 10, padding: 0, color: colors.textSecondary,
+          }}
+        >
+          <ChevronRight style={{ width: 14, height: 14, transition: 'transform 150ms ease', transform: timelineOpen ? 'rotate(180deg)' : 'rotate(0deg)' }} />
+        </button>
       </div>
 
-      {/* Main Content */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      {/* Center — document */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
         {/* Edit Mode Banner */}
         {annotateMode && (
           <div style={{
@@ -923,194 +1051,125 @@ export default function ReportViewer() {
               </div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              {canAnnotateReports && !annotateMode && !reportDocument && (
+
+              {/* Share dropdown */}
+              <div ref={shareMenuRef} style={{ position: 'relative' }}>
                 <button
-                  onClick={() => setAnnotateMode(true)}
+                  onClick={() => { setShareMenuOpen(o => !o); setOverflowMenuOpen(false); }}
                   style={{
-                    padding: '8px 14px',
-                    borderRadius: 8,
-                    fontSize: 14,
-                    fontWeight: 600,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    background: colors.accentSoft,
-                    color: colors.accent,
-                    border: `1px solid ${colors.accent}44`,
-                    cursor: 'pointer',
-                    fontFamily: fonts.sans,
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    padding: '8px 14px', borderRadius: 8, fontSize: 14, fontWeight: 600,
+                    background: colors.accent, color: '#fff', border: 'none', cursor: 'pointer', fontFamily: fonts.sans,
                   }}
                 >
-                  <Edit3 style={{ width: 15, height: 15 }} />
-                  Annotate
-                </button>
-              )}
-              {canAnnotateReports && !isAnnotating && reportDocument && (
-                <button
-                  onClick={() => setIsAnnotating(true)}
-                  style={{
-                    padding: '8px 14px',
-                    borderRadius: 8,
-                    fontSize: 14,
-                    fontWeight: 600,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    background: colors.accentSoft,
-                    color: colors.accent,
-                    border: `1px solid ${colors.accent}44`,
-                    cursor: 'pointer',
-                    fontFamily: fonts.sans,
-                  }}
-                >
-                  <Edit3 style={{ width: 15, height: 15 }} />
-                  Annotate
-                  {docAnnotations.length > 0 && (
-                    <span style={{ fontSize: 11, background: colors.accent, color: '#fff', borderRadius: 10, padding: '1px 6px' }}>
-                      {docAnnotations.length}
-                    </span>
-                  )}
-                </button>
-              )}
-              <button
-                onClick={() => setAnonymizeMode(!anonymizeMode)}
-                style={{
-                  padding: '8px 12px',
-                  borderRadius: 8,
-                  fontSize: 14,
-                  fontWeight: 500,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  background: anonymizeMode ? '#fef3c7' : colors.surfaceRaised,
-                  color: anonymizeMode ? '#78350f' : colors.text,
-                  border: 'none',
-                  cursor: 'pointer',
-                  fontFamily: fonts.sans,
-                }}
-                onMouseEnter={(e) => {
-                  if (!anonymizeMode) e.currentTarget.style.background = colors.border;
-                }}
-                onMouseLeave={(e) => {
-                  if (!anonymizeMode) e.currentTarget.style.background = colors.surfaceRaised;
-                }}
-              >
-                <Eye style={{ width: 16, height: 16 }} />
-                {anonymizeMode ? 'Anonymized' : 'Anonymize'}
-              </button>
-              {isV2 && workspaceId && reportId && (
-                <>
-                  {['pdf', 'docx'].map(format => (
-                    <button
-                      key={`annotated-${format}`}
-                      onClick={() => {
-                        const url = `/api/${workspaceId}/reports/${reportId}/generations/${generation?.id}/export/${format}`;
-                        window.open(url, '_blank');
-                      }}
-                      style={{
-                        padding: '8px 12px', borderRadius: 8, fontSize: 13, fontWeight: 500,
-                        display: 'flex', alignItems: 'center', gap: 6,
-                        background: colors.accentSoft, color: colors.accent,
-                        border: `1px solid ${colors.accent}44`, cursor: 'pointer', fontFamily: fonts.sans,
-                      }}
-                    >
-                      <Download style={{ width: 14, height: 14 }} />
-                      {format.toUpperCase()} (V2)
-                    </button>
-                  ))}
-                </>
-              )}
-              {reportDocument && (
-                <>
-                  {(['pdf', 'docx', 'pptx'] as const).map(format => (
-                    <button
-                      key={`doc-export-${format}`}
-                      onClick={() => { setExportModalFormat(format); setShowExportModal(true); }}
-                      style={{
-                        padding: '8px 12px', borderRadius: 8, fontSize: 13, fontWeight: 500,
-                        display: 'flex', alignItems: 'center', gap: 6,
-                        background: colors.accentSoft, color: colors.accent,
-                        border: `1px solid ${colors.accent}44`,
-                        cursor: 'pointer', fontFamily: fonts.sans,
-                      }}
-                    >
-                      <Download style={{ width: 14, height: 14 }} />
-                      {format.toUpperCase()}
-                    </button>
-                  ))}
-                </>
-              )}
-              {!reportDocument && Object.keys(generation?.formats_generated || {}).map((format) => (
-                <button
-                  key={format}
-                  onClick={() => downloadFormat(format)}
-                  style={{
-                    padding: '8px 12px',
-                    background: colors.surfaceRaised,
-                    borderRadius: 8,
-                    fontSize: 14,
-                    fontWeight: 500,
-                    color: colors.text,
-                    border: 'none',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    cursor: 'pointer',
-                    fontFamily: fonts.sans,
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = colors.border)}
-                  onMouseLeave={(e) => (e.currentTarget.style.background = colors.surfaceRaised)}
-                >
-                  <Download style={{ width: 16, height: 16 }} />
-                  {format.toUpperCase()}
-                </button>
-              ))}
-              {!reportDocument && (
-                <button
-                  onClick={shareReport}
-                  style={{
-                    padding: '8px 12px',
-                    background: colors.accent,
-                    borderRadius: 8,
-                    fontSize: 14,
-                    fontWeight: 500,
-                    color: '#fff',
-                    border: 'none',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    cursor: 'pointer',
-                    fontFamily: fonts.sans,
-                  }}
-                >
-                  <Share2 style={{ width: 16, height: 16 }} />
+                  <Share2 style={{ width: 15, height: 15 }} />
                   Share
+                  <ChevronRight style={{ width: 12, height: 12, transform: 'rotate(90deg)', opacity: 0.7 }} />
                 </button>
-              )}
-              {reportId && (
-                <Link
-                  to={`/workspace/${workspaceId}/reports/${reportId}/edit`}
+                {shareMenuOpen && (
+                  <div style={{
+                    position: 'absolute', right: 0, top: '110%', zIndex: 200,
+                    background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 8,
+                    padding: '4px 0', minWidth: 190, boxShadow: '0 4px 16px rgba(0,0,0,0.18)',
+                  }}>
+                    {isV2 && workspaceId && reportId && generation?.id && (
+                      <button onClick={() => { window.open(`/api/${workspaceId}/reports/${reportId}/generations/${generation?.id}/export/pdf`, '_blank'); setShareMenuOpen(false); }} style={dropdownItemStyle}>
+                        <Download style={{ width: 13, height: 13 }} /> Download PDF
+                      </button>
+                    )}
+                    {reportDocument && (
+                      <button onClick={() => { setExportModalFormat('pdf'); setShowExportModal(true); setShareMenuOpen(false); }} style={dropdownItemStyle}>
+                        <Download style={{ width: 13, height: 13 }} /> Download PDF
+                      </button>
+                    )}
+                    {!reportDocument && Object.keys(generation?.formats_generated || {}).includes('pdf') && (
+                      <button onClick={() => { downloadFormat('pdf'); setShareMenuOpen(false); }} style={dropdownItemStyle}>
+                        <Download style={{ width: 13, height: 13 }} /> Download PDF
+                      </button>
+                    )}
+                    {isV2 && workspaceId && reportId && generation?.id && (
+                      <button onClick={() => { window.open(`/api/${workspaceId}/reports/${reportId}/generations/${generation?.id}/export/docx`, '_blank'); setShareMenuOpen(false); }} style={dropdownItemStyle}>
+                        <Download style={{ width: 13, height: 13 }} /> Download DOCX
+                      </button>
+                    )}
+                    {reportDocument && (
+                      <button onClick={() => { setExportModalFormat('docx'); setShowExportModal(true); setShareMenuOpen(false); }} style={dropdownItemStyle}>
+                        <Download style={{ width: 13, height: 13 }} /> Download DOCX
+                      </button>
+                    )}
+                    {!reportDocument && Object.keys(generation?.formats_generated || {}).includes('docx') && (
+                      <button onClick={() => { downloadFormat('docx'); setShareMenuOpen(false); }} style={dropdownItemStyle}>
+                        <Download style={{ width: 13, height: 13 }} /> Download DOCX
+                      </button>
+                    )}
+                    {!reportDocument && (
+                      <button onClick={() => { shareReport(); setShareMenuOpen(false); }} style={dropdownItemStyle}>
+                        <Share2 style={{ width: 13, height: 13 }} /> Copy share link
+                      </button>
+                    )}
+                    <div style={{ height: 1, background: colors.border, margin: '4px 0' }} />
+                    <div style={{ ...dropdownItemStyle, cursor: 'default', opacity: 0.5 }}>
+                      Export to Gamma →
+                      <span style={{ fontSize: 10, padding: '1px 5px', background: colors.accentSoft, color: colors.accent, borderRadius: 8, marginLeft: 4 }}>soon</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Overflow menu */}
+              <div ref={overflowMenuRef} style={{ position: 'relative' }}>
+                <button
+                  onClick={() => { setOverflowMenuOpen(o => !o); setShareMenuOpen(false); }}
+                  title="More options"
                   style={{
-                    padding: '8px 12px',
-                    background: colors.surfaceRaised,
-                    borderRadius: 8,
-                    fontSize: 14,
-                    fontWeight: 500,
-                    color: colors.text,
-                    textDecoration: 'none',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    cursor: 'pointer',
-                    fontFamily: fonts.sans,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    width: 36, height: 36, borderRadius: 8,
+                    background: overflowMenuOpen ? colors.border : colors.surfaceRaised, border: 'none', cursor: 'pointer', color: colors.text,
                   }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = colors.border)}
-                  onMouseLeave={(e) => (e.currentTarget.style.background = colors.surfaceRaised)}
                 >
-                  <Settings style={{ width: 16, height: 16 }} />
-                  Edit Report
-                </Link>
-              )}
+                  <MoreHorizontal style={{ width: 16, height: 16 }} />
+                </button>
+                {overflowMenuOpen && (
+                  <div style={{
+                    position: 'absolute', right: 0, top: '110%', zIndex: 200,
+                    background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 8,
+                    padding: '4px 0', minWidth: 200, boxShadow: '0 4px 16px rgba(0,0,0,0.18)',
+                  }}>
+                    {canAnnotateReports && !annotateMode && !reportDocument && (
+                      <button onClick={() => { setAnnotateMode(true); setOverflowMenuOpen(false); }} style={dropdownItemStyle}>
+                        <Edit3 style={{ width: 13, height: 13 }} /> Annotate
+                      </button>
+                    )}
+                    {canAnnotateReports && !isAnnotating && reportDocument && (
+                      <button onClick={() => { setIsAnnotating(true); setOverflowMenuOpen(false); }} style={dropdownItemStyle}>
+                        <Edit3 style={{ width: 13, height: 13 }} /> Annotate
+                        {docAnnotations.length > 0 && (
+                          <span style={{ fontSize: 11, background: colors.accent, color: '#fff', borderRadius: 10, padding: '1px 6px', marginLeft: 4 }}>
+                            {docAnnotations.length}
+                          </span>
+                        )}
+                      </button>
+                    )}
+                    <button
+                      onClick={() => { setAnonymizeMode(m => !m); setOverflowMenuOpen(false); }}
+                      style={{ ...dropdownItemStyle, color: anonymizeMode ? '#78350f' : colors.text, background: anonymizeMode ? '#fef3c7' : 'transparent' }}
+                    >
+                      <Eye style={{ width: 13, height: 13 }} />
+                      {anonymizeMode ? 'Anonymized ✓' : 'Anonymize'}
+                    </button>
+                    {reportId && (
+                      <Link
+                        to={`/workspace/${workspaceId}/reports/${reportId}/edit`}
+                        onClick={() => setOverflowMenuOpen(false)}
+                        style={{ ...dropdownItemStyle, color: colors.text, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 6, width: '100%', boxSizing: 'border-box' }}
+                      >
+                        <Settings style={{ width: 13, height: 13 }} /> Template settings
+                      </Link>
+                    )}
+                  </div>
+                )}
+              </div>
+
             </div>
           </div>
         </div>
@@ -1148,8 +1207,10 @@ export default function ReportViewer() {
                   return (
                     <div
                       key={section.id}
+                      data-section-id={section.id}
+                      ref={el => { if (el) sectionRefs.current.set(section.id, el); }}
                       style={{ background: colors.surface, borderRadius: 8, border: `1px solid ${colors.border}`, padding: 24 }}
-                      onMouseEnter={() => setHoveredSection(section.id)}
+                      onMouseEnter={() => { setHoveredSection(section.id); setActiveSectionId(section.id); }}
                       onMouseLeave={() => setHoveredSection(null)}
                       onContextMenu={(e) => {
                         e.preventDefault();
@@ -1514,6 +1575,104 @@ export default function ReportViewer() {
           </div>
         </div>
       </div>
+
+      {/* Right rail — Ask Pandora */}
+      <div style={{ width: pandoraWidth, transition: 'width 150ms ease', flexShrink: 0, position: 'relative', borderLeft: `1px solid ${colors.border}`, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: colors.surface }}>
+
+        {/* Toggle chevron (left edge of right rail) */}
+        <button
+          onClick={() => setPandoraOpen(o => !o)}
+          title={pandoraOpen ? 'Close Ask Pandora' : 'Open Ask Pandora'}
+          style={{
+            position: 'absolute', left: -12, top: '50%', transform: 'translateY(-50%)',
+            width: 24, height: 24, borderRadius: '50%', border: `1px solid ${colors.border}`,
+            background: colors.surface, cursor: 'pointer', display: 'flex', alignItems: 'center',
+            justifyContent: 'center', zIndex: 10, padding: 0, color: colors.textSecondary,
+          }}
+        >
+          <ChevronLeft style={{ width: 14, height: 14, transition: 'transform 150ms ease', transform: pandoraOpen ? 'rotate(180deg)' : 'rotate(0deg)' }} />
+        </button>
+
+        {/* Collapsed icon strip */}
+        {!pandoraOpen && (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '12px 0', gap: 10, flex: 1, overflow: 'hidden' }}>
+            <button
+              title="Ask Pandora"
+              onClick={() => setPandoraOpen(true)}
+              style={{ width: 32, height: 32, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: colors.accentSoft, border: `1px solid ${colors.accent}44`, cursor: 'pointer', color: colors.accent, flexShrink: 0, padding: 0, fontSize: 16 }}
+            >
+              ✦
+            </button>
+            {[
+              { id: 'bull_bear', avatar: '/avatars/char-21.png', tooltip: 'Bull / Bear · Argue both sides' },
+              { id: 'socratic', avatar: '/avatars/char-23.png', tooltip: 'Socratic · Question the assumption' },
+              { id: 'boardroom', avatar: '/avatars/char-24.png', tooltip: 'Boardroom · Multiple perspectives' },
+              { id: 'prosecutor_defense', avatar: '/avatars/char-25.png', tooltip: 'Prosecutor / Defense · Stress test a plan' },
+            ].map(mode => (
+              <button
+                key={mode.id}
+                title={mode.tooltip}
+                onClick={() => { setPandoraMode(pandoraMode === mode.id ? null : mode.id); setPandoraOpen(true); }}
+                style={{
+                  width: 32, height: 32, borderRadius: '50%', padding: 0, cursor: 'pointer', flexShrink: 0,
+                  border: `1px solid ${pandoraMode === mode.id ? colors.accent : colors.border}`,
+                  background: pandoraMode === mode.id ? `${colors.accent}18` : 'transparent',
+                  overflow: 'hidden',
+                }}
+              >
+                <img src={mode.avatar} alt={mode.id} style={{ width: '100%', height: '100%', objectFit: 'cover', imageRendering: 'pixelated', display: 'block' }} />
+              </button>
+            ))}
+            <button
+              title="Auto · Pandora decides"
+              onClick={() => { setPandoraMode(null); setPandoraOpen(true); }}
+              style={{
+                width: 32, height: 32, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                border: `1px solid ${pandoraMode === null ? colors.accent : colors.border}`,
+                background: pandoraMode === null ? `${colors.accent}18` : 'transparent',
+                cursor: 'pointer', color: pandoraMode === null ? colors.accent : colors.textSecondary,
+                flexShrink: 0, padding: 0, fontSize: 15,
+              }}
+            >
+              ✦
+            </button>
+          </div>
+        )}
+
+        {/* Expanded state */}
+        {pandoraOpen && (
+          <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: 360, overflow: 'hidden' }}>
+            {/* Rail header */}
+            <div style={{ flexShrink: 0, padding: '12px 14px', borderBottom: `1px solid ${colors.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: colors.surface }}>
+              <span style={{ fontFamily: fonts.sans, fontWeight: 700, fontSize: 14, color: colors.text, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ color: colors.accent }}>✦</span> Ask Pandora
+              </span>
+              <button
+                onClick={() => setPandoraOpen(false)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: colors.textMuted, fontSize: 18, padding: 0, display: 'flex', alignItems: 'center' }}
+              >
+                <X style={{ width: 16, height: 16 }} />
+              </button>
+            </div>
+            {/* Chat panel fills remaining height */}
+            <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+              <PandoraRail
+                workspaceId={workspaceId || ''}
+                reportContext={{
+                  documentId: reportDocument?.id,
+                  documentType: reportDocument?.document_type,
+                  periodLabel: reportDocument?.week_label,
+                  activeSectionId,
+                  activeSectionTitle,
+                }}
+                forcedMode={pandoraMode}
+                onModeChange={setPandoraMode}
+              />
+            </div>
+          </div>
+        )}
+      </div>
+
     </div>
   );
 }
