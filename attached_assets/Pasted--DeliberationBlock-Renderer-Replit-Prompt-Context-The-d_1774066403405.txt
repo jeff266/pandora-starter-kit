@@ -1,0 +1,122 @@
+# DeliberationBlock Renderer — Replit Prompt
+
+## Context
+
+The deliberation system was just upgraded. Bull/Bear analysis now returns
+as a DeliberationBlock inside the PandoraResponse envelope alongside
+narrative, chart, and action card blocks. The block renderer handles 4
+types today. This adds the 5th.
+
+## Before Starting
+
+Read these files:
+
+1. shared/types/response-blocks.ts — find DeliberationBlock,
+   DeliberationPanel, DeliberationMode. Show the full types.
+2. client/src/components/shared/BlockRenderer.tsx — the switch component.
+   Add the deliberation case here.
+3. client/src/components/blocks/ — the existing block components
+   (NarrativeBlockView, TableBlockView, ActionCardBlockView). Match their
+   file structure and styling conventions.
+4. client/src/lib/chartColors.ts — SEMANTIC_COLORS dictionary. The
+   color_hint values ('bull', 'bear', 'synthesis') are already in there
+   from a recent update. Use these hex values directly for panel styling.
+
+---
+
+## Build: DeliberationBlockView
+
+File: client/src/components/blocks/DeliberationBlockView.tsx
+
+### Layout
+
+Full-width card, rounded border, subtle background matching the design
+system dark theme.
+
+Structure top to bottom:
+1. Header row — mode label + hypothesis text
+2. Panels row — Bull and Bear cards side by side (or stacked on mobile)
+3. Synthesis panel — full width, always expanded
+4. Verdict line — if present, bold, above synthesis or below header
+
+### Header
+
+Left side: mode pill badge
+  - bull_bear → "🐂 Bull / Bear" with amber (#F59E0B) background at 15%
+    opacity, amber text
+  - red_team → "🔴 Red Team" with coral (#F97316) background at 15%
+    opacity, coral text
+
+Right side: collapse/expand toggle (chevron). Default: expanded.
+
+Below header: hypothesis text in muted color, italic, truncated to 2
+lines with expand on click.
+
+### Panel Cards (Bull / Bear)
+
+Side-by-side grid (2 columns desktop, 1 column mobile).
+
+Each panel card:
+- Header: role name (e.g. "Bull", "Bear") left-aligned, confidence
+  percentage right-aligned
+- Confidence bar: thin progress bar below the header, full width
+  Color from SEMANTIC_COLORS using panel.color_hint:
+    bull  → #F59E0B
+    bear  → #94A3B8
+    If no color_hint, fall back to primary teal
+- Summary text: 13px, normal weight, 3 line clamp with "Read more" toggle
+- Key points: bulleted list, 12px, muted text. Max 3 bullets.
+- Left border: 3px solid, same color as confidence bar
+
+### Synthesis Panel
+
+Full width. Teal left border (4px, #14B8A6).
+Label: "Synthesis" in small caps, indigo (#6366F1), above the text.
+Content: synthesis text, 14px, normal weight, no line clamp.
+
+### Verdict
+
+If verdict is present: render as a standalone line between the panels
+and the synthesis.
+Style: 13px, medium weight, indigo (#6366F1).
+Prefix with "→ " to visually distinguish from panel text.
+
+### Collapsed State
+
+When collapsed (chevron toggled): show only the header row and the
+verdict line (if present). Hide panels and synthesis. This lets users
+scan past deliberation output without losing the conclusion.
+
+---
+
+## Wire into BlockRenderer
+
+File: client/src/components/shared/BlockRenderer.tsx
+
+Add import and case:
+```typescript
+import DeliberationBlockView from '../blocks/DeliberationBlockView'
+
+// In switch:
+case 'deliberation':
+  return <DeliberationBlockView block={block} />
+```
+
+---
+
+## Acceptance Criteria
+
+1. DeliberationBlockView renders without errors for both bull_bear and
+   red_team modes
+2. Bull panel has amber left border and confidence bar
+3. Bear panel has gray left border and confidence bar
+4. Synthesis panel has teal left border, indigo "Synthesis" label
+5. Verdict line renders in indigo when present, hidden when absent
+6. Collapsed state shows only header + verdict
+7. Hypothesis text truncates at 2 lines, expands on click
+8. Layout is 2-column on desktop, 1-column on mobile
+9. BlockRenderer switch handles 'deliberation' without falling through
+   to null
+10. Colors sourced from SEMANTIC_COLORS values — no hardcoded hex
+    values that diverge from the color system (import or reference the
+    same hex values already in chartColors.ts)
