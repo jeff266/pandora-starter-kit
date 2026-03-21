@@ -4,6 +4,7 @@ import ChartRenderer from './ChartRenderer';
 import NarrativeBlockView from '../blocks/NarrativeBlockView';
 import TableBlockView from '../blocks/TableBlockView';
 import ActionCardBlockView from '../blocks/ActionCardBlockView';
+import DeliberationBlockView from '../blocks/DeliberationBlockView';
 
 interface BlockRendererProps {
   block: PandoraBlock;
@@ -20,6 +21,8 @@ export default function BlockRenderer({ block, compact }: BlockRendererProps) {
       return <TableBlockView block={block} />;
     case 'action_card':
       return <ActionCardBlockView block={block} />;
+    case 'deliberation':
+      return <DeliberationBlockView block={block} />;
     default:
       console.warn(`Unknown block type: ${(block as any).blockType}`);
       return null;
