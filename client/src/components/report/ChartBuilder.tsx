@@ -224,16 +224,33 @@ function FieldPicker({ fields, fillRates, value, onChange }: FieldPickerProps) {
 
   const topFields = sorted.slice(0, FIELD_PICKER_TOP_N);
   const hasMore = sorted.length > FIELD_PICKER_TOP_N;
-  const selectedInTop = topFields.some(f => f.name === value);
   const selectedField = fields.find(f => f.name === value);
 
   const displayed = expanded
     ? (search ? sorted.filter(f => f.label.toLowerCase().includes(search.toLowerCase())) : sorted)
     : topFields;
 
+  const selectedInDisplayed = displayed.some(f => f.name === value);
+
   return (
     <div>
-      {!selectedInTop && selectedField && (
+      {/* Search input — top of expanded view for autocomplete feel */}
+      {expanded && (
+        <input
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Search fields…"
+          autoFocus
+          style={{
+            width: '100%', boxSizing: 'border-box',
+            padding: '5px 8px', marginBottom: 6,
+            border: '0.5px solid #CBD5E1', borderRadius: 5,
+            fontSize: 11, color: '#1E293B',
+          }}
+        />
+      )}
+      {/* Pinned selected banner — shown when selected field is not in the current list */}
+      {!selectedInDisplayed && selectedField && (
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           padding: '5px 10px', marginBottom: 4,
@@ -248,6 +265,7 @@ function FieldPicker({ fields, fillRates, value, onChange }: FieldPickerProps) {
           )}
         </div>
       )}
+      {/* Field buttons */}
       {displayed.map(f => {
         const isSelected = f.name === value;
         const rate = fillRates[f.name];
@@ -279,20 +297,7 @@ function FieldPicker({ fields, fillRates, value, onChange }: FieldPickerProps) {
           </button>
         );
       })}
-      {expanded && (
-        <input
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="Search fields…"
-          autoFocus
-          style={{
-            width: '100%', boxSizing: 'border-box',
-            padding: '5px 8px', marginBottom: 4,
-            border: '0.5px solid #CBD5E1', borderRadius: 5,
-            fontSize: 11, color: '#1E293B',
-          }}
-        />
-      )}
+      {/* See more (collapsed) */}
       {!expanded && hasMore && (
         <button
           onClick={() => setExpanded(true)}
@@ -305,6 +310,7 @@ function FieldPicker({ fields, fillRates, value, onChange }: FieldPickerProps) {
           See more ({sorted.length - FIELD_PICKER_TOP_N} more) →
         </button>
       )}
+      {/* See less (expanded) */}
       {expanded && (
         <button
           onClick={() => { setExpanded(false); setSearch(''); }}
