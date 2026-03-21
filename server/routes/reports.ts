@@ -828,6 +828,8 @@ router.get('/:workspaceId/report-sections', async (_req: Request, res: Response)
 router.get('/:workspaceId/report-templates', async (req: Request, res: Response) => {
   try {
     const { workspaceId } = req.params;
+    // Ensure WBR/QBR templates are seeded before returning results
+    await seedWbrQbrTemplates(workspaceId);
     const result = await query(
       `SELECT id, name, description, cadence, created_from_template, is_active, created_at
        FROM report_templates

@@ -138,15 +138,15 @@ export async function generateReport(request: GenerateReportRequest): Promise<Re
         return status === 'missing' || status === 'stale';
       });
       if (notReadySkills.length > 0) {
-        const names = notReadySkills.map(humanizeSkillId).join(', ');
-        const firstStatus = skillFreshness.get(notReadySkills[0]);
-        const reason = firstStatus === 'missing'
-          ? `${names} ${notReadySkills.length === 1 ? 'has' : 'have'} not completed a run in the last 7 days`
-          : `Data from ${names} is older than 7 days`;
+        const firstName = humanizeSkillId(notReadySkills[0]);
+        const extraCount = notReadySkills.length - 1;
+        const label = extraCount > 0
+          ? `${firstName} (+${extraCount} more)`
+          : firstName;
         sectionsContent.push({
           section_id: section.id,
           title: section.label,
-          narrative: `[Awaiting data — ${reason}. Schedule the skill and regenerate to populate this section.]`,
+          narrative: `⚠ ${label} has not run recently. Run it from the Skills page to populate this section.`,
           source_skills: section.skills,
           data_freshness: new Date().toISOString(),
           confidence: 0,

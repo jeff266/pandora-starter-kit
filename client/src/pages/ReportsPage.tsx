@@ -443,10 +443,37 @@ export default function ReportsPage() {
     api.get('/governance/summary')
       .then(s => setPendingCount(s?.pending_approval ?? 0))
       .catch(() => {});
-    api.get('/report-templates')
-      .then(d => setSeededTemplates(d?.templates || []))
-      .catch(() => {});
+    loadSeededTemplates();
   }, []);
+
+  async function loadSeededTemplates(): Promise<SeededTemplate[]> {
+    try {
+      const d = await api.get('/report-templates');
+      const templates = d?.templates || [];
+      setSeededTemplates(templates);
+      return templates;
+    } catch {
+      return [];
+    }
+  }
+
+  async function openWbrModal() {
+    let id = seededTemplates.find(t => t.created_from_template === 'wbr_standard')?.id;
+    if (!id) {
+      const fresh = await loadSeededTemplates();
+      id = fresh.find(t => t.created_from_template === 'wbr_standard')?.id;
+    }
+    if (id) setWbrModal(true);
+  }
+
+  async function openQbrModal() {
+    let id = seededTemplates.find(t => t.created_from_template === 'qbr_standard')?.id;
+    if (!id) {
+      const fresh = await loadSeededTemplates();
+      id = fresh.find(t => t.created_from_template === 'qbr_standard')?.id;
+    }
+    if (id) setQbrModal(true);
+  }
 
   async function loadReports() {
     try {
@@ -482,13 +509,11 @@ export default function ReportsPage() {
         onClose={() => setShowTemplateGallery(false)}
         onOpenWbr={() => {
           setShowTemplateGallery(false);
-          if (wbrTemplateId) setWbrModal(true);
-          else navigate('/reports/new?type=wbr');
+          openWbrModal();
         }}
         onOpenQbr={() => {
           setShowTemplateGallery(false);
-          if (qbrTemplateId) setQbrModal(true);
-          else navigate('/reports/new?type=qbr');
+          openQbrModal();
         }}
       />
     );
@@ -509,10 +534,7 @@ export default function ReportsPage() {
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           {/* WBR button */}
           <button
-            onClick={() => {
-              if (wbrTemplateId) setWbrModal(true);
-              else navigate('/reports/new?type=wbr');
-            }}
+            onClick={() => openWbrModal()}
             style={{
               padding: '8px 16px',
               background: '#0f766e',
@@ -533,10 +555,7 @@ export default function ReportsPage() {
           </button>
           {/* QBR button */}
           <button
-            onClick={() => {
-              if (qbrTemplateId) setQbrModal(true);
-              else navigate('/reports/new?type=qbr');
-            }}
+            onClick={() => openQbrModal()}
             style={{
               padding: '8px 16px',
               background: '#c2410c',
