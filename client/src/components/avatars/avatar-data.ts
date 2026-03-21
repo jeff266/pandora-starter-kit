@@ -25,6 +25,12 @@ export const AVATAR_GALLERY: AvatarOption[] = [
   { id: 'char-18', src: '/avatars/char-18.png', label: 'CFO' },
   { id: 'char-19', src: '/avatars/char-19.png', label: 'Engineer' },
   { id: 'char-20', src: '/avatars/char-20.png', label: 'Consultant' },
+  { id: 'char-21', src: '/avatars/char-21.png', label: 'Bull' },
+  { id: 'char-22', src: '/avatars/char-22.png', label: 'Bear' },
+  { id: 'char-23', src: '/avatars/char-23.png', label: 'Socratic' },
+  { id: 'char-24', src: '/avatars/char-24.png', label: 'Boardroom' },
+  { id: 'char-25', src: '/avatars/char-25.png', label: 'Prosecutor' },
+  { id: 'char-26', src: '/avatars/char-26.png', label: 'Defense' },
 ];
 
 export function isPixelAvatar(value: string | null | undefined): boolean {
