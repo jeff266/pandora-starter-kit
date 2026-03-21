@@ -161,7 +161,7 @@ export async function generateReport(request: GenerateReportRequest): Promise<Re
     }
 
     try {
-      const content = await generateSectionContent(workspace_id, section, template.voice_config);
+      const content = await generateSectionContent(workspace_id, section, template.voice_config, document_type);
       sectionsContent.push(content);
     } catch (err) {
       logger.error('Section generation failed', err instanceof Error ? err : undefined);

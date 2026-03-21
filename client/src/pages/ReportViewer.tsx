@@ -1690,7 +1690,44 @@ interface ReportSectionProps {
   humanAnnotations?: import('../components/reports/ReportAnnotationEditor').Annotation[];
 }
 
+function getPrimaryDelta(metrics?: MetricCard[]): MetricCard | null {
+  if (!metrics) return null;
+  const withDelta = metrics.filter(m => m.delta && m.delta_direction && m.delta_direction !== 'flat');
+  if (!withDelta.length) return null;
+  return withDelta[0];
+}
+
+function DeltaBadge({ metric }: { metric: MetricCard }) {
+  const isUp = metric.delta_direction === 'up';
+  const isDown = metric.delta_direction === 'down';
+  const color = isUp ? '#16a34a' : isDown ? '#dc2626' : '#94a3b8';
+  const arrow = isUp ? '↑' : isDown ? '↓' : '→';
+  const tooltip = `${metric.label}\nThis week: ${metric.value}\nChange: ${metric.delta}`;
+  return (
+    <span
+      title={tooltip}
+      style={{
+        fontSize: 11,
+        fontWeight: 500,
+        color,
+        backgroundColor: `${color}18`,
+        border: `1px solid ${color}40`,
+        borderRadius: 4,
+        padding: '2px 7px',
+        marginLeft: 8,
+        whiteSpace: 'nowrap',
+        fontFamily: fonts.sans,
+        cursor: 'default',
+        flexShrink: 0,
+      }}
+    >
+      {metric.label}: {metric.value} {arrow} {metric.delta}
+    </span>
+  );
+}
+
 function ReportSection({ section, isCollapsed, onToggle, anonymizeMode, workspaceId, agentId, generationId, existingSignal, onContextMenu, humanAnnotations }: ReportSectionProps) {
+  const primaryDelta = getPrimaryDelta(section.metrics);
   return (
     <div id={section.section_id} style={{ background: colors.surface, borderRadius: 8, border: `1px solid ${colors.border}`, overflow: 'hidden' }}>
       {/* Section Header */}
@@ -1710,7 +1747,10 @@ function ReportSection({ section, isCollapsed, onToggle, anonymizeMode, workspac
         onMouseEnter={(e) => (e.currentTarget.style.background = colors.surfaceRaised)}
         onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
       >
-        <h2 style={{ fontSize: 20, fontWeight: 700, color: colors.text, fontFamily: fonts.sans, margin: 0 }}>{section.title}</h2>
+        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
+          <h2 style={{ fontSize: 20, fontWeight: 700, color: colors.text, fontFamily: fonts.sans, margin: 0 }}>{section.title}</h2>
+          {primaryDelta && <DeltaBadge metric={primaryDelta} />}
+        </div>
         {isCollapsed ? (
           <ChevronRight style={{ width: 20, height: 20, color: colors.textMuted }} />
         ) : (

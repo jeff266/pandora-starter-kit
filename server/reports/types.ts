@@ -92,7 +92,8 @@ export interface SectionContent {
 export interface MetricCard {
   label: string;
   value: string;
-  delta?: string;
+  metric_name?: string;         // stable key from skill evidence (e.g. 'coverage_ratio')
+  delta?: string;               // formatted delta string (e.g. '+0.6x', '+$1.2M')
   delta_direction?: 'up' | 'down' | 'flat';
   severity?: 'good' | 'warning' | 'critical';
 }

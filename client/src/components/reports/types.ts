@@ -1,6 +1,7 @@
 export interface MetricCard {
   label: string;
   value: string;
+  metric_name?: string;
   delta?: string;
   delta_direction?: 'up' | 'down' | 'flat';
   severity?: 'good' | 'warning' | 'critical';

@@ -3,6 +3,7 @@
 
 import { query } from '../db.js';
 import { ReportSection, SectionContent, VoiceConfig, MetricCard, DealCard, ActionItem } from './types.js';
+import { computeSkillDiff, MetricDelta } from './skill-diff.js';
 import { createLogger } from '../utils/logger.js';
 
 const logger = createLogger('SectionGenerator');
@@ -191,7 +192,8 @@ function parseDealCards(narrative: string, maxItems: number): DealCard[] {
 export async function generateSectionContent(
   workspaceId: string,
   section: ReportSection,
-  voiceConfig: VoiceConfig
+  voiceConfig: VoiceConfig,
+  documentType?: string,
 ): Promise<SectionContent> {
   logger.info('Generating section content', { section_id: section.id, skills: section.skills });
 
@@ -261,7 +263,93 @@ export async function generateSectionContent(
     content.narrative += `\n\n_Note: ${freshnessNotes.join('; ')}._`;
   }
 
+  // WBR/QBR only: enrich MetricCards with week-over-week deltas from skill evidence
+  const isWbrOrQbr = documentType === 'wbr' || documentType === 'qbr';
+  if (isWbrOrQbr && content.metrics && content.metrics.length > 0) {
+    content.metrics = await enrichMetricsWithDiff(workspaceId, section.skills, content.metrics);
+  }
+
   return content;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Week-over-week diff helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Formats a numeric delta for display in a badge.
+ * Format is inferred from the MetricCard's value string (e.g. "2.2x" → ratio, "$1.2M" → currency).
+ */
+function formatDelta(delta: number, currentValue: string): string {
+  const sign = delta >= 0 ? '+' : '';
+  if (currentValue.includes('x')) {
+    return `${sign}${delta.toFixed(2)}x`;
+  }
+  if (currentValue.includes('$')) {
+    const abs = Math.abs(delta);
+    const s = delta >= 0 ? '+' : '-';
+    if (abs >= 1_000_000) return `${s}$${(abs / 1_000_000).toFixed(1)}M`;
+    if (abs >= 1_000) return `${s}$${(abs / 1_000).toFixed(0)}K`;
+    return `${s}$${abs.toFixed(0)}`;
+  }
+  if (currentValue.includes('%')) {
+    return `${sign}${delta.toFixed(1)}%`;
+  }
+  return `${sign}${delta.toFixed(2)}`;
+}
+
+/**
+ * Fuzzy-matches a MetricCard label to a MetricDelta by metric_name.
+ * Handles "Coverage Ratio" → "coverage_ratio" style translations.
+ */
+function findDeltaByLabel(label: string, deltas: MetricDelta[]): MetricDelta | undefined {
+  const normalized = label.toLowerCase().replace(/[\s\-\/]+/g, '_');
+  return deltas.find(d =>
+    d.metric_name === normalized ||
+    d.metric_name.includes(normalized) ||
+    normalized.includes(d.metric_name),
+  );
+}
+
+/**
+ * Enriches a MetricCard[] with week-over-week delta data from skill_runs evidence.
+ * Tries each skill in skillIds and aggregates all available deltas.
+ * Never throws — on any failure, returns the original metrics unchanged.
+ */
+async function enrichMetricsWithDiff(
+  workspaceId: string,
+  skillIds: string[],
+  metrics: MetricCard[],
+): Promise<MetricCard[]> {
+  try {
+    // Collect deltas from all skills in this section
+    const allDeltas: MetricDelta[] = [];
+    for (const skillId of skillIds) {
+      const d = await computeSkillDiff(workspaceId, skillId);
+      allDeltas.push(...d);
+    }
+    if (allDeltas.length === 0) return metrics;
+
+    // Build lookup: metric_name → MetricDelta
+    const deltaMap = new Map(allDeltas.map(d => [d.metric_name, d]));
+
+    return metrics.map(metric => {
+      // Match by explicit metric_name first, then fuzzy label match
+      const matched =
+        (metric.metric_name ? deltaMap.get(metric.metric_name) : undefined) ??
+        findDeltaByLabel(metric.label, allDeltas);
+
+      if (!matched) return metric;
+
+      return {
+        ...metric,
+        delta: formatDelta(matched.delta, metric.value),
+        delta_direction: matched.direction,
+      };
+    });
+  } catch {
+    return metrics;
+  }
 }
 
 function getBestFreshness(evidenceMap: Map<string, SkillEvidence>): string {
@@ -484,6 +572,7 @@ function buildPipelineCoverage(content: SectionContent, evidenceMap: Map<string,
       content.metrics.push({
         label: 'Coverage Ratio',
         value: `${ratio}x`,
+        metric_name: 'coverage_ratio',
         severity: ratio >= 3.0 ? 'good' : ratio >= 2.0 ? 'warning' : 'critical',
       });
     }
