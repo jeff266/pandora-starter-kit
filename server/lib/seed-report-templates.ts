@@ -170,15 +170,15 @@ const QBR_SECTIONS: ReportSection[] = [
 ];
 
 export async function seedWbrQbrTemplates(workspaceId: string): Promise<void> {
-  const existing = await query<{ id: string }>(
-    `SELECT id FROM report_templates
+  const existing = await query<{ id: string; created_from_template: string }>(
+    `SELECT id, created_from_template FROM report_templates
      WHERE workspace_id = $1
        AND created_from_template IN ('wbr_standard', 'qbr_standard')`,
     [workspaceId]
   );
-  if (existing.rows.length >= 2) return;
 
   const seededKeys = new Set(existing.rows.map((r: any) => r.created_from_template));
+  if (seededKeys.has('wbr_standard') && seededKeys.has('qbr_standard')) return;
 
   if (!seededKeys.has('wbr_standard')) {
     await query(

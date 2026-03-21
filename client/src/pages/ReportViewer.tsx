@@ -746,11 +746,19 @@ export default function ReportViewer() {
         {reportDocument && DOC_TYPE_BANNER[reportDocument.document_type] && (() => {
           const banner = DOC_TYPE_BANNER[reportDocument.document_type];
           const sectionCount = (reportDocument.sections || []).length;
+          const generatedAgo = reportDocument.generated_at
+            ? (() => {
+                const diff = (Date.now() - new Date(reportDocument.generated_at).getTime()) / 1000;
+                if (diff < 3600) return `${Math.round(diff / 60)}m ago`;
+                if (diff < 86400) return `${Math.round(diff / 3600)}h ago`;
+                return `${Math.round(diff / 86400)}d ago`;
+              })()
+            : null;
           return (
             <div style={{
               background: banner.bg,
               borderBottom: `1px solid ${banner.accent}33`,
-              padding: '14px 24px',
+              padding: '12px 24px',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
@@ -770,30 +778,56 @@ export default function ReportViewer() {
                 <span style={{ fontSize: 13, color: banner.accent, fontFamily: fonts.sans }}>
                   {sectionCount} section{sectionCount !== 1 ? 's' : ''}
                 </span>
+                {generatedAgo && (
+                  <span style={{ fontSize: 12, color: `${banner.accent}88`, fontFamily: fonts.sans }}>
+                    · Generated {generatedAgo}
+                  </span>
+                )}
               </div>
-              <button
-                onClick={() => {
-                  alert('Export to Gamma is coming soon. This will push the document directly to your Gamma presentation.');
-                }}
-                style={{
-                  padding: '7px 16px',
-                  background: 'rgba(255,255,255,0.08)',
-                  border: `1px solid ${banner.accent}44`,
-                  borderRadius: 8,
-                  color: banner.accent,
-                  fontSize: 13,
-                  fontWeight: 600,
-                  fontFamily: fonts.sans,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.15)')}
-                onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.08)')}
-              >
-                ↗ Export to Gamma
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <button
+                  onClick={() => window.print()}
+                  style={{
+                    padding: '6px 14px',
+                    background: 'rgba(255,255,255,0.08)',
+                    border: `1px solid ${banner.accent}33`,
+                    borderRadius: 7,
+                    color: banner.accent,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    fontFamily: fonts.sans,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.14)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.08)')}
+                >
+                  ↓ Download PDF
+                </button>
+                <button
+                  disabled
+                  title="Export to Gamma — coming soon"
+                  style={{
+                    padding: '6px 14px',
+                    background: 'rgba(255,255,255,0.04)',
+                    border: `1px solid ${banner.accent}22`,
+                    borderRadius: 7,
+                    color: `${banner.accent}66`,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    fontFamily: fonts.sans,
+                    cursor: 'not-allowed',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                  }}
+                >
+                  ↗ Export to Gamma
+                  <span style={{ fontSize: 10, padding: '1px 5px', background: `${banner.accent}22`, borderRadius: 8, letterSpacing: '0.04em' }}>soon</span>
+                </button>
+              </div>
             </div>
           );
         })()}

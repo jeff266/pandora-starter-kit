@@ -124,10 +124,14 @@ function WbrQbrGenerateModal({ workspaceId, type, templateId, onClose, onSuccess
   const [selectedWeekIdx, setSelectedWeekIdx] = useState(0);
   const [selectedQtrIdx, setSelectedQtrIdx] = useState(0);
 
+  const CUSTOM_SENTINEL = '__custom__';
+  const [customPeriod, setCustomPeriod] = useState('');
+  const [showCustomInput, setShowCustomInput] = useState(false);
+
   useEffect(() => {
     api.get('/skills')
-      .then((data) => {
-        const all: SkillInfo[] = (data.skills || []).map((s: any) => ({
+      .then((data: any) => {
+        const all: SkillInfo[] = (Array.isArray(data) ? data : (data.skills || [])).map((s: any) => ({
           id: s.id,
           name: s.name,
           lastRunAt: s.lastRunAt || null,
@@ -145,9 +149,10 @@ function WbrQbrGenerateModal({ workspaceId, type, templateId, onClose, onSuccess
       .finally(() => setSkillsLoading(false));
   }, []);
 
-  const periodLabel = isWbr
+  const autoLabel = isWbr
     ? `Week of ${mondays[selectedWeekIdx].toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`
     : quarters[selectedQtrIdx].label;
+  const periodLabel = showCustomInput ? (customPeriod || autoLabel) : autoLabel;
 
   const freshCounts = skills.reduce(
     (acc, sk) => {
@@ -238,31 +243,61 @@ function WbrQbrGenerateModal({ workspaceId, type, templateId, onClose, onSuccess
             <label style={{ fontSize: 12, fontWeight: 600, color: colors.textSecondary, fontFamily: fonts.sans, letterSpacing: '0.05em', textTransform: 'uppercase', display: 'block', marginBottom: 8 }}>
               {isWbr ? 'Week' : 'Quarter'}
             </label>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <button
-                onClick={() => isWbr ? setSelectedWeekIdx(i => Math.min(i + 1, mondays.length - 1)) : setSelectedQtrIdx(i => Math.min(i + 1, quarters.length - 1))}
-                disabled={isWbr ? selectedWeekIdx >= mondays.length - 1 : selectedQtrIdx >= quarters.length - 1}
-                style={{ background: 'none', border: `1px solid ${colors.border}`, borderRadius: 6, padding: '6px 8px', cursor: 'pointer', color: colors.textSecondary, lineHeight: 1 }}
-              >
-                <ChevronLeft style={{ width: 14, height: 14 }} />
-              </button>
-              <div style={{
-                flex: 1, textAlign: 'center', padding: '8px 16px',
-                background: colors.surfaceRaised, borderRadius: 6,
-                fontSize: 14, fontWeight: 600, color: colors.text, fontFamily: fonts.sans,
-                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-              }}>
-                <Calendar style={{ width: 14, height: 14, color: colors.textMuted }} />
-                {periodLabel}
+            {!showCustomInput ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <button
+                  onClick={() => isWbr ? setSelectedWeekIdx(i => Math.min(i + 1, mondays.length - 1)) : setSelectedQtrIdx(i => Math.min(i + 1, quarters.length - 1))}
+                  disabled={isWbr ? selectedWeekIdx >= mondays.length - 1 : selectedQtrIdx >= quarters.length - 1}
+                  style={{ background: 'none', border: `1px solid ${colors.border}`, borderRadius: 6, padding: '6px 8px', cursor: 'pointer', color: colors.textSecondary, lineHeight: 1 }}
+                >
+                  <ChevronLeft style={{ width: 14, height: 14 }} />
+                </button>
+                <div style={{
+                  flex: 1, textAlign: 'center', padding: '8px 16px',
+                  background: colors.surfaceRaised, borderRadius: 6,
+                  fontSize: 14, fontWeight: 600, color: colors.text, fontFamily: fonts.sans,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                }}>
+                  <Calendar style={{ width: 14, height: 14, color: colors.textMuted }} />
+                  {autoLabel}
+                </div>
+                <button
+                  onClick={() => isWbr ? setSelectedWeekIdx(i => Math.max(i - 1, 0)) : setSelectedQtrIdx(i => Math.max(i - 1, 0))}
+                  disabled={isWbr ? selectedWeekIdx === 0 : selectedQtrIdx === 0}
+                  style={{ background: 'none', border: `1px solid ${colors.border}`, borderRadius: 6, padding: '6px 8px', cursor: 'pointer', color: colors.textSecondary, lineHeight: 1 }}
+                >
+                  <ChevronRight style={{ width: 14, height: 14 }} />
+                </button>
               </div>
+            ) : (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input
+                  type="text"
+                  value={customPeriod}
+                  onChange={e => setCustomPeriod(e.target.value)}
+                  placeholder={isWbr ? 'e.g. Week of April 14, 2026' : 'e.g. Q2 2026'}
+                  style={{
+                    flex: 1, padding: '8px 12px', fontSize: 14, fontFamily: fonts.sans,
+                    background: colors.surfaceRaised, border: `1px solid ${colors.border}`,
+                    borderRadius: 6, color: colors.text, outline: 'none',
+                  }}
+                />
+                <button
+                  onClick={() => { setShowCustomInput(false); setCustomPeriod(''); }}
+                  style={{ background: 'none', border: `1px solid ${colors.border}`, borderRadius: 6, padding: '6px 10px', cursor: 'pointer', color: colors.textMuted, fontSize: 12, fontFamily: fonts.sans }}
+                >
+                  ← Back
+                </button>
+              </div>
+            )}
+            {!showCustomInput && (
               <button
-                onClick={() => isWbr ? setSelectedWeekIdx(i => Math.max(i - 1, 0)) : setSelectedQtrIdx(i => Math.max(i - 1, 0))}
-                disabled={isWbr ? selectedWeekIdx === 0 : selectedQtrIdx === 0}
-                style={{ background: 'none', border: `1px solid ${colors.border}`, borderRadius: 6, padding: '6px 8px', cursor: 'pointer', color: colors.textSecondary, lineHeight: 1 }}
+                onClick={() => { setShowCustomInput(true); setCustomPeriod(''); }}
+                style={{ marginTop: 6, background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: colors.textMuted, fontFamily: fonts.sans, padding: 0 }}
               >
-                <ChevronRight style={{ width: 14, height: 14 }} />
+                Custom…
               </button>
-            </div>
+            )}
           </div>
 
           {/* Skill freshness */}
@@ -445,6 +480,16 @@ export default function ReportsPage() {
           navigate(`/reports/new?template=${templateId}`);
         }}
         onClose={() => setShowTemplateGallery(false)}
+        onOpenWbr={() => {
+          setShowTemplateGallery(false);
+          if (wbrTemplateId) setWbrModal(true);
+          else navigate('/reports/new?type=wbr');
+        }}
+        onOpenQbr={() => {
+          setShowTemplateGallery(false);
+          if (qbrTemplateId) setQbrModal(true);
+          else navigate('/reports/new?type=qbr');
+        }}
       />
     );
   }
@@ -697,17 +742,42 @@ interface TemplateGalleryProps {
   workspaceId: string;
   onSelect: (templateId: string) => void;
   onClose: () => void;
+  onOpenWbr?: () => void;
+  onOpenQbr?: () => void;
 }
 
-function TemplateGallery({ workspaceId, onSelect, onClose }: TemplateGalleryProps) {
-  const templates = [
+function TemplateGallery({ workspaceId, onSelect, onClose, onOpenWbr, onOpenQbr }: TemplateGalleryProps) {
+  const specialTemplates = [
+    {
+      type: 'wbr' as const,
+      name: 'Weekly Business Review',
+      description: 'Pipeline, Forecast, Rep performance, Deal velocity, and Actions. 8 sections. 15–20 min read.',
+      cadence: 'weekly',
+      sectionCount: 8,
+      icon: '📋',
+      accentColor: '#2dd4bf',
+      borderColor: '#0d3330',
+    },
+    {
+      type: 'qbr' as const,
+      name: 'Quarterly Business Review',
+      description: 'Full quarter review: The Number, Win/Loss, Forecast accuracy, Capacity, and Next quarter plan. 10 sections.',
+      cadence: 'quarterly',
+      sectionCount: 10,
+      icon: '📊',
+      accentColor: '#fb923c',
+      borderColor: '#431407',
+    },
+  ];
+
+  const regularTemplates = [
     {
       id: 'monday-pipeline-briefing',
       name: 'Monday Pipeline Briefing',
       description: 'Weekly pipeline review for leadership with forecast, deals at risk, and actions',
       cadence: 'weekly',
       sections: ['the-number', 'what-moved', 'deals-needing-attention', 'actions-summary'],
-      icon: '📊',
+      icon: '📈',
     },
     {
       id: 'executive-monthly',
@@ -715,7 +785,7 @@ function TemplateGallery({ workspaceId, onSelect, onClose }: TemplateGalleryProp
       description: 'High-level monthly summary with forecast waterfall, rep performance, and key metrics',
       cadence: 'monthly',
       sections: ['the-number', 'forecast-waterfall', 'rep-performance', 'actions-summary'],
-      icon: '📈',
+      icon: '📉',
     },
     {
       id: 'deal-review-weekly',
@@ -724,14 +794,6 @@ function TemplateGallery({ workspaceId, onSelect, onClose }: TemplateGalleryProp
       cadence: 'weekly',
       sections: ['deals-needing-attention', 'pipeline-hygiene', 'pipeline-coverage', 'call-intelligence'],
       icon: '🎯',
-    },
-    {
-      id: 'quarterly-business-review',
-      name: 'Quarterly Business Review',
-      description: 'Comprehensive QBR with all sections, forecast, performance, and strategic actions',
-      cadence: 'quarterly',
-      sections: ['the-number', 'what-moved', 'forecast-waterfall', 'rep-performance', 'pipeline-hygiene', 'icp-fit-analysis', 'actions-summary'],
-      icon: '📋',
     },
   ];
 
@@ -763,8 +825,56 @@ function TemplateGallery({ workspaceId, onSelect, onClose }: TemplateGalleryProp
         </button>
       </div>
 
+      {/* WBR / QBR highlight cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16, marginBottom: 16 }}>
+        {specialTemplates.map((t) => (
+          <button
+            key={t.type}
+            onClick={() => {
+              onClose();
+              if (t.type === 'wbr' && onOpenWbr) onOpenWbr();
+              else if (t.type === 'qbr' && onOpenQbr) onOpenQbr();
+            }}
+            style={{
+              background: t.borderColor,
+              border: `1px solid ${t.accentColor}44`,
+              borderRadius: 8,
+              padding: 24,
+              textAlign: 'left',
+              cursor: 'pointer',
+              transition: 'border-color 0.2s, box-shadow 0.2s',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = t.accentColor;
+              e.currentTarget.style.boxShadow = `0 4px 12px ${t.accentColor}33`;
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = `${t.accentColor}44`;
+              e.currentTarget.style.boxShadow = 'none';
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+              <span style={{ fontSize: 28 }}>{t.icon}</span>
+              <span style={{
+                fontSize: 10, fontWeight: 700, letterSpacing: '0.08em',
+                padding: '2px 8px', borderRadius: 12,
+                background: t.accentColor, color: '#000', fontFamily: fonts.sans, textTransform: 'uppercase',
+              }}>
+                {t.type.toUpperCase()}
+              </span>
+            </div>
+            <h3 style={{ fontSize: 17, fontWeight: 700, color: '#fff', marginBottom: 6, fontFamily: fonts.sans }}>{t.name}</h3>
+            <p style={{ fontSize: 13, color: `${t.accentColor}cc`, marginBottom: 16, fontFamily: fonts.sans, lineHeight: 1.5 }}>{t.description}</p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 12, color: t.accentColor, fontFamily: fonts.sans }}>
+              <span style={{ padding: '3px 8px', background: 'rgba(255,255,255,0.08)', borderRadius: 4 }}>{t.cadence}</span>
+              <span>{t.sectionCount} sections</span>
+            </div>
+          </button>
+        ))}
+      </div>
+
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16, marginBottom: 24 }}>
-        {templates.map((template) => (
+        {regularTemplates.map((template) => (
           <button
             key={template.id}
             onClick={() => onSelect(template.id)}
@@ -786,11 +896,9 @@ function TemplateGallery({ workspaceId, onSelect, onClose }: TemplateGalleryProp
               e.currentTarget.style.boxShadow = 'none';
             }}
           >
-            <div style={{ marginBottom: 12 }}>
-              <AvatarDisplay value={template.icon} size={40} fallbackEmoji={template.icon} borderRadius={8} />
-            </div>
-            <h3 style={{ fontSize: 18, fontWeight: 600, color: colors.text, marginBottom: 8, fontFamily: fonts.sans }}>{template.name}</h3>
-            <p style={{ fontSize: 14, color: colors.textSecondary, marginBottom: 16, fontFamily: fonts.sans }}>{template.description}</p>
+            <div style={{ marginBottom: 12, fontSize: 28 }}>{template.icon}</div>
+            <h3 style={{ fontSize: 17, fontWeight: 600, color: colors.text, marginBottom: 8, fontFamily: fonts.sans }}>{template.name}</h3>
+            <p style={{ fontSize: 13, color: colors.textSecondary, marginBottom: 16, fontFamily: fonts.sans }}>{template.description}</p>
             <div style={{ display: 'flex', alignItems: 'center', gap: 16, fontSize: 12, color: colors.textMuted, fontFamily: fonts.sans }}>
               <span style={{ padding: '4px 8px', background: colors.surfaceRaised, borderRadius: 4 }}>{template.cadence}</span>
               <span>{template.sections.length} sections</span>
