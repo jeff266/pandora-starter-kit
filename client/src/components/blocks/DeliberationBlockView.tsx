@@ -9,8 +9,10 @@ const FALLBACK = SEMANTIC_COLORS['uniform'];  // #0D9488
 function getPanelColor(panel: DeliberationPanel): string {
   const hint = panel.color_hint?.toLowerCase() as keyof typeof COLOR_HINT_MAP | undefined;
   if (hint && COLOR_HINT_MAP[hint]) return COLOR_HINT_MAP[hint];
-  const role = panel.role.toLowerCase() as keyof typeof SEMANTIC_COLORS;
-  if (SEMANTIC_COLORS[role]) return SEMANTIC_COLORS[role] as string;
+  const role = panel.role.toLowerCase().trim();
+  if (SEMANTIC_COLORS[role as keyof typeof SEMANTIC_COLORS]) return SEMANTIC_COLORS[role as keyof typeof SEMANTIC_COLORS] as string;
+  const firstWord = role.split(/\s+/)[0] as keyof typeof SEMANTIC_COLORS;
+  if (SEMANTIC_COLORS[firstWord]) return SEMANTIC_COLORS[firstWord] as string;
   return FALLBACK;
 }
 
@@ -144,7 +146,7 @@ export default function DeliberationBlockView({ block }: DeliberationBlockViewPr
 
 function PanelCard({ panel, color }: { panel: DeliberationPanel; color: string }) {
   const [summaryExpanded, setSummaryExpanded] = useState(false);
-  const pct = Math.round(panel.confidence * 100);
+  const pct = Math.min(100, Math.max(0, Math.round(panel.confidence * 100)));
 
   return (
     <div style={{
