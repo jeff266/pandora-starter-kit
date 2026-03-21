@@ -49,7 +49,6 @@ export default function DeliberationBlockView({ block }: DeliberationBlockViewPr
         }
       `}</style>
 
-      {/* ── Header row ─────────────────────────────────────────────────────── */}
       <div
         onClick={() => setCollapsed(c => !c)}
         style={{
@@ -75,7 +74,6 @@ export default function DeliberationBlockView({ block }: DeliberationBlockViewPr
         </span>
       </div>
 
-      {/* ── Hypothesis ─────────────────────────────────────────────────────── */}
       {!collapsed && (
         <div style={{ padding: '10px 14px 4px' }}>
           <div
@@ -104,7 +102,6 @@ export default function DeliberationBlockView({ block }: DeliberationBlockViewPr
         </div>
       )}
 
-      {/* ── Verdict ────────────────────────────────────────────────────────── */}
       {block.verdict && (
         <div style={{
           padding: collapsed ? '6px 14px 8px' : '8px 14px 2px',
@@ -114,19 +111,14 @@ export default function DeliberationBlockView({ block }: DeliberationBlockViewPr
         </div>
       )}
 
-      {/* ── Panel cards ────────────────────────────────────────────────────── */}
       {!collapsed && (
         <>
-          <div
-            className="delib-panels"
-            style={{ paddingTop: 12 }}
-          >
+          <div className="delib-panels" style={{ paddingTop: 12 }}>
             {block.panels.map((panel, i) => (
               <PanelCard key={i} panel={panel} color={getPanelColor(panel)} />
             ))}
           </div>
 
-          {/* ── Synthesis ──────────────────────────────────────────────────── */}
           <div style={{
             margin: '2px 14px 14px',
             borderLeft: `4px solid ${TEAL}`,
@@ -162,7 +154,6 @@ function PanelCard({ panel, color }: { panel: DeliberationPanel; color: string }
       padding: '10px 10px 10px 12px',
       background: '#131f35',
     }}>
-      {/* Role + confidence percentage */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
         <span style={{ fontSize: 12, fontWeight: 700, color: '#e2e8f0' }}>
           {panel.role}
@@ -172,12 +163,10 @@ function PanelCard({ panel, color }: { panel: DeliberationPanel; color: string }
         </span>
       </div>
 
-      {/* Confidence bar */}
       <div style={{ height: 3, background: '#1e293b', borderRadius: 2, marginBottom: 8, overflow: 'hidden' }}>
         <div style={{ height: '100%', width: `${pct}%`, background: color, borderRadius: 2 }} />
       </div>
 
-      {/* Summary with 3-line clamp + "Read more" */}
       <div
         style={{
           fontSize: 13, color: '#cbd5e1', lineHeight: 1.5, marginBottom: 4,
@@ -203,7 +192,6 @@ function PanelCard({ panel, color }: { panel: DeliberationPanel; color: string }
         </button>
       )}
 
-      {/* Key points — max 3 */}
       {panel.key_points.slice(0, 3).map((pt, i) => (
         <div
           key={i}
