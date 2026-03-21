@@ -595,6 +595,9 @@ export default function ConciergeView() {
   const [brief, setBrief] = useState<OpeningBriefData | null>(null);
   const [overnight, setOvernight] = useState<OvernightSummary | null>(null);
   const [overnightExpanded, setOvernightExpanded] = useState(false);
+  const [pendingBannerDismissed, setPendingBannerDismissed] = useState(() => {
+    try { return sessionStorage.getItem('pandora_pending_banner_dismissed') === '1'; } catch { return false; }
+  });
   const [error, setError] = useState<string | null>(null);
   const [activeMathKey, setActiveMathKey] = useState<string | null>(null);
   const [activeQuarterTab, setActiveQuarterTab] = useState<QuarterTab>('early');
@@ -1368,6 +1371,49 @@ export default function ConciergeView() {
 
               return (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+
+                  {/* ⚡ Pending actions amber banner — sessionStorage-dismissed */}
+                  {overnight && overnight.pendingApprovalCount > 0 && !pendingBannerDismissed && (
+                    <div style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      padding: '12px 16px',
+                      background: 'rgba(245,158,11,0.10)',
+                      borderLeft: '4px solid #f59e0b',
+                      borderRadius: '0 6px 6px 0',
+                      marginBottom: 8,
+                      gap: 12,
+                    }}>
+                      <span style={{ fontSize: 13, color: '#b45309', fontWeight: 500, fontFamily: S.font, lineHeight: 1.4 }}>
+                        ⚡ {overnight.pendingApprovalCount} action{overnight.pendingApprovalCount === 1 ? '' : 's'} need{overnight.pendingApprovalCount === 1 ? 's' : ''} your review before the team starts their day
+                      </span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                        <button
+                          onClick={() => navigate('/settings/automations')}
+                          style={{
+                            padding: '5px 12px', borderRadius: 6, cursor: 'pointer', fontFamily: S.font,
+                            background: '#f59e0b', border: 'none', color: '#fff',
+                            fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap',
+                          }}
+                        >
+                          Review Actions →
+                        </button>
+                        <button
+                          onClick={() => {
+                            try { sessionStorage.setItem('pandora_pending_banner_dismissed', '1'); } catch {}
+                            setPendingBannerDismissed(true);
+                          }}
+                          title="Dismiss for this session"
+                          style={{
+                            background: 'none', border: 'none', cursor: 'pointer',
+                            color: '#b45309', fontSize: 16, padding: '0 2px', lineHeight: 1,
+                          }}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   <div style={{ fontSize: 11, color: '#5a6578', marginBottom: 8 }}>
                     {riskDeals.length > 0
                       ? `${riskDeals.length} big deal${riskDeals.length > 1 ? 's' : ''} at risk · ${Math.min(topFindings.length, 5)} of ${totalCount} findings · ${countTail}`
