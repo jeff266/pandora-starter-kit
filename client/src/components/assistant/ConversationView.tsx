@@ -16,6 +16,7 @@ import StickyInput from './StickyInput';
 import MessageFeedback from './MessageFeedback';
 import AgentConversationFeed from './AgentConversationFeed';
 import ChartRenderer from '../shared/ChartRenderer';
+import ResponseEnvelopeRenderer from '../shared/ResponseEnvelopeRenderer';
 import SankeyChart from '../reports/SankeyChart';
 import WinningPathsChart from '../pipeline/WinningPathsChart';
 import SuggestedActionsPanel from './SuggestedActionsPanel';
@@ -413,6 +414,18 @@ export default function ConversationView({ initialMessage, onBack, onThreadId, s
                   <AddToReportButton chart={state.responseChart} />
                 </div>
               </div>
+            </div>
+          </div>
+        )}
+
+        {state.pandoraResponse && state.synthesisComplete && (
+          <div style={{ display: 'flex', justifyContent: 'flex-start', width: '100%', marginBottom: 12 }}>
+            <div style={{
+              maxWidth: '75%', padding: '12px 14px', borderRadius: 10,
+              background: colors.surface, border: `1px solid ${colors.border}`,
+              width: '100%',
+            }}>
+              <ResponseEnvelopeRenderer response={state.pandoraResponse} compact={true} />
             </div>
           </div>
         )}

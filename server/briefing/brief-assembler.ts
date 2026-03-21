@@ -20,6 +20,7 @@ import { callLLM } from '../utils/llm-router.js';
 import { createBriefSSEEmitter, NULL_EMITTER, type BriefSSEEmitter } from './brief-sse-emitter.js';
 import { getDictionaryContext } from '../dictionary/dictionary-context.js';
 import { getToolDefinitionsContext } from '../skills/tool-context.js';
+import { PandoraResponseBuilder } from '../lib/pandora-response-builder.js';
 
 // ─── Entry point ─────────────────────────────────────────────────────────────
 
@@ -595,17 +596,67 @@ async function saveBrief(workspaceId: string, briefType: BriefType, now: Date, d
     console.error(`[brief-assembler] Comparison failed for ${workspaceId}:`, err);
   }
 
+  // Build PandoraResponse envelope
+  const builder = new PandoraResponseBuilder();
+
+  // Opening summary
+  if (aiBlurbs?.week_summary) {
+    builder.addNarrative(aiBlurbs.week_summary);
+  }
+
+  // The number narrative
+  if (aiBlurbs?.pulse_summary) {
+    builder.addNarrative(aiBlurbs.pulse_summary);
+  }
+
+  // Existing chart_specs — all 3 already exist on AssembledBrief
+  if (theNumber?.chart_spec) {
+    builder.addChart(theNumber.chart_spec, false);
+  }
+  if (whatChanged?.chart_spec) {
+    builder.addChart(whatChanged.chart_spec, false);
+  }
+  if (reps?.chart_spec) {
+    builder.addChart(reps.chart_spec, false);
+  }
+
+  // Risk narrative
+  if (aiBlurbs?.risk_narrative) {
+    builder.addNarrative(aiBlurbs.risk_narrative, 'warning');
+  }
+
+  // Deals to watch → ActionCards
+  for (const deal of deals?.items ?? []) {
+    builder.addActionCard({
+      severity: deal.severity === 'critical' ? 'critical' : 'warning',
+      title: deal.name,
+      rationale: deal.signal_text,
+      target_entity_type: 'deal',
+      target_entity_id: deal.id,
+      target_entity_name: deal.name,
+      cta_label: 'View deal',
+      cta_href: `/deals/${deal.id}`,
+    });
+  }
+
+  // Key action
+  if (aiBlurbs?.key_action) {
+    builder.addNarrative(aiBlurbs.key_action, 'info');
+  }
+
+  const pandoraResponse = builder.build('concierge', workspaceId);
+
   const result = await query<any>(
-    `INSERT INTO weekly_briefs (workspace_id, brief_type, generated_date, period_start, period_end, days_in_quarter, days_remaining, the_number, what_changed, segments, reps, deals_to_watch, ai_blurbs, editorial_focus, section_refreshed_at, status, assembly_duration_ms, comparison_block, comparison_data, forecast_accuracy_note)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'ready',$16,$17,$18,$19)
+    `INSERT INTO weekly_briefs (workspace_id, brief_type, generated_date, period_start, period_end, days_in_quarter, days_remaining, the_number, what_changed, segments, reps, deals_to_watch, ai_blurbs, editorial_focus, section_refreshed_at, status, assembly_duration_ms, comparison_block, comparison_data, forecast_accuracy_note, pandora_response)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'ready',$16,$17,$18,$19,$20)
      ON CONFLICT (workspace_id, generated_date) DO UPDATE SET
        brief_type=$2, period_start=$4, period_end=$5, days_in_quarter=$6, days_remaining=$7,
        the_number=$8, what_changed=$9, segments=$10, reps=$11, deals_to_watch=$12,
        ai_blurbs=$13, editorial_focus=$14, section_refreshed_at=$15,
        status='ready', assembly_duration_ms=$16, updated_at=NOW(),
-       comparison_block=$17, comparison_data=$18, forecast_accuracy_note=$19
+       comparison_block=$17, comparison_data=$18, forecast_accuracy_note=$19, pandora_response=$20
      RETURNING *`,
-    [workspaceId, briefType, todayStr, monday.toISOString().split('T')[0], sunday.toISOString().split('T')[0], daysInQ, theNumber.days_remaining, JSON.stringify(theNumber), JSON.stringify(whatChanged), JSON.stringify(segments), JSON.stringify(reps), JSON.stringify(deals), JSON.stringify(aiBlurbs), JSON.stringify(editorialFocus), JSON.stringify(sectionRefreshedAt), Date.now() - startTime, comparisonBlock, JSON.stringify(comparisonData), forecastAccuracyNote]
+    [workspaceId, briefType, todayStr, monday.toISOString().split('T')[0], sunday.toISOString().split('T')[0], daysInQ, theNumber.days_remaining, JSON.stringify(theNumber), JSON.stringify(whatChanged), JSON.stringify(segments), JSON.stringify(reps), JSON.stringify(deals), JSON.stringify(aiBlurbs), JSON.stringify(editorialFocus), JSON.stringify(sectionRefreshedAt), Date.now() - startTime, comparisonBlock, JSON.stringify(comparisonData), forecastAccuracyNote, JSON.stringify(pandoraResponse)]
   );
 
   console.log(`[brief-assembler] ${briefType} brief ready for workspace ${workspaceId} in ${Date.now() - startTime}ms`);

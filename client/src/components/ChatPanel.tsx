@@ -6,6 +6,7 @@ import { useDemoMode } from '../contexts/DemoModeContext';
 import { Icon } from './icons';
 import ChartRenderer from './shared/ChartRenderer';
 import type { ChartSpec } from './shared/ChartRenderer';
+import ResponseEnvelopeRenderer from './shared/ResponseEnvelopeRenderer';
 import DeliberationCard from './DeliberationCard';
 import ChatDocBar from './ChatDocBar';
 import SaveAsAgentBanner from './chat/SaveAsAgentBanner';
@@ -52,6 +53,7 @@ interface ChatMessage {
   chart_specs?: ChartSpec[];
   response_chart?: { spec: any; png_base64: string; suggested_section_id?: string };
   deliberation?: any;
+  pandora_response?: any; // PandoraResponse from response-blocks.ts
 }
 
 interface ChatScope {
@@ -705,6 +707,11 @@ export default function ChatPanel({ isOpen, onClose, scope, initialSessionId, pe
               )}
               {msg.role === 'assistant' && msg.deliberation && (
                 <DeliberationCard deliberation={msg.deliberation} />
+              )}
+              {msg.role === 'assistant' && msg.pandora_response && (
+                <div style={{ marginTop: 12 }}>
+                  <ResponseEnvelopeRenderer response={msg.pandora_response} />
+                </div>
               )}
               {msg.role === 'assistant' && isLongResponse && !alreadyHasDoc && !loading && (
                 <div style={{ marginTop: 10, borderTop: '1px solid #1e293b', paddingTop: 10 }}>

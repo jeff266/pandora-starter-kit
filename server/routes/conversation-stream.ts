@@ -21,6 +21,7 @@ import { getOrCreateSessionContext } from '../agents/session-context.js';
 import { waterfallAnalysis } from '../analysis/waterfall-analysis.js';
 import { buildSankeyChartData } from '../analysis/sankey-builder.js';
 import { computeWinningPaths } from '../analysis/winning-paths.js';
+import { PandoraResponseBuilder } from '../lib/pandora-response-builder.js';
 import axios from 'axios';
 import type { InvestigationStep } from '../goals/types.js';
 
@@ -470,6 +471,46 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
           });
         }
       }
+
+      // Build and emit PandoraResponse envelope
+      const actionBuilder = new PandoraResponseBuilder();
+      actionBuilder.addNarrative(pandoraAction.answer);
+      for (const spec of pandoraAction.chart_specs ?? []) {
+        actionBuilder.addChart(spec, true);
+      }
+      if (pandoraAction.suggested_actions?.length) {
+        for (const action of pandoraAction.suggested_actions) {
+          actionBuilder.addActionCard({
+            severity: action.priority === 'P1' ? 'critical' : action.priority === 'P2' ? 'warning' : 'info',
+            title: action.title,
+            rationale: action.description,
+            target_entity_type: 'deal',
+            target_entity_id: action.deal_id,
+            target_entity_name: action.deal_name,
+            action_id: action.id,
+            cta_label: 'Take action',
+            cta_href: action.deal_id ? `/deals/${action.deal_id}` : undefined,
+          });
+        }
+      } else if (pandoraAction.inline_actions?.length) {
+        for (const action of pandoraAction.inline_actions) {
+          actionBuilder.addActionCard({
+            severity: action.severity,
+            title: action.title,
+            rationale: action.summary,
+            target_entity_type: 'deal',
+            target_entity_name: action.deal_name,
+            action_id: action.id,
+            cta_label: 'Take action',
+          });
+        }
+      }
+      for (const toolCall of pandoraAction.evidence?.tool_calls ?? []) {
+        actionBuilder.recordTool(toolCall.tool_name);
+      }
+      const actionPandoraResponse = actionBuilder.build('ask_pandora', workspaceId, pandoraAction.tokens_used);
+      sse(res, { type: 'pandora_response', response: actionPandoraResponse });
+
       await persistExchange(workspaceId, workingThreadId, message, assistantResponse);
       sse(res, { type: 'done', thread_id: workingThreadId });
       res.end();
@@ -636,6 +677,45 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
             });
           }
         }
+
+        // Build and emit PandoraResponse envelope for tier1
+        const t1Builder = new PandoraResponseBuilder();
+        t1Builder.addNarrative(pandoraT1.answer);
+        for (const spec of pandoraT1.chart_specs ?? []) {
+          t1Builder.addChart(spec, true);
+        }
+        if (pandoraT1.suggested_actions?.length) {
+          for (const action of pandoraT1.suggested_actions) {
+            t1Builder.addActionCard({
+              severity: action.priority === 'P1' ? 'critical' : action.priority === 'P2' ? 'warning' : 'info',
+              title: action.title,
+              rationale: action.description,
+              target_entity_type: 'deal',
+              target_entity_id: action.deal_id,
+              target_entity_name: action.deal_name,
+              action_id: action.id,
+              cta_label: 'Take action',
+              cta_href: action.deal_id ? `/deals/${action.deal_id}` : undefined,
+            });
+          }
+        } else if (pandoraT1.inline_actions?.length) {
+          for (const action of pandoraT1.inline_actions) {
+            t1Builder.addActionCard({
+              severity: action.severity,
+              title: action.title,
+              rationale: action.summary,
+              target_entity_type: 'deal',
+              target_entity_name: action.deal_name,
+              action_id: action.id,
+              cta_label: 'Take action',
+            });
+          }
+        }
+        for (const toolCall of pandoraT1.evidence?.tool_calls ?? []) {
+          t1Builder.recordTool(toolCall.tool_name);
+        }
+        const t1PandoraResponse = t1Builder.build('ask_pandora', workspaceId, pandoraT1.tokens_used);
+        sse(res, { type: 'pandora_response', response: t1PandoraResponse });
       }
     }
 
@@ -747,6 +827,45 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
             });
           }
         }
+
+        // Build and emit PandoraResponse envelope for fallback
+        const fbBuilder = new PandoraResponseBuilder();
+        fbBuilder.addNarrative(pandoraFallback.answer);
+        for (const spec of pandoraFallback.chart_specs ?? []) {
+          fbBuilder.addChart(spec, true);
+        }
+        if (pandoraFallback.suggested_actions?.length) {
+          for (const action of pandoraFallback.suggested_actions) {
+            fbBuilder.addActionCard({
+              severity: action.priority === 'P1' ? 'critical' : action.priority === 'P2' ? 'warning' : 'info',
+              title: action.title,
+              rationale: action.description,
+              target_entity_type: 'deal',
+              target_entity_id: action.deal_id,
+              target_entity_name: action.deal_name,
+              action_id: action.id,
+              cta_label: 'Take action',
+              cta_href: action.deal_id ? `/deals/${action.deal_id}` : undefined,
+            });
+          }
+        } else if (pandoraFallback.inline_actions?.length) {
+          for (const action of pandoraFallback.inline_actions) {
+            fbBuilder.addActionCard({
+              severity: action.severity,
+              title: action.title,
+              rationale: action.summary,
+              target_entity_type: 'deal',
+              target_entity_name: action.deal_name,
+              action_id: action.id,
+              cta_label: 'Take action',
+            });
+          }
+        }
+        for (const toolCall of pandoraFallback.evidence?.tool_calls ?? []) {
+          fbBuilder.recordTool(toolCall.tool_name);
+        }
+        const fbPandoraResponse = fbBuilder.build('ask_pandora', workspaceId, pandoraFallback.tokens_used);
+        sse(res, { type: 'pandora_response', response: fbPandoraResponse });
       } else {
         // Investigation path (Tier 2 or Tier 3)
         for (const step of plan!.steps) {

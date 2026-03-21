@@ -26,7 +26,7 @@ import { recordFeedbackSignal } from '../feedback/signals.js';
 import { createAnnotation, getActiveAnnotations } from '../feedback/annotations.js';
 import { randomUUID } from 'crypto';
 import { runPandoraAgent, buildConversationHistory } from './pandora-agent.js';
-import { isDeliberationTrigger } from './intent-classifier.js';
+import { classifyDeliberationMode } from './intent-classifier.js';
 import { runDeliberation, type DeliberationResult } from './deliberation-engine.js';
 import { logChatMessage } from '../lib/chat-logger.js';
 import { estimateTokens } from './token-estimator.js';
@@ -38,6 +38,7 @@ import { runRetroPipeline } from '../retro/pipeline.js';
 import { createSessionContext, type SessionContext } from '../agents/session-context.js';
 import { extractSkillContext, formatMethodologyComparisons } from './context-assembler.js';
 import { buildConversationContext } from '../context/build-conversation-context.js';
+import { PandoraResponseBuilder } from '../lib/pandora-response-builder.js';
 
 export interface ConversationTurnInput {
   surface: 'slack_thread' | 'slack_dm' | 'in_app';
@@ -799,45 +800,37 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
         }
       }
 
-      // Deliberation intercept — only for deal-scoped sessions with judgment queries
-      if (scopeType === 'deal' && entityId && isDeliberationTrigger(message)) {
+      // Deliberation classification — check if this warrants bull/bear analysis
+      const classifierStart = Date.now();
+      const deliberationClassification = await classifyDeliberationMode(message, {
+        scopeType,
+        entityId,
+      });
+      const classifierMs = Date.now() - classifierStart;
+
+      if (classifierMs > 500) {
+        console.warn(
+          `[deliberation-classifier] slow: ${classifierMs}ms`,
+          { workspaceId, scopeType, mode: deliberationClassification.mode }
+        );
+      }
+
+      let deliberationResult: any = null;
+
+      if (deliberationClassification.mode === 'bull_bear' &&
+          deliberationClassification.confidence >= 0.70 &&
+          entityId) {
         try {
-          console.log(`[orchestrator] Deliberation triggered for deal ${entityId}`);
-          const deliberationResult = await runDeliberation(workspaceId, entityId, message);
-          const summaryAnswer = `Bull Case close probability: ${deliberationResult.perspectives.bull.closeProbability}%. Bear Case close probability: ${deliberationResult.perspectives.bear.closeProbability}%. Expected value: $${Math.round(deliberationResult.verdict.expectedValue).toLocaleString()}.`;
-
-          await appendMessage(workspaceId, channelId, threadId, {
-            role: 'assistant',
-            content: summaryAnswer,
-            timestamp: new Date().toISOString(),
-          });
-          await logChatMessage({
-            workspaceId, sessionId: threadId, surface: 'ask_pandora', role: 'assistant',
-            content: summaryAnswer,
-            scope: { type: scopeType, entity_id: entityId, rep_email: repEmail } as Record<string, unknown>,
-            tokenCost: deliberationResult.tokenCost,
-          });
-          await updateContext(workspaceId, channelId, threadId, {
-            last_scope: { type: scopeType, entity_id: entityId, rep_email: repEmail },
-          });
-          await updateTurnMetrics(workspaceId, channelId, threadId, deliberationResult.tokenCost);
-
-          return {
-            answer: summaryAnswer,
-            thread_id: threadId,
-            scope: { type: scopeType, entity_id: entityId, rep_email: repEmail },
-            router_decision: 'deliberation',
-            data_strategy: 'bull_bear',
-            tokens_used: deliberationResult.tokenCost,
-            response_id: randomUUID(),
-            feedback_enabled: true,
-            deliberation: deliberationResult,
-          };
+          console.log(`[orchestrator] Running bull/bear deliberation for deal ${entityId}`);
+          deliberationResult = await runDeliberation(workspaceId, entityId, message);
         } catch (err) {
-          console.error('[orchestrator] Deliberation failed, falling through to pandora_agent:', err);
-          // Non-fatal — fall through to standard pandora_agent
+          console.error('[orchestrator] Deliberation failed, continuing to pandora_agent:', err);
+          // Non-fatal — continue to pandora_agent
         }
       }
+
+      // Note: red_team deliberation is triggered separately via hypothesis challenge
+      // and has its own execution path. Do not wire red_team here.
 
       // Detect complex requests for planning mode
       const isComplex = detectComplexRequest(message);
@@ -891,6 +884,80 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
       });
       await updateTurnMetrics(workspaceId, channelId, threadId, tokensUsed);
 
+      // Build PandoraResponse envelope
+      const builder = new PandoraResponseBuilder();
+
+      // 1. Narrative — the synthesis text
+      builder.addNarrative(answer);
+
+      // 2. Charts — map existing ChartSpecs to ChartBlocks
+      for (const spec of pandoraResult.chart_specs ?? []) {
+        builder.addChart(spec, true); // saveable = true in Ask Pandora
+      }
+
+      // 3. Action cards — map suggested_actions or inline_actions
+      if (pandoraResult.suggested_actions?.length) {
+        for (const action of pandoraResult.suggested_actions) {
+          builder.addActionCard({
+            severity: action.priority === 'P1' ? 'critical' : action.priority === 'P2' ? 'warning' : 'info',
+            title: action.title,
+            rationale: action.description,
+            target_entity_type: 'deal',
+            target_entity_id: action.deal_id,
+            target_entity_name: action.deal_name,
+            action_id: action.id,
+            cta_label: 'Take action',
+            cta_href: action.deal_id ? `/deals/${action.deal_id}` : undefined,
+          });
+        }
+      } else if (pandoraResult.inline_actions?.length) {
+        for (const action of pandoraResult.inline_actions) {
+          builder.addActionCard({
+            severity: action.severity,
+            title: action.title,
+            rationale: action.summary,
+            target_entity_type: 'deal',
+            target_entity_name: action.deal_name,
+            action_id: action.id,
+            cta_label: 'Take action',
+          });
+        }
+      }
+
+      // 4. Record tools used
+      for (const toolCall of pandoraResult.evidence?.tool_calls ?? []) {
+        builder.recordTool(toolCall.tool_name);
+      }
+
+      // 5. Add deliberation block if bull/bear was run
+      if (deliberationResult) {
+        builder.addDeliberation({
+          mode: 'bull_bear',
+          run_id: deliberationResult.id ?? undefined,
+          hypothesis: message,
+          panels: [
+            {
+              role: 'Bull',
+              summary: deliberationResult.perspectives?.bull?.output ?? '',
+              key_points: [],
+              confidence: (deliberationResult.perspectives?.bull?.closeProbability ?? 50) / 100,
+              color_hint: 'bull',
+            },
+            {
+              role: 'Bear',
+              summary: deliberationResult.perspectives?.bear?.output ?? '',
+              key_points: [],
+              confidence: (deliberationResult.perspectives?.bear?.closeProbability ?? 50) / 100,
+              color_hint: 'bear',
+            },
+          ],
+          synthesis: deliberationResult.verdict?.rawOutput ?? '',
+          verdict: deliberationResult.verdict?.recommendedAction ?? undefined,
+        });
+      }
+
+      const pandoraResponse = builder.build('ask_pandora', workspaceId, tokensUsed);
+
       return {
         answer,
         thread_id: threadId,
@@ -909,6 +976,7 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
         ...(pandoraResult.inline_actions ? { inline_actions: pandoraResult.inline_actions } : {}),
         ...(pandoraResult.chart_specs?.length ? { chart_specs: pandoraResult.chart_specs } : {}),
         ...(pandoraResult.chart ? { chart: pandoraResult.chart } : {}),
+        pandora_response: pandoraResponse,
       } as any;
     } catch (err) {
       console.error('[orchestrator] Pandora Agent failed:', err);

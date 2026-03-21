@@ -80,6 +80,7 @@ export interface ConversationState {
   deliverableOptions: DeliverableOption[];
   chartSpecs: ChartSpec[];
   responseChart: { spec: any; png_base64: string; suggested_section_id?: string } | null;
+  pandoraResponse: any | null; // PandoraResponse from response-blocks.ts
   sankeyData: SankeyChartData | null;
   winningPathsData: WinningPathsData | null;
   error: string | null;
@@ -124,6 +125,7 @@ const initial: ConversationState = {
   deliverableOptions: [],
   chartSpecs: [],
   responseChart: null,
+  pandoraResponse: null,
   sankeyData: null,
   winningPathsData: null,
   planText: null,
@@ -175,6 +177,7 @@ function reducer(state: ConversationState, action: Action): ConversationState {
       deliverableOptions: [],
       chartSpecs: [],
       responseChart: null,
+      pandoraResponse: null,
       sankeyData: null,
       winningPathsData: null,
       error: null,
@@ -275,6 +278,9 @@ function reducer(state: ConversationState, action: Action): ConversationState {
       }
       case 'response_chart': {
         return { ...state, responseChart: ev.chart ?? null };
+      }
+      case 'pandora_response': {
+        return { ...state, pandoraResponse: ev.response ?? null };
       }
       case 'sankey_data': {
         return { ...state, sankeyData: ev.data ?? null };

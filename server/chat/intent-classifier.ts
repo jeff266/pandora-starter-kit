@@ -153,6 +153,14 @@ export interface IntentClassification {
   is_followup_doc?: boolean;    // true when user wants previous response converted to a doc
 }
 
+export type DeliberationMode = 'bull_bear' | 'red_team' | 'none';
+
+export interface DeliberationClassification {
+  mode: DeliberationMode;
+  confidence: number;
+  rationale: string;
+}
+
 // Deliberation trigger patterns — only fire when chat is deal-scoped
 const DELIBERATION_PATTERNS = [
   // Close probability questions
@@ -384,12 +392,45 @@ function timeoutPromise(ms: number): Promise<never> {
   });
 }
 
-// Helper function to check if a query is a deal judgment question
-function isDealJudgmentQuestion(query: string): boolean {
-  const q = query.toLowerCase().trim();
+export async function classifyDeliberationMode(
+  message: string,
+  context: {
+    scopeType?: string;      // 'deal' | 'pipeline' | etc
+    entityId?: string;
+    recentMessages?: string[];
+  }
+): Promise<DeliberationClassification> {
+  const q = message.toLowerCase().trim();
 
-  // Negative guard — these are data questions, not judgment questions
-  // Even if they contain trigger words, skip deliberation
+  // Fast-path guard: no deliberation if no entity context and message doesn't mention hypothesis/sprint
+  if (!context.scopeType && !context.entityId &&
+      !/\b(hypothesis|sprint|plan)\b/i.test(message)) {
+    return {
+      mode: 'none',
+      confidence: 1,
+      rationale: 'no entity context',
+    };
+  }
+
+  // Fast-path: obvious bull_bear patterns (no LLM call needed)
+  const BULL_BEAR_PATTERNS = [
+    /\bwill (this|the) deal close\b/i,
+    /\b(probability|chance|likelihood) of (closing|winning)\b/i,
+    /\bshould (i|we) (pursue|walk away|drop|kill)\b/i,
+    /\bclose probability\b/i,
+  ];
+
+  for (const pattern of BULL_BEAR_PATTERNS) {
+    if (pattern.test(message)) {
+      return {
+        mode: 'bull_bear',
+        confidence: 1,
+        rationale: 'high-confidence pattern match',
+      };
+    }
+  }
+
+  // Negative guard — these are data questions, not deliberation
   const DATA_QUESTION_PREFIXES = [
     'show me',
     'what is the current',
@@ -400,24 +441,74 @@ function isDealJudgmentQuestion(query: string): boolean {
     'who is',
     'list',
     'summarize',
-    'tell me about',  // factual — standard analysis, not deliberation
   ];
 
   if (DATA_QUESTION_PREFIXES.some(prefix => q.startsWith(prefix))) {
-    return false;
+    return {
+      mode: 'none',
+      confidence: 1,
+      rationale: 'data lookup question',
+    };
   }
 
-  // Positive trigger check — any pattern matches
-  return DELIBERATION_PATTERNS.some(pattern => pattern.test(query));
-}
-
-export function isDeliberationTrigger(message: string): boolean {
-  // Minimum query length guard — too short to be deliberation intent
-  if (message.trim().length < 12) {
-    return false;
+  // DeepSeek fallback for ambiguous cases
+  // Only call if scopeType is 'deal' or message mentions hypothesis/sprint
+  if (context.scopeType !== 'deal' &&
+      !/\b(hypothesis|sprint|plan)\b/i.test(message)) {
+    return {
+      mode: 'none',
+      confidence: 0.9,
+      rationale: 'not a deal context, no hypothesis keywords',
+    };
   }
 
-  return isDealJudgmentQuestion(message);
+  try {
+    const response = await callLLM('system', 'intent_classify', {
+      systemPrompt: `Classify whether this RevOps question warrants deliberation analysis.
+
+bull_bear: Question about whether a specific deal will close, its risk vs. upside, close probability, or whether to pursue/drop it.
+Examples: "will this deal close?", "should we walk away?", "what's the probability this lands in Q1?"
+
+red_team: Question about validating a hypothesis, sprint plan, or whether a proposed action is sufficient.
+Examples: "will this sprint work?", "is this hypothesis right?", "does this plan address the root cause?"
+
+none: Everything else — data lookups, pipeline questions, rep questions, general advice, list requests.
+
+Respond ONLY with JSON:
+{ "mode": "bull_bear" | "red_team" | "none", "confidence": 0.0, "rationale": "one sentence" }`,
+      messages: [{
+        role: 'user',
+        content: `Context: ${context.scopeType || 'unknown'} scope${context.entityId ? ', entity present' : ''}\nMessage: "${message}"`,
+      }],
+      maxTokens: 100,
+      temperature: 0,
+    });
+
+    const text = (response.content || '').trim();
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+
+    if (jsonMatch) {
+      try {
+        const parsed = JSON.parse(jsonMatch[0]);
+        return {
+          mode: parsed.mode || 'none',
+          confidence: parsed.confidence || 0.5,
+          rationale: parsed.rationale || 'classifier response',
+        };
+      } catch {
+        // JSON parse failed
+      }
+    }
+  } catch (err) {
+    console.error('[classifyDeliberationMode] error:', err);
+  }
+
+  // Fallback: no deliberation on error
+  return {
+    mode: 'none',
+    confidence: 1,
+    rationale: 'classifier error',
+  };
 }
 
 export async function classifyIntent(

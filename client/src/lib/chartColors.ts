@@ -16,6 +16,32 @@ export const SEMANTIC_COLORS = {
   omitted:    '#94A3B8',
   uniform:  '#0D9488',
   fallback: '#CBD5E1',
+  // Deliberation panel roles
+  'bull':        '#F59E0B',   // amber — optimistic
+  'bear':        '#94A3B8',   // muted gray — skeptical
+  'skeptic':     '#94A3B8',   // same as bear
+  'advocate':    '#14B8A6',   // teal — supportive
+  'prosecutor':  '#F97316',   // coral — adversarial
+  'defense':     '#14B8A6',   // teal — protective
+  'synthesis':   '#6366F1',   // indigo — resolution
+  'verdict':     '#6366F1',   // indigo — conclusion
+  // Forecast landing zones (used in forecast charts)
+  'bear case':   '#94A3B8',
+  'base case':   '#14B8A6',
+  'bull case':   '#F59E0B',
+  'upside':      '#F59E0B',
+  'downside':    '#F97316',
+} as const;
+
+export const COLOR_HINT_MAP = {
+  'bull':              '#F59E0B',
+  'bear':              '#94A3B8',
+  'prosecutor':        '#F97316',
+  'defense':           '#14B8A6',
+  'synthesis':         '#6366F1',
+  'optimistic':        '#F59E0B',
+  'pessimistic':       '#94A3B8',
+  'stress_test':       '#F97316',
 } as const;
 
 export function resolveColor(

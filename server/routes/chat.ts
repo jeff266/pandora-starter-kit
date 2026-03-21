@@ -115,6 +115,7 @@ router.post('/:workspaceId/chat', async (req: Request, res: Response): Promise<v
       ...(result.chart ? { chart: result.chart } : {}),
       ...(suggestedActions.length > 0 ? { suggested_actions: suggestedActions } : {}),
       ...(result.deliberation ? { deliberation: result.deliberation } : {}),
+      ...((result as any).pandora_response ? { pandora_response: (result as any).pandora_response } : {}),
     };
 
     // Persist to session (fire-and-forget to not slow response)
