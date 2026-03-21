@@ -106,6 +106,30 @@ export type ChartQuestionType =
   // Comparing 3+ discrete values of same type?
   // → vertical bar, uniform teal color
 
+  | 'waterfall'
+  // Pipeline movement: adds, advances, slips, wins, losses
+  // → waterfall chart showing cumulative change
+
+  | 'funnel'
+  // Stage-by-stage conversion rates
+  // → funnel chart with narrowing stages
+
+  | 'bullet'
+  // Attainment vs target for multiple subjects
+  // → bullet chart with bands and target markers
+
+  | 'heatmap'
+  // Two-dimensional intensity patterns
+  // → heatmap with color-coded cells
+
+  | 'combo'
+  // Volume + rate on same time axis
+  // → combo chart with bar + line series
+
+  | 'scatter'
+  // Relationship between two numeric dimensions
+  // → scatter plot showing correlation
+
   | 'not_chartable';
   // Qualitative argument, no numeric data, or data_gap = true → no chart
 

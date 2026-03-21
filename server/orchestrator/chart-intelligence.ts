@@ -179,11 +179,37 @@ ${availableData.keyMetrics.length > 0
     .join('\n')}`
   : ''}
 
+Available chart types and when to use each:
+
+deal_triage — compare discrete deals by risk/urgency (which deals to work vs abandon)
+deal_timing — compare deals by time metrics (days stale, days in stage)
+rep_comparison — compare reps on a metric (pipeline by rep, attainment by rep)
+pipeline_composition — part-to-whole with 2–5 segments (closed vs open, stage distribution)
+coverage_gap — actual vs target for one metric (pipeline vs quota, coverage vs target)
+trend — metric over time (pipeline over 12 weeks, win rate by month) — BLOCKED unless time series data exists
+metric_comparison — compare 3+ discrete values on same metric (ARR by segment, deals by stage)
+waterfall — pipeline movement: adds, advances, slips, wins, losses in a period. Use when question is about net pipeline change.
+funnel — stage-by-stage conversion rates. Use when question is about drop-off between ordered stages.
+bullet — attainment vs target for multiple subjects (quota attainment by rep). Use when clear target values exist.
+heatmap — two-dimensional intensity patterns (rep × stage distribution, stage × week density). Use when two categorical dimensions + numeric value.
+combo — volume + rate on same time axis (pipeline created as bars, win rate as line). Use when two related but differently scaled metrics over same period.
+scatter — relationship between two numeric dimensions (deal size vs cycle time). Use for correlation or outlier detection.
+not_chartable — no chart warranted
+
+Selection rules:
+- Default to deal_triage, deal_timing, or metric_comparison for most cases.
+- Waterfall requires pipeline movement data (start, adds, removes, end). Do not use if only snapshot data.
+- Funnel requires stage-ordered conversion data. Do not use for unordered categories.
+- Bullet requires target values. Do not use if no targets available.
+- Heatmap requires two categorical dimensions + numeric value. Do not use for single-dimension data.
+- Combo requires two numeric series on same time axis. Do not use if only one metric.
+- Scatter requires two numeric dimensions per point. Do not use for category comparisons.
+
 Respond ONLY with JSON:
 {
   "vp_decision": "one sentence: what must VP decide?",
   "chart_question": "one sentence: what does chart answer?",
-  "question_type": "deal_triage|deal_timing|rep_comparison|pipeline_composition|coverage_gap|trend|metric_comparison|not_chartable",
+  "question_type": "deal_triage|deal_timing|rep_comparison|pipeline_composition|coverage_gap|trend|metric_comparison|waterfall|funnel|bullet|heatmap|combo|scatter|not_chartable",
   "preferred_data": "at_risk_deals|stale_deals|rep_performance|key_metrics|none",
   "reasoning": "one sentence: why this type"
 }`;
@@ -466,6 +492,66 @@ function resolveChartFromQuestion(
       // Reserved for prior_context week-over-week data (future feature).
       console.log(
         '[ChartIntelligence] Trend chart requested but no time series data available — skipping'
+      );
+      return null;
+    }
+
+    case 'waterfall': {
+      // Waterfall chart — pipeline movement: start, adds, removes, end.
+      // Requires skills to provide pipeline_movement data structure.
+      // Future: extract from forecast-rollup or pipeline-coverage movement metrics.
+      console.log(
+        '[ChartIntelligence] Waterfall chart requested but pipeline movement data not available — skipping'
+      );
+      return null;
+    }
+
+    case 'funnel': {
+      // Funnel chart — stage-by-stage conversion.
+      // Requires stage-ordered conversion rate data.
+      // Future: extract from pipeline-coverage or forecast-rollup stage distribution.
+      console.log(
+        '[ChartIntelligence] Funnel chart requested but stage conversion data not available — skipping'
+      );
+      return null;
+    }
+
+    case 'bullet': {
+      // Bullet chart — attainment vs target for multiple subjects (reps).
+      // Requires target values (quota) per rep.
+      // Future: extract from rep-scorecard or forecast-rollup rep attainment.
+      console.log(
+        '[ChartIntelligence] Bullet chart requested but rep quota/target data not available — skipping'
+      );
+      return null;
+    }
+
+    case 'heatmap': {
+      // Heatmap — two-dimensional intensity (rep × stage, stage × week).
+      // Requires two categorical dimensions + numeric value.
+      // Future: extract from deal-risk-review or pipeline-coverage cross-tabulation.
+      console.log(
+        '[ChartIntelligence] Heatmap requested but two-dimensional data not available — skipping'
+      );
+      return null;
+    }
+
+    case 'combo': {
+      // Combo chart — volume + rate on same time axis.
+      // Requires two numeric series (bar + line) over same period.
+      // Future: extract from forecast-rollup (pipeline created + win rate).
+      console.log(
+        '[ChartIntelligence] Combo chart requested but dual-metric time series data not available — skipping'
+      );
+      return null;
+    }
+
+    case 'scatter': {
+      // Scatter chart — correlation between two numeric dimensions.
+      // Requires two numeric values per data point (e.g., deal size vs cycle time).
+      // Future: extract from deal-risk-review with deal-level metrics.
+      console.log(
+        '[ChartIntelligence] Scatter chart requested but two-dimensional numeric data not available — skipping'
       );
       return null;
     }
