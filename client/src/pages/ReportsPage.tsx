@@ -101,6 +101,14 @@ interface SkillInfo {
   lastRunStatus: string | null;
 }
 
+interface RawSkillRecord {
+  id: string;
+  name: string;
+  lastRunAt?: string | null;
+  lastRunStatus?: string | null;
+  last_run?: { at?: string | null; status?: string | null };
+}
+
 interface WbrQbrGenerateModalProps {
   workspaceId: string;
   type: 'wbr' | 'qbr';
@@ -128,14 +136,16 @@ function WbrQbrGenerateModal({ workspaceId, type, templateId, templateSections, 
   const [selectedWeekIdx, setSelectedWeekIdx] = useState(0);
   const [selectedQtrIdx, setSelectedQtrIdx] = useState(0);
 
-  const CUSTOM_SENTINEL = '__custom__';
   const [customPeriod, setCustomPeriod] = useState('');
   const [showCustomInput, setShowCustomInput] = useState(false);
 
   useEffect(() => {
     api.get('/skills')
-      .then((data: any) => {
-        const all: SkillInfo[] = (Array.isArray(data) ? data : (data.skills || [])).map((s: any) => ({
+      .then((data: unknown) => {
+        const raw: RawSkillRecord[] = Array.isArray(data)
+          ? (data as RawSkillRecord[])
+          : ((data as { skills?: RawSkillRecord[] }).skills || []);
+        const all: SkillInfo[] = raw.map(s => ({
           id: s.id,
           name: s.name,
           // Handle both API shapes: flat fields and nested last_run object
@@ -181,8 +191,8 @@ function WbrQbrGenerateModal({ workspaceId, type, templateId, templateSections, 
       } else {
         setError('Generation succeeded but no document was returned. Please try again.');
       }
-    } catch (err: any) {
-      setError(err?.message || 'Generation failed. Please try again.');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Generation failed. Please try again.');
     } finally {
       setGenerating(false);
     }

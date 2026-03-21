@@ -386,45 +386,8 @@ router.post('/:workspaceId/reports/:reportId/generate', async (req: Request, res
 
     const generation = await generateReport(request);
 
-    let documentId: string | undefined;
-
-    if ((docType === 'wbr' || docType === 'qbr') && !preview) {
-      // Sections are already populated by generator.ts (with degraded placeholders for stale/missing skills)
-      const sections = (generation.sections_content || []).map((sc: any) => {
-        const content = sc.narrative || '';
-        return {
-          id: sc.section_id,
-          title: sc.title,
-          content,
-          word_count: content ? Math.round(content.split(/\s+/).length) : 0,
-          source_skills: sc.source_skills || [],
-        };
-      });
-
-      const docResult = await query<{ id: string }>(
-        `INSERT INTO report_documents
-           (workspace_id, document_type, week_label, headline, sections,
-            actions, skills_included, skills_omitted, tokens_used,
-            orchestrator_run_id, generated_at, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, gen_random_uuid(), NOW(), NOW())
-         RETURNING id`,
-        [
-          workspaceId,
-          docType,
-          periodLabel || new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }),
-          '',
-          JSON.stringify(sections),
-          JSON.stringify([]),
-          generation.skills_run || [],
-          [],
-          0,
-        ]
-      );
-      documentId = docResult.rows[0].id;
-      logger.info('WBR/QBR report_document created', { document_id: documentId, docType, periodLabel });
-    }
-
-    res.json({ ...generation, document_id: documentId });
+    // document_id is set by generator.ts for WBR/QBR when preview_only is false
+    res.json({ ...generation, document_id: generation.document_id });
   } catch (err) {
     logger.error('Report generation failed', err instanceof Error ? err : undefined);
     res.status(500).json({ error: err instanceof Error ? err.message : 'Report generation failed' });

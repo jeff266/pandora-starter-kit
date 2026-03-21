@@ -45,21 +45,26 @@ async function checkSkillFreshness(
   const result = new Map<string, 'fresh' | 'stale' | 'missing'>();
   if (skillIds.length === 0) return result;
   try {
-    const rows = await query<{ skill_id: string; created_at: string; status: string }>(
-      `SELECT DISTINCT ON (skill_id) skill_id, created_at, status
+    // Find the most recent COMPLETED run per skill — ignores failed/running runs
+    const rows = await query<{ skill_id: string; last_completed_at: string }>(
+      `SELECT skill_id, MAX(created_at) AS last_completed_at
        FROM skill_runs
-       WHERE workspace_id = $1 AND skill_id = ANY($2)
-       ORDER BY skill_id, created_at DESC`,
+       WHERE workspace_id = $1 AND skill_id = ANY($2) AND status = 'completed'
+       GROUP BY skill_id`,
       [workspace_id, skillIds]
     );
-    const seen = new Set<string>();
+    const completedAt = new Map<string, Date>();
     for (const r of rows.rows) {
-      seen.add(r.skill_id);
-      const age = Date.now() - new Date(r.created_at).getTime();
-      result.set(r.skill_id, r.status === 'completed' && age <= thresholdMs ? 'fresh' : 'stale');
+      completedAt.set(r.skill_id, new Date(r.last_completed_at));
     }
     for (const sid of skillIds) {
-      if (!seen.has(sid)) result.set(sid, 'missing');
+      const last = completedAt.get(sid);
+      if (!last) {
+        result.set(sid, 'missing');
+      } else {
+        const age = Date.now() - last.getTime();
+        result.set(sid, age <= thresholdMs ? 'fresh' : 'stale');
+      }
     }
   } catch {
     for (const sid of skillIds) result.set(sid, 'missing');
@@ -285,6 +290,49 @@ export async function generateReport(request: GenerateReportRequest): Promise<Re
     logger.info('Preview generation complete', { duration_ms: Date.now() - startTime });
   }
 
+  // 8. For WBR/QBR: assemble and persist report_documents record
+  let documentId: string | undefined;
+  if ((document_type === 'wbr' || document_type === 'qbr') && !preview_only) {
+    const sections = sectionsContent.map(sc => ({
+      id: sc.section_id,
+      title: sc.title,
+      content: sc.narrative || '',
+      word_count: sc.narrative ? Math.round(sc.narrative.split(/\s+/).length) : 0,
+      source_skills: sc.source_skills || [],
+    }));
+    const skillsIncluded = sections
+      .filter(s => !s.content.startsWith('⚠'))
+      .flatMap(s => s.source_skills);
+    const skillsOmitted = sections
+      .filter(s => s.content.startsWith('⚠'))
+      .flatMap(s => s.source_skills);
+    const headline = `${document_type === 'wbr' ? 'Weekly Business Review' : 'Quarterly Business Review'} — ${period_label ?? new Date().toLocaleDateString()}`;
+    const docResult = await query<{ id: string }>(
+      `INSERT INTO report_documents
+         (workspace_id, document_type, week_label, headline, sections,
+          actions, skills_included, skills_omitted, tokens_used,
+          orchestrator_run_id, generated_at, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, gen_random_uuid(), NOW(), NOW())
+       RETURNING id`,
+      [
+        workspace_id,
+        document_type,
+        period_label ?? '',
+        headline,
+        JSON.stringify(sections),
+        JSON.stringify([]),
+        JSON.stringify(Array.from(new Set(skillsIncluded))),
+        JSON.stringify(Array.from(new Set(skillsOmitted))),
+        0,
+      ]
+    ).catch(err => {
+      logger.error('Failed to insert report_documents', err instanceof Error ? err : undefined);
+      return { rows: [] as { id: string }[] };
+    });
+    documentId = docResult.rows[0]?.id;
+    logger.info('WBR/QBR document persisted', { document_id: documentId, document_type, period_label });
+  }
+
   return {
     id: generationId,
     report_template_id,
@@ -300,6 +348,7 @@ export async function generateReport(request: GenerateReportRequest): Promise<Re
     triggered_by,
     data_as_of: new Date().toISOString(),
     created_at: new Date().toISOString(),
+    document_id: documentId,
   };
 }
 

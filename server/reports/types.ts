@@ -214,7 +214,7 @@ export interface ReportGeneration {
   sections_snapshot: ReportSection[];
   sections_content?: SectionContent[];
   opening_narrative?: string;
-  editorial_decisions?: any[];
+  editorial_decisions?: Record<string, unknown>[];
   skills_run?: string[];
   total_tokens: number;
   generation_duration_ms?: number;
@@ -223,6 +223,8 @@ export interface ReportGeneration {
   data_as_of: string;
   error_message?: string;
   created_at: string;
+  /** Populated when document_type is 'wbr' or 'qbr' and preview_only is false */
+  document_id?: string;
 }
 
 // Report Generation Request
