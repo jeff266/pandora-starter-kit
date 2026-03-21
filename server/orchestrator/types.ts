@@ -125,7 +125,7 @@ export interface ChartQuestion {
 }
 
 export interface ChartNodeSpec {
-  chart_type: 'bar' | 'horizontalBar' | 'line' | 'doughnut';
+  chart_type: 'bar' | 'horizontalBar' | 'line' | 'doughnut' | 'stackedBar' | 'waterfall' | 'funnel' | 'bullet' | 'heatmap' | 'combo' | 'scatter';
   title: string;              // Conclusion-first title (NOT data description)
   data_points: ChartDataPoint[];
   color_scheme: ChartColorScheme;
@@ -162,7 +162,7 @@ export interface ReportSection {
 
 export interface ChartSuggestion {
   section_id: string;
-  chart_type: 'bar' | 'line' | 'pie' | 'doughnut' | 'horizontalBar';
+  chart_type: 'bar' | 'line' | 'pie' | 'doughnut' | 'horizontalBar' | 'stackedBar' | 'waterfall' | 'funnel' | 'bullet' | 'heatmap' | 'combo' | 'scatter';
   title: string;
   data_labels: string[];
   data_values: number[];

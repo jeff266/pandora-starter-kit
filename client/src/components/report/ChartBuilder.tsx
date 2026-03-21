@@ -4,7 +4,7 @@ import { resolveColor } from '../../lib/chartColors';
 
 type BuilderView = 'pick_source' | 'pick_field' | 'pick_query_columns' | 'pick_live_query' | 'refine';
 type SourceMode = 'skills' | 'queries' | 'live';
-type ChartTypeOption = 'bar' | 'horizontal_bar' | 'line' | 'donut';
+type ChartTypeOption = 'bar' | 'horizontal_bar' | 'line' | 'donut' | 'stacked_bar' | 'waterfall' | 'funnel' | 'bullet' | 'heatmap' | 'combo' | 'scatter';
 type NumberFormat = 'K' | 'M' | 'raw' | 'pct';
 type ColorScheme = 'semantic' | 'uniform' | 'categorical';
 
@@ -378,6 +378,8 @@ export default function ChartBuilder({
   const [limit, setLimit] = useState(6);
   const [numberFormat, setNumberFormat] = useState<NumberFormat>('K');
   const [showLegend, setShowLegend] = useState(false);
+  const [targetValue, setTargetValue] = useState<number | ''>('');
+  const [comboSeriesLabel, setComboSeriesLabel] = useState('');
 
   const [previewPng, setPreviewPng] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -633,6 +635,8 @@ export default function ChartBuilder({
   function mapChartType(ct: ChartTypeOption): string {
     if (ct === 'horizontal_bar') return 'horizontalBar';
     if (ct === 'donut') return 'doughnut';
+    if (ct === 'stacked_bar') return 'stackedBar';
+    // New types pass through as-is: funnel, bullet, heatmap, combo, scatter, waterfall
     return ct;
   }
 
@@ -662,6 +666,8 @@ export default function ChartBuilder({
       data_points: dataPoints,
       color_scheme: colorScheme,
       show_legend: showLegend,
+      ...(chartType === 'bullet' && targetValue !== '' ? { targetValue } : {}),
+      ...(chartType === 'combo' && comboSeriesLabel ? { comboSeriesLabel } : {}),
     };
   }
 
@@ -1409,21 +1415,36 @@ export default function ChartBuilder({
               <div style={{ marginBottom: 20 }}>
                 <label style={labelStyle}>Chart type</label>
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                  {(['bar', 'horizontal_bar', 'line', 'donut'] as const).map(type => (
-                    <button
-                      key={type}
-                      onClick={() => { setChartType(type); setShowLegend(type === 'donut'); debouncedPreview(); }}
-                      style={{
-                        padding: '5px 10px', fontSize: 11,
-                        border: `1px solid ${chartType === type ? '#0D9488' : '#E2E8F0'}`,
-                        background: chartType === type ? '#F0FDF9' : 'white',
-                        color: chartType === type ? '#0D9488' : '#374151',
-                        borderRadius: 6, cursor: 'pointer',
-                      }}
-                    >
-                      {type === 'horizontal_bar' ? 'Horizontal' : type.charAt(0).toUpperCase() + type.slice(1)}
-                    </button>
-                  ))}
+                  {(['bar', 'horizontal_bar', 'line', 'donut', 'stacked_bar', 'waterfall', 'funnel', 'bullet', 'heatmap', 'combo', 'scatter'] as const).map(type => {
+                    const labels: Record<ChartTypeOption, string> = {
+                      bar: 'Bar',
+                      horizontal_bar: 'Horizontal',
+                      line: 'Line',
+                      donut: 'Donut',
+                      stacked_bar: 'Stacked',
+                      waterfall: 'Waterfall',
+                      funnel: 'Funnel',
+                      bullet: 'Bullet',
+                      heatmap: 'Heatmap',
+                      combo: 'Combo',
+                      scatter: 'Scatter',
+                    };
+                    return (
+                      <button
+                        key={type}
+                        onClick={() => { setChartType(type); setShowLegend(type === 'donut'); debouncedPreview(); }}
+                        style={{
+                          padding: '5px 10px', fontSize: 11,
+                          border: `1px solid ${chartType === type ? '#0D9488' : '#E2E8F0'}`,
+                          background: chartType === type ? '#F0FDF9' : 'white',
+                          color: chartType === type ? '#0D9488' : '#374151',
+                          borderRadius: 6, cursor: 'pointer',
+                        }}
+                      >
+                        {labels[type]}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -1483,8 +1504,8 @@ export default function ChartBuilder({
                 </div>
               )}
 
-              {/* Sort — skills mode only */}
-              {sourceMode === 'skills' && selectedSource && (
+              {/* Sort — skills mode only (hide for charts with meaningful order) */}
+              {sourceMode === 'skills' && selectedSource && !['funnel', 'waterfall', 'heatmap', 'scatter'].includes(chartType) && (
                 <div style={{ marginBottom: 20 }}>
                   <label style={labelStyle}>Sort by</label>
                   <div style={{ display: 'flex', gap: 8 }}>
@@ -1507,8 +1528,8 @@ export default function ChartBuilder({
                 </div>
               )}
 
-              {/* Sort dir — query mode */}
-              {sourceMode !== 'skills' && (
+              {/* Sort dir — query mode (hide for charts with meaningful order) */}
+              {sourceMode !== 'skills' && !['funnel', 'waterfall', 'heatmap', 'scatter'].includes(chartType) && (
                 <div style={{ marginBottom: 20 }}>
                   <label style={labelStyle}>Sort</label>
                   <select value={sortDir} onChange={e => { setSortDir(e.target.value as 'asc' | 'desc'); debouncedPreview(); }} style={{ width: '100%', ...inputStyle }}>
@@ -1539,6 +1560,40 @@ export default function ChartBuilder({
                   Show legend
                 </label>
               </div>
+
+              {/* Bullet chart: target value */}
+              {chartType === 'bullet' && (
+                <div style={{ marginBottom: 20 }}>
+                  <label style={labelStyle}>Target value</label>
+                  <input
+                    type="number"
+                    value={targetValue}
+                    onChange={e => { setTargetValue(e.target.value === '' ? '' : Number(e.target.value)); debouncedPreview(); }}
+                    placeholder="e.g. 100000"
+                    style={{ width: '100%', ...inputStyle }}
+                  />
+                  <div style={{ fontSize: 10, color: '#64748B', marginTop: 4 }}>
+                    Target line marker for comparison
+                  </div>
+                </div>
+              )}
+
+              {/* Combo chart: secondary series label */}
+              {chartType === 'combo' && (
+                <div style={{ marginBottom: 20 }}>
+                  <label style={labelStyle}>Line series label</label>
+                  <input
+                    type="text"
+                    value={comboSeriesLabel}
+                    onChange={e => { setComboSeriesLabel(e.target.value); debouncedPreview(); }}
+                    placeholder="e.g. Pipeline Value"
+                    style={{ width: '100%', ...inputStyle }}
+                  />
+                  <div style={{ fontSize: 10, color: '#64748B', marginTop: 4 }}>
+                    Map a second numeric field to 'secondaryValue' in your data source to drive the line series.
+                  </div>
+                </div>
+              )}
 
               {/* Actions */}
               <div style={{ display: 'flex', gap: 8, paddingTop: 12, borderTop: '0.5px solid #E2E8F0' }}>

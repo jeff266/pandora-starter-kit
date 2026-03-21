@@ -4,14 +4,23 @@ export type ChartType =
   | 'line'
   | 'stacked_bar'
   | 'waterfall'
-  | 'donut';
+  | 'donut'
+  | 'funnel'
+  | 'bullet'
+  | 'heatmap'
+  | 'combo'
+  | 'scatter';
 
 export interface ChartDataPoint {
   label: string;
   value: number;
-  secondaryValue?: number;
+  secondaryValue?: number;  // for combo: line series on secondary axis
   segment?: string;
   annotation?: string;
+  x?: number;               // for scatter: explicit x position
+  y?: number;               // for scatter: explicit y position (value stays as size/z)
+  row?: string;             // for heatmap: Y-axis dimension (e.g. rep name)
+  col?: string;             // for heatmap: X-axis dimension (e.g. stage)
 }
 
 export interface ChartSpec {
@@ -31,6 +40,15 @@ export interface ChartSpec {
     run_at: string;
     record_count: number;
   };
+  // Bullet chart bands
+  bands?: Array<{
+    from: number;
+    to: number;
+    color: string;          // e.g. '#fee2e2', '#fef9c3', '#dcfce7'
+    label?: string;         // e.g. 'Below target', 'On track', 'Exceeding'
+  }>;
+  targetValue?: number;       // for bullet: target line (distinct from referenceValue)
+  comboSeriesLabel?: string;  // for combo: label for line series (secondary axis)
 }
 
 export interface ChartBlock {

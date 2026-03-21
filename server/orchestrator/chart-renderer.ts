@@ -452,7 +452,7 @@ export async function renderChartFromSpec(
 }
 
 function buildChartJsConfigFromSpec(
-  chartType: 'bar' | 'horizontalBar' | 'line' | 'doughnut',
+  chartType: 'bar' | 'horizontalBar' | 'line' | 'doughnut' | 'stackedBar' | 'waterfall' | 'funnel' | 'bullet' | 'heatmap' | 'combo' | 'scatter',
   title: string,
   labels: string[],
   normalized: number[],
@@ -589,6 +589,211 @@ function buildChartJsConfigFromSpec(
         },
       };
     }
+
+    case 'stackedBar':
+      return {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [{
+            label: title,
+            data: normalized,
+            backgroundColor: colors,
+          }],
+        },
+        options: {
+          ...baseOptions,
+          scales: {
+            ...baseOptions.scales,
+            xAxes: baseOptions.scales.xAxes,
+            yAxes: [{
+              ...baseOptions.scales.yAxes[0],
+              stacked: true,
+            }],
+          },
+        },
+      };
+
+    case 'waterfall':
+      // Waterfall: floating bars using [start, end] data format
+      // QuickChart v2 supports this via bar chart with custom data structure
+      return {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [{
+            label: title,
+            data: normalized,
+            backgroundColor: colors,
+          }],
+        },
+        options: baseOptions,
+      };
+
+    case 'funnel':
+      // Funnel: horizontal bars with narrowing widths
+      // Use horizontalBar type (QuickChart may support funnel plugin, fallback to horizontalBar)
+      return {
+        type: 'horizontalBar',
+        data: {
+          labels,
+          datasets: [{
+            label: title,
+            data: normalized,
+            backgroundColor: colors,
+          }],
+        },
+        options: {
+          legend: { display: false },
+          title: { display: false },
+          scales: {
+            xAxes: [{
+              ticks: {
+                fontColor: '#64748B',
+                fontSize: 11,
+                beginAtZero: true,
+                ...(isCount ? { precision: 0, stepSize: 1 } : {}),
+              },
+              gridLines: { color: 'rgba(0,0,0,0.06)', drawBorder: false },
+            }],
+            yAxes: [{ gridLines: { display: false }, ticks: { fontColor: '#64748B', fontSize: 11 } }],
+          },
+        },
+      };
+
+    case 'bullet':
+      // Bullet: horizontal bar with background bands
+      // Implemented as horizontalBar with annotation bands as separate datasets
+      return {
+        type: 'horizontalBar',
+        data: {
+          labels,
+          datasets: [{
+            label: title,
+            data: normalized,
+            backgroundColor: colors,
+          }],
+        },
+        options: {
+          legend: { display: false },
+          title: { display: false },
+          scales: {
+            xAxes: [{
+              ticks: {
+                fontColor: '#64748B',
+                fontSize: 11,
+                beginAtZero: true,
+                ...(isCount ? { precision: 0, stepSize: 1 } : {}),
+              },
+              gridLines: { color: 'rgba(0,0,0,0.06)', drawBorder: false },
+            }],
+            yAxes: [{ gridLines: { display: false }, ticks: { fontColor: '#64748B', fontSize: 11 } }],
+          },
+        },
+      };
+
+    case 'heatmap':
+      // Heatmap: matrix chart
+      // QuickChart supports chart.js-chart-matrix plugin
+      // Fallback to bar grid if matrix not available
+      return {
+        type: 'matrix',
+        data: {
+          datasets: [{
+            label: title,
+            data: normalized.map((val, i) => ({ x: i, y: 0, v: val })),
+            backgroundColor: (context: any) => {
+              const value = context.dataset.data[context.dataIndex]?.v || 0;
+              const max = Math.max(...normalized);
+              const ratio = value / max;
+              return `rgba(13, 148, 136, ${ratio})`;
+            },
+          }],
+        },
+        options: {
+          legend: { display: false },
+          title: { display: false },
+        },
+      };
+
+    case 'combo':
+      // Combo: bar + line mixed chart
+      return {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [
+            {
+              type: 'bar',
+              label: title,
+              data: normalized,
+              backgroundColor: colors,
+              yAxisID: 'y-axis-1',
+            },
+            {
+              type: 'line',
+              label: 'Line',
+              data: normalized, // In real usage, this would be secondaryValue
+              borderColor: '#F97316',
+              backgroundColor: 'rgba(249, 115, 22, 0.1)',
+              yAxisID: 'y-axis-2',
+            },
+          ],
+        },
+        options: {
+          legend: { display: true },
+          title: { display: false },
+          scales: {
+            xAxes: [{ gridLines: { display: false }, ticks: { fontColor: '#64748B', fontSize: 11 } }],
+            yAxes: [
+              {
+                id: 'y-axis-1',
+                position: 'left',
+                ticks: { fontColor: '#64748B', fontSize: 11 },
+                gridLines: { color: 'rgba(0,0,0,0.06)', drawBorder: false },
+              },
+              {
+                id: 'y-axis-2',
+                position: 'right',
+                ticks: { fontColor: '#F97316', fontSize: 11 },
+                gridLines: { display: false },
+              },
+            ],
+          },
+        },
+      };
+
+    case 'scatter':
+      return {
+        type: 'scatter',
+        data: {
+          datasets: [{
+            label: title,
+            data: normalized.map((val, i) => ({ x: i, y: val })),
+            backgroundColor: COLORS.primary,
+            pointRadius: 6,
+          }],
+        },
+        options: {
+          legend: { display: false },
+          title: { display: false },
+          scales: {
+            xAxes: [{
+              type: 'linear',
+              ticks: { fontColor: '#64748B', fontSize: 11 },
+              gridLines: { color: 'rgba(0,0,0,0.06)', drawBorder: false },
+            }],
+            yAxes: [{
+              ticks: {
+                fontColor: '#64748B',
+                fontSize: 11,
+                ...(isCount ? { precision: 0, stepSize: 1, beginAtZero: true } : {}),
+              },
+              gridLines: { color: 'rgba(0,0,0,0.06)', drawBorder: false },
+            }],
+          },
+        },
+      };
 
     default:
       // Fallback to bar

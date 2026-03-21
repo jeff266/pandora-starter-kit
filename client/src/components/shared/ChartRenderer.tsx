@@ -2,6 +2,7 @@ import React from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   LineChart, Line, ReferenceLine, PieChart, Pie, Cell, Legend,
+  ComposedChart, ScatterChart, Scatter,
 } from 'recharts';
 import { colors } from '../../styles/theme';
 import type { ChartSpec, ChartDataPoint } from '../../types/chart-types';
@@ -316,6 +317,290 @@ function DonutChartRenderer({ spec, height }: { spec: ChartSpec; height: number 
   );
 }
 
+function FunnelChartRenderer({ spec, height }: { spec: ChartSpec; height: number }) {
+  const yFmt = spec.yAxis?.format || 'number';
+  const sorted = spec.data; // Natural order preserved
+
+  // Calculate conversion rates
+  const withConversion = sorted.map((d, i) => ({
+    ...d,
+    conversionPct: i < sorted.length - 1 ? (sorted[i + 1].value / d.value) * 100 : 100,
+  }));
+
+  return (
+    <div style={{ width: '100%', height }}>
+      {withConversion.map((entry, index) => {
+        const barWidth = `${(entry.conversionPct / 100) * 90 + 10}%`; // 10-100% width
+        const bgColor = index === 0 ? '#14B8A6' : `rgba(20, 184, 166, ${0.9 - index * 0.15})`;
+        return (
+          <div key={index} style={{ marginBottom: 6 }}>
+            <div
+              style={{
+                width: barWidth,
+                background: bgColor,
+                padding: '8px 12px',
+                borderRadius: 4,
+                color: 'white',
+                fontSize: 11,
+                fontWeight: 600,
+                display: 'flex',
+                justifyContent: 'space-between',
+                margin: '0 auto',
+              }}
+            >
+              <span>{entry.label}</span>
+              <span>
+                {formatValue(entry.value, yFmt)}
+                {index < sorted.length - 1 && ` (${entry.conversionPct.toFixed(0)}%)`}
+              </span>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function BulletChartRenderer({ spec, height }: { spec: ChartSpec; height: number }) {
+  const yFmt = spec.yAxis?.format || 'number';
+  const target = spec.targetValue || spec.referenceValue || 0;
+
+  return (
+    <div style={{ width: '100%', height, padding: '8px 0' }}>
+      {spec.data.map((entry, index) => {
+        const barColor = entry.value >= target ? '#14B8A6' : '#F97316';
+        const maxVal = Math.max(target, entry.value, ...(spec.bands?.map(b => b.to) || []));
+
+        return (
+          <div key={index} style={{ marginBottom: 12 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 4, color: 'var(--color-text)' }}>
+              {entry.label}
+            </div>
+            <div style={{ position: 'relative', height: 28, background: '#F1F5F9', borderRadius: 4 }}>
+              {/* Bands */}
+              {spec.bands?.map((band, bi) => (
+                <div
+                  key={bi}
+                  style={{
+                    position: 'absolute',
+                    left: `${(band.from / maxVal) * 100}%`,
+                    width: `${((band.to - band.from) / maxVal) * 100}%`,
+                    height: '100%',
+                    background: band.color,
+                    borderRadius: bi === 0 ? '4px 0 0 4px' : bi === (spec.bands?.length || 0) - 1 ? '0 4px 4px 0' : 0,
+                  }}
+                />
+              ))}
+              {/* Actual bar */}
+              <div
+                style={{
+                  position: 'absolute',
+                  width: `${(entry.value / maxVal) * 100}%`,
+                  height: '60%',
+                  top: '20%',
+                  background: barColor,
+                  borderRadius: '0 3px 3px 0',
+                }}
+              />
+              {/* Target marker */}
+              <div
+                style={{
+                  position: 'absolute',
+                  left: `${(target / maxVal) * 100}%`,
+                  height: '100%',
+                  width: 2,
+                  background: '#374151',
+                }}
+              />
+              {/* Value label */}
+              <div
+                style={{
+                  position: 'absolute',
+                  right: 8,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: '#374151',
+                }}
+              >
+                {formatValue(entry.value, yFmt)}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function HeatmapRenderer({ spec, height, compact }: { spec: ChartSpec; height: number; compact: boolean }) {
+  const rows = Array.from(new Set(spec.data.map(d => d.row).filter(Boolean))) as string[];
+  const cols = Array.from(new Set(spec.data.map(d => d.col).filter(Boolean))) as string[];
+
+  const values = spec.data.map(d => d.value);
+  const minVal = Math.min(...values);
+  const maxVal = Math.max(...values);
+
+  const getColor = (value: number) => {
+    const ratio = (value - minVal) / (maxVal - minVal || 1);
+    // 5-stop teal gradient: #e6f7f5 (lightest) → #0d6b61 (darkest)
+    const colors = ['#e6f7f5', '#99d9d0', '#4db8a8', '#14B8A6', '#0d6b61'];
+    const idx = Math.min(Math.floor(ratio * colors.length), colors.length - 1);
+    return colors[idx];
+  };
+
+  const cellSize = Math.min(60, (height - 40) / rows.length);
+
+  return (
+    <div style={{ width: '100%', height, overflow: 'auto' }}>
+      <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+        <thead>
+          <tr>
+            <th style={{ fontSize: 10, color: 'var(--color-textMuted)', padding: 4 }}></th>
+            {cols.map(col => (
+              <th key={col} style={{ fontSize: 10, color: 'var(--color-textMuted)', padding: 4, textAlign: 'center' }}>
+                {col}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(row => (
+            <tr key={row}>
+              <td style={{ fontSize: 10, color: 'var(--color-textMuted)', padding: 4, fontWeight: 600 }}>
+                {row}
+              </td>
+              {cols.map(col => {
+                const point = spec.data.find(d => d.row === row && d.col === col);
+                const value = point?.value || 0;
+                return (
+                  <td
+                    key={col}
+                    style={{
+                      background: point ? getColor(value) : '#F1F5F9',
+                      textAlign: 'center',
+                      padding: 8,
+                      fontSize: compact ? 9 : 11,
+                      fontWeight: 600,
+                      color: point && value > (maxVal - minVal) * 0.5 + minVal ? 'white' : '#374151',
+                      minWidth: cellSize,
+                      height: cellSize,
+                    }}
+                  >
+                    {point && !compact ? formatValue(value, spec.yAxis?.format || 'number') : ''}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ComboChartRenderer({ spec, height }: { spec: ChartSpec; height: number }) {
+  const yFmt = spec.yAxis?.format || 'currency';
+  const hasSecondary = spec.data.some(d => d.secondaryValue != null);
+
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <ComposedChart data={spec.data} margin={{ top: 8, right: hasSecondary ? 40 : 8, bottom: 0, left: 0 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" vertical={false} />
+        <XAxis
+          dataKey="label"
+          tick={{ fontSize: 11, fill: 'var(--color-textMuted)' }}
+          axisLine={false}
+          tickLine={false}
+        />
+        <YAxis
+          yAxisId="left"
+          tickFormatter={(v) => formatValue(v, yFmt)}
+          tick={{ fontSize: 11, fill: 'var(--color-textMuted)' }}
+          axisLine={false}
+          tickLine={false}
+          width={55}
+        />
+        {hasSecondary && (
+          <YAxis
+            yAxisId="right"
+            orientation="right"
+            tickFormatter={(v) => formatValue(v, yFmt)}
+            tick={{ fontSize: 11, fill: '#F97316' }}
+            axisLine={false}
+            tickLine={false}
+            width={55}
+            label={{ value: spec.comboSeriesLabel || 'Secondary', angle: 90, position: 'insideRight', style: { fontSize: 10, fill: '#F97316' } }}
+          />
+        )}
+        <Tooltip content={<BarTooltip yFormat={yFmt} />} />
+        <Bar yAxisId="left" dataKey="value" fill="var(--color-accent)" radius={[3, 3, 0, 0]} />
+        {hasSecondary && (
+          <Line
+            yAxisId="right"
+            type="monotone"
+            dataKey="secondaryValue"
+            stroke="#F97316"
+            strokeWidth={2}
+            dot={{ fill: '#F97316', r: 3 }}
+            activeDot={{ r: 5 }}
+          />
+        )}
+      </ComposedChart>
+    </ResponsiveContainer>
+  );
+}
+
+function ScatterChartRenderer({ spec, height }: { spec: ChartSpec; height: number }) {
+  const yFmt = spec.yAxis?.format || 'number';
+
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <ScatterChart margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+        <XAxis
+          type="number"
+          dataKey="x"
+          name="x"
+          tick={{ fontSize: 11, fill: 'var(--color-textMuted)' }}
+          axisLine={false}
+          tickLine={false}
+        />
+        <YAxis
+          type="number"
+          dataKey="value"
+          name="y"
+          tickFormatter={(v) => formatValue(v, yFmt)}
+          tick={{ fontSize: 11, fill: 'var(--color-textMuted)' }}
+          axisLine={false}
+          tickLine={false}
+          width={55}
+        />
+        <Tooltip
+          cursor={{ strokeDasharray: '3 3' }}
+          content={({ active, payload }: any) => {
+            if (!active || !payload?.length) return null;
+            const p = payload[0].payload;
+            return (
+              <div style={{ background: 'var(--color-surfaceRaised)', border: '1px solid var(--color-border)', borderRadius: 6, padding: '8px 12px', fontSize: 12 }}>
+                <div style={{ fontWeight: 600, marginBottom: 4 }}>{p.label}</div>
+                <div>x: {p.x}</div>
+                <div>y: {formatValue(p.value, yFmt)}</div>
+              </div>
+            );
+          }}
+        />
+        <Scatter
+          name="Points"
+          data={spec.data}
+          fill="var(--color-accent)"
+        />
+      </ScatterChart>
+    </ResponsiveContainer>
+  );
+}
+
 export default function ChartRenderer({ spec, compact = false }: ChartRendererProps) {
   const fullHeight = 220;
   const height = compact ? Math.round(fullHeight * 0.7) : fullHeight;
@@ -335,7 +620,18 @@ export default function ChartRenderer({ spec, compact = false }: ChartRendererPr
         return <WaterfallChartRenderer spec={sortedSpec} height={height} />;
       case 'donut':
         return <DonutChartRenderer spec={sortedSpec} height={height} />;
+      case 'funnel':
+        return <FunnelChartRenderer spec={sortedSpec} height={height} />;
+      case 'bullet':
+        return <BulletChartRenderer spec={sortedSpec} height={Math.max(height, sortedSpec.data.length * 52 + 20)} />;
+      case 'heatmap':
+        return <HeatmapRenderer spec={sortedSpec} height={height} compact={compact} />;
+      case 'combo':
+        return <ComboChartRenderer spec={sortedSpec} height={height} />;
+      case 'scatter':
+        return <ScatterChartRenderer spec={sortedSpec} height={height} />;
       default:
+        console.warn(`[ChartRenderer] Unknown chart type: ${spec.chartType}`);
         return null;
     }
   };
