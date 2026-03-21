@@ -43,16 +43,89 @@ const BASE_EXTENSIONS = [
   Image.configure({ inline: false }),
 ];
 
-function convertPlainTextToDoc(text: string): any {
-  const paragraphs = text.split(/\n\n+/).filter(p => p.trim());
-  if (paragraphs.length === 0) return { type: 'doc', content: [{ type: 'paragraph' }] };
-  return {
-    type: 'doc',
-    content: paragraphs.map(p => ({
-      type: 'paragraph',
-      content: p.trim() ? [{ type: 'text', text: p.trim() }] : undefined,
-    })),
-  };
+// ── Markdown → TipTap conversion ────────────────────────────────────────────
+
+function parseInline(text: string): any[] {
+  const nodes: any[] = [];
+  const boldRe = /\*\*(.+?)\*\*/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = boldRe.exec(text)) !== null) {
+    if (m.index > last) nodes.push({ type: 'text', text: text.slice(last, m.index) });
+    nodes.push({ type: 'text', marks: [{ type: 'bold' }], text: m[1] });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) nodes.push({ type: 'text', text: text.slice(last) });
+  return nodes.length ? nodes : [{ type: 'text', text }];
+}
+
+function parseBlock(raw: string): any {
+  const t = raw.trim();
+  if (t.startsWith('### ')) return { type: 'heading', attrs: { level: 3 }, content: parseInline(t.slice(4)) };
+  if (t.startsWith('## '))  return { type: 'heading', attrs: { level: 2 }, content: parseInline(t.slice(3)) };
+  if (t.startsWith('# '))  return { type: 'heading', attrs: { level: 1 }, content: parseInline(t.slice(2)) };
+  // Handle multi-line blocks containing headings on interior lines
+  if (/\n/.test(t)) {
+    return {
+      type: 'doc',
+      content: t.split('\n').filter(l => l.trim()).map(l => parseBlock(l)),
+    } as any;
+  }
+  return { type: 'paragraph', content: parseInline(t) };
+}
+
+function convertMarkdownToDoc(text: string): any {
+  const blocks = text.split(/\n\n+/).filter(b => b.trim());
+  if (!blocks.length) return { type: 'doc', content: [{ type: 'paragraph' }] };
+  const nodes: any[] = [];
+  for (const block of blocks) {
+    const result = parseBlock(block);
+    if (result.type === 'doc') nodes.push(...result.content);
+    else nodes.push(result);
+  }
+  return { type: 'doc', content: nodes.length ? nodes : [{ type: 'paragraph' }] };
+}
+
+// Keep the old name as an alias — editor initialisation still calls it
+const convertPlainTextToDoc = convertMarkdownToDoc;
+
+// ── Runtime content sanitizer ────────────────────────────────────────────────
+// Walks TipTap JSON and:
+//  1. Converts paragraph nodes whose text is raw markdown into proper heading/bold nodes
+//  2. Appends ?token=... to chart image URLs so browser <img> requests succeed
+
+function looksLikeMarkdown(text: string): boolean {
+  return /^#{1,3}\s/.test(text) || /\*\*[^*]+\*\*/.test(text);
+}
+
+function sanitizeTiptapContent(node: any, token: string): any {
+  if (!node || typeof node !== 'object') return node;
+
+  // Patch image src to include auth token
+  if (node.type === 'image' && node.attrs?.src) {
+    const src: string = node.attrs.src;
+    if (src.startsWith('/api/workspaces/') && !src.includes('?token=') && !src.includes('&token=')) {
+      return { ...node, attrs: { ...node.attrs, src: `${src}?token=${encodeURIComponent(token)}` } };
+    }
+    return node;
+  }
+
+  // Convert raw-markdown paragraph text to proper TipTap nodes
+  if (
+    node.type === 'paragraph' &&
+    Array.isArray(node.content) &&
+    node.content.length === 1 &&
+    node.content[0].type === 'text' &&
+    typeof node.content[0].text === 'string' &&
+    looksLikeMarkdown(node.content[0].text)
+  ) {
+    return parseBlock(node.content[0].text);
+  }
+
+  if (Array.isArray(node.content)) {
+    return { ...node, content: node.content.map((child: any) => sanitizeTiptapContent(child, token)) };
+  }
+  return node;
 }
 
 function TiptapReadView({ content }: { content: any }) {
@@ -132,7 +205,6 @@ export default function SectionEditor({
   const [slashMenuAbsPos, setSlashMenuAbsPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const readViewRef = useRef<HTMLDivElement>(null);
   const fromEditorRef = useRef(false);
 
   const initialContent = tiptapContent ?? convertPlainTextToDoc(section.content);
@@ -242,20 +314,6 @@ export default function SectionEditor({
     if (onChartInserted) onChartInserted(section.id, chart);
   }
 
-  // Fix up any chart image URLs that were saved without a token query param.
-  // Browser <img> requests cannot send Authorization headers, so we embed the
-  // session token as a query parameter so the server can authenticate the request.
-  useEffect(() => {
-    if (isEditing || !readViewRef.current || !token) return;
-    const imgs = readViewRef.current.querySelectorAll<HTMLImageElement>('img[src*="/api/workspaces/"]');
-    imgs.forEach(img => {
-      const src = img.getAttribute('src');
-      if (src && !src.includes('?token=') && !src.includes('&token=')) {
-        img.setAttribute('src', `${src}?token=${encodeURIComponent(token)}`);
-      }
-    });
-  }, [isEditing, localTiptapContent, token]);
-
   useEffect(() => {
     if (!isEditing) return;
     const handler = (e: CustomEvent) => {
@@ -311,9 +369,9 @@ export default function SectionEditor({
           ✎ Edit
         </button>
         {localTiptapContent ? (
-          <div ref={readViewRef}>
+          <div>
             <h2 style={{ fontSize: 20, fontWeight: 700, color: '#1E293B', marginBottom: 12 }}>{section.title}</h2>
-            <TiptapReadView content={localTiptapContent} />
+            <TiptapReadView content={sanitizeTiptapContent(localTiptapContent, token)} />
           </div>
         ) : (
           <AnnotatableSection
