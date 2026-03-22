@@ -293,19 +293,12 @@ export async function generateReport(request: GenerateReportRequest): Promise<Re
   // 8. When document_type is provided: persist a report_documents record with period_label override
   let documentId: string | undefined;
   if (document_type && !preview_only) {
-    const sections = sectionsContent.map(sc => ({
-      id: sc.section_id,
-      title: sc.title,
-      content: sc.narrative || '',
-      word_count: sc.narrative ? Math.round(sc.narrative.split(/\s+/).length) : 0,
-      source_skills: sc.source_skills || [],
-    }));
-    const skillsIncluded = sections
-      .filter(s => !s.content.startsWith('⚠'))
-      .flatMap(s => s.source_skills);
-    const skillsOmitted = sections
-      .filter(s => s.content.startsWith('⚠'))
-      .flatMap(s => s.source_skills);
+    const skillsIncluded = sectionsContent
+      .filter(sc => !sc.narrative?.startsWith('⚠'))
+      .flatMap(sc => sc.source_skills ?? []);
+    const skillsOmitted = sectionsContent
+      .filter(sc => sc.narrative?.startsWith('⚠'))
+      .flatMap(sc => sc.source_skills ?? []);
 
     // Generate executive summary for WBR/QBR documents
     let headline = `${template.name} — ${period_label ?? new Date().toLocaleDateString()}`;
@@ -335,10 +328,10 @@ export async function generateReport(request: GenerateReportRequest): Promise<Re
         document_type,
         period_label ?? '',
         headline,
-        JSON.stringify(sections),
+        JSON.stringify(sectionsContent),
         JSON.stringify([]),
-        JSON.stringify(Array.from(new Set(skillsIncluded))),
-        JSON.stringify(Array.from(new Set(skillsOmitted))),
+        Array.from(new Set(skillsIncluded)),
+        Array.from(new Set(skillsOmitted)),
         0,
       ]
     ).catch(err => {

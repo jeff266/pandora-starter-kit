@@ -255,6 +255,57 @@ export async function generateSectionContent(
     case 'actions-summary':
       await buildActionsSummary(content, workspaceId);
       break;
+
+    // ── WBR sections ──────────────────────────────────────────────────────────
+    case 'wbr-pipeline-health':
+    case 'wbr-hygiene':
+      buildPipelineHygiene(content, evidenceMap, maxItems);
+      break;
+    case 'wbr-forecast':
+      buildForecastWaterfall(content, evidenceMap);
+      break;
+    case 'wbr-deal-velocity':
+    case 'wbr-watchlist':
+      buildDealsNeedingAttention(content, evidenceMap, maxItems);
+      break;
+    case 'wbr-rep-performance':
+      buildRepPerformance(content, evidenceMap);
+      break;
+    case 'wbr-demand':
+      buildPipelineCoverage(content, evidenceMap);
+      break;
+    case 'wbr-actions':
+      await buildActionsSummary(content, workspaceId);
+      break;
+
+    // ── QBR sections ──────────────────────────────────────────────────────────
+    case 'qbr-the-number':
+      buildTheNumber(content, evidenceMap);
+      break;
+    case 'qbr-pipeline-funnel':
+      buildWhatMoved(content, evidenceMap, maxItems);
+      break;
+    case 'qbr-forecast-accuracy':
+    case 'qbr-next-quarter':
+      buildForecastWaterfall(content, evidenceMap);
+      break;
+    case 'qbr-win-loss':
+      buildDealsNeedingAttention(content, evidenceMap, maxItems);
+      break;
+    case 'qbr-rep-performance':
+      buildRepPerformance(content, evidenceMap);
+      break;
+    case 'qbr-capacity':
+    case 'qbr-marketing':
+      buildPipelineCoverage(content, evidenceMap);
+      break;
+    case 'qbr-process-health':
+      buildPipelineHygiene(content, evidenceMap, maxItems);
+      break;
+    case 'qbr-asks':
+      await buildActionsSummary(content, workspaceId);
+      break;
+
     default:
       content.narrative = `Content for "${section.label}" section — no generator configured.`;
   }

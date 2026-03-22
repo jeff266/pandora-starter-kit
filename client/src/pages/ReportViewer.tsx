@@ -1356,7 +1356,7 @@ export default function ReportViewer() {
                 {/* Headline / Executive Summary */}
                 {(() => {
                   const isWbrQbr = reportDocument.document_type === 'wbr' || reportDocument.document_type === 'qbr';
-                  const isMechanical = /^(WBR|QBR|Weekly Business Review|Quarterly Business Review)\s+[—–-]/.test(reportDocument.headline);
+                  const isMechanical = /^(WBR|QBR|wbr|qbr|Weekly Business Review|Quarterly Business Review)\s*[—–-]/i.test(reportDocument.headline);
                   const showAsSummary = isWbrQbr && !isMechanical;
                   return (
                     <div style={{
