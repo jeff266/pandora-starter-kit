@@ -1594,4 +1594,96 @@ router.post('/:workspaceId/admin/backfill-findings', async (req: Request, res: R
   }
 });
 
+router.get('/:workspaceId/claude-insights', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const workspaceId = req.params.workspaceId as string;
+    const q = req.query;
+
+    const conditions: string[] = ['workspace_id = $1'];
+    const params: unknown[] = [workspaceId];
+    let paramIdx = 2;
+
+    const status = (q.status as string) || 'active';
+    if (status !== 'all') {
+      conditions.push(`status = $${paramIdx}`);
+      params.push(status);
+      paramIdx++;
+    }
+
+    if (q.severity) {
+      conditions.push(`severity = $${paramIdx}`);
+      params.push(q.severity);
+      paramIdx++;
+    }
+
+    if (q.insight_type) {
+      conditions.push(`insight_type = $${paramIdx}`);
+      params.push(q.insight_type);
+      paramIdx++;
+    }
+
+    if (q.entity_type) {
+      conditions.push(`entity_type = $${paramIdx}`);
+      params.push(q.entity_type);
+      paramIdx++;
+    }
+
+    if (q.days) {
+      conditions.push(`created_at > NOW() - ($${paramIdx} || ' days')::INTERVAL`);
+      params.push(String(parseInt(q.days as string) || 7));
+      paramIdx++;
+    } else {
+      conditions.push(`created_at > NOW() - INTERVAL '7 days'`);
+    }
+
+    const whereClause = conditions.join(' AND ');
+    const limit = Math.min(Math.max(parseInt(q.limit as string) || 50, 1), 200);
+
+    const dataResult = await query(
+      `SELECT id, workspace_id, insight_text, insight_type, severity,
+              trigger_surface, tool_name, trigger_query,
+              entity_type, entity_id, entity_name,
+              status, dismissed_at, actioned_at, created_at
+       FROM claude_insights
+       WHERE ${whereClause}
+       ORDER BY CASE severity
+         WHEN 'critical' THEN 1 WHEN 'warning' THEN 2
+         WHEN 'positive' THEN 3 ELSE 4 END ASC,
+         created_at DESC
+       LIMIT $${paramIdx}`,
+      [...params, limit]
+    );
+
+    res.json(dataResult.rows);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[claude-insights] Error:', msg);
+    res.status(500).json({ error: msg });
+  }
+});
+
+router.patch('/:workspaceId/claude-insights/:insightId', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { workspaceId, insightId } = req.params;
+    const { status } = req.body;
+
+    if (!['active', 'dismissed', 'actioned'].includes(status)) {
+      res.status(400).json({ error: 'Invalid status' });
+      return;
+    }
+
+    const tsField = status === 'dismissed' ? ', dismissed_at = NOW()' : status === 'actioned' ? ', actioned_at = NOW()' : '';
+    await query(
+      `UPDATE claude_insights SET status = $1${tsField} WHERE id = $2 AND workspace_id = $3`,
+      [status, insightId, workspaceId]
+    );
+
+    res.json({ ok: true });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[claude-insights] PATCH error:', msg);
+    res.status(500).json({ error: msg });
+  }
+});
+
 export default router;

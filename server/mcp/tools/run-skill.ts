@@ -1,71 +1,71 @@
 import { z } from 'zod';
-import { query } from '../../db.js';
-import { getSkillRegistry } from '../../skills/registry.js';
-import { SkillRuntime } from '../../skills/runtime.js';
 import type { McpTool } from './index.js';
+import { runSkillWithAutoSave } from './skills/helpers.js';
 
 const InputSchema = z.object({
   skill_id: z.string().min(1),
   params: z.record(z.any()).optional().default({}),
+  save: z.boolean().optional().default(true),
 });
 
 export const runSkill: McpTool = {
   name: 'run_skill',
   description: [
-    'Runs any registered Pandora skill on demand.',
-    'Skills produce structured findings, narratives, and evidence.',
-    'Common skill IDs: pipeline-hygiene, deal-risk-review, forecast-rollup,',
-    'rep-scorecard, weekly-recap, pipeline-coverage, monte-carlo-forecast,',
-    'competitive-intelligence, gtm-health-diagnostic.',
-    'Use get_skill_status to retrieve the full output by run_id after execution.',
-  ].join(' '),
+    'Runs any Pandora skill on demand. Auto-saves results as Claude insights. Pass save: false to skip persistence.',
+    '',
+    'Available skill IDs:',
+    'Pipeline: bowtie-analysis, gtm-health-diagnostic, pipeline-conversion-rate, pipeline-coverage,',
+    'pipeline-gen-forecast, pipeline-goals, pipeline-hygiene, pipeline-movement,',
+    'pipeline-progression, pipeline-waterfall, quarterly-pre-mortem',
+    '',
+    'Forecasting: forecast-accuracy-tracking, forecast-model, forecast-rollup,',
+    'monte-carlo-forecast, pipeline-contribution-forecast',
+    '',
+    'Intelligence: behavioral-winning-path, coaching, icp-discovery, icp-taxonomy-builder, strategy-insights',
+    '',
+    'Scoring: deal-rfm-scoring, deal-scoring-model, lead-scoring',
+    '',
+    'Deals: deal-risk-review',
+    '',
+    'Enrichment: contact-role-resolution, custom-field-discovery, voice-pattern-extraction',
+    '',
+    'Reporting: competitive-intelligence',
+    '',
+    'Operations: data-quality-audit, workspace-config-audit',
+    '',
+    'Calls: conversation-intelligence',
+    '',
+    'Other: rep-scorecard, single-thread-alert, stage-mismatch-detector,',
+    'stage-velocity-benchmarks, weekly-recap, project-recap',
+    '',
+    'Note: Results are cached for 4 hours. Pass params to override skill-specific options.',
+  ].join('\n'),
   inputSchema: {
     type: 'object',
     required: ['skill_id'],
     properties: {
       skill_id: {
         type: 'string',
-        description: 'Skill ID to run (e.g. "pipeline-hygiene", "deal-risk-review")',
+        description: 'Skill ID from the list above (e.g. "pipeline-hygiene", "deal-risk-review")',
       },
       params: {
         type: 'object',
         description: 'Optional params to pass to the skill (skill-specific)',
       },
+      save: {
+        type: 'boolean',
+        description: 'Auto-save insight summary to Pandora (default: true)',
+      },
     },
   },
   handler: async (args: any, workspaceId: string) => {
     const input = InputSchema.parse(args);
-
-    const registry = getSkillRegistry();
-    const skill = registry.get(input.skill_id);
-    if (!skill) {
-      const allSkills = registry.getAll ? registry.getAll() : [];
-      const available = Array.isArray(allSkills)
-        ? allSkills.map((s: any) => s.id).join(', ')
-        : 'use list_skills to see available skills';
-      throw new Error(
-        `Skill not found: "${input.skill_id}". Available: ${available}`
-      );
-    }
-
-    const runtime = new SkillRuntime();
-    const result = await runtime.executeSkill(skill, workspaceId, input.params);
-
-    const run = await query(
-      `SELECT output, output_text FROM skill_runs WHERE run_id = $1`,
-      [result.runId]
+    return runSkillWithAutoSave(
+      workspaceId,
+      input.skill_id,
+      input.params,
+      input.save,
+      `run_skill: ${input.skill_id}`
     );
-
-    const fullOutput = run.rows[0]?.output ?? result.output;
-    const text = run.rows[0]?.output_text ?? null;
-
-    return {
-      run_id: result.runId,
-      skill_id: input.skill_id,
-      status: result.status,
-      duration_ms: result.totalDuration_ms,
-      output_text: text,
-      output: fullOutput,
-    };
   },
 };

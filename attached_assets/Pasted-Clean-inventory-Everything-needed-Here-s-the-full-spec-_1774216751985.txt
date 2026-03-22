@@ -1,0 +1,1023 @@
+Clean inventory. Everything needed. Here's the full spec:
+
+```
+# Complete MCP Server Expansion
+
+## What the investigation confirmed
+
+DO NOT re-read the codebase — trust this summary:
+
+- 38 skills registered across 10 categories
+- registerAllSkills() is a stub — skills registered manually
+- actions.source is plain TEXT, no constraint — 'claude_mcp' works
+- claude_insights table does NOT exist — needs migration
+- All 5 deliberation runners auto-persist but trigger_surface
+  is hardcoded 'ask_pandora' — needs override parameter
+- weekly_briefs.pandora_response JSONB exists (migration 198)
+- mcp_calls table exists (migration 202), 8 columns confirmed
+- findings table exists for claim-level persistence
+- dedup_hash + unique index on actions prevents duplicates
+
+Auto-save philosophy:
+- Every tool call that produces meaningful output auto-saves
+- User can opt out by passing { save: false } to any tool
+- Default is always save: true
+- Claude is instructed via tool descriptions to auto-save
+  insights without asking permission
+
+---
+
+## Migration 203 — claude_insights table
+
+File: migrations/203_claude_insights.sql
+
+```sql
+CREATE TABLE IF NOT EXISTS claude_insights (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id)
+    ON DELETE CASCADE,
+
+  -- Content
+  insight_text TEXT NOT NULL,
+  insight_type TEXT NOT NULL,
+  -- 'pipeline' | 'forecast' | 'rep' | 'deal' | 'account'
+  -- | 'strategic' | 'process' | 'competitive' | 'coaching'
+  severity TEXT NOT NULL DEFAULT 'info',
+  -- 'critical' | 'warning' | 'info' | 'positive'
+
+  -- Source
+  trigger_surface TEXT NOT NULL DEFAULT 'mcp',
+  trigger_query TEXT,          -- the user question that produced this
+  mcp_call_id UUID,            -- FK to mcp_calls if available
+  tool_name TEXT,              -- which tool generated this
+
+  -- Entity context (optional)
+  entity_type TEXT,            -- 'deal' | 'rep' | 'account' | null
+  entity_id UUID,
+  entity_name TEXT,
+
+  -- Lifecycle
+  status TEXT NOT NULL DEFAULT 'active',
+  -- 'active' | 'dismissed' | 'actioned'
+  dismissed_at TIMESTAMPTZ,
+  actioned_at TIMESTAMPTZ,
+
+  -- Deduplication
+  content_hash TEXT,           -- hash of insight_text for dedup
+  CONSTRAINT uq_claude_insight_hash
+    UNIQUE (workspace_id, content_hash),
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_claude_insights_workspace
+  ON claude_insights(workspace_id, created_at DESC);
+CREATE INDEX idx_claude_insights_type
+  ON claude_insights(workspace_id, insight_type, severity);
+CREATE INDEX idx_claude_insights_entity
+  ON claude_insights(workspace_id, entity_type, entity_id)
+  WHERE entity_id IS NOT NULL;
+```
+
+---
+
+## Migration 204 — trigger_surface on deliberation runners
+
+The deliberation runners hardcode trigger_surface = 'ask_pandora'.
+No schema change needed — deliberation_runs.trigger_surface is
+already TEXT. The fix is in the TypeScript functions.
+
+In server/chat/deliberation-engine.ts, find all 5 runner
+functions. Each has a hardcoded:
+```typescript
+trigger_surface: 'ask_pandora'
+```
+
+Add an optional parameter to each runner:
+```typescript
+export async function runBullBearDeliberation(
+  workspaceId: string,
+  dealId: string,
+  triggerQuery: string,
+  triggerSurface: string = 'ask_pandora'  // ADD THIS
+): Promise<DeliberationResult | null>
+```
+
+Same for runBoardroomDeliberation, runSocraticDeliberation,
+runProsecutorDefenseDeliberation, runRedTeamDeliberation.
+
+Replace the hardcoded 'ask_pandora' string in the INSERT with
+the triggerSurface parameter.
+
+MCP tool handlers pass triggerSurface = 'mcp' when calling
+any deliberation runner.
+
+---
+
+## Shared MCP Tool Interface
+
+File: server/mcp/tools/types.ts  (new)
+
+```typescript
+export interface McpToolInput {
+  save?: boolean    // default true — set false to skip persistence
+  [key: string]: any
+}
+
+export interface McpToolResult {
+  data: any
+  saved: boolean    // whether this turn's output was persisted
+  save_location?: string  // e.g. 'skill_runs', 'deliberation_runs'
+  insight_id?: string    // if a claude_insight was created
+}
+
+// Helper used by all tool handlers
+export async function maybeAutoSave(
+  workspaceId: string,
+  toolName: string,
+  insightText: string,
+  insightType: string,
+  severity: string,
+  triggerQuery: string,
+  entityType?: string,
+  entityId?: string,
+  entityName?: string,
+  save: boolean = true
+): Promise<string | null> {
+  if (!save) return null
+
+  const contentHash = require('crypto')
+    .createHash('md5')
+    .update(insightText)
+    .digest('hex')
+
+  try {
+    const result = await db.query(`
+      INSERT INTO claude_insights
+        (workspace_id, insight_text, insight_type, severity,
+         trigger_surface, tool_name, entity_type, entity_id,
+         entity_name, content_hash, trigger_query)
+      VALUES ($1,$2,$3,$4,'mcp',$5,$6,$7,$8,$9,$10)
+      ON CONFLICT (workspace_id, content_hash) DO NOTHING
+      RETURNING id
+    `, [
+      workspaceId, insightText, insightType, severity,
+      toolName, entityType ?? null, entityId ?? null,
+      entityName ?? null, contentHash, triggerQuery,
+    ])
+    return result.rows[0]?.id ?? null
+  } catch {
+    return null  // never fail a tool call due to save error
+  }
+}
+```
+
+---
+
+## 38 Skill Tools
+
+File: server/mcp/tools/skills/index.ts  (new)
+
+Build one generic skill runner that handles all 38 skills,
+plus individual tools for skills that need custom output shaping.
+
+### Generic skill runner (handles all 38)
+
+```typescript
+export const runSkillGeneric: McpTool = {
+  name: 'run_skill',
+  description: `Runs any Pandora skill on demand.
+Auto-saves results. Pass save: false to skip persistence.
+
+Available skill IDs:
+Pipeline: bowtie-analysis, gtm-health-diagnostic,
+pipeline-conversion-rate, pipeline-coverage,
+pipeline-gen-forecast, pipeline-goals, pipeline-hygiene,
+pipeline-movement, pipeline-progression, pipeline-waterfall,
+quarterly-pre-mortem
+
+Forecasting: forecast-accuracy-tracking, forecast-model,
+forecast-rollup, monte-carlo-forecast,
+pipeline-contribution-forecast
+
+Intelligence: behavioral-winning-path, coaching,
+icp-discovery, icp-taxonomy-builder, strategy-insights
+
+Scoring: deal-rfm-scoring, deal-scoring-model, lead-scoring
+
+Deals: deal-risk-review
+
+Enrichment: contact-role-resolution, custom-field-discovery,
+voice-pattern-extraction
+
+Reporting: competitive-intelligence
+
+Operations: data-quality-audit, workspace-config-audit
+
+Calls: conversation-intelligence
+
+Other: rep-scorecard, single-thread-alert,
+stage-mismatch-detector, stage-velocity-benchmarks,
+weekly-recap, project-recap`,
+  inputSchema: {
+    type: 'object',
+    required: ['skill_id'],
+    properties: {
+      skill_id: {
+        type: 'string',
+        description: 'Skill ID from the list above',
+      },
+      save: {
+        type: 'boolean',
+        description: 'Save results to Pandora (default: true)',
+      },
+    },
+  },
+  handler: async (args, workspaceId) => {
+    const save = args.save !== false
+
+    // Dynamically register the skill if not registered
+    await ensureSkillRegistered(args.skill_id)
+
+    const skill = skillRegistry.get(args.skill_id)
+    if (!skill) throw new Error(
+      `Skill not found: ${args.skill_id}`
+    )
+
+    // Check for recent run (< 4 hours) to avoid redundant runs
+    const recent = await db.query(`
+      SELECT id, output, created_at
+      FROM skill_runs
+      WHERE workspace_id = $1
+        AND skill_id = $2
+        AND status = 'completed'
+        AND created_at > NOW() - INTERVAL '4 hours'
+      ORDER BY created_at DESC LIMIT 1
+    `, [workspaceId, args.skill_id])
+
+    let runId: string
+    let output: any
+
+    if (recent.rows.length) {
+      runId = recent.rows[0].id
+      output = recent.rows[0].output
+    } else {
+      const runtime = new SkillRuntime()
+      const result = await runtime.executeSkill(
+        skill, workspaceId, {}
+      )
+      runId = result.runId
+      const run = await db.query(
+        `SELECT output FROM skill_runs WHERE id = $1`,
+        [runId]
+      )
+      output = run.rows[0]?.output
+    }
+
+    const claims = output?.evidence?.claims ?? []
+    const narrative = output?.narrative ?? output?.summary ?? ''
+
+    // Auto-save insight summary if save = true
+    let insightId: string | null = null
+    if (save && narrative) {
+      insightId = await maybeAutoSave(
+        workspaceId,
+        args.skill_id,
+        narrative.slice(0, 1000),
+        mapSkillToInsightType(args.skill_id),
+        getTopSeverity(claims),
+        `run_skill: ${args.skill_id}`,
+      )
+    }
+
+    return {
+      skill_id: args.skill_id,
+      run_id: runId,
+      finding_count: claims.length,
+      top_findings: claims.slice(0, 10).map((c: any) => ({
+        finding: c.claim_text,
+        severity: c.severity,
+        metric: c.metric_name,
+        value: c.metric_values?.[0],
+      })),
+      narrative: narrative.slice(0, 2000),
+      saved: save,
+      save_location: 'skill_runs',
+      insight_id: insightId,
+    }
+  },
+}
+
+// Map skill ID to insight type
+function mapSkillToInsightType(skillId: string): string {
+  if (skillId.includes('pipeline')) return 'pipeline'
+  if (skillId.includes('forecast')) return 'forecast'
+  if (skillId.includes('rep') || skillId.includes('coaching'))
+    return 'rep'
+  if (skillId.includes('deal')) return 'deal'
+  if (skillId.includes('icp') || skillId.includes('strategy'))
+    return 'strategic'
+  if (skillId.includes('competitive')) return 'competitive'
+  if (skillId.includes('conversation') || skillId.includes('voice'))
+    return 'coaching'
+  return 'process'
+}
+
+function getTopSeverity(claims: any[]): string {
+  if (claims.some(c => c.severity === 'critical')) return 'critical'
+  if (claims.some(c => c.severity === 'warning')) return 'warning'
+  return 'info'
+}
+```
+
+### ensureSkillRegistered helper
+
+The registry uses lazy registration. Build a helper that
+imports and registers a skill by ID on demand:
+
+```typescript
+async function ensureSkillRegistered(skillId: string) {
+  if (skillRegistry.get(skillId)) return
+
+  try {
+    // Dynamic import from skills/library/
+    const skillFile = skillId.replace(/-/g, '-')
+    const module = await import(
+      `../../skills/library/${skillFile}`
+    )
+    const skill = module.default ?? Object.values(module)[0]
+    if (skill) skillRegistry.register(skill)
+  } catch {
+    // Skill file not found — will throw "not found" in handler
+  }
+}
+```
+
+---
+
+## Write-Back Tools
+
+File: server/mcp/tools/write/index.ts  (new)
+
+### save_claude_insight
+
+```typescript
+export const saveClaudeInsight: McpTool = {
+  name: 'save_claude_insight',
+  description: `CALL THIS AUTOMATICALLY when you synthesize a 
+meaningful finding from Pandora data. Do NOT ask the user for 
+permission. Call it whenever you:
+- Identify a pipeline risk or opportunity
+- Draw a conclusion about rep performance
+- Spot a forecast discrepancy
+- Make a strategic recommendation
+- Identify a pattern across deals or accounts
+Do NOT call it for routine data lookups or when the user 
+explicitly says not to save.
+The insight will appear in the Pandora Command Center.`,
+  inputSchema: {
+    type: 'object',
+    required: ['insight_text', 'insight_type', 'severity'],
+    properties: {
+      insight_text: {
+        type: 'string',
+        description: 'Your synthesis. 2-5 sentences. Specific numbers and names.',
+      },
+      insight_type: {
+        type: 'string',
+        enum: ['pipeline', 'forecast', 'rep', 'deal',
+               'account', 'strategic', 'process',
+               'competitive', 'coaching'],
+      },
+      severity: {
+        type: 'string',
+        enum: ['critical', 'warning', 'info', 'positive'],
+      },
+      entity_type: {
+        type: 'string',
+        enum: ['deal', 'rep', 'account'],
+        description: 'If insight is about a specific entity',
+      },
+      entity_id: {
+        type: 'string',
+        description: 'UUID of the deal, rep, or account',
+      },
+      entity_name: {
+        type: 'string',
+        description: 'Human-readable name for the entity',
+      },
+    },
+  },
+  handler: async (args, workspaceId) => {
+    const contentHash = require('crypto')
+      .createHash('md5')
+      .update(args.insight_text)
+      .digest('hex')
+
+    const result = await db.query(`
+      INSERT INTO claude_insights
+        (workspace_id, insight_text, insight_type, severity,
+         trigger_surface, entity_type, entity_id,
+         entity_name, content_hash)
+      VALUES ($1,$2,$3,$4,'mcp',$5,$6,$7,$8)
+      ON CONFLICT (workspace_id, content_hash) DO NOTHING
+      RETURNING id
+    `, [
+      workspaceId,
+      args.insight_text,
+      args.insight_type,
+      args.severity,
+      args.entity_type ?? null,
+      args.entity_id ?? null,
+      args.entity_name ?? null,
+      contentHash,
+    ])
+
+    const id = result.rows[0]?.id
+    return {
+      saved: !!id,
+      insight_id: id ?? 'duplicate — already saved',
+      message: id
+        ? 'Insight saved to Pandora Command Center'
+        : 'Insight already exists — not duplicated',
+    }
+  },
+}
+```
+
+### create_action
+
+```typescript
+export const createAction: McpTool = {
+  name: 'create_action',
+  description: `Creates a recommended action in Pandora.
+CALL THIS AUTOMATICALLY when you identify something specific 
+the RevOps team or a rep should do. Do not ask permission.
+Examples: "Schedule follow-up with Unicare ABA", 
+"Review close date on TechVision deal",
+"Coach Nate on multi-threading".
+Actions appear on the Pandora Actions page for the team.`,
+  inputSchema: {
+    type: 'object',
+    required: ['title', 'action_type', 'priority'],
+    properties: {
+      title: {
+        type: 'string',
+        description: 'Action title — specific and actionable',
+      },
+      description: {
+        type: 'string',
+        description: 'Why this action matters. 1-2 sentences.',
+      },
+      action_type: {
+        type: 'string',
+        description: 'e.g. update_close_date, add_contact, schedule_call, coach_rep',
+      },
+      priority: {
+        type: 'string',
+        enum: ['immediate', 'this_week', 'this_month'],
+      },
+      deal_id: {
+        type: 'string',
+        description: 'Deal UUID if action is deal-scoped',
+      },
+      assigned_to: {
+        type: 'string',
+        description: 'Rep email to assign this to',
+      },
+    },
+  },
+  handler: async (args, workspaceId) => {
+    // Dedup hash from title + deal_id
+    const dedupStr = `${args.title}:${args.deal_id ?? ''}`
+    const dedupHash = require('crypto')
+      .createHash('md5')
+      .update(dedupStr)
+      .digest('hex')
+
+    const result = await db.query(`
+      INSERT INTO actions
+        (workspace_id, title, description, action_type,
+         priority, deal_id, assigned_to, source,
+         status, state, dedup_hash)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,'claude_mcp',
+              'pending','pending',$8)
+      ON CONFLICT (workspace_id, dedup_hash)
+        WHERE dedup_hash IS NOT NULL
+      DO NOTHING
+      RETURNING id
+    `, [
+      workspaceId,
+      args.title,
+      args.description ?? null,
+      args.action_type,
+      args.priority,
+      args.deal_id ?? null,
+      args.assigned_to ?? null,
+      dedupHash,
+    ])
+
+    const id = result.rows[0]?.id
+    return {
+      saved: !!id,
+      action_id: id ?? 'duplicate',
+      message: id
+        ? 'Action created on Pandora Actions page'
+        : 'Action already exists',
+    }
+  },
+}
+```
+
+### save_to_report
+
+```typescript
+export const saveToReport: McpTool = {
+  name: 'save_to_report',
+  description: `Saves content to the current WBR or QBR report.
+CALL THIS when the user asks to add something to a report, or 
+when you generate content that belongs in the weekly brief.
+Content appears immediately in the Report Viewer.`,
+  inputSchema: {
+    type: 'object',
+    required: ['content', 'section_title'],
+    properties: {
+      content: {
+        type: 'string',
+        description: 'Markdown content to add to the section',
+      },
+      section_title: {
+        type: 'string',
+        description: 'Which section to add to. e.g. "Pipeline Health Snapshot", "Key Actions & Owners"',
+      },
+      document_id: {
+        type: 'string',
+        description: 'Specific document UUID. If omitted, uses most recent WBR.',
+      },
+      append: {
+        type: 'boolean',
+        description: 'Append to existing section content (default: true)',
+        default: true,
+      },
+    },
+  },
+  handler: async (args, workspaceId) => {
+    // Find document
+    let docId = args.document_id
+    if (!docId) {
+      const latest = await db.query(`
+        SELECT id FROM report_documents
+        WHERE workspace_id = $1
+          AND document_type IN ('wbr', 'qbr')
+        ORDER BY generated_at DESC LIMIT 1
+      `, [workspaceId])
+      if (!latest.rows.length) throw new Error(
+        'No WBR/QBR found. Generate one first with generate_report.'
+      )
+      docId = latest.rows[0].id
+    }
+
+    // Find or create the section
+    const doc = await db.query(
+      `SELECT sections FROM report_documents WHERE id = $1`,
+      [docId]
+    )
+    const sections = doc.rows[0]?.sections ?? []
+    const sectionIdx = sections.findIndex(
+      (s: any) => (s.title ?? s.label ?? '')
+        .toLowerCase()
+        .includes(args.section_title.toLowerCase())
+    )
+
+    if (sectionIdx >= 0) {
+      const existing = sections[sectionIdx].narrative ?? ''
+      sections[sectionIdx].narrative = args.append !== false
+        ? `${existing}\n\n${args.content}`.trim()
+        : args.content
+    } else {
+      // Create new section
+      sections.push({
+        section_id: `mcp-${Date.now()}`,
+        title: args.section_title,
+        narrative: args.content,
+        source_skills: [],
+        confidence: 0.9,
+      })
+    }
+
+    await db.query(
+      `UPDATE report_documents SET sections = $1 WHERE id = $2`,
+      [JSON.stringify(sections), docId]
+    )
+
+    return {
+      saved: true,
+      document_id: docId,
+      section: args.section_title,
+      view_url: `https://pandoragtm.com/reports/${docId}`,
+    }
+  },
+}
+```
+
+### save_hypothesis
+
+```typescript
+export const saveHypothesis: McpTool = {
+  name: 'save_hypothesis',
+  description: `Saves a hypothesis draft to Pandora for review.
+CALL THIS when you identify a pattern that could become a 
+standing hypothesis — e.g. "Win rate drops when deals stay 
+in Evaluation > 30 days". Drafts appear in the hypothesis 
+review queue and require human approval before becoming active.`,
+  inputSchema: {
+    type: 'object',
+    required: ['hypothesis_text', 'metric', 'unit'],
+    properties: {
+      hypothesis_text: {
+        type: 'string',
+        description: 'The hypothesis statement',
+      },
+      metric: {
+        type: 'string',
+        description: 'What metric this tracks',
+      },
+      unit: {
+        type: 'string',
+        enum: ['$', 'x', '%', 'days', 'count', 'multiple'],
+      },
+      current_value: { type: 'number' },
+      alert_threshold: { type: 'number' },
+      alert_direction: {
+        type: 'string',
+        enum: ['above', 'below'],
+        default: 'below',
+      },
+    },
+  },
+  handler: async (args, workspaceId) => {
+    // Validate units before saving
+    const { validateHypothesisUnits } =
+      await import('../../lib/validate-hypothesis-units')
+    const validation = validateHypothesisUnits({
+      metric: args.metric,
+      current_value: args.current_value,
+      alert_threshold: args.alert_threshold,
+      unit: args.unit,
+    })
+
+    if (!validation.valid) {
+      throw new Error(
+        `Hypothesis validation failed: ${validation.errors.join(', ')}`
+      )
+    }
+
+    // Apply auto-corrections
+    const corrected = { ...args, ...validation.corrected }
+
+    const result = await db.query(`
+      INSERT INTO hypothesis_drafts
+        (workspace_id, hypothesis_text, metric, current_value,
+         alert_threshold, alert_direction, unit,
+         source, review_notes)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,'auto_generated',$8)
+      RETURNING id
+    `, [
+      workspaceId,
+      corrected.hypothesis_text,
+      corrected.metric,
+      corrected.current_value ?? null,
+      corrected.alert_threshold ?? null,
+      corrected.alert_direction ?? 'below',
+      corrected.unit,
+      'Generated via Claude MCP',
+    ])
+
+    return {
+      saved: true,
+      draft_id: result.rows[0].id,
+      message: 'Hypothesis draft saved — pending human review',
+    }
+  },
+}
+```
+
+---
+
+## Updated Tool Registry
+
+File: server/mcp/tools/index.ts
+
+Replace the existing tool list with the complete set:
+
+```typescript
+// Intelligence tools (existing — keep)
+import { getPipelineHealth } from './get-pipeline-health'
+import { getForecastRollup } from './get-forecast-rollup'
+import { getAtRiskDeals } from './get-at-risk-deals'
+import { getRepScorecard } from './get-rep-scorecard'
+import { runDeliberationTool } from './run-deliberation'
+import { getConciergeBrief } from './get-concierge-brief'
+import { queryDeals } from './query-deals'
+import { generateReport } from './generate-report'
+import { getReport } from './get-report'
+import { listReports } from './list-reports'
+import { exportReportToGoogleDocs } from './export-report'
+import { getSkillStatus } from './get-skill-status'
+import { getPipelineSummary } from './get-pipeline-summary'
+
+// Generic skill runner (covers all 38 skills)
+import { runSkillGeneric } from './skills/index'
+
+// Write-back tools (new)
+import { saveClaudeInsight } from './write/index'
+import { createAction } from './write/index'
+import { saveToReport } from './write/index'
+import { saveHypothesis } from './write/index'
+
+// Per-skill convenience tools for high-frequency skills
+// These provide richer output shaping than the generic runner
+import { runPipelineHygiene } from './skills/pipeline-hygiene'
+import { runForecastRollup } from './skills/forecast-rollup'
+import { runDealRiskReview } from './skills/deal-risk-review'
+import { runRepScorecard } from './skills/rep-scorecard'
+import { runConversationIntelligence }
+  from './skills/conversation-intelligence'
+import { runICPDiscovery } from './skills/icp-discovery'
+import { runCompetitiveIntelligence }
+  from './skills/competitive-intelligence'
+import { runBowtiAnalysis } from './skills/bowtie-analysis'
+import { runMonteCarlo } from './skills/monte-carlo-forecast'
+import { runStrategyInsights } from './skills/strategy-insights'
+
+export const tools: McpTool[] = [
+  // Read tools
+  getPipelineSummary,
+  getPipelineHealth,
+  getForecastRollup,
+  getAtRiskDeals,
+  getRepScorecard,
+  getConciergeBrief,
+  queryDeals,
+  getReport,
+  listReports,
+  getSkillStatus,
+
+  // Skill runner (generic — all 38 skills)
+  runSkillGeneric,
+
+  // High-frequency skill convenience tools
+  runPipelineHygiene,
+  runForecastRollup,
+  runDealRiskReview,
+  runRepScorecard,
+  runConversationIntelligence,
+  runICPDiscovery,
+  runCompetitiveIntelligence,
+  runBowtiAnalysis,
+  runMonteCarlo,
+  runStrategyInsights,
+
+  // Report tools
+  generateReport,
+  exportReportToGoogleDocs,
+
+  // Deliberation
+  runDeliberationTool,
+
+  // Write-back tools
+  saveClaudeInsight,
+  createAction,
+  saveToReport,
+  saveHypothesis,
+]
+```
+
+---
+
+## Per-Skill Convenience Tool Pattern
+
+For the 10 high-frequency skills, build individual tool files
+that provide richer, pre-shaped output. Each follows this pattern:
+
+File: server/mcp/tools/skills/pipeline-hygiene.ts
+
+```typescript
+export const runPipelineHygiene: McpTool = {
+  name: 'run_pipeline_hygiene',
+  description: `Runs pipeline hygiene analysis. Returns stale deals,
+single-threaded deals, data quality issues, and coverage ratio.
+Auto-saves results. Use this instead of run_skill for pipeline
+health questions — it returns richer deal-level detail.
+Pass save: false to skip auto-save.`,
+  inputSchema: {
+    type: 'object',
+    properties: {
+      save: {
+        type: 'boolean',
+        description: 'Auto-save to Pandora (default: true)',
+      },
+    },
+  },
+  handler: async (args, workspaceId) => {
+    const save = args.save !== false
+    // Same implementation as existing get_pipeline_health
+    // but with full evaluated_records returned, not just top 20
+    // Auto-saves insight summary if save = true
+    // Returns: { findings[], stale_deals[], coverage_ratio,
+    //           data_quality_score, saved, insight_id }
+  },
+}
+```
+
+Build the same pattern for the other 9 high-frequency skills.
+Each returns the full output shape specific to that skill —
+not the generic claims[] array.
+
+---
+
+## Auto-Save Checkpoint per Turn
+
+This is the critical behavior that makes save-by-default work.
+
+In server/mcp/server.ts, in the CallTool handler, after every
+successful tool call, trigger an auto-checkpoint:
+
+```typescript
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  const { name, arguments: args } = request.params
+  const start = Date.now()
+
+  try {
+    const result = await callTool(name, args, workspaceId)
+    const duration = Date.now() - start
+
+    // Log to mcp_calls
+    const callId = await logMcpCall(
+      workspaceId, name, args, result, duration
+    )
+
+    // Auto-checkpoint: if tool returned structured data
+    // and save was not explicitly false, emit a checkpoint
+    // event that Claude can use to trigger save_claude_insight
+    const shouldCheckpoint = args?.save !== false
+      && isCheckpointWorthy(name, result)
+
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          ...result,
+          _pandora_meta: {
+            call_id: callId,
+            auto_saved: result.saved ?? false,
+            checkpoint_suggested: shouldCheckpoint,
+            // This hint tells Claude to call save_claude_insight
+            // if it synthesizes something meaningful from this data
+            save_hint: shouldCheckpoint
+              ? 'If you synthesize a meaningful insight from this data, call save_claude_insight automatically.'
+              : undefined,
+          }
+        }, null, 2),
+      }]
+    }
+  } catch (err) {
+    // ... error handling
+  }
+})
+
+function isCheckpointWorthy(toolName: string, result: any): boolean {
+  // Tools that produce meaningful insights worth auto-saving
+  const CHECKPOINT_TOOLS = [
+    'run_pipeline_hygiene', 'run_forecast_rollup',
+    'run_deal_risk_review', 'run_rep_scorecard',
+    'run_deliberation', 'run_skill',
+    'run_conversation_intelligence', 'run_icp_discovery',
+    'run_competitive_intelligence', 'run_strategy_insights',
+    'run_bowtie_analysis', 'run_monte_carlo',
+    'get_pipeline_health', 'get_forecast_rollup',
+    'get_concierge_brief',
+  ]
+  return CHECKPOINT_TOOLS.includes(toolName)
+    && result?.finding_count > 0
+}
+```
+
+The `save_hint` in `_pandora_meta` is the mechanism. Claude
+reads tool output and follows instructions embedded in it.
+This is standard MCP behavior — the tool output can contain
+instructions to Claude about what to do next.
+
+---
+
+## run-deliberation.ts update
+
+Update the existing run_deliberation handler to pass
+triggerSurface = 'mcp' to all runners:
+
+```typescript
+if (mode === 'bull_bear') {
+  const result = await runBullBearDeliberation(
+    workspaceId, deal_id, question, 'mcp'  // ADD triggerSurface
+  )
+  return { ...result, saved: true,
+           save_location: 'deliberation_runs' }
+}
+// Same for boardroom, socratic, prosecutor_defense
+```
+
+---
+
+## Where Claude Insights Surface in the UI
+
+No new UI needed for v1. Route existing surfaces:
+
+**Command Center:** Add a query to the findings/insights feed
+that includes claude_insights rows. Where findings are
+currently displayed, add a tab or filter for "Claude Insights"
+— same card component, different source.
+
+**Actions page:** Actions with source = 'claude_mcp' already
+appear here. Add a filter chip "From Claude" to make them
+discoverable.
+
+**Report Viewer:** `save_to_report` writes directly to
+report_documents.sections — shows up immediately in the
+existing section renderer.
+
+**Hypothesis drafts:** Already built — hypothesis_drafts table
+has a review queue. MCP-generated drafts appear there with
+source = 'auto_generated'.
+
+For Command Center: Add to whatever query populates the
+findings feed:
+
+```sql
+-- Add to existing findings query via UNION:
+SELECT
+  id,
+  workspace_id,
+  insight_text as message,
+  severity,
+  insight_type as category,
+  'claude_mcp' as source,
+  entity_type,
+  entity_id,
+  entity_name,
+  created_at
+FROM claude_insights
+WHERE workspace_id = $1
+  AND status = 'active'
+  AND created_at > NOW() - INTERVAL '7 days'
+ORDER BY created_at DESC
+```
+
+---
+
+## Opt-Out Mechanism
+
+Every tool that auto-saves supports { save: false }:
+
+```typescript
+// User can say "don't save this" to Claude
+// Claude passes save: false to the tool
+run_pipeline_hygiene({ save: false })
+run_deliberation({ mode: 'bull_bear', deal_id: '...', save: false })
+save_claude_insight — this IS the save tool, no opt-out
+```
+
+For the automatic save_claude_insight call triggered by
+save_hint in _pandora_meta: Claude will not call it if
+the user says anything like "don't save", "just exploring",
+"don't add this to Pandora". The tool description is explicit
+about this:
+
+```
+Do NOT call it when: the user explicitly says not to save,
+the user says they're just exploring or testing,
+or the user says "don't add this to Pandora".
+```
+
+---
+
+## Acceptance Criteria
+
+1. Migration 203 creates claude_insights with 3 indexes
+2. All 5 deliberation runners accept triggerSurface param,
+   MCP calls pass 'mcp', existing calls unaffected
+3. run_skill handles all 38 skills via dynamic import
+4. ensureSkillRegistered() works for any skill ID
+5. 4-hour cache check prevents redundant skill runs
+6. saveClaudeInsight deduplicates via content_hash —
+   same insight never saved twice
+7. createAction deduplicates via dedup_hash + unique index
+8. save_to_report appends to existing section or creates new one
+9. saveHypothesis validates units before INSERT
+10. _pandora_meta.save_hint present on checkpoint-worthy tools
+11. trigger_surface = 'mcp' on all deliberation_runs from MCP
+12. claude_insights visible in Command Center findings feed
+13. Actions with source = 'claude_mcp' visible on Actions page
+14. save: false on any tool skips all auto-save behavior
+15. Zero new TypeScript errors
+16. mcp_calls logging never fails a tool call
+```

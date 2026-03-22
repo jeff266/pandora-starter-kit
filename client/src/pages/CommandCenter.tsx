@@ -203,6 +203,9 @@ export default function CommandCenter() {
   const [findingSeverityFilter, setFindingSeverityFilter] = useState<string>('all');
   const [findingSkillFilter, setFindingSkillFilter] = useState<string>('all');
   const [availableSkills, setAvailableSkills] = useState<Array<{ id: string; name: string }>>([]);
+  const [findingSource, setFindingSource] = useState<'skill' | 'claude'>('skill');
+  const [claudeInsights, setClaudeInsights] = useState<any[]>([]);
+  const [claudeInsightsLoading, setClaudeInsightsLoading] = useState(false);
 
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const [refreshing, setRefreshing] = useState(false);
@@ -380,6 +383,16 @@ export default function CommandCenter() {
     if (!wsId) return;
     loadBrief(false);
   }, [wsId, loadBrief]);
+
+  // Fetch Claude insights on demand when that tab is selected
+  useEffect(() => {
+    if (!wsId || findingSource !== 'claude') return;
+    setClaudeInsightsLoading(true);
+    api.get('/claude-insights?status=active&days=7&limit=50')
+      .then((d: any) => setClaudeInsights(Array.isArray(d) ? d : []))
+      .catch(() => setClaudeInsights([]))
+      .finally(() => setClaudeInsightsLoading(false));
+  }, [wsId, findingSource]);
 
   const stageData: PipelineStage[] = pipeline?.by_stage || [];
   const totalPipeline = Number(pipeline?.total_pipeline) || 0;
@@ -964,6 +977,93 @@ export default function CommandCenter() {
           onToggle={(collapsed) => updateSection('findings', { collapsed })}
           badge={filteredFindings.length}
         >
+          {/* Source toggle: Skill Findings | Claude Insights */}
+          <div style={{ display: 'flex', gap: 4, marginBottom: 12, background: colors.surface, borderRadius: 8, padding: 3, width: 'fit-content' }}>
+            {(['skill', 'claude'] as const).map(src => {
+              const isActive = findingSource === src;
+              const label = src === 'skill' ? 'Skill Findings' : '✦ Claude Insights';
+              return (
+                <button
+                  key={src}
+                  onClick={() => setFindingSource(src)}
+                  style={{
+                    padding: '4px 12px',
+                    borderRadius: 6,
+                    fontSize: 11,
+                    fontWeight: 600,
+                    fontFamily: fonts.sans,
+                    cursor: 'pointer',
+                    border: 'none',
+                    background: isActive ? colors.surfaceRaised : 'transparent',
+                    color: isActive ? colors.text : colors.textMuted,
+                    transition: 'all 0.15s',
+                    boxShadow: isActive ? `0 1px 3px rgba(0,0,0,0.15)` : 'none',
+                  }}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+
+          {findingSource === 'claude' ? (
+            claudeInsightsLoading ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} height={56} />)}
+              </div>
+            ) : claudeInsights.length === 0 ? (
+              <p style={{ fontSize: 12, color: colors.textMuted, textAlign: 'center', padding: 24 }}>
+                No Claude insights yet. Run skills or ask Pandora via the MCP server to generate insights.
+              </p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 400, overflow: 'auto' }}>
+                {claudeInsights.map((ins: any) => {
+                  const sevColor = ins.severity === 'critical' ? colors.red : ins.severity === 'warning' ? colors.yellow : ins.severity === 'positive' ? colors.green : colors.textMuted;
+                  return (
+                    <div
+                      key={ins.id}
+                      style={{
+                        padding: '10px 12px',
+                        borderRadius: 8,
+                        border: `1px solid ${colors.border}`,
+                        background: colors.surface,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 4,
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, fontFamily: fonts.mono, color: sevColor, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                          {ins.severity}
+                        </span>
+                        <span style={{ fontSize: 10, color: colors.textMuted, fontFamily: fonts.mono }}>
+                          {ins.insight_type}
+                        </span>
+                        {ins.entity_name && (
+                          <span style={{ fontSize: 10, color: colors.textMuted, fontFamily: fonts.mono }}>
+                            · {ins.entity_name}
+                          </span>
+                        )}
+                        <span style={{ marginLeft: 'auto', fontSize: 10, color: colors.textMuted }}>
+                          {new Date(ins.created_at).toLocaleDateString()}
+                        </span>
+                      </div>
+                      <p style={{ fontSize: 12, color: colors.text, margin: 0, lineHeight: 1.5 }}>
+                        {ins.insight_text}
+                      </p>
+                      {ins.tool_name && (
+                        <span style={{ fontSize: 10, color: colors.textMuted, fontFamily: fonts.mono }}>
+                          via {ins.tool_name}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )
+          ) : (
+            <>
+
           {/* Severity filter pills */}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
             {(['all', 'act', 'watch', 'notable', 'info'] as const).map(sev => {
@@ -1091,6 +1191,8 @@ export default function CommandCenter() {
                 />
               ))}
             </div>
+          )}
+          </>
           )}
         </CollapsibleSection>
       </SectionErrorBoundary>

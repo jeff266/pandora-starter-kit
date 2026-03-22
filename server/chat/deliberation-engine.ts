@@ -296,7 +296,8 @@ async function gatherBullEvidence(
 export async function runDeliberation(
   workspaceId: string,
   dealId: string,
-  triggerQuery: string
+  triggerQuery: string,
+  triggerSurface: string = 'ask_pandora'
 ): Promise<DeliberationResult> {
   const { evidence: bearEvidence, deal } = await gatherBearEvidence(workspaceId, dealId);
   const bullEvidence = await gatherBullEvidence(workspaceId, dealId, deal);
@@ -378,7 +379,7 @@ BEAR CASE SAID: ${bearOutput}`,
   await query(
     `INSERT INTO deliberation_runs
      (workspace_id, pattern, trigger_surface, trigger_query, entity_type, entity_id, perspectives, verdict, token_cost)
-     VALUES ($1, 'bull_bear', 'ask_pandora', $2, 'deal', $3, $4, $5, $6)`,
+     VALUES ($1, 'bull_bear', $7, $2, 'deal', $3, $4, $5, $6)`,
     [
       workspaceId,
       triggerQuery.slice(0, 500),
@@ -389,6 +390,7 @@ BEAR CASE SAID: ${bearOutput}`,
       }),
       JSON.stringify(verdict),
       tokenCost,
+      triggerSurface,
     ]
   );
 
@@ -728,7 +730,8 @@ export interface BoardroomResult {
 export async function runBoardroomDeliberation(
   workspaceId: string,
   question: string,
-  context: string
+  context: string,
+  triggerSurface: string = 'ask_pandora'
 ): Promise<BoardroomResult | null> {
   try {
     // Call 1: CEO perspective (revenue + growth lens)
@@ -813,7 +816,7 @@ Synthesize in 2-3 sentences. Where do they agree? What is the single most import
     await query(
       `INSERT INTO deliberation_runs
        (workspace_id, pattern, trigger_surface, trigger_query, entity_type, entity_id, perspectives, verdict, token_cost)
-       VALUES ($1, 'boardroom', 'ask_pandora', $2, NULL, NULL, $3, $4, $5)`,
+       VALUES ($1, 'boardroom', $6, $2, NULL, NULL, $3, $4, $5)`,
       [
         workspaceId,
         question.slice(0, 500),
@@ -824,6 +827,7 @@ Synthesize in 2-3 sentences. Where do they agree? What is the single most import
         }),
         JSON.stringify({ synthesis }),
         tokenCost,
+        triggerSurface,
       ]
     );
 
@@ -859,7 +863,8 @@ export interface SocraticResult {
 export async function runSocraticDeliberation(
   workspaceId: string,
   question: string,
-  context: string
+  context: string,
+  triggerSurface: string = 'ask_pandora'
 ): Promise<SocraticResult | null> {
   try {
     // Call 1: Surface the assumption
@@ -909,7 +914,7 @@ Identify the core assumption being made. State it clearly in 1-2 sentences. Then
     await query(
       `INSERT INTO deliberation_runs
        (workspace_id, pattern, trigger_surface, trigger_query, entity_type, entity_id, perspectives, verdict, token_cost)
-       VALUES ($1, 'socratic', 'ask_pandora', $2, NULL, NULL, $3, $4, $5)`,
+       VALUES ($1, 'socratic', $6, $2, NULL, NULL, $3, $4, $5)`,
       [
         workspaceId,
         question.slice(0, 500),
@@ -920,6 +925,7 @@ Identify the core assumption being made. State it clearly in 1-2 sentences. Then
         }),
         JSON.stringify({ synthesis }),
         tokenCost,
+        triggerSurface,
       ]
     );
 
@@ -953,7 +959,8 @@ export interface ProsecutorDefenseResult {
 export async function runProsecutorDefenseDeliberation(
   workspaceId: string,
   plan: string,
-  context: string
+  context: string,
+  triggerSurface: string = 'ask_pandora'
 ): Promise<ProsecutorDefenseResult | null> {
   try {
     // Call 1: Prosecution (what will fail)
@@ -1018,7 +1025,7 @@ Make the strongest possible case for why this plan will succeed. What evidence s
     await query(
       `INSERT INTO deliberation_runs
        (workspace_id, pattern, trigger_surface, trigger_query, entity_type, entity_id, perspectives, verdict, token_cost)
-       VALUES ($1, 'prosecutor_defense', 'ask_pandora', $2, NULL, NULL, $3, $4, $5)`,
+       VALUES ($1, 'prosecutor_defense', $6, $2, NULL, NULL, $3, $4, $5)`,
       [
         workspaceId,
         plan.slice(0, 500),
@@ -1028,6 +1035,7 @@ Make the strongest possible case for why this plan will succeed. What evidence s
         }),
         JSON.stringify({ verdict: verdictOutput, confidence }),
         tokenCost,
+        triggerSurface,
       ]
     );
 

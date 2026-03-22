@@ -52,22 +52,26 @@ export const runDeliberationTool: McpTool = {
         throw new Error('deal_id (UUID) is required for bull_bear mode');
       }
       const { runDeliberation } = await import('../../chat/deliberation-engine.js');
-      return runDeliberation(workspaceId, input.deal_id, input.question);
+      const result = await runDeliberation(workspaceId, input.deal_id, input.question, 'mcp');
+      return { ...result, saved: true, save_location: 'deliberation_runs' };
     }
 
     if (input.mode === 'boardroom') {
       const { runBoardroomDeliberation } = await import('../../chat/deliberation-engine.js');
-      return runBoardroomDeliberation(workspaceId, input.question, input.context);
+      const result = await runBoardroomDeliberation(workspaceId, input.question, input.context, 'mcp');
+      return { ...result, saved: true, save_location: 'deliberation_runs' };
     }
 
     if (input.mode === 'socratic') {
       const { runSocraticDeliberation } = await import('../../chat/deliberation-engine.js');
-      return runSocraticDeliberation(workspaceId, input.question, input.context);
+      const result = await runSocraticDeliberation(workspaceId, input.question, input.context, 'mcp');
+      return { ...result, saved: true, save_location: 'deliberation_runs' };
     }
 
     if (input.mode === 'prosecutor_defense') {
       const { runProsecutorDefenseDeliberation } = await import('../../chat/deliberation-engine.js');
-      return runProsecutorDefenseDeliberation(workspaceId, input.question, input.context);
+      const result = await runProsecutorDefenseDeliberation(workspaceId, input.question, input.context, 'mcp');
+      return { ...result, saved: true, save_location: 'deliberation_runs' };
     }
 
     throw new Error(`Unknown mode: ${input.mode}`);

@@ -13,6 +13,26 @@ import { runSkill } from './run-skill.js';
 import { getSkillStatus } from './get-skill-status.js';
 import { getPipelineSummary } from './get-pipeline-summary.js';
 
+import {
+  runPipelineHygiene,
+  runForecastRollupSkill,
+  runDealRiskReview,
+  runRepScorecardSkill,
+  runConversationIntelligence,
+  runICPDiscovery,
+  runCompetitiveIntelligence,
+  runBowtiAnalysis,
+  runMonteCarlo,
+  runStrategyInsights,
+} from './skills/convenience.js';
+
+import {
+  saveClaudeInsight,
+  createAction,
+  saveToReport,
+  saveHypothesis,
+} from './write/index.js';
+
 export interface McpTool {
   name: string;
   description: string;
@@ -21,20 +41,45 @@ export interface McpTool {
 }
 
 export const tools: McpTool[] = [
+  // Read tools — pipeline & forecast
+  getPipelineSummary,
   getPipelineHealth,
   getForecastRollup,
   getAtRiskDeals,
   getRepScorecard,
-  runDeliberationTool,
   getConciergeBrief,
   queryDeals,
+  getSkillStatus,
+
+  // Skill runner — generic (covers all 38 skills)
+  runSkill,
+
+  // Per-skill convenience tools — high-frequency skills with richer output
+  runPipelineHygiene,
+  runForecastRollupSkill,
+  runDealRiskReview,
+  runRepScorecardSkill,
+  runConversationIntelligence,
+  runICPDiscovery,
+  runCompetitiveIntelligence,
+  runBowtiAnalysis,
+  runMonteCarlo,
+  runStrategyInsights,
+
+  // Report tools
   generateReportTool,
   getReport,
   listReports,
   exportReportToGoogleDocs,
-  runSkill,
-  getSkillStatus,
-  getPipelineSummary,
+
+  // Deliberation
+  runDeliberationTool,
+
+  // Write-back tools
+  saveClaudeInsight,
+  createAction,
+  saveToReport,
+  saveHypothesis,
 ];
 
 const toolMap = new Map<string, McpTool>(tools.map(t => [t.name, t]));
