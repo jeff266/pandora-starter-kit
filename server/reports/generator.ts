@@ -306,7 +306,23 @@ export async function generateReport(request: GenerateReportRequest): Promise<Re
     const skillsOmitted = sections
       .filter(s => s.content.startsWith('⚠'))
       .flatMap(s => s.source_skills);
-    const headline = `${template.name} — ${period_label ?? new Date().toLocaleDateString()}`;
+
+    // Generate executive summary for WBR/QBR documents
+    let headline = `${template.name} — ${period_label ?? new Date().toLocaleDateString()}`;
+    if (document_type === 'wbr' || document_type === 'qbr') {
+      const { generateExecSummary } = await import('./exec-summary.js');
+      const summary = await generateExecSummary(
+        sectionsContent,
+        document_type,
+        period_label ?? new Date().toLocaleDateString(),
+        workspace_id
+      );
+      if (summary) {
+        headline = summary;
+      }
+      // Falls back to mechanical headline if summary generation fails
+    }
+
     const docResult = await query<{ id: string }>(
       `INSERT INTO report_documents
          (workspace_id, document_type, week_label, headline, sections,

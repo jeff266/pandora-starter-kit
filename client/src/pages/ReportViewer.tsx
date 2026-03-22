@@ -915,42 +915,61 @@ export default function ReportViewer() {
                 return `${Math.round(diff / 86400)}d ago`;
               })()
             : null;
+
+          const mechanicalHeadline = `${banner.label} — ${reportDocument.week_label}`;
+          const hasLLMSummary = reportDocument.headline && reportDocument.headline !== mechanicalHeadline;
+
           return (
             <div style={{
               background: banner.bg,
               borderBottom: `1px solid ${banner.accent}33`,
               padding: '12px 24px',
               display: 'flex',
-              alignItems: 'center',
+              alignItems: hasLLMSummary ? 'flex-start' : 'center',
               justifyContent: 'space-between',
               flexShrink: 0,
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <span style={{
-                  padding: '3px 10px', fontSize: 11, fontWeight: 700, letterSpacing: '0.08em',
-                  background: banner.pill, color: banner.pillText, borderRadius: 20,
-                  fontFamily: fonts.sans, textTransform: 'uppercase',
-                }}>
-                  {reportDocument.document_type.toUpperCase()}
-                </span>
-                <span style={{ fontSize: 15, fontWeight: 700, color: '#fff', fontFamily: fonts.sans }}>
-                  {banner.label}
-                </span>
-                {reportDocument.week_label && (
-                  <span style={{ fontSize: 13, color: banner.accent, fontFamily: fonts.sans }}>
-                    · {reportDocument.week_label}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <span style={{
+                    padding: '3px 10px', fontSize: 11, fontWeight: 700, letterSpacing: '0.08em',
+                    background: banner.pill, color: banner.pillText, borderRadius: 20,
+                    fontFamily: fonts.sans, textTransform: 'uppercase',
+                  }}>
+                    {reportDocument.document_type.toUpperCase()}
                   </span>
-                )}
-                <span style={{ fontSize: 13, color: `${banner.accent}88`, fontFamily: fonts.sans }}>
-                  {sectionCount} section{sectionCount !== 1 ? 's' : ''}
-                </span>
-                {generatedAgo && (
-                  <span style={{ fontSize: 12, color: `${banner.accent}66`, fontFamily: fonts.sans }}>
-                    · Generated {generatedAgo}
+                  <span style={{ fontSize: 15, fontWeight: 700, color: '#fff', fontFamily: fonts.sans }}>
+                    {banner.label}
                   </span>
+                  {reportDocument.week_label && (
+                    <span style={{ fontSize: 13, color: banner.accent, fontFamily: fonts.sans }}>
+                      · {reportDocument.week_label}
+                    </span>
+                  )}
+                  <span style={{ fontSize: 13, color: `${banner.accent}88`, fontFamily: fonts.sans }}>
+                    {sectionCount} section{sectionCount !== 1 ? 's' : ''}
+                  </span>
+                  {generatedAgo && (
+                    <span style={{ fontSize: 12, color: `${banner.accent}66`, fontFamily: fonts.sans }}>
+                      · Generated {generatedAgo}
+                    </span>
+                  )}
+                </div>
+                {hasLLMSummary && (
+                  <p style={{
+                    fontSize: 14,
+                    color: `${banner.accent}cc`,
+                    lineHeight: 1.6,
+                    marginTop: 6,
+                    maxWidth: 680,
+                    margin: 0,
+                    fontFamily: fonts.sans,
+                  }}>
+                    {reportDocument.headline}
+                  </p>
                 )}
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, paddingTop: hasLLMSummary ? 0 : 0 }}>
                 <button
                   onClick={() => window.print()}
                   style={{
