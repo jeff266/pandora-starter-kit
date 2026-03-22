@@ -1037,12 +1037,41 @@ agentsWorkspaceRouter.post('/:workspaceId/reports/:reportId/export/google-docs',
     const periodLabel = finalDoc.week_label || '';
     const title = [docType, periodLabel].filter(Boolean).join(' — ');
 
-    // 5. Upload to Google Drive — metadata mimeType triggers DOCX → Google Doc conversion
+    // 5. Extract plain text baseline for feedback comparison
+    const extractPlainText = (doc: any): string => {
+      const sections = doc.sections || [];
+      return sections
+        .map((s: any) => {
+          const title = s.title || '';
+          const content = (s.content || '')
+            .replace(/\*\*(.+?)\*\*/g, '$1')  // Remove bold
+            .replace(/\*(.+?)\*/g, '$1')       // Remove italic
+            .replace(/`(.+?)`/g, '$1')         // Remove code
+            .replace(/#+\s*/g, '');            // Remove headers
+          return `${title}\n\n${content}`.trim();
+        })
+        .filter(Boolean)
+        .join('\n\n');
+    };
+    const originalText = extractPlainText(finalDoc);
+
+    // 6. Upload to Google Drive — metadata mimeType triggers DOCX → Google Doc conversion
     const client = new GoogleDriveClient();
     const { id, webViewLink } = await client.createGoogleDoc(
       conn.credentials as GoogleDriveCredentials,
       title,
       buf
+    );
+
+    // 7. Store Google Doc metadata on report_documents for feedback loop
+    await query(
+      `UPDATE report_documents
+       SET google_doc_id = $1,
+           google_doc_url = $2,
+           google_doc_exported_at = NOW(),
+           google_doc_original_text = $3
+       WHERE id = $4 AND workspace_id = $5`,
+      [id, webViewLink, originalText, reportId, workspaceId]
     );
 
     return res.json({ doc_url: webViewLink, doc_id: id, title });

@@ -258,6 +258,75 @@ async function incrementFailureCount(reportId: string): Promise<number> {
 }
 
 /**
+ * Sunday evening read-back of Google Docs for feedback collection
+ * Runs at 8 PM on Sundays to pre-cache feedback before Monday WBR generation
+ */
+export async function checkGoogleDocsFeedback(): Promise<void> {
+  try {
+    const now = DateTime.now();
+
+    // Only run on Sundays between 8:00 PM and 8:59 PM
+    if (now.weekday !== 7) return; // 7 = Sunday
+    if (now.hour !== 20) return;   // 20:00 = 8 PM
+
+    logger.info('Running Sunday Google Docs feedback check');
+
+    // Find workspaces with WBR templates and recent Google Doc exports
+    const result = await query<{
+      workspace_id: string;
+      document_id: string;
+      document_type: string;
+    }>(
+      `SELECT DISTINCT
+         rd.workspace_id,
+         rd.id as document_id,
+         rd.document_type
+       FROM report_documents rd
+       JOIN report_templates rt ON rt.workspace_id = rd.workspace_id
+       WHERE rd.google_doc_id IS NOT NULL
+         AND rd.document_type IN ('wbr', 'qbr')
+         AND rd.generated_at >= NOW() - INTERVAL '14 days'
+         AND rt.is_active = true
+         AND rt.cadence != 'manual'
+       ORDER BY rd.generated_at DESC`,
+      []
+    );
+
+    if (result.rows.length === 0) {
+      logger.info('No recent Google Doc exports found');
+      return;
+    }
+
+    logger.info(`Found ${result.rows.length} document(s) to check for feedback`);
+
+    const { readGoogleDocFeedback } = await import('./google-docs-feedback.js');
+
+    for (const row of result.rows) {
+      try {
+        const feedback = await readGoogleDocFeedback(row.workspace_id, row.document_id);
+        if (feedback) {
+          logger.info('Feedback collected', {
+            workspace_id: row.workspace_id,
+            document_id: row.document_id,
+            has_meaningful_changes: feedback.has_meaningful_changes,
+          });
+        }
+      } catch (err) {
+        logger.error('Feedback read failed', {
+          workspace_id: row.workspace_id,
+          document_id: row.document_id,
+          error: err instanceof Error ? err.message : 'Unknown error',
+        });
+      }
+    }
+
+    logger.info('Sunday feedback check complete');
+  } catch (err) {
+    logger.error('Sunday feedback check failed', err instanceof Error ? err : undefined);
+  }
+}
+
+/**
  * Initialize next_due_at for all active reports that don't have it set
  */
 export async function initializeScheduledReports(): Promise<void> {

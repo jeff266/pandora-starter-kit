@@ -197,6 +197,7 @@ export async function generateSectionContent(
   section: ReportSection,
   voiceConfig: VoiceConfig,
   documentType?: string,
+  priorFeedback?: any | null
 ): Promise<SectionContent> {
   logger.info('Generating section content', { section_id: section.id, skills: section.skills });
 

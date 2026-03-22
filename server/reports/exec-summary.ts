@@ -66,11 +66,28 @@ export async function generateExecSummary(
   sections: SectionContent[],
   documentType: 'wbr' | 'qbr',
   periodLabel: string,
-  workspaceId: string
+  workspaceId: string,
+  priorFeedback?: any | null
 ): Promise<string | null> {
   try {
     const compressed = compressSections(sections);
     if (!compressed.trim()) return null;
+
+    // Build feedback context if available
+    let feedbackContext = '';
+    if (priorFeedback?.has_meaningful_changes) {
+      feedbackContext = [
+        '',
+        'PRIOR WEEK FEEDBACK:',
+        `Prior week's report was edited by the team after export.`,
+        `Changes made: ${priorFeedback.diff_summary}`,
+        '',
+        'Let these edits inform your emphasis and framing this week.',
+        'If sections were removed last week, weight them less.',
+        'If numbers were corrected, note the data quality concern.',
+        '',
+      ].join('\n');
+    }
 
     const result = await callLLM(workspaceId, 'generate', {
       systemPrompt: [
@@ -86,6 +103,7 @@ export async function generateExecSummary(
         '• Sentence 2: the biggest risk or week-over-week change.',
         '• Sentence 3: the single action required this period.',
         '• If a metric is unavailable, write a directional statement ("pipeline coverage remains under review") rather than omitting the sentence.',
+        feedbackContext,
       ].join('\n'),
       messages: [
         {

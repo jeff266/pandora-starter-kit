@@ -694,9 +694,10 @@ async function initializeAfterStart(t0: number, tDb: number): Promise<void> {
   const { startCrmRetryScheduler } = await import('./jobs/crm-retry-scheduler.js');
   startCrmRetryScheduler(dbPool);
 
-  const { checkScheduledReports, initializeScheduledReports } = await import('./reports/scheduler.js');
+  const { checkScheduledReports, initializeScheduledReports, checkGoogleDocsFeedback } = await import('./reports/scheduler.js');
   await initializeScheduledReports();
   setInterval(checkScheduledReports, 60 * 1000);
+  setInterval(checkGoogleDocsFeedback, 60 * 1000); // Runs every minute, but only acts on Sunday 8 PM
 
   const { flushDigests } = await import('./notifications/digest.js');
   setInterval(flushDigests, 15 * 60 * 1000);

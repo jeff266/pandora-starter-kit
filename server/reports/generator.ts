@@ -130,6 +130,43 @@ export async function generateReport(request: GenerateReportRequest): Promise<Re
     ? await checkSkillFreshness(workspace_id, requiredSkills, FRESHNESS_THRESHOLD_MS)
     : new Map<string, 'fresh' | 'stale' | 'missing'>();
 
+  // 4b. For WBR/QBR: check for prior doc feedback from Google Docs edits
+  let priorFeedback: any | null = null;
+  if (isWbrOrQbr) {
+    try {
+      // Find the most recent prior WBR/QBR document for this workspace
+      const priorDocResult = await query<{
+        id: string;
+        google_doc_id: string | null;
+      }>(
+        `SELECT id, google_doc_id
+         FROM report_documents
+         WHERE workspace_id = $1
+           AND document_type = $2
+           AND google_doc_id IS NOT NULL
+         ORDER BY generated_at DESC
+         LIMIT 1`,
+        [workspace_id, document_type]
+      );
+
+      if (priorDocResult.rows.length > 0) {
+        const { readGoogleDocFeedback } = await import('./google-docs-feedback.js');
+        priorFeedback = await readGoogleDocFeedback(
+          workspace_id,
+          priorDocResult.rows[0].id
+        );
+        if (priorFeedback) {
+          logger.info('Prior Google Doc feedback loaded', {
+            has_meaningful_changes: priorFeedback.has_meaningful_changes,
+            word_count_delta: priorFeedback.word_count_delta,
+          });
+        }
+      }
+    } catch (err) {
+      logger.warn('Failed to load prior feedback (non-fatal)', err instanceof Error ? err : undefined);
+    }
+  }
+
   // 5. Generate content for each section
   logger.info('Generating section content', { section_count: enabledSections.length });
   const sectionsContent: SectionContent[] = [];
@@ -161,7 +198,13 @@ export async function generateReport(request: GenerateReportRequest): Promise<Re
     }
 
     try {
-      const content = await generateSectionContent(workspace_id, section, template.voice_config, document_type);
+      const content = await generateSectionContent(
+        workspace_id,
+        section,
+        template.voice_config,
+        document_type,
+        priorFeedback
+      );
       sectionsContent.push(content);
     } catch (err) {
       logger.error('Section generation failed', err instanceof Error ? err : undefined);
@@ -308,7 +351,8 @@ export async function generateReport(request: GenerateReportRequest): Promise<Re
         sectionsContent,
         document_type,
         period_label ?? new Date().toLocaleDateString(),
-        workspace_id
+        workspace_id,
+        priorFeedback
       );
       if (summary) {
         headline = summary;
