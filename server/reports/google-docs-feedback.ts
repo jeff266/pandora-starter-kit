@@ -23,34 +23,22 @@ export interface DocFeedback {
 }
 
 /**
- * Simple Levenshtein distance implementation for change detection
+ * Fast approximate change ratio between two strings.
+ * Compares first 5000 characters to avoid large memory allocation on long docs.
+ * Returns a ratio 0.0–1.0 where 0 = identical, 1 = completely different.
  */
-function levenshteinDistance(a: string, b: string): number {
-  const matrix: number[][] = [];
-
-  for (let i = 0; i <= b.length; i++) {
-    matrix[i] = [i];
+function changeRatio(a: string, b: string): number {
+  const aShort = a.slice(0, 5000);
+  const bShort = b.slice(0, 5000);
+  const maxLen = Math.max(aShort.length, bShort.length);
+  if (maxLen === 0) return 0;
+  let diffs = 0;
+  const minLen = Math.min(aShort.length, bShort.length);
+  for (let i = 0; i < minLen; i++) {
+    if (aShort[i] !== bShort[i]) diffs++;
   }
-
-  for (let j = 0; j <= a.length; j++) {
-    matrix[0][j] = j;
-  }
-
-  for (let i = 1; i <= b.length; i++) {
-    for (let j = 1; i <= a.length; j++) {
-      if (b.charAt(i - 1) === a.charAt(j - 1)) {
-        matrix[i][j] = matrix[i - 1][j - 1];
-      } else {
-        matrix[i][j] = Math.min(
-          matrix[i - 1][j - 1] + 1, // substitution
-          matrix[i][j - 1] + 1,     // insertion
-          matrix[i - 1][j] + 1      // deletion
-        );
-      }
-    }
-  }
-
-  return matrix[b.length][a.length];
+  diffs += Math.abs(aShort.length - bShort.length);
+  return diffs / maxLen;
 }
 
 /**
@@ -122,10 +110,9 @@ export async function readGoogleDocFeedback(
     const currentWords = currentText.split(/\s+/).length;
     const wordDelta = currentWords - originalWords;
 
-    // Levenshtein distance > 5% of original length = meaningful changes
-    const distance = levenshteinDistance(original, currentText);
-    const changeRatio = distance / original.length;
-    const hasMeaningfulChanges = changeRatio > 0.05;
+    // Change ratio > 5% = meaningful changes
+    const ratio = changeRatio(original, currentText);
+    const hasMeaningfulChanges = ratio > 0.05;
 
     let diffSummary = 'No significant changes detected.';
 
@@ -161,7 +148,7 @@ Be specific. Under 150 words.`;
     logger.info('Google Doc feedback collected', {
       documentId,
       wordDelta,
-      changeRatio: Math.round(changeRatio * 100) + '%',
+      changeRatio: Math.round(ratio * 100) + '%',
       hasMeaningfulChanges,
     });
 
