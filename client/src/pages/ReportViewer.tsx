@@ -1395,7 +1395,12 @@ export default function ReportViewer() {
                 })()}
 
                 {/* Sections */}
-                {reportDocument.sections.map((section, sectionIndex) => {
+                {reportDocument.sections.map((rawSection: any, sectionIndex) => {
+                  const section = {
+                    ...rawSection,
+                    id: rawSection.section_id ?? rawSection.id ?? `section-${sectionIndex}`,
+                    content: rawSection.content ?? rawSection.narrative ?? '',
+                  };
                   const wid = currentWorkspace?.id || workspaceId || '';
                   const sectionChartList = sectionCharts[section.id] || [];
                   return (
