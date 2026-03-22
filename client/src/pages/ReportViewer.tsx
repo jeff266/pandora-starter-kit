@@ -14,6 +14,7 @@ import AnnotatableSection, { type Annotation as DocAnnotation } from '../compone
 import { ContextMenu as DocContextMenu } from '../components/report/ContextMenu';
 import ChartBuilder from '../components/report/ChartBuilder';
 import SectionEditor from '../components/report/SectionEditor';
+import EvidenceDrawer from '../components/report/EvidenceDrawer';
 import PrepareForClientModal from '../components/report/PrepareForClientModal';
 import type { ExportConfig } from '../types/export';
 import ReportContextMenu, { type ReportContextTarget } from '../components/reports/ReportContextMenu';
@@ -162,6 +163,11 @@ export default function ReportViewer() {
   const [hasUsedRightClick] = useState(
     () => localStorage.getItem('pandora-rightclick-hint-dismissed') === 'true'
   );
+  const [evidenceDrawer, setEvidenceDrawer] = useState<{
+    sectionId: string;
+    claimId: string;
+    claimText: string;
+  } | null>(null);
   const { canAnnotateReports } = usePermissions();
   const { currentWorkspace } = useWorkspace();
 
@@ -1736,6 +1742,7 @@ export default function ReportViewer() {
                         existingSignal={feedbackSummary?.sections?.[section.section_id]?.signals?.[0] || null}
                         onContextMenu={handleContextMenu}
                         humanAnnotations={annotations}
+                        onEvidenceDrill={reportDocument ? (sid, cid, ct) => setEvidenceDrawer({ sectionId: sid, claimId: cid, claimText: ct }) : undefined}
                       />
                     </div>
                   );
@@ -1935,6 +1942,29 @@ export default function ReportViewer() {
         </div>
       )}
 
+      {/* Evidence Drill-Through */}
+      {evidenceDrawer && (
+        <>
+          <div
+            onClick={() => setEvidenceDrawer(null)}
+            style={{
+              position: 'fixed',
+              inset: 0,
+              background: 'rgba(0,0,0,0.35)',
+              zIndex: 200,
+            }}
+          />
+          <EvidenceDrawer
+            workspaceId={workspaceId ?? ''}
+            documentId={reportDocument?.id ?? ''}
+            sectionId={evidenceDrawer.sectionId}
+            claimId={evidenceDrawer.claimId}
+            claimText={evidenceDrawer.claimText}
+            onClose={() => setEvidenceDrawer(null)}
+          />
+        </>
+      )}
+
     </div>
   );
 }
@@ -1950,6 +1980,7 @@ interface ReportSectionProps {
   existingSignal?: string | null;
   onContextMenu?: (e: React.MouseEvent, target: import('../components/reports/ReportContextMenu').ReportContextTarget) => void;
   humanAnnotations?: import('../components/reports/ReportAnnotationEditor').Annotation[];
+  onEvidenceDrill?: (sectionId: string, claimId: string, claimText: string) => void;
 }
 
 function getPrimaryDelta(metrics?: MetricCard[]): MetricCard | null {
@@ -1988,7 +2019,7 @@ function DeltaBadge({ metric }: { metric: MetricCard }) {
   );
 }
 
-function ReportSection({ section, isCollapsed, onToggle, anonymizeMode, workspaceId, agentId, generationId, existingSignal, onContextMenu, humanAnnotations }: ReportSectionProps) {
+function ReportSection({ section, isCollapsed, onToggle, anonymizeMode, workspaceId, agentId, generationId, existingSignal, onContextMenu, humanAnnotations, onEvidenceDrill }: ReportSectionProps) {
   const primaryDelta = getPrimaryDelta(section.metrics);
   return (
     <div id={section.section_id} style={{ background: colors.surface, borderRadius: 8, border: `1px solid ${colors.border}`, overflow: 'hidden' }}>
@@ -2036,6 +2067,8 @@ function ReportSection({ section, isCollapsed, onToggle, anonymizeMode, workspac
                   {section.metrics.map((metric, idx) => {
                     const blockId = `${section.section_id}:metric:${idx}`;
                     const annotation = humanAnnotations?.find(a => a.block_id === blockId);
+                    const drillClaimId = metric.metric_name ?? metric.label.toLowerCase().replace(/\s+/g, '_');
+                    const isDrillable = !!onEvidenceDrill;
                     return (
                       <div
                         key={idx}
@@ -2046,11 +2079,15 @@ function ReportSection({ section, isCollapsed, onToggle, anonymizeMode, workspac
                           sectionTitle: section.title,
                           blockId,
                         }) : undefined}
+                        onClick={isDrillable ? () => onEvidenceDrill!(section.section_id, drillClaimId, metric.label) : undefined}
+                        style={isDrillable ? { cursor: 'pointer', position: 'relative' } : undefined}
+                        title={isDrillable ? 'Click to see underlying deals' : undefined}
                       >
                         <MetricCardComponent
                           metric={metric}
                           annotationOverride={annotation?.new_value ?? undefined}
                           annotationOriginal={annotation?.type === 'override' ? annotation.original_value : undefined}
+                          drillable={isDrillable}
                         />
                       </div>
                     );
@@ -2248,10 +2285,11 @@ function ReportSection({ section, isCollapsed, onToggle, anonymizeMode, workspac
   );
 }
 
-function MetricCardComponent({ metric, annotationOverride, annotationOriginal }: {
+function MetricCardComponent({ metric, annotationOverride, annotationOriginal, drillable }: {
   metric: MetricCard;
   annotationOverride?: string;
   annotationOriginal?: string;
+  drillable?: boolean;
 }) {
   const severityColors = {
     critical: { bg: '#7f1d1d', border: '#991b1b', accent: '#dc2626' },
@@ -2270,7 +2308,23 @@ function MetricCardComponent({ metric, annotationOverride, annotationOriginal }:
       borderLeft: `4px solid ${annotationOverride ? '#00BFA5' : colorScheme.accent}`,
       borderRadius: 8,
       padding: 16,
+      position: 'relative',
     }}>
+      {drillable && (
+        <span
+          style={{
+            position: 'absolute',
+            top: 10,
+            right: 10,
+            fontSize: 11,
+            color: hasSeverity ? 'rgba(255,255,255,0.35)' : colors.textMuted,
+            fontFamily: fonts.sans,
+            pointerEvents: 'none',
+          }}
+        >
+          ↗
+        </span>
+      )}
       <div style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.05em', color: hasSeverity ? 'rgba(255,255,255,0.6)' : colors.textSecondary, fontWeight: 600, fontFamily: fonts.sans }}>{metric.label}</div>
       <div style={{ marginTop: 8, display: 'flex', alignItems: 'baseline', gap: 8 }}>
         {annotationOverride ? (

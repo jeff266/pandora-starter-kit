@@ -9,6 +9,7 @@ import { createLogger } from '../utils/logger.js';
 const logger = createLogger('SectionGenerator');
 
 interface SkillRunRow {
+  id: string;
   skill_id: string;
   output: any;
   output_text: string | null;
@@ -18,6 +19,7 @@ interface SkillRunRow {
 
 interface SkillEvidence {
   skill_id: string;
+  run_id: string;
   output: any;
   narrative: string;
   evidence: any;
@@ -33,7 +35,7 @@ async function fetchSkillEvidence(
   if (skillIds.length === 0) return new Map();
 
   const result = await query<SkillRunRow>(
-    `SELECT DISTINCT ON (skill_id) skill_id, output, output_text, created_at, status
+    `SELECT DISTINCT ON (skill_id) id, skill_id, output, output_text, created_at, status
      FROM skill_runs
      WHERE workspace_id = $1 AND skill_id = ANY($2) AND status = 'completed' AND output IS NOT NULL
      ORDER BY skill_id, created_at DESC`,
@@ -66,6 +68,7 @@ async function fetchSkillEvidence(
 
     evidenceMap.set(row.skill_id, {
       skill_id: row.skill_id,
+      run_id: row.id,
       output: typeof output === 'string' ? { narrative: output } : output,
       narrative,
       evidence,
@@ -208,11 +211,17 @@ export async function generateSectionContent(
     }
   }
 
+  const skillRunIds: Record<string, string> = {};
+  for (const [skillId, ev] of evidenceMap) {
+    if (ev.run_id) skillRunIds[skillId] = ev.run_id;
+  }
+
   const content: SectionContent = {
     section_id: section.id,
     title: section.label,
     narrative: '',
     source_skills: section.skills,
+    skill_run_ids: skillRunIds,
     data_freshness: getBestFreshness(evidenceMap),
     confidence: evidenceMap.size > 0 ? Math.min(0.95, 0.5 + (evidenceMap.size / section.skills.length) * 0.45) : 0.3,
     metrics: [],

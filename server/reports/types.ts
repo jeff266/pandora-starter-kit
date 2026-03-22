@@ -85,6 +85,7 @@ export interface SectionContent {
 
   // Metadata
   source_skills: string[];
+  skill_run_ids?: Record<string, string>; // skill_id → run_id, populated at generation time
   data_freshness: string;               // ISO timestamp
   confidence: number;                   // 0-1, from underlying evidence
 }

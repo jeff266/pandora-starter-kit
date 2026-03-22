@@ -1142,6 +1142,115 @@ function parseDuration(duration: string): number {
   }
 }
 
+// GET /api/workspaces/:workspaceId/reports/documents/:documentId/evidence
+// Query params: section_id, claim_id
+// Returns evaluated_records filtered to the claim's entity_ids
+router.get('/:workspaceId/reports/documents/:documentId/evidence', async (req: Request, res: Response) => {
+  try {
+    const { workspaceId, documentId } = req.params;
+    const { section_id, claim_id } = req.query as { section_id?: string; claim_id?: string };
+
+    if (!section_id || !claim_id) {
+      return res.status(400).json({ error: 'section_id and claim_id are required' });
+    }
+
+    const docResult = await query(
+      `SELECT sections, generated_at FROM report_documents WHERE id = $1 AND workspace_id = $2`,
+      [documentId, workspaceId]
+    );
+    if (!docResult.rows.length) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+
+    const sections: any[] = docResult.rows[0].sections ?? [];
+    const generatedAt: string = docResult.rows[0].generated_at;
+
+    const section = sections.find((s: any) => s.section_id === section_id);
+    if (!section) {
+      return res.status(404).json({ error: 'Section not found' });
+    }
+
+    let foundClaim: any = null;
+    let foundRecords: any[] = [];
+
+    // Path 1: use stored skill_run_ids (new docs)
+    const skillRunIds: Record<string, string> = section.skill_run_ids ?? {};
+    for (const [, runId] of Object.entries(skillRunIds)) {
+      const run = await query(
+        `SELECT output->'evidence'->'claims' as claims,
+                output->'evidence'->'evaluated_records' as records
+         FROM skill_runs WHERE id = $1 AND workspace_id = $2`,
+        [runId, workspaceId]
+      );
+      if (!run.rows.length) continue;
+
+      const claims: any[] = run.rows[0].claims ?? [];
+      const records: any[] = run.rows[0].records ?? [];
+      const claim = claims.find((c: any) => c.claim_id === claim_id);
+      if (!claim) continue;
+
+      foundClaim = claim;
+      foundRecords = records;
+      break;
+    }
+
+    // Path 2: timestamp-based fallback (legacy docs without skill_run_ids)
+    if (!foundClaim) {
+      const sourceSkills: string[] = section.source_skills ?? [];
+      for (const skillId of sourceSkills) {
+        const run = await query(
+          `SELECT output->'evidence'->'claims' as claims,
+                  output->'evidence'->'evaluated_records' as records
+           FROM skill_runs
+           WHERE workspace_id = $1
+             AND skill_id = $2
+             AND status = 'completed'
+             AND created_at <= $3
+             AND created_at > $3::timestamptz - INTERVAL '24 hours'
+           ORDER BY created_at DESC LIMIT 1`,
+          [workspaceId, skillId, generatedAt]
+        );
+        if (!run.rows.length) continue;
+
+        const claims: any[] = run.rows[0].claims ?? [];
+        const records: any[] = run.rows[0].records ?? [];
+        const claim = claims.find((c: any) => c.claim_id === claim_id);
+        if (!claim) continue;
+
+        foundClaim = claim;
+        foundRecords = records;
+        break;
+      }
+    }
+
+    if (!foundClaim) {
+      return res.status(404).json({ error: 'Claim not found', claim_id });
+    }
+
+    const entityIds = new Set<string>(foundClaim.entity_ids ?? []);
+    const matchedRecords: any[] = entityIds.size > 0
+      ? foundRecords.filter((r: any) => entityIds.has(r.entity_id))
+      : [];
+
+    return res.json({
+      claim: {
+        claim_id: foundClaim.claim_id,
+        claim_text: foundClaim.claim_text,
+        severity: foundClaim.severity,
+        metric_name: foundClaim.metric_name,
+        threshold_applied: foundClaim.threshold_applied,
+        entity_count: matchedRecords.length,
+      },
+      records: matchedRecords.slice(0, 50),
+      total: matchedRecords.length,
+      truncated: matchedRecords.length > 50,
+    });
+  } catch (err) {
+    logger.error('Evidence lookup failed', err instanceof Error ? err : undefined);
+    res.status(500).json({ error: 'Failed to load evidence' });
+  }
+});
+
 const REPORT_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 export function cleanupReportFiles() {
