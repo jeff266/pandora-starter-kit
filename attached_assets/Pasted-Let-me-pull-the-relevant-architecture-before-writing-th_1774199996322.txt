@@ -1,0 +1,55 @@
+Let me pull the relevant architecture before writing these:Need to see the existing deliberation engine before writing any of these. Send this investigation first:
+
+```
+Read only. No changes. Four investigations in parallel.
+
+--- INVESTIGATION 1: Deliberation engine ---
+
+1. server/chat/deliberation-engine.ts — full file. Show:
+   - The complete runDeliberation() function signature
+   - The complete bull_bear runner (the 3 LLM calls: bull,
+     bear, verdict)
+   - The DeliberationResult return shape
+   - How callLLM() is called — model, capability, prompt shape
+   - The deliberation_runs table write — what gets stored
+
+2. server/chat/intent-classifier.ts — show classifyDeliberationMode()
+   and the DeliberationMode type. Confirm 'boardroom', 'socratic',
+   'prosecutor_defense' are in the union but have no runners.
+
+--- INVESTIGATION 2: Google Drive client ---
+
+3. server/connectors/google-drive/client.ts — show:
+   - All methods on GoogleDriveClient
+   - Does any method read document content? (exportDocument
+     was mentioned in a prior investigation)
+   - Does it call the Google Docs API (docs.googleapis.com)?
+   - What OAuth scopes are currently granted?
+
+4. The Google Docs export we just built — what does it store?
+   Specifically: is the Google Doc ID (doc_id from createGoogleDoc)
+   stored anywhere in report_documents or a related table?
+
+--- INVESTIGATION 3: Hypothesis schema ---
+
+5. Find the hypotheses table — show the full schema from
+   migrations. Specifically:
+   - Is there a 'unit' column?
+   - What does the metric_value or threshold column look like?
+   - Is there a hypothesis_drafts table?
+
+6. Find validateHypothesisUnits() — does it exist anywhere?
+
+7. Find formatMetricValue() — does it exist? Show it.
+   Does it use metric-name heuristics to determine format,
+   or a unit field?
+
+--- INVESTIGATION 4: deliberation_runs table ---
+
+8. Show the deliberation_runs table schema from migrations.
+   What columns exist? What pattern/mode field is there?
+
+Report all findings. No changes.
+```
+
+Once that comes back I'll write all four specs in one prompt.
