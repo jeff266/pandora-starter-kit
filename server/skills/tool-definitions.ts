@@ -8268,25 +8268,30 @@ const mcWritePortfolioCompositionHypothesis: ToolDefinition = {
         };
       }
 
-      const reviewDate = new Date();
-      reviewDate.setDate(reviewDate.getDate() + 56);
+      const { validateHypothesisUnits: _validateMcHyp } = await import('../lib/validate-hypothesis-units.js');
+      const mcHypData: { metric: string; current_value?: number; alert_threshold?: number; unit: string } = {
+        metric: composition.swingVariable,
+        current_value: currentValue ?? undefined,
+        alert_threshold: alertThreshold ?? undefined,
+        unit: '$',
+      };
+      const mcValidation = _validateMcHyp(mcHypData);
+      if (mcValidation.corrected) Object.assign(mcHypData, mcValidation.corrected);
 
       const result = await query(
-        `INSERT INTO standing_hypotheses (
-           workspace_id, hypothesis, metric, current_value,
-           alert_threshold, alert_direction, review_date,
-           status, source, weekly_values
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', 'monte_carlo', $8)
+        `INSERT INTO hypothesis_drafts
+           (workspace_id, hypothesis_text, metric, current_value,
+            alert_threshold, alert_direction, unit, source)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'auto_generated')
          RETURNING id`,
         [
           context.workspaceId,
           composition.swingDescription,
           composition.swingVariable,
-          currentValue,
-          alertThreshold,
+          mcHypData.current_value ?? currentValue,
+          mcHypData.alert_threshold ?? alertThreshold,
           'below',
-          reviewDate.toISOString().split('T')[0],
-          JSON.stringify([{ weekOf: new Date().toISOString().split('T')[0], value: currentValue }]),
+          mcHypData.unit,
         ]
       ).catch(() => ({ rows: [] as any[] }));
 
@@ -10535,20 +10540,29 @@ export const toolRegistry = new Map<string, ToolDefinition>([
         reviewDate.setDate(reviewDate.getDate() + reviewWeeks * 7);
 
         try {
+          const { validateHypothesisUnits: _validatePmHyp } = await import('../lib/validate-hypothesis-units.js');
+          const pmHypData: { metric: string; current_value?: number; alert_threshold?: number; unit: string } = {
+            metric: mode.metric ?? 'unknown_metric',
+            current_value: mode.currentValue ?? undefined,
+            alert_threshold: mode.alertThreshold ?? 0,
+            unit: '$',
+          };
+          const pmValidation = _validatePmHyp(pmHypData);
+          if (pmValidation.corrected) Object.assign(pmHypData, pmValidation.corrected);
+
           const result = await query<{ id: string }>(
-            `INSERT INTO standing_hypotheses
-               (workspace_id, source, hypothesis, metric, current_value, alert_threshold, alert_direction, review_date, status, weekly_values)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active', '[]')
+            `INSERT INTO hypothesis_drafts
+               (workspace_id, hypothesis_text, metric, current_value, alert_threshold, alert_direction, unit, source)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, 'auto_generated')
              RETURNING id`,
             [
               workspaceId,
-              'pre_mortem',
               mode.hypothesis ?? mode.name ?? 'Unknown failure mode',
-              mode.metric ?? 'unknown_metric',
-              mode.currentValue ?? null,
-              mode.alertThreshold ?? 0,
+              pmHypData.metric,
+              pmHypData.current_value ?? null,
+              pmHypData.alert_threshold,
               mode.alertDirection ?? 'below',
-              reviewDate.toISOString().split('T')[0],
+              pmHypData.unit,
             ]
           );
           if (result.rows.length > 0) {
