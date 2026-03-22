@@ -430,8 +430,34 @@ export interface HypothesisRedTeamResult {
   tokenCost: number;
 }
 
-function formatMetricValue(value: number, metric: string): string {
-  const m = metric.toLowerCase();
+/**
+ * Format metric value for display
+ * @param value - The numeric value
+ * @param metricOrUnit - Either a unit ('$', 'x', '%', 'days', 'count', 'multiple') or metric name as fallback
+ * @returns Formatted string
+ */
+function formatMetricValue(value: number, metricOrUnit: string): string {
+  // Try unit-based formatting first (explicit unit field from hypothesis)
+  const validUnits = ['$', 'x', '%', 'days', 'count', 'multiple'];
+  if (validUnits.includes(metricOrUnit)) {
+    switch (metricOrUnit) {
+      case '$':
+        return formatCurrency(value);
+      case 'x':
+      case 'multiple':
+        return `${value.toFixed(1)}x`;
+      case '%':
+        // Ratios stored as 0-1, display ×100
+        return `${Math.round(value * 100)}%`;
+      case 'days':
+        return `${Math.round(value)} days`;
+      case 'count':
+        return value.toFixed(1);
+    }
+  }
+
+  // Fall back to metric-name heuristics for backwards compatibility
+  const m = metricOrUnit.toLowerCase();
   if (m.includes('ratio')) return `${value.toFixed(1)}x`;
   // cohort metrics store either a ratio (≤1, e.g. 0.6 = 60%) or a deal-close count (>1, e.g. 236).
   // Apply × 100 only for ratio values to avoid e.g. 236.1 → "23610%".
