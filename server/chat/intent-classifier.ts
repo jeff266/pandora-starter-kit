@@ -153,7 +153,13 @@ export interface IntentClassification {
   is_followup_doc?: boolean;    // true when user wants previous response converted to a doc
 }
 
-export type DeliberationMode = 'bull_bear' | 'red_team' | 'none';
+export type DeliberationMode =
+  | 'bull_bear'
+  | 'red_team'
+  | 'boardroom'
+  | 'socratic'
+  | 'prosecutor_defense'
+  | 'none';
 
 export interface DeliberationClassification {
   mode: DeliberationMode;
@@ -430,6 +436,62 @@ export async function classifyDeliberationMode(
     }
   }
 
+  // Fast-path: boardroom deliberation (multi-stakeholder decision)
+  const BOARDROOM_PATTERNS = [
+    /\bwhat should (we|the team) do\b/i,
+    /\bhow should (we|i) handle\b/i,
+    /\bwe('re| are) considering\b/i,
+    /\bprioritize\b.*\bor\b/i,
+    /\btrade.?off\b/i,
+  ];
+
+  for (const pattern of BOARDROOM_PATTERNS) {
+    if (pattern.test(message)) {
+      return {
+        mode: 'boardroom',
+        confidence: 1,
+        rationale: 'boardroom decision pattern',
+      };
+    }
+  }
+
+  // Fast-path: socratic questioning (assumption examination)
+  const SOCRATIC_PATTERNS = [
+    /\bi (think|believe|feel) (the problem|this)\b/i,
+    /\bdoes this make sense\b/i,
+    /\bwhy (isn't|is|are|aren't)\b/i,
+    /\bam i (right|wrong|missing)\b/i,
+    /\bis (this|that|my) (assumption|hypothesis|theory)\b/i,
+  ];
+
+  for (const pattern of SOCRATIC_PATTERNS) {
+    if (pattern.test(message)) {
+      return {
+        mode: 'socratic',
+        confidence: 1,
+        rationale: 'socratic questioning pattern',
+      };
+    }
+  }
+
+  // Fast-path: prosecutor/defense (plan stress-testing)
+  const PROSECUTOR_PATTERNS = [
+    /\bwe('re| are) planning (to|on)\b/i,
+    /\bwe (decided|decided to)\b/i,
+    /\bour (plan|strategy|approach) is\b/i,
+    /\bwe('re| are) going to\b/i,
+  ];
+
+  for (const pattern of PROSECUTOR_PATTERNS) {
+    if (pattern.test(message)) {
+      return {
+        mode: 'prosecutor_defense',
+        confidence: 1,
+        rationale: 'plan stress-testing pattern',
+      };
+    }
+  }
+
   // Negative guard — these are data questions, not deliberation
   const DATA_QUESTION_PREFIXES = [
     'show me',
@@ -472,10 +534,19 @@ Examples: "will this deal close?", "should we walk away?", "what's the probabili
 red_team: Question about validating a hypothesis, sprint plan, or whether a proposed action is sufficient.
 Examples: "will this sprint work?", "is this hypothesis right?", "does this plan address the root cause?"
 
+boardroom: Question requiring multi-stakeholder perspective (CEO/CFO/VP Sales). What should we do? How should we handle this? Trade-offs between options.
+Examples: "what should we do about pipeline coverage?", "how should we prioritize these deals?", "should we invest in outbound or product?"
+
+socratic: User is stating an assumption or belief and wants it examined/challenged. "I think...", "Does this make sense?", "Am I right?"
+Examples: "I think the problem is lack of discovery", "does it make sense to focus on enterprise?", "am I missing something?"
+
+prosecutor_defense: User is stating a plan and wants it stress-tested. "We're planning to...", "Our strategy is...", "We decided to..."
+Examples: "we're planning to hire 5 SDRs", "our strategy is to target healthcare", "we decided to cut prices 20%"
+
 none: Everything else — data lookups, pipeline questions, rep questions, general advice, list requests.
 
 Respond ONLY with JSON:
-{ "mode": "bull_bear" | "red_team" | "none", "confidence": 0.0, "rationale": "one sentence" }`,
+{ "mode": "bull_bear" | "red_team" | "boardroom" | "socratic" | "prosecutor_defense" | "none", "confidence": 0.0, "rationale": "one sentence" }`,
       messages: [{
         role: 'user',
         content: `Context: ${context.scopeType || 'unknown'} scope${context.entityId ? ', entity present' : ''}\nMessage: "${message}"`,

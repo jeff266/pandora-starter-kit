@@ -683,3 +683,338 @@ HYPOTHESIS GAP: ${gapLabel} remaining to close.
     tokenCost,
   };
 }
+
+// ============================================================================
+// Boardroom Deliberation (CEO/CFO/VP Sales perspectives)
+// ============================================================================
+
+export interface BoardroomResult {
+  question: string;
+  panels: Array<{
+    role: 'CEO' | 'CFO' | 'VP Sales';
+    output: string;
+    color_hint: 'synthesis' | 'bear' | 'bull';
+  }>;
+  synthesis: string;
+  tokenCost: number;
+}
+
+export async function runBoardroomDeliberation(
+  workspaceId: string,
+  question: string,
+  context: string
+): Promise<BoardroomResult | null> {
+  try {
+    // Call 1: CEO perspective (revenue + growth lens)
+    const ceoResult = await callLLM(workspaceId, 'reason', {
+      systemPrompt: `You are the CEO of a B2B SaaS company reviewing a RevOps question.
+Your lens: revenue growth, market position, long-term strategy.
+
+Give your perspective in 3-4 sentences. Lead with the strategic implication. What matters most from a CEO lens?`,
+      messages: [{
+        role: 'user',
+        content: `Question: ${question}\n\nContext: ${context}`,
+      }],
+      maxTokens: 400,
+      temperature: 0.3,
+      _tracking: { workspaceId, phase: 'chat', stepName: 'boardroom-ceo' },
+    });
+
+    // Call 2: CFO perspective (efficiency + risk lens)
+    const cfoResult = await callLLM(workspaceId, 'reason', {
+      systemPrompt: `You are the CFO of a B2B SaaS company reviewing a RevOps question.
+Your lens: capital efficiency, forecast accuracy, risk management.
+
+Give your perspective in 3-4 sentences. Lead with the financial or risk implication. What would you push back on?`,
+      messages: [{
+        role: 'user',
+        content: `Question: ${question}\n\nContext: ${context}`,
+      }],
+      maxTokens: 400,
+      temperature: 0.3,
+      _tracking: { workspaceId, phase: 'chat', stepName: 'boardroom-cfo' },
+    });
+
+    // Call 3: VP Sales perspective (execution + team lens)
+    const vpResult = await callLLM(workspaceId, 'reason', {
+      systemPrompt: `You are the VP of Sales reviewing a RevOps question.
+Your lens: rep performance, pipeline execution, quota attainment.
+
+Give your perspective in 3-4 sentences. Lead with the execution implication. What does the team need to do differently?`,
+      messages: [{
+        role: 'user',
+        content: `Question: ${question}\n\nContext: ${context}`,
+      }],
+      maxTokens: 400,
+      temperature: 0.3,
+      _tracking: { workspaceId, phase: 'chat', stepName: 'boardroom-vp' },
+    });
+
+    const ceoOutput = ceoResult.content || '';
+    const cfoOutput = cfoResult.content || '';
+    const vpOutput = vpResult.content || '';
+
+    // Call 4: Synthesis
+    const synthesisResult = await callLLM(workspaceId, 'reason', {
+      systemPrompt: `Three perspectives on this question:
+CEO: ${ceoOutput}
+CFO: ${cfoOutput}
+VP Sales: ${vpOutput}
+
+Synthesize in 2-3 sentences. Where do they agree? What is the single most important consideration?`,
+      messages: [{
+        role: 'user',
+        content: 'Synthesize the perspectives.',
+      }],
+      maxTokens: 350,
+      temperature: 0.2,
+      _tracking: { workspaceId, phase: 'chat', stepName: 'boardroom-synthesis' },
+    });
+
+    const synthesis = synthesisResult.content || '';
+
+    const tokenCost =
+      (ceoResult.usage?.input_tokens ?? 0) +
+      (ceoResult.usage?.output_tokens ?? 0) +
+      (cfoResult.usage?.input_tokens ?? 0) +
+      (cfoResult.usage?.output_tokens ?? 0) +
+      (vpResult.usage?.input_tokens ?? 0) +
+      (vpResult.usage?.output_tokens ?? 0) +
+      (synthesisResult.usage?.input_tokens ?? 0) +
+      (synthesisResult.usage?.output_tokens ?? 0);
+
+    // Write to deliberation_runs
+    await query(
+      `INSERT INTO deliberation_runs
+       (workspace_id, pattern, trigger_surface, trigger_query, entity_type, entity_id, perspectives, verdict, token_cost)
+       VALUES ($1, 'boardroom', 'ask_pandora', $2, NULL, NULL, $3, $4, $5)`,
+      [
+        workspaceId,
+        question.slice(0, 500),
+        JSON.stringify({
+          ceo: { role: 'CEO', output: ceoOutput },
+          cfo: { role: 'CFO', output: cfoOutput },
+          vp_sales: { role: 'VP Sales', output: vpOutput },
+        }),
+        JSON.stringify({ synthesis }),
+        tokenCost,
+      ]
+    );
+
+    return {
+      question,
+      panels: [
+        { role: 'CEO', output: ceoOutput, color_hint: 'synthesis' },
+        { role: 'CFO', output: cfoOutput, color_hint: 'bear' },
+        { role: 'VP Sales', output: vpOutput, color_hint: 'bull' },
+      ],
+      synthesis,
+      tokenCost,
+    };
+  } catch (err) {
+    console.error('[boardroom-deliberation] error:', err);
+    return null;
+  }
+}
+
+// ============================================================================
+// Socratic Deliberation (assumption examination)
+// ============================================================================
+
+export interface SocraticResult {
+  question: string;
+  assumption: string;
+  probing_questions: string;
+  counter_hypothesis: string;
+  synthesis: string;
+  tokenCost: number;
+}
+
+export async function runSocraticDeliberation(
+  workspaceId: string,
+  question: string,
+  context: string
+): Promise<SocraticResult | null> {
+  try {
+    // Call 1: Surface the assumption
+    const assumptionResult = await callLLM(workspaceId, 'reason', {
+      systemPrompt: `You are a Socratic examiner reviewing a RevOps claim or question.
+
+Identify the core assumption being made. State it clearly in 1-2 sentences. Then raise 2-3 questions that would test whether this assumption is valid. Be specific — reference the actual numbers and context provided.`,
+      messages: [{
+        role: 'user',
+        content: `Question/claim: ${question}\n\nContext: ${context}`,
+      }],
+      maxTokens: 400,
+      temperature: 0.3,
+      _tracking: { workspaceId, phase: 'chat', stepName: 'socratic-assumption' },
+    });
+
+    const assumptionOutput = assumptionResult.content || '';
+
+    // Call 2: Counter-hypothesis
+    const counterResult = await callLLM(workspaceId, 'reason', {
+      systemPrompt: `Propose an alternative explanation or hypothesis that fits the same data. Why might the assumption be wrong? What evidence would confirm or refute it? 3-4 sentences.`,
+      messages: [{
+        role: 'user',
+        content: `Original claim: ${question}\n\nCore assumption identified: ${assumptionOutput}\n\nContext: ${context}`,
+      }],
+      maxTokens: 400,
+      temperature: 0.3,
+      _tracking: { workspaceId, phase: 'chat', stepName: 'socratic-counter' },
+    });
+
+    const counterOutput = counterResult.content || '';
+
+    // Extract assumption and probing questions
+    const lines = assumptionOutput.split('\n').filter(l => l.trim());
+    const assumption = lines.slice(0, 2).join(' ').trim();
+    const probing_questions = lines.slice(2).join('\n').trim();
+
+    const synthesis = `To resolve this: ${probing_questions.split('\n')[0] || 'gather evidence'}`;
+
+    const tokenCost =
+      (assumptionResult.usage?.input_tokens ?? 0) +
+      (assumptionResult.usage?.output_tokens ?? 0) +
+      (counterResult.usage?.input_tokens ?? 0) +
+      (counterResult.usage?.output_tokens ?? 0);
+
+    // Write to deliberation_runs
+    await query(
+      `INSERT INTO deliberation_runs
+       (workspace_id, pattern, trigger_surface, trigger_query, entity_type, entity_id, perspectives, verdict, token_cost)
+       VALUES ($1, 'socratic', 'ask_pandora', $2, NULL, NULL, $3, $4, $5)`,
+      [
+        workspaceId,
+        question.slice(0, 500),
+        JSON.stringify({
+          assumption: { output: assumption },
+          probing: { output: probing_questions },
+          counter: { output: counterOutput },
+        }),
+        JSON.stringify({ synthesis }),
+        tokenCost,
+      ]
+    );
+
+    return {
+      question,
+      assumption,
+      probing_questions,
+      counter_hypothesis: counterOutput,
+      synthesis,
+      tokenCost,
+    };
+  } catch (err) {
+    console.error('[socratic-deliberation] error:', err);
+    return null;
+  }
+}
+
+// ============================================================================
+// Prosecutor/Defense Deliberation (plan stress-testing)
+// ============================================================================
+
+export interface ProsecutorDefenseResult {
+  plan: string;
+  prosecution: string;
+  defense: string;
+  verdict: string;
+  confidence: number;
+  tokenCost: number;
+}
+
+export async function runProsecutorDefenseDeliberation(
+  workspaceId: string,
+  plan: string,
+  context: string
+): Promise<ProsecutorDefenseResult | null> {
+  try {
+    // Call 1: Prosecution (what will fail)
+    const prosecutionResult = await callLLM(workspaceId, 'reason', {
+      systemPrompt: `You are a ruthless critic stress-testing a revenue plan.
+
+Make the strongest possible case for why this plan will fail. What are the 3 biggest risks? What assumptions are most likely wrong? What is the single most likely failure mode? 4-5 sentences.`,
+      messages: [{
+        role: 'user',
+        content: `Plan: ${plan}\n\nContext: ${context}`,
+      }],
+      maxTokens: 400,
+      temperature: 0.3,
+      _tracking: { workspaceId, phase: 'chat', stepName: 'prosecutor-prosecution' },
+    });
+
+    const prosecutionOutput = prosecutionResult.content || '';
+
+    // Call 2: Defense (why it will work)
+    const defenseResult = await callLLM(workspaceId, 'reason', {
+      systemPrompt: `You are defending a revenue plan against criticism.
+
+Make the strongest possible case for why this plan will succeed. What evidence supports it? What mitigates the obvious risks? What is being underestimated? 4-5 sentences.`,
+      messages: [{
+        role: 'user',
+        content: `Plan: ${plan}\n\nContext: ${context}`,
+      }],
+      maxTokens: 400,
+      temperature: 0.3,
+      _tracking: { workspaceId, phase: 'chat', stepName: 'prosecutor-defense' },
+    });
+
+    const defenseOutput = defenseResult.content || '';
+
+    // Call 3: Verdict
+    const verdictResult = await callLLM(workspaceId, 'reason', {
+      systemPrompt: `Verdict: Is this plan sound? Rate confidence 0-1. What is the single change that would most improve its odds? What is the trip-wire to watch for — the early signal that it's failing? 3-4 sentences.`,
+      messages: [{
+        role: 'user',
+        content: `Prosecution argument: ${prosecutionOutput}\n\nDefense argument: ${defenseOutput}\n\nPlan: ${plan}`,
+      }],
+      maxTokens: 350,
+      temperature: 0.2,
+      _tracking: { workspaceId, phase: 'chat', stepName: 'prosecutor-verdict' },
+    });
+
+    const verdictOutput = verdictResult.content || '';
+
+    // Extract confidence from verdict (look for 0.X pattern)
+    const confidenceMatch = verdictOutput.match(/\b0\.\d+\b/);
+    const confidence = confidenceMatch ? parseFloat(confidenceMatch[0]) : 0.5;
+
+    const tokenCost =
+      (prosecutionResult.usage?.input_tokens ?? 0) +
+      (prosecutionResult.usage?.output_tokens ?? 0) +
+      (defenseResult.usage?.input_tokens ?? 0) +
+      (defenseResult.usage?.output_tokens ?? 0) +
+      (verdictResult.usage?.input_tokens ?? 0) +
+      (verdictResult.usage?.output_tokens ?? 0);
+
+    // Write to deliberation_runs
+    await query(
+      `INSERT INTO deliberation_runs
+       (workspace_id, pattern, trigger_surface, trigger_query, entity_type, entity_id, perspectives, verdict, token_cost)
+       VALUES ($1, 'prosecutor_defense', 'ask_pandora', $2, NULL, NULL, $3, $4, $5)`,
+      [
+        workspaceId,
+        plan.slice(0, 500),
+        JSON.stringify({
+          prosecution: { output: prosecutionOutput },
+          defense: { output: defenseOutput },
+        }),
+        JSON.stringify({ verdict: verdictOutput, confidence }),
+        tokenCost,
+      ]
+    );
+
+    return {
+      plan,
+      prosecution: prosecutionOutput,
+      defense: defenseOutput,
+      verdict: verdictOutput,
+      confidence,
+      tokenCost,
+    };
+  } catch (err) {
+    console.error('[prosecutor-defense-deliberation] error:', err);
+    return null;
+  }
+}

@@ -816,6 +816,7 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
       }
 
       let deliberationResult: any = null;
+      let deliberationMode: string | null = null;
 
       if (deliberationClassification.mode === 'bull_bear' &&
           deliberationClassification.confidence >= 0.70 &&
@@ -823,9 +824,56 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
         try {
           console.log(`[orchestrator] Running bull/bear deliberation for deal ${entityId}`);
           deliberationResult = await runDeliberation(workspaceId, entityId, message);
+          deliberationMode = 'bull_bear';
         } catch (err) {
           console.error('[orchestrator] Deliberation failed, continuing to pandora_agent:', err);
           // Non-fatal — continue to pandora_agent
+        }
+      }
+
+      // Boardroom deliberation
+      if (deliberationClassification.mode === 'boardroom' &&
+          deliberationClassification.confidence >= 0.70) {
+        try {
+          console.log(`[orchestrator] Running boardroom deliberation`);
+          // Assemble context from recent history
+          const recentContext = history.slice(-3).map(m => `${m.role}: ${m.content}`).join('\n');
+          const context = recentContext || 'No additional context available.';
+          const { runBoardroomDeliberation } = await import('./deliberation-engine.js');
+          deliberationResult = await runBoardroomDeliberation(workspaceId, message, context);
+          deliberationMode = 'boardroom';
+        } catch (err) {
+          console.error('[orchestrator] Boardroom deliberation failed:', err);
+        }
+      }
+
+      // Socratic deliberation
+      if (deliberationClassification.mode === 'socratic' &&
+          deliberationClassification.confidence >= 0.70) {
+        try {
+          console.log(`[orchestrator] Running socratic deliberation`);
+          const recentContext = history.slice(-3).map(m => `${m.role}: ${m.content}`).join('\n');
+          const context = recentContext || 'No additional context available.';
+          const { runSocraticDeliberation } = await import('./deliberation-engine.js');
+          deliberationResult = await runSocraticDeliberation(workspaceId, message, context);
+          deliberationMode = 'socratic';
+        } catch (err) {
+          console.error('[orchestrator] Socratic deliberation failed:', err);
+        }
+      }
+
+      // Prosecutor/Defense deliberation
+      if (deliberationClassification.mode === 'prosecutor_defense' &&
+          deliberationClassification.confidence >= 0.70) {
+        try {
+          console.log(`[orchestrator] Running prosecutor/defense deliberation`);
+          const recentContext = history.slice(-3).map(m => `${m.role}: ${m.content}`).join('\n');
+          const context = recentContext || 'No additional context available.';
+          const { runProsecutorDefenseDeliberation } = await import('./deliberation-engine.js');
+          deliberationResult = await runProsecutorDefenseDeliberation(workspaceId, message, context);
+          deliberationMode = 'prosecutor_defense';
+        } catch (err) {
+          console.error('[orchestrator] Prosecutor/Defense deliberation failed:', err);
         }
       }
 
@@ -929,8 +977,8 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
         builder.recordTool(toolCall.tool_name);
       }
 
-      // 5. Add deliberation block if bull/bear was run
-      if (deliberationResult) {
+      // 5. Add deliberation block based on mode
+      if (deliberationResult && deliberationMode === 'bull_bear') {
         builder.addDeliberation({
           mode: 'bull_bear',
           run_id: deliberationResult.id ?? undefined,
@@ -953,6 +1001,69 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
           ],
           synthesis: deliberationResult.verdict?.rawOutput ?? '',
           verdict: deliberationResult.verdict?.recommendedAction ?? undefined,
+        });
+      }
+
+      if (deliberationResult && deliberationMode === 'boardroom') {
+        builder.addDeliberation({
+          mode: 'boardroom',
+          hypothesis: message,
+          panels: deliberationResult.panels.map((p: any) => ({
+            role: p.role,
+            summary: p.output,
+            key_points: [],
+            confidence: 0.7,
+            color_hint: p.color_hint,
+          })),
+          synthesis: deliberationResult.synthesis,
+        });
+      }
+
+      if (deliberationResult && deliberationMode === 'socratic') {
+        builder.addDeliberation({
+          mode: 'socratic',
+          hypothesis: message,
+          panels: [
+            {
+              role: 'Assumption',
+              summary: deliberationResult.assumption,
+              key_points: [deliberationResult.probing_questions],
+              confidence: 0.5,
+              color_hint: 'bear',
+            },
+            {
+              role: 'Counter-Hypothesis',
+              summary: deliberationResult.counter_hypothesis,
+              key_points: [],
+              confidence: 0.5,
+              color_hint: 'bull',
+            },
+          ],
+          synthesis: deliberationResult.synthesis,
+        });
+      }
+
+      if (deliberationResult && deliberationMode === 'prosecutor_defense') {
+        builder.addDeliberation({
+          mode: 'prosecutor_defense',
+          hypothesis: message,
+          panels: [
+            {
+              role: 'Prosecutor',
+              summary: deliberationResult.prosecution,
+              key_points: [],
+              confidence: 1 - deliberationResult.confidence,
+              color_hint: 'prosecutor',
+            },
+            {
+              role: 'Defense',
+              summary: deliberationResult.defense,
+              key_points: [],
+              confidence: deliberationResult.confidence,
+              color_hint: 'defense',
+            },
+          ],
+          synthesis: deliberationResult.verdict,
         });
       }
 
