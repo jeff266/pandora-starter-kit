@@ -4,6 +4,7 @@ import { colors, fonts } from '../styles/theme';
 import SectionErrorBoundary from '../components/SectionErrorBoundary';
 import SankeyChart from '../components/reports/SankeyChart';
 import WinningPathsChart from '../components/pipeline/WinningPathsChart';
+import { SkillTrendChart } from '../components/charts/SkillTrendChart';
 import type { SankeyChartData, WinningPathsData } from '../components/reports/types';
 
 interface FilterState {
@@ -64,6 +65,10 @@ export default function PipelinePage() {
   const [pathsLoading, setPathsLoading] = useState(true);
   const [pathsError, setPathsError] = useState<string | null>(null);
 
+  const [trendsData, setTrendsData] = useState<Record<string, Array<{ week: string; count: number }>>>({});
+  const [trendsLoading, setTrendsLoading] = useState(true);
+  const [claimsData, setClaimsData] = useState<{ quota: number; used: number; utilization: number } | null>(null);
+
   const fetchSankey = useCallback(async (f: FilterState) => {
     setSankeyLoading(true);
     setSankeyError(null);
@@ -110,6 +115,33 @@ export default function PipelinePage() {
   useEffect(() => {
     fetchSankey(filter);
     fetchPaths(filter);
+  }, []);
+
+  useEffect(() => {
+    const fetchTrends = async () => {
+      setTrendsLoading(true);
+      try {
+        const trackedSkills = [
+          'pipeline-hygiene',
+          'pipeline-coverage',
+          'forecast-rollup',
+          'deal-risk-review',
+          'meddic-coverage',
+        ];
+        const skillIds = trackedSkills.join(',');
+        const [trendsRes, claimsRes] = await Promise.all([
+          api.get(`/skills/trends?skill_ids=${skillIds}`),
+          api.get('/skills/claims'),
+        ]);
+        setTrendsData((trendsRes as any).trends || {});
+        setClaimsData(claimsRes as any);
+      } catch (err) {
+        console.error('Failed to load skill trends:', err);
+      } finally {
+        setTrendsLoading(false);
+      }
+    };
+    fetchTrends();
   }, []);
 
   function applyFilter(next: FilterState) {
@@ -291,6 +323,104 @@ export default function PipelinePage() {
                 data={pathsData}
                 hideFilters
               />
+            )}
+          </div>
+        </SectionErrorBoundary>
+
+        <SectionErrorBoundary fallbackMessage="Unable to load skill trends.">
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+              <h2 style={{
+                fontSize: 12,
+                fontWeight: 600,
+                color: colors.textMuted,
+                fontFamily: fonts.sans,
+                textTransform: 'uppercase',
+                letterSpacing: '0.06em',
+                margin: 0,
+              }}>
+                Skill Run Trends
+              </h2>
+              {claimsData && (
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  fontSize: 11,
+                  color: colors.textSecondary,
+                  fontFamily: fonts.sans,
+                }}>
+                  <span>{claimsData.used} / {claimsData.quota} runs used</span>
+                  <div style={{
+                    width: 120,
+                    height: 6,
+                    background: colors.border,
+                    borderRadius: 3,
+                    overflow: 'hidden',
+                  }}>
+                    <div style={{
+                      width: `${Math.min(100, claimsData.utilization)}%`,
+                      height: '100%',
+                      background: claimsData.utilization > 90
+                        ? '#f59e0b'
+                        : claimsData.utilization > 75
+                        ? '#3b82f6'
+                        : '#10b981',
+                      transition: 'width 0.3s ease',
+                    }} />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {trendsLoading ? (
+              <div style={{
+                background: colors.surface,
+                border: `1px solid ${colors.border}`,
+                borderRadius: 12,
+                padding: 40,
+                textAlign: 'center',
+                color: colors.textMuted,
+                fontSize: 13,
+              }}>
+                Loading skill trends…
+              </div>
+            ) : Object.keys(trendsData).length === 0 ? (
+              <div style={{
+                background: colors.surface,
+                border: `1px solid ${colors.border}`,
+                borderRadius: 12,
+                padding: 24,
+                textAlign: 'center',
+                color: colors.textMuted,
+                fontSize: 13,
+              }}>
+                No skill run data available
+              </div>
+            ) : (
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+                gap: 16,
+              }}>
+                {Object.entries(trendsData).map(([skillId, data]) => {
+                  const skillNames: Record<string, string> = {
+                    'pipeline-hygiene': 'Pipeline Hygiene',
+                    'pipeline-coverage': 'Pipeline Coverage',
+                    'forecast-rollup': 'Forecast Rollup',
+                    'deal-risk-review': 'Deal Risk Review',
+                    'meddic-coverage': 'MEDDIC Coverage',
+                  };
+                  return (
+                    <SkillTrendChart
+                      key={skillId}
+                      skillId={skillId}
+                      skillName={skillNames[skillId] || skillId}
+                      data={data}
+                    />
+                  );
+                })}
+              </div>
             )}
           </div>
         </SectionErrorBoundary>

@@ -112,6 +112,7 @@ import notificationPreferencesRouter from './routes/notification-preferences.js'
 import skillRunRequestsRouter from './routes/skill-run-requests.js';
 import reportsRouter, { cleanupReportFiles } from './routes/reports.js';
 import chartDataRouter from './routes/chart-data.js';
+import skillTrendsRouter from './routes/skill-trends.js';
 import sessionsRouter from './routes/sessions.js';
 import documentsRouter from './routes/documents.js';
 import fineTuningRouter from './routes/fine-tuning.js';
@@ -419,6 +420,7 @@ workspaceApiRouter.use(adminRouter);
 workspaceApiRouter.use(targetsRouter);
 workspaceApiRouter.use(reportsRouter);
 workspaceApiRouter.use(chartDataRouter);
+workspaceApiRouter.use('/:workspaceId/skills', skillTrendsRouter);
 workspaceApiRouter.use(sqlWorkspaceRouter);
 workspaceApiRouter.use(toolManifestRouter);
 workspaceApiRouter.use(briefingRouter);
