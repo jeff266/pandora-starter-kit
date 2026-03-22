@@ -188,6 +188,13 @@ export interface SkillExecutionContext {
    *  any steps run; every tool reads from here instead of recomputing. */
   queryScope: import('../context/query-scope.js').QueryScope;
 
+  /** Active pipeline config for value resolution. Tools call resolveValue(deal, pipelineConfig)
+   *  instead of deal.amount so that value_field / value_formula overrides are respected.
+   *  Defaults to the workspace's first pipeline (value_field: 'amount') so unconfigured
+   *  workspaces are unaffected. Scope field_overrides.value_field is applied before this
+   *  is set, so scoped runs automatically use the correct field. */
+  pipelineConfig: import('../types/workspace-config.js').PipelineConfig;
+
   /** Execution metadata */
   metadata: {
     startedAt: Date;

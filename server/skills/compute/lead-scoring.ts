@@ -16,6 +16,8 @@ import { query } from '../../db.js';
 import { getChampionAndSentimentSignals, getConversationRiskSignals } from '../../analysis/enrichment-queries.js';
 import { emitProspectScoredEvents, type ScoredEntity } from '../../webhooks/prospect-score-events.js';
 import { createLogger } from '../../utils/logger.js';
+import { resolveValue } from '../../config/value-resolver.js';
+import type { PipelineConfig } from '../../types/workspace-config.js';
 import {
   ScoreFactor,
   ProspectScoreResult,
@@ -2190,7 +2192,7 @@ async function persistScore(workspaceId: string, score: ProspectScoreResult): Pr
 // Main Scoring Function
 // ============================================================================
 
-export async function scoreLeads(workspaceId: string): Promise<ScoringResult> {
+export async function scoreLeads(workspaceId: string, pipelineConfig?: Pick<PipelineConfig, 'value_field' | 'value_formula'>): Promise<ScoringResult> {
   logger.info('[Lead Scoring] Starting scoring run', { workspaceId });
 
   const { getGradeThresholds } = await import('../../config/index.js');
@@ -2218,15 +2220,25 @@ export async function scoreLeads(workspaceId: string): Promise<ScoringResult> {
     icpProfileId: icpProfile?.profile.id,
   });
 
-  const amounts = dealFeatures.map(d => d.amount).filter((a): a is number => a !== null && a > 0);
+  const amounts = dealFeatures.map(d => pipelineConfig ? resolveValue(d as any, pipelineConfig) : (d.amount ?? 0)).filter(a => a > 0);
   const workspaceMedianAmount = amounts.length > 0
     ? amounts.sort((a, b) => a - b)[Math.floor(amounts.length / 2)]
     : 50000;
 
   const icpProfileIdRef = icpProfile?.profile.id || null;
 
+  // If a pipelineConfig is provided, pre-resolve each deal's amount using the
+  // configured value_field / value_formula so all downstream scoring (amount_tier,
+  // amount_present) uses the workspace's canonical economic value, not raw amount.
+  const resolvedDealFeatures = pipelineConfig
+    ? dealFeatures.map(d => ({
+        ...d,
+        amount: resolveValue(d as any, pipelineConfig),
+      }))
+    : dealFeatures;
+
   const dealScores: ProspectScoreResult[] = [];
-  for (const deal of dealFeatures) {
+  for (const deal of resolvedDealFeatures) {
     const score = scoreDeal(
       deal,
       customFieldWeights,
@@ -2352,7 +2364,7 @@ export async function scoreLeads(workspaceId: string): Promise<ScoringResult> {
     .sort((a, b) => b.score - a.score);
 
   const topDeals = sortedDeals.slice(0, 10);
-  const bottomDeals = sortedDeals.filter(d => (dealFeatures.find(df => df.id === d.id)?.amount || 0) > 10000).slice(-5).reverse();
+  const bottomDeals = sortedDeals.filter(d => (resolvedDealFeatures.find(df => df.id === d.id)?.amount || 0) > 10000).slice(-5).reverse();
 
   // Movers
   const movers = dealScores

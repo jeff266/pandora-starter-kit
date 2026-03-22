@@ -19,6 +19,8 @@
 
 import { query } from '../../db.js';
 import { createLogger } from '../../utils/logger.js';
+import { resolveValue } from '../../config/value-resolver.js';
+import type { PipelineConfig } from '../../types/workspace-config.js';
 
 const logger = createLogger('ICPDiscovery');
 
@@ -512,7 +514,7 @@ async function checkDataReadiness(workspaceId: string): Promise<DataReadiness> {
 // Step 2: Build Feature Matrix
 // ============================================================================
 
-async function buildFeatureMatrix(workspaceId: string): Promise<FeatureVector[]> {
+async function buildFeatureMatrix(workspaceId: string, pipelineConfig?: Pick<PipelineConfig, 'value_field' | 'value_formula'>): Promise<FeatureVector[]> {
   logger.info('[Step 2] Building feature matrix');
 
   // Load custom department patterns from workspace config
@@ -692,7 +694,7 @@ async function buildFeatureMatrix(workspaceId: string): Promise<FeatureVector[]>
       dealId: deal.id,
       dealName: deal.name,
       outcome: deal.stage_normalized === 'closed_won' ? 'won' : 'lost',
-      amount: Number(deal.amount || 0),
+      amount: pipelineConfig ? resolveValue(deal as any, pipelineConfig) : Number(deal.amount || 0),
       salesCycleDays,
       ownerEmail: deal.owner_email,
       ownerName: deal.owner,
@@ -2188,7 +2190,7 @@ function mergeConversationMetadataIntoFeatures(
 // Main Function
 // ============================================================================
 
-export async function discoverICP(workspaceId: string): Promise<ICPDiscoveryResult> {
+export async function discoverICP(workspaceId: string, pipelineConfig?: Pick<PipelineConfig, 'value_field' | 'value_formula'>): Promise<ICPDiscoveryResult> {
   const startTime = Date.now();
 
   logger.info('[ICP Discovery] Starting', { workspaceId });
@@ -2211,7 +2213,7 @@ export async function discoverICP(workspaceId: string): Promise<ICPDiscoveryResu
   const topFields = customFieldResult.rows[0]?.output?.topFields || [];
 
   // Step 2: Build feature matrix
-  let featureMatrix = await buildFeatureMatrix(workspaceId);
+  let featureMatrix = await buildFeatureMatrix(workspaceId, pipelineConfig);
 
   // Step 2.5: Extract conversation metadata (NEW)
   let conversationData: Awaited<ReturnType<typeof extractConversationMetadata>> = null;

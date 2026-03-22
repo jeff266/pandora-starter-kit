@@ -143,7 +143,7 @@ export class SkillRuntime {
 
     console.log(`[Skill Runtime] Starting ${skill.id} for workspace ${workspaceId}, runId: ${runId}`);
 
-    const [contextData, dataFreshness, activeTargetsResult, workspaceContextBlock, queryScope] = await Promise.all([
+    const [contextData, dataFreshness, activeTargetsResult, workspaceContextBlock, queryScope, workspaceConfig] = await Promise.all([
       getContext(workspaceId),
       getDataFreshness(workspaceId),
       query(
@@ -154,6 +154,7 @@ export class SkillRuntime {
       ).catch(() => ({ rows: [] })),
       buildWorkspaceContextBlock(workspaceId, userId).catch(() => ''),
       buildQueryScope(workspaceId, userId),
+      configLoader.getConfig(workspaceId).catch(() => null),
     ]);
 
     // Merge skill timeConfig with runtime overrides from params
@@ -366,6 +367,48 @@ export class SkillRuntime {
 
     const scopeFilters = params?.scope_filters || [];
 
+    // Resolve pipeline config for value resolution (resolveValue call sites)
+    // Default to first pipeline (value_field: 'amount') so unconfigured workspaces are unaffected.
+    // If the skill is running under a scope with field_overrides.value_field, override here.
+    const DEFAULT_PIPELINE_CONFIG = {
+      id: 'default',
+      name: 'All Deals',
+      type: 'new_business' as const,
+      filter: { field: '1', values: ['1'] },
+      coverage_target: 3.0,
+      stage_probabilities: {},
+      loss_values: ['closed_lost'],
+      included_in_default_scope: true,
+      value_field: 'amount',
+      value_formula: null,
+      forecast_eligible: true,
+    };
+
+    // Use first forecast-eligible pipeline (most specific), falling back to any pipeline, then default.
+    // This ensures multi-pipeline workspaces use the most relevant value_field.
+    const activePipelines = workspaceConfig?.pipelines ?? [];
+    const basePipeline =
+      activePipelines.find(p => p.forecast_eligible && p.included_in_default_scope) ??
+      activePipelines[0] ??
+      DEFAULT_PIPELINE_CONFIG;
+
+    let pipelineConfig = { ...basePipeline };
+
+    // Apply scope field_overrides if this skill was invoked for a specific scope.
+    // Scope overrides win over pipeline defaults so scoped runs automatically use
+    // the correct field without additional config.
+    const activeScope = params?.activeScope as import('../config/scope-loader.js').ActiveScope | undefined;
+    if (activeScope?.field_overrides?.value_field) {
+      pipelineConfig = { ...pipelineConfig, value_field: activeScope.field_overrides.value_field };
+    }
+    if (activeScope?.field_overrides?.value_formula !== undefined) {
+      pipelineConfig = { ...pipelineConfig, value_formula: activeScope.field_overrides.value_formula ?? null };
+    }
+    if (activeScope?.field_overrides?.coverage_target !== undefined) {
+      pipelineConfig = { ...pipelineConfig, coverage_target: activeScope.field_overrides.coverage_target };
+    }
+    // stale_deal_days is exposed via context.params for tools that need it (not a PipelineConfig field)
+
     const context: SkillExecutionContext = {
       workspaceId,
       userId,
@@ -376,6 +419,7 @@ export class SkillRuntime {
       params: params || {},
       scopeFilters,
       queryScope,
+      pipelineConfig,
       metadata: {
         startedAt: new Date(),
         tokenUsage: {

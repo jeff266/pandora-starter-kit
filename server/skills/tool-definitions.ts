@@ -10,6 +10,7 @@
 
 import type { ToolDefinition, SkillExecutionContext } from './types.js';
 import { formatCurrency } from '../utils/format-currency.js';
+import { resolveValue } from '../config/value-resolver.js';
 import * as dealTools from '../tools/deal-query.js';
 import * as contactTools from '../tools/contact-query.js';
 import * as accountTools from '../tools/account-query.js';
@@ -146,6 +147,15 @@ async function safeExecute<T>(
     console.error(`[Tool Error] ${toolName}:`, errorMsg);
     return { error: errorMsg };
   }
+}
+
+/**
+ * Resolve deal value using the context's pipeline config.
+ * Use this everywhere a tool would otherwise read deal.amount for economic value.
+ * Falls back to deal.amount if pipelineConfig is unavailable.
+ */
+function rv(deal: Record<string, any>, context: SkillExecutionContext): number {
+  return resolveValue(deal, context.pipelineConfig);
 }
 
 async function resolveNamedFilters(
@@ -985,7 +995,7 @@ const computePipelineCoverage: ToolDefinition = {
 
       for (const row of icpResult.rows) {
         const grade = row.score_grade;
-        const amount = Number(row.amount || 0);
+        const amount = rv(row, context);
         totalValue += amount;
 
         if (icpSummary.by_grade[grade]) {
@@ -1109,16 +1119,16 @@ const aggregateStaleDeals: ToolDefinition = {
       const bySeverity = bucketByThreshold(
         staleItems,
         d => d.daysStale,
-        d => d.amount,
+        d => rv(d, context),
         [7, 14, 30],
         ['watch', 'warning', 'serious', 'critical']
       );
 
-      const byOwner = aggregateBy(staleItems, d => d.owner, d => d.amount);
-      const byStage = aggregateBy(staleItems, d => d.stage, d => d.amount);
+      const byOwner = aggregateBy(staleItems, d => d.owner, d => rv(d, context));
+      const byStage = aggregateBy(staleItems, d => d.stage, d => rv(d, context));
 
       const { topItems, remaining } = topNWithSummary(
-        staleItems, topN, d => d.amount, d => d.amount
+        staleItems, topN, d => rv(d, context), d => rv(d, context)
       );
 
       // Add ICP-aware risk signals
@@ -1132,10 +1142,10 @@ const aggregateStaleDeals: ToolDefinition = {
               severity: 'high',
               deal_id: deal.dealId,
               deal_name: deal.name,
-              amount: deal.amount,
+              amount: rv(deal, context),
               days_stale: deal.daysStale,
               icp_grade: deal.icp_grade,
-              message: `${deal.name} is A-grade ICP fit ($${deal.amount}) but stale for ${deal.daysStale} days — high priority recovery`,
+              message: `${deal.name} is A-grade ICP fit ($${formatCurrency(rv(deal, context))}) but stale for ${deal.daysStale} days — high priority recovery`,
             });
           }
         }
@@ -1207,7 +1217,7 @@ const aggregateStaleDeals: ToolDefinition = {
         if (grade) {
           rfmBreakdown[grade] = rfmBreakdown[grade] ?? { count: 0, totalValue: 0 };
           rfmBreakdown[grade].count++;
-          rfmBreakdown[grade].totalValue += Number((deal as any).amount) || 0;
+          rfmBreakdown[grade].totalValue += rv(deal as any, context);
         }
       }
       const hasRFMScores = Object.keys(rfmBreakdown).length > 0;
@@ -1257,7 +1267,7 @@ const aggregateClosingSoon: ToolDefinition = {
       const summary = summarizeDeals(deals);
 
       const { topItems, remaining } = topNWithSummary(
-        closingItems, topN, d => d.amount, d => d.amount
+        closingItems, topN, d => rv(d, context), d => rv(d, context)
       );
 
       return {
@@ -1314,10 +1324,10 @@ const computeOwnerPerformance: ToolDefinition = {
           ownerStats[owner] = { openDeals: 0, pipelineValue: 0, staleDeals: 0, staleValue: 0, activityCount: 0, staleRate: 0 };
         }
         ownerStats[owner].openDeals++;
-        ownerStats[owner].pipelineValue += parseFloat((deal as any).amount) || 0;
+        ownerStats[owner].pipelineValue += rv(deal as any, context);
         if (staleSet.has((deal as any).id)) {
           ownerStats[owner].staleDeals++;
-          ownerStats[owner].staleValue += parseFloat((deal as any).amount) || 0;
+          ownerStats[owner].staleValue += rv(deal as any, context);
         }
       }
 
@@ -2217,7 +2227,7 @@ Required weekly pipeline gen: ${weeklyGenStr}`;
         const summarizeDealList = (deals: any, label: string, limit: number) => {
           if (!deals?.deals || deals.deals.length === 0) return `${label}: None`;
           const top = deals.deals.slice(0, limit).map((d: any) =>
-            `- ${d.name}: $${(d.amount || 0).toLocaleString()} | Stage: ${d.stage_normalized || d.stage} | Close: ${d.close_date || 'N/A'} | Owner: ${d.owner_name || 'Unknown'}`
+            `- ${d.name}: $${rv(d, context).toLocaleString()} | Stage: ${d.stage_normalized || d.stage} | Close: ${d.close_date || 'N/A'} | Owner: ${d.owner_name || 'Unknown'}`
           );
           const remaining = deals.deals.length - limit;
           const extra = remaining > 0 ? `\n  ... and ${remaining} more` : '';
@@ -2387,7 +2397,7 @@ Required weekly pipeline gen: ${weeklyGenStr}`;
             ? `RFM Health: ${rfm.rfm_grade} (${rfm.rfm_label}) | ${rfm.rfm_recency_days !== null ? `Days dark: ${rfm.rfm_recency_days}` : 'N/A'} | Frequency: ${rfm.rfm_frequency_count || 'N/A'}`
             : 'RFM Health: Not scored';
 
-          let profile = `DEAL: ${d.name} | $${(d.amount || 0).toLocaleString()} | Stage: ${d.stage_normalized || d.stage} | Close: ${d.close_date || 'N/A'} | Owner: ${d.owner_name || 'N/A'}
+          let profile = `DEAL: ${d.name} | $${rv(d, context).toLocaleString()} | Stage: ${d.stage_normalized || d.stage} | Close: ${d.close_date || 'N/A'} | Owner: ${d.owner_name || 'N/A'}
   ${rfmLine}
   Activity: ${activityLine}
   Contacts (${contacts.length}): ${contacts.length > 0 ? contacts.slice(0, 5).join('; ') : 'None'}${contacts.length > 5 ? ` +${contacts.length - 5} more` : ''}
@@ -3365,25 +3375,25 @@ const forecastRollup: ToolDefinition = {
 
         icpForecast = {
           commit: {
-            total: commitDeals.reduce((s: number, d: any) => s + (Number(d.amount) || 0), 0),
+            total: commitDeals.reduce((s: number, d: any) => s + rv(d, context), 0),
             ab_grade: commitDeals.filter((d: any) => d.score_grade === 'A' || d.score_grade === 'B')
-              .reduce((s: number, d: any) => s + (Number(d.amount) || 0), 0),
+              .reduce((s: number, d: any) => s + rv(d, context), 0),
             cdf_grade: commitDeals.filter((d: any) => ['C','D','F'].includes(d.score_grade))
-              .reduce((s: number, d: any) => s + (Number(d.amount) || 0), 0),
+              .reduce((s: number, d: any) => s + rv(d, context), 0),
           },
           best_case: {
-            total: bestCaseDeals.reduce((s: number, d: any) => s + (Number(d.amount) || 0), 0),
+            total: bestCaseDeals.reduce((s: number, d: any) => s + rv(d, context), 0),
             ab_grade: bestCaseDeals.filter((d: any) => d.score_grade === 'A' || d.score_grade === 'B')
-              .reduce((s: number, d: any) => s + (Number(d.amount) || 0), 0),
+              .reduce((s: number, d: any) => s + rv(d, context), 0),
             cdf_grade: bestCaseDeals.filter((d: any) => ['C','D','F'].includes(d.score_grade))
-              .reduce((s: number, d: any) => s + (Number(d.amount) || 0), 0),
+              .reduce((s: number, d: any) => s + rv(d, context), 0),
           },
           pipeline: {
-            total: pipelineDeals.reduce((s: number, d: any) => s + (Number(d.amount) || 0), 0),
+            total: pipelineDeals.reduce((s: number, d: any) => s + rv(d, context), 0),
             ab_grade: pipelineDeals.filter((d: any) => d.score_grade === 'A' || d.score_grade === 'B')
-              .reduce((s: number, d: any) => s + (Number(d.amount) || 0), 0),
+              .reduce((s: number, d: any) => s + rv(d, context), 0),
             cdf_grade: pipelineDeals.filter((d: any) => ['C','D','F'].includes(d.score_grade))
-              .reduce((s: number, d: any) => s + (Number(d.amount) || 0), 0),
+              .reduce((s: number, d: any) => s + rv(d, context), 0),
           },
           has_grade_adjusted: false,
         };
@@ -3415,12 +3425,12 @@ const forecastRollup: ToolDefinition = {
         if (Object.keys(gradeCloseRates).length >= 3) {
           icpForecast.grade_adjusted_commit = commitDeals.reduce((sum: number, d: any) => {
             const rate = gradeCloseRates[d.score_grade] ?? 0.5;
-            return sum + (Number(d.amount) || 0) * rate;
+            return sum + rv(d, context) * rate;
           }, 0);
 
           icpForecast.grade_adjusted_best_case = bestCaseDeals.reduce((sum: number, d: any) => {
             const rate = gradeCloseRates[d.score_grade] ?? 0.3;
-            return sum + (Number(d.amount) || 0) * rate;
+            return sum + rv(d, context) * rate;
           }, 0);
 
           icpForecast.has_grade_adjusted = true;
@@ -3458,15 +3468,15 @@ const forecastRollup: ToolDefinition = {
       if (hasRFMScores) {
         const buildCatRFM = (cat: string) => {
           const catDeals = icpDealsResult.rows.filter((r: any) => r.forecast_category === cat);
-          const total = catDeals.reduce((s: number, d: any) => s + (Number(d.amount) || 0), 0);
+          const total = catDeals.reduce((s: number, d: any) => s + rv(d, context), 0);
           const abDeals = catDeals.filter((d: any) => d.rfm_grade === 'A' || d.rfm_grade === 'B');
           const dfDeals = catDeals.filter((d: any) => d.rfm_grade === 'D' || d.rfm_grade === 'F');
           return {
             total,
             ab_count: abDeals.length,
-            ab_value: abDeals.reduce((s: number, d: any) => s + (Number(d.amount) || 0), 0),
+            ab_value: abDeals.reduce((s: number, d: any) => s + rv(d, context), 0),
             df_count: dfDeals.length,
-            df_value: dfDeals.reduce((s: number, d: any) => s + (Number(d.amount) || 0), 0),
+            df_value: dfDeals.reduce((s: number, d: any) => s + rv(d, context), 0),
           };
         };
 
@@ -3924,15 +3934,18 @@ const gatherDealConcentrationRisk: ToolDefinition = {
       const fmt = (n: number) => `$${(n || 0).toLocaleString('en-US')}`;
 
       // Top 3 deals
-      const top3 = deals.rows.slice(0, 3).map(d => ({
-        name: d.name,
-        amount: d.amount || 0,
-        probability: d.probability || 0,
-        weighted: (d.amount || 0) * ((d.probability || 0) > 1 ? (d.probability || 0) / 100 : (d.probability || 0)),
-        category: d.forecast_category || 'unknown',
-        owner: nameMap[d.owner || ''] || d.owner || 'Unknown',
-        closeDate: d.close_date,
-      }));
+      const top3 = deals.rows.slice(0, 3).map(d => {
+        const dealValue = rv(d as any, context);
+        return {
+          name: d.name,
+          amount: dealValue,
+          probability: d.probability || 0,
+          weighted: dealValue * ((d.probability || 0) > 1 ? (d.probability || 0) / 100 : (d.probability || 0)),
+          category: d.forecast_category || 'unknown',
+          owner: nameMap[d.owner || ''] || d.owner || 'Unknown',
+          closeDate: d.close_date,
+        };
+      });
 
       let whaleDeals: any[] = [];
       let whaleThreshold = 0;
@@ -3940,17 +3953,20 @@ const gatherDealConcentrationRisk: ToolDefinition = {
       if (quotaConfig?.hasQuotas && quotaConfig.teamQuota) {
         whaleThreshold = quotaConfig.teamQuota * 0.2; // 20% of team quota
         whaleDeals = deals.rows
-          .filter(d => (d.amount || 0) >= whaleThreshold)
-          .map(d => ({
-            name: d.name,
-            amount: d.amount || 0,
-            percentOfQuota: ((d.amount || 0) / quotaConfig.teamQuota) * 100,
-            probability: d.probability || 0,
-            weighted: (d.amount || 0) * ((d.probability || 0) > 1 ? (d.probability || 0) / 100 : (d.probability || 0)),
-            category: d.forecast_category || 'unknown',
-            owner: nameMap[d.owner || ''] || d.owner || 'Unknown',
-            closeDate: d.close_date,
-          }));
+          .filter(d => rv(d as any, context) >= whaleThreshold)
+          .map(d => {
+            const dealValue = rv(d as any, context);
+            return {
+              name: d.name,
+              amount: dealValue,
+              percentOfQuota: (dealValue / quotaConfig.teamQuota) * 100,
+              probability: d.probability || 0,
+              weighted: dealValue * ((d.probability || 0) > 1 ? (d.probability || 0) / 100 : (d.probability || 0)),
+              category: d.forecast_category || 'unknown',
+              owner: nameMap[d.owner || ''] || d.owner || 'Unknown',
+              closeDate: d.close_date,
+            };
+          });
       }
 
       // Calculate concentration metrics
@@ -4341,7 +4357,7 @@ const topDealsInMotionTool: ToolDefinition = {
         `SELECT id, amount, owner FROM deals WHERE id = ANY($1)`,
         [dealIds]
       );
-      const dealData = new Map(dealResult.rows.map(d => [d.id, { amount: Number(d.amount) || 0, owner: d.owner }]));
+      const dealData = new Map(dealResult.rows.map(d => [d.id, { amount: rv(d as any, context), owner: d.owner }]));
 
       const advanced = transitions
         .filter(t => t.toStageNormalized && !['closed_won', 'closed_lost'].includes(t.toStageNormalized))
@@ -4843,7 +4859,7 @@ const scoreLeadsTool: ToolDefinition = {
   },
   execute: async (params, context) => {
     return safeExecute('scoreLeads', async () => {
-      const result = await scoreLeads(context.workspaceId);
+      const result = await scoreLeads(context.workspaceId, context.pipelineConfig);
 
       console.log(`[Lead Scoring] Scored ${result.dealScores.length} deals and ${result.contactScores.length} contacts`);
 
@@ -5170,7 +5186,7 @@ const discoverICPTool: ToolDefinition = {
   },
   execute: async (params, context) => {
     return safeExecute('discoverICP', async () => {
-      const result = await discoverICP(context.workspaceId);
+      const result = await discoverICP(context.workspaceId, context.pipelineConfig);
 
       console.log(`[ICP Discovery] Mode: ${result.mode}, Analyzed ${result.metadata.dealsAnalyzed} deals, Discovered ${result.personas.length} personas`);
 
@@ -5670,7 +5686,7 @@ const svbFlagSlowDeals: ToolDefinition = {
         flagged.push({
           deal_id: deal.id,
           deal_name: deal.name,
-          amount: parseFloat(deal.amount) || 0,
+          amount: rv(deal, context),
           stage: deal.stage,
           stage_normalized: deal.stage_normalized,
           owner: deal.owner,
@@ -5887,10 +5903,11 @@ const fmScoreOpenDeals: ToolDefinition = {
         const daysToClose = deal.days_to_close !== null ? parseFloat(deal.days_to_close) : null;
         const closePenalty = daysToClose !== null && daysToClose < 0 ? -0.10 : 0;
         const probability = Math.min(Math.round((baseProb + callBonus + contactBonus + closePenalty) * 100), 95);
+        const dealValue = rv(deal, context);
         return {
           deal_id: deal.id,
           deal_name: deal.name,
-          amount: parseFloat(deal.amount),
+          amount: dealValue,
           stage: deal.stage,
           stage_normalized: deal.stage_normalized,
           close_date: deal.close_date,
@@ -5898,7 +5915,7 @@ const fmScoreOpenDeals: ToolDefinition = {
           forecast_category: deal.forecast_category,
           probability,
           crm_probability: deal.crm_probability,
-          weighted_amount: Math.round(parseFloat(deal.amount) * probability / 100),
+          weighted_amount: Math.round(dealValue * probability / 100),
           call_count: conv.call_count,
           contacts: cont.total,
           key_contacts: cont.key_contacts,
@@ -6429,7 +6446,7 @@ const ciCompGatherMentions: ToolDefinition = {
         if (!entry.deal_ids.has(dealId)) {
           entry.deal_ids.add(dealId);
           if (entry.deals.length < 10) {
-            entry.deals.push({ deal_name: deal.deal_name, amount: parseFloat(deal.amount || '0'), stage: deal.stage, stage_normalized: deal.stage_normalized, owner: deal.owner });
+            entry.deals.push({ deal_name: deal.deal_name, amount: rv(deal, context), stage: deal.stage, stage_normalized: deal.stage_normalized, owner: deal.owner });
           }
         }
       };
@@ -6937,7 +6954,7 @@ const dsmGatherOpenDeals: ToolDefinition = {
       const deals = result.rows.map((r: any) => ({
         id: r.id,
         name: r.name,
-        amount: parseFloat(r.amount || '0'),
+        amount: rv(r, context),
         stage: r.stage,
         stage_normalized: r.stage_normalized,
         close_date: r.close_date,
@@ -7381,7 +7398,7 @@ const icpScoreOpenDeals: ToolDefinition = {
         }
 
         // Deal size match (0-25 pts)
-        const amount = parseFloat(deal.amount || '0');
+        const amount = rv(deal, context);
         if (amount >= p25Amount && amount <= p75Amount) {
           score += 25;
         } else if (amount < p25Amount) {
@@ -7771,7 +7788,7 @@ const mcLoadOpenDeals: ToolDefinition = {
       const openDeals = result.rows.map(r => ({
         id: r.id,
         name: r.name,
-        amount: r.amount ? Math.max(0, parseFloat(r.amount)) : 50000,
+        amount: Math.max(0, rv(r, context)) || 50000,
         stageNormalized: r.stage_normalized || 'qualification',
         closeDate: r.close_date ? new Date(r.close_date) : new Date(Date.now() + 90 * 86400000),
         createdAt: r.created_at ? new Date(r.created_at) : undefined,
@@ -7913,7 +7930,7 @@ const mcLoadUpcomingRenewals: ToolDefinition = {
         return {
           dealId: r.id,
           name: r.name,
-          contractValue: r.amount ? Math.max(0, parseFloat(r.amount)) : 50000,
+          contractValue: Math.max(0, rv(r, context)),
           expectedCloseDate,
           owner: r.owner,
         };
@@ -8410,7 +8427,7 @@ const pcfBuildCohortMatrix: ToolDefinition = {
         const qLabel = `${qStart.getUTCFullYear()}-Q${Math.floor(qStart.getUTCMonth() / 3) + 1}`;
 
         const dealsRes = await query<any>(
-          `SELECT amount::numeric as amount, close_date, stage_normalized
+          `SELECT amount::numeric as amount, close_date, stage_normalized, custom_fields
            FROM deals
            WHERE workspace_id = $1
              AND created_at >= $2 AND created_at < $3
@@ -8422,7 +8439,7 @@ const pcfBuildCohortMatrix: ToolDefinition = {
         const horizonClosed: Record<string, number> = { 'q+0': 0, 'q+1': 0, 'q+2': 0, 'q+3': 0, 'q+4+': 0 };
 
         for (const deal of dealsRes.rows) {
-          const amt = parseFloat(deal.amount);
+          const amt = rv(deal, context);
           totalCreated += amt;
 
           if (deal.stage_normalized !== 'closed_won' || !deal.close_date) continue;
@@ -8656,7 +8673,8 @@ const pcfAuditOpenPipeline: ToolDefinition = {
       const dealsRes = await query<any>(
         `SELECT d.id::text, d.name, d.amount::numeric as amount, d.stage, d.close_date::text,
                 d.owner, COALESCE(d.days_in_stage, 0)::int as days_in_stage,
-                EXTRACT(DAY FROM NOW() - d.created_at)::int as age_days
+                EXTRACT(DAY FROM NOW() - d.created_at)::int as age_days,
+                d.custom_fields
          FROM deals d
          WHERE d.workspace_id = $1
            AND d.stage_normalized NOT IN ('closed_won','closed_lost')
@@ -8670,7 +8688,7 @@ const pcfAuditOpenPipeline: ToolDefinition = {
       const credibleDeals: any[] = [], atRiskDeals: any[] = [];
 
       for (const deal of dealsRes.rows) {
-        const amt = parseFloat(deal.amount);
+        const amt = rv(deal, context);
         const ageDays = deal.age_days || 0;
         const daysInStage = deal.days_in_stage || 0;
         const closeDate = new Date(deal.close_date);
@@ -9955,10 +9973,11 @@ export const toolRegistry = new Map<string, ToolDefinition>([
         ? new Date(timeWindows.analysisRange.end).toISOString().split('T')[0]
         : new Date().toISOString().split('T')[0];
 
-      const dealsResult = await query<{ id: string; name: string; amount: string; stage_normalized: string; owner_email: string }>(
+      const dealsResult = await query<{ id: string; name: string; amount: string; stage_normalized: string; owner_email: string; custom_fields: any }>(
         `SELECT id, COALESCE(name, 'Unnamed') AS name, COALESCE(amount, 0) AS amount,
                 COALESCE(stage_normalized, 'unknown') AS stage_normalized,
-                COALESCE(owner_email, '') AS owner_email
+                COALESCE(owner_email, '') AS owner_email,
+                custom_fields
          FROM deals
          WHERE workspace_id = $1
            AND close_date >= $2 AND close_date <= $3
@@ -9970,7 +9989,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
       const openDeals = dealsResult.rows.map(r => ({
         id: r.id,
         name: r.name,
-        amount: Number(r.amount),
+        amount: rv(r, context),
         stageNormalized: r.stage_normalized,
         ownerEmail: r.owner_email,
       }));
