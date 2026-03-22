@@ -1055,3 +1055,40 @@ All changes in `server/orchestrator/report-renderer.ts`:
 - Font: `Georgia, serif` → `-apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif`; `line-height: 1.7`
 - Cover: Teal band div with company name + doc type. Week label shown ONCE below band.
 - Headline: callout box with `border-left: 4px solid #0D9488` and `background: #F8FAFC`.
+
+---
+
+## MCP Server (Build 4)
+
+Pandora exposes itself as a Model Context Protocol server so Claude Desktop and other MCP-compatible clients can call Pandora tools directly.
+
+### Package
+- `@modelcontextprotocol/sdk` installed (added to package.json)
+- `zod` v4.3.6 already present (used for input validation in tool handlers)
+
+### Files
+- `server/mcp/server.ts` — `createMcpServer(workspaceId)` + `startStdioServer(workspaceId)`. Handles `ListTools` and `CallTool` MCP requests. Logs every call to `mcp_calls` table.
+- `server/mcp/tools/index.ts` — tool registry + `callTool()` dispatcher. 14 tools registered.
+- `server/mcp/tools/get-pipeline-health.ts` — runs `pipeline-hygiene` skill, returns findings + stale deal list. Caches for 4 hours.
+- `server/mcp/tools/get-forecast-rollup.ts` — runs `forecast-rollup` skill, returns totals + rep breakdown. Caches 4 hours.
+- `server/mcp/tools/get-at-risk-deals.ts` — direct DB query, returns at-risk deals sorted by `deal_risk DESC`.
+- `server/mcp/tools/get-rep-scorecard.ts` — runs `rep-scorecard` skill, optionally filters by rep email. Caches 8 hours.
+- `server/mcp/tools/run-deliberation.ts` — dispatches to `runDeliberation`, `runBoardroomDeliberation`, `runSocraticDeliberation`, or `runProsecutorDefenseDeliberation` based on `mode`.
+- `server/mcp/tools/get-concierge-brief.ts` — returns latest assembled brief via `getLatestBrief` or live-assembles one.
+- `server/mcp/tools/query-deals.ts` — direct DB query with filters: stage, owner_email, amount range, close date range, limit.
+- `server/mcp/tools/generate-report.ts` — calls `generateReport()` synchronously. Finds WBR/QBR template by `created_from_template`. Returns `document_id`.
+- `server/mcp/tools/get-report.ts` — fetches `report_documents` row by ID or most-recent by type.
+- `server/mcp/tools/list-reports.ts` — lists recent reports from `report_documents`.
+- `server/mcp/tools/export-report.ts` — returns Google Docs URL if a report was exported; indicates not-exported otherwise.
+- `server/mcp/tools/run-skill.ts` — runs any registered skill by `skill_id`, returns full `output` from `skill_runs`.
+- `server/mcp/tools/get-skill-status.ts` — fetches full `skill_runs` row by `run_id`.
+- `server/mcp/tools/get-pipeline-summary.ts` — lightweight direct DB query; stage breakdown + QTD closed-won. No skill run needed.
+
+### Auth
+No new auth system was built. Reuses the existing `workspaces.api_key` column. `requireAuth` middleware already does `SELECT id, name FROM workspaces WHERE api_key = $1` with a 5-minute in-memory cache. All MCP tool handlers receive `workspaceId` resolved from the API key — same as any other API key caller.
+
+### Usage Tracking
+Migration `202_mcp_calls.sql` — `mcp_calls` table: `workspace_id`, `tool_name`, `input_summary`, `output_summary`, `duration_ms`, `error`, `called_at`. Two indexes: by workspace+time, by workspace+tool+time. Logging never fails a tool call (`.catch(() => {})`).
+
+### Registration Endpoint
+`GET /api/workspaces/:workspaceId/mcp` — returns `{ api_key, mcp_server_url, claude_desktop_config, tools_available, instructions }`. Auto-generates `api_key` if workspace doesn't have one. The `claude_desktop_config` block can be pasted directly into Claude Desktop's config file.

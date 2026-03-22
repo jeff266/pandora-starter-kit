@@ -139,6 +139,64 @@ router.post('/:workspaceId/rotate-key', requireWorkspaceAccess, async (req, res)
   }
 });
 
+// MCP Registration — returns server URL + API key in one call
+// so users can paste directly into Claude Desktop config
+router.get('/:workspaceId/mcp', requireWorkspaceAccess, async (req, res) => {
+  try {
+    const workspaceId = req.params.workspaceId as string;
+
+    const result = await query(
+      'SELECT id, name, api_key FROM workspaces WHERE id = $1',
+      [workspaceId]
+    );
+
+    if (result.rows.length === 0) {
+      res.status(404).json({ error: 'Workspace not found' });
+      return;
+    }
+
+    const workspace = result.rows[0];
+
+    if (!workspace.api_key) {
+      const newKey = generateApiKey();
+      await query(
+        'UPDATE workspaces SET api_key = $1, updated_at = NOW() WHERE id = $2',
+        [newKey, workspaceId]
+      );
+      workspace.api_key = newKey;
+    }
+
+    const baseUrl = process.env.PUBLIC_URL || `https://${process.env.REPLIT_DEV_DOMAIN || 'localhost:3001'}`;
+
+    res.json({
+      workspace_id: workspace.id,
+      workspace_name: workspace.name,
+      api_key: workspace.api_key,
+      mcp_server_url: `${baseUrl}/api/mcp/${workspaceId}`,
+      claude_desktop_config: {
+        mcpServers: {
+          pandora: {
+            url: `${baseUrl}/api/mcp/${workspaceId}`,
+            headers: {
+              Authorization: `Bearer ${workspace.api_key}`,
+            },
+          },
+        },
+      },
+      tools_available: 14,
+      instructions: [
+        '1. Copy the claude_desktop_config block above.',
+        '2. Add it to your Claude Desktop config file (~/.config/claude/claude_desktop_config.json on macOS).',
+        '3. Restart Claude Desktop.',
+        '4. Pandora tools will appear in the Claude tools panel.',
+      ],
+    });
+  } catch (err) {
+    console.error('[workspaces] Error generating MCP config:', err instanceof Error ? err.message : err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Branding Configuration Endpoints
 
 /**
