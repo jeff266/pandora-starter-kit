@@ -18,6 +18,12 @@ interface ScopeRow {
   source: string | null;
   created_at: string;
   updated_at: string;
+  field_overrides?: Record<string, any>;
+}
+
+interface NumericField {
+  key: string;
+  label: string;
 }
 
 interface ScopesResponse {
@@ -197,6 +203,179 @@ function Button({
 }
 
 // ============================================================================
+// Field Overrides Expander — per scope
+// ============================================================================
+
+function FieldOverridesExpander({
+  scope,
+  numericFields,
+  onSave,
+}: {
+  scope: ScopeRow;
+  numericFields: NumericField[];
+  onSave: (scopeId: string, overrides: Record<string, any>) => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const overrides = scope.field_overrides || {};
+  const currentValueField = overrides.value_field || '';
+  const currentValueFormula = overrides.value_formula || '';
+
+  const [valueField, setValueField] = useState(currentValueField);
+  const [valueFormula, setValueFormula] = useState(currentValueFormula);
+  const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [savedOk, setSavedOk] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const handleFieldChange = (v: string) => { setValueField(v); setDirty(true); setSavedOk(false); setSaveError(null); };
+  const handleFormulaChange = (v: string) => { setValueFormula(v); setDirty(true); setSavedOk(false); setSaveError(null); };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const payload: Record<string, any> = {};
+      if (valueField) payload.value_field = valueField;
+      else payload.value_field = null;
+      if (valueFormula.trim()) payload.value_formula = valueFormula.trim();
+      else payload.value_formula = null;
+      await onSave(scope.scope_id, payload);
+      setDirty(false);
+      setSavedOk(true);
+      setTimeout(() => setSavedOk(false), 2500);
+    } catch (err: any) {
+      setSaveError(err?.message || 'Save failed');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const hasOverrides = !!(overrides.value_field || overrides.value_formula);
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{
+          background: 'none',
+          border: 'none',
+          cursor: 'pointer',
+          fontSize: 11,
+          fontWeight: 600,
+          fontFamily: fonts.sans,
+          color: hasOverrides ? colors.accent : colors.textMuted,
+          padding: '2px 0',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 4,
+        }}
+      >
+        <span style={{ fontSize: 10 }}>{open ? '▾' : '▸'}</span>
+        Field Overrides
+        {hasOverrides && <span style={{
+          marginLeft: 4,
+          padding: '1px 5px',
+          borderRadius: 8,
+          fontSize: 10,
+          background: colors.accentSoft,
+          color: colors.accent,
+          fontWeight: 700,
+        }}>configured</span>}
+      </button>
+
+      {open && (
+        <div style={{
+          marginTop: 8,
+          padding: '12px 14px',
+          background: colors.surfaceRaised,
+          border: `1px solid ${colors.border}`,
+          borderRadius: 6,
+        }}>
+          <div style={{ fontSize: 11, color: colors.textMuted, fontFamily: fonts.sans, marginBottom: 12 }}>
+            Override the value field for <strong style={{ color: colors.text }}>{scope.name}</strong> scope.
+            Leave blank to use the workspace default.
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 600, color: colors.textMuted, fontFamily: fonts.sans, display: 'block', marginBottom: 4, textTransform: 'uppercase' as const, letterSpacing: '0.04em' }}>
+                Value Field
+              </label>
+              <select
+                value={valueField}
+                onChange={e => handleFieldChange(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '6px 8px',
+                  background: colors.surface,
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: 5,
+                  fontSize: 12,
+                  color: colors.text,
+                  fontFamily: fonts.sans,
+                  cursor: 'pointer',
+                }}
+              >
+                <option value="">— use workspace default —</option>
+                {numericFields.map(f => (
+                  <option key={f.key} value={f.key}>{f.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 600, color: colors.textMuted, fontFamily: fonts.sans, display: 'block', marginBottom: 4, textTransform: 'uppercase' as const, letterSpacing: '0.04em' }}>
+                Value Formula (optional)
+              </label>
+              <input
+                type="text"
+                value={valueFormula}
+                onChange={e => handleFormulaChange(e.target.value)}
+                placeholder="{arr_value} / 12"
+                style={{
+                  width: '100%',
+                  padding: '6px 8px',
+                  background: colors.surface,
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: 5,
+                  fontSize: 12,
+                  color: colors.text,
+                  fontFamily: fonts.mono,
+                  boxSizing: 'border-box' as const,
+                }}
+              />
+            </div>
+          </div>
+          <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 10 }}>
+            <button
+              onClick={handleSave}
+              disabled={!dirty || saving}
+              style={{
+                padding: '5px 14px',
+                borderRadius: 5,
+                fontSize: 11,
+                fontWeight: 600,
+                fontFamily: fonts.sans,
+                background: dirty && !saving ? colors.accent : colors.surfaceRaised,
+                color: dirty && !saving ? '#fff' : colors.textMuted,
+                border: 'none',
+                cursor: dirty && !saving ? 'pointer' : 'not-allowed',
+              }}
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+            {savedOk && (
+              <span style={{ fontSize: 11, color: colors.green, fontFamily: fonts.sans }}>Saved</span>
+            )}
+            {saveError && (
+              <span style={{ fontSize: 11, color: colors.red, fontFamily: fonts.sans }}>{saveError}</span>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
 // Panel 1: Scope Inventory
 // ============================================================================
 
@@ -208,6 +387,8 @@ function ScopeInventoryPanel({
   confirmingId,
   reInferring,
   anon,
+  numericFields,
+  onSaveFieldOverrides,
 }: {
   data: ScopesResponse | null;
   loading: boolean;
@@ -216,6 +397,8 @@ function ScopeInventoryPanel({
   confirmingId: string | null;
   reInferring: boolean;
   anon: ReturnType<typeof useDemoMode>['anon'];
+  numericFields: NumericField[];
+  onSaveFieldOverrides: (scopeId: string, overrides: Record<string, any>) => Promise<void>;
 }) {
   return (
     <div style={panelStyle}>
@@ -250,34 +433,45 @@ function ScopeInventoryPanel({
               </thead>
               <tbody>
                 {data.scopes.map(scope => (
-                  <tr key={scope.scope_id} style={{ background: 'transparent' }}>
-                    <td style={tdStyle}>
-                      <span style={monoStyle}>{scope.scope_id}</span>
-                    </td>
-                    <td style={tdStyle}>{anon.pipeline(scope.name)}</td>
-                    <td style={{ ...tdStyle, maxWidth: 260 }}>
-                      <span style={{ ...monoStyle, fontSize: 11 }}>
-                        {formatFilter(scope.filter_field, scope.filter_values)}
-                      </span>
-                    </td>
-                    <td style={{ ...tdStyle, fontWeight: 700 }}>{scope.deal_count.toLocaleString()}</td>
-                    <td style={tdStyle}><Badge confirmed={scope.confirmed} /></td>
-                    <td style={tdStyle}>{formatConfidence(scope.confidence)}</td>
-                    <td style={{ ...tdStyle, color: colors.textSecondary, fontSize: 12 }}>
-                      {scope.source || '—'}
-                    </td>
-                    <td style={tdStyle}>
-                      {!scope.confirmed && (
-                        <Button
-                          onClick={() => onConfirm(scope.scope_id)}
-                          disabled={confirmingId === scope.scope_id}
-                          variant="primary"
-                        >
-                          {confirmingId === scope.scope_id ? 'Confirming...' : 'Confirm'}
-                        </Button>
-                      )}
-                    </td>
-                  </tr>
+                  <React.Fragment key={scope.scope_id}>
+                    <tr style={{ background: 'transparent' }}>
+                      <td style={tdStyle}>
+                        <span style={monoStyle}>{scope.scope_id}</span>
+                      </td>
+                      <td style={tdStyle}>{anon.pipeline(scope.name)}</td>
+                      <td style={{ ...tdStyle, maxWidth: 260 }}>
+                        <span style={{ ...monoStyle, fontSize: 11 }}>
+                          {formatFilter(scope.filter_field, scope.filter_values)}
+                        </span>
+                      </td>
+                      <td style={{ ...tdStyle, fontWeight: 700 }}>{scope.deal_count.toLocaleString()}</td>
+                      <td style={tdStyle}><Badge confirmed={scope.confirmed} /></td>
+                      <td style={tdStyle}>{formatConfidence(scope.confidence)}</td>
+                      <td style={{ ...tdStyle, color: colors.textSecondary, fontSize: 12 }}>
+                        {scope.source || '—'}
+                      </td>
+                      <td style={tdStyle}>
+                        {!scope.confirmed && (
+                          <Button
+                            onClick={() => onConfirm(scope.scope_id)}
+                            disabled={confirmingId === scope.scope_id}
+                            variant="primary"
+                          >
+                            {confirmingId === scope.scope_id ? 'Confirming...' : 'Confirm'}
+                          </Button>
+                        )}
+                      </td>
+                    </tr>
+                    <tr style={{ background: 'transparent' }}>
+                      <td colSpan={8} style={{ padding: '0 12px 10px', borderBottom: `1px solid ${colors.border}` }}>
+                        <FieldOverridesExpander
+                          scope={scope}
+                          numericFields={numericFields}
+                          onSave={onSaveFieldOverrides}
+                        />
+                      </td>
+                    </tr>
+                  </React.Fragment>
                 ))}
               </tbody>
             </table>
@@ -335,6 +529,7 @@ function FilterPreviewPanel({
   onClearOverride,
   overridingDealId,
   anon,
+  valueFieldLabel,
 }: {
   scopes: ScopeRow[];
   selectedScopeId: string | null;
@@ -349,6 +544,7 @@ function FilterPreviewPanel({
   onClearOverride: (dealId: string) => Promise<void>;
   overridingDealId: string | null;
   anon: ReturnType<typeof useDemoMode>['anon'];
+  valueFieldLabel?: string;
 }) {
   const [expandedDealId, setExpandedDealId] = useState<string | null>(null);
   const nonDefaultScopes = scopes.filter(s => s.scope_id !== 'default');
@@ -444,7 +640,7 @@ function FilterPreviewPanel({
               <thead>
                 <tr>
                   <th style={thStyle}>Name</th>
-                  <th style={thStyle}>Amount</th>
+                  <th style={thStyle}>{valueFieldLabel || 'Amount'}</th>
                   <th style={thStyle}>Scope</th>
                   <th style={thStyle}>Stage</th>
                   <th style={thStyle}>Owner</th>
@@ -653,6 +849,12 @@ export default function AdminScopesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Numeric fields for value field dropdowns
+  const [numericFields, setNumericFields] = useState<NumericField[]>([
+    { key: 'amount', label: 'Amount (default)' },
+  ]);
+  const [valueFieldLabel, setValueFieldLabel] = useState<string>('Amount');
+
   // Preview state
   const [selectedScopeId, setSelectedScopeId] = useState<string | null>(null);
   const [previewDeals, setPreviewDeals] = useState<DealPreview[]>([]);
@@ -711,6 +913,20 @@ export default function AdminScopesPage() {
 
   useEffect(() => {
     fetchScopes();
+    Promise.all([
+      api.get('/admin/numeric-fields').catch(() => null),
+      api.get('/workspace-config').catch(() => null),
+    ]).then(([fieldsRes, configRes]: any[]) => {
+      if (fieldsRes?.fields?.length) setNumericFields(fieldsRes.fields);
+      // Derive value field label from workspace config default pipeline
+      if (configRes?.config?.pipelines?.length) {
+        const defaultPipeline = configRes.config.pipelines.find((p: any) => p.included_in_default_scope) || configRes.config.pipelines[0];
+        const vf = defaultPipeline?.value_field || 'amount';
+        const match = (fieldsRes?.fields || []).find((f: any) => f.key === vf);
+        if (match) setValueFieldLabel(match.label);
+        else if (vf !== 'amount') setValueFieldLabel(vf.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()));
+      }
+    });
   }, []);
 
   useEffect(() => {
@@ -788,6 +1004,12 @@ export default function AdminScopesPage() {
     }
   };
 
+  const handleSaveFieldOverrides = async (scopeId: string, overrides: Record<string, any>) => {
+    await api.patch(`/analysis-scopes/${encodeURIComponent(scopeId)}/field-overrides`, overrides);
+    // Refresh scopes so the new field_overrides are reflected in state
+    await fetchScopes();
+  };
+
   // ---- Render ----
 
   return (
@@ -850,6 +1072,8 @@ export default function AdminScopesPage() {
         confirmingId={confirmingId}
         reInferring={reInferring}
         anon={anon}
+        numericFields={numericFields}
+        onSaveFieldOverrides={handleSaveFieldOverrides}
       />
 
       {/* Panel 2 */}
@@ -867,6 +1091,7 @@ export default function AdminScopesPage() {
         onClearOverride={handleClearOverride}
         overridingDealId={overridingDealId}
         anon={anon}
+        valueFieldLabel={valueFieldLabel}
       />
 
       {/* Panel 3 */}

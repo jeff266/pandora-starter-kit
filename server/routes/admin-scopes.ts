@@ -114,6 +114,7 @@ router.get('/:workspaceId/admin/scopes', requirePermission('config.view'), async
       confirmed: row.confirmed,
       confidence: row.confidence,
       source: (row.field_overrides as Record<string, any>)?._source || null,
+      field_overrides: row.field_overrides || {},
       created_at: row.created_at,
       updated_at: row.updated_at,
     }));
@@ -436,6 +437,125 @@ router.put('/:workspaceId/admin/pipeline-defaults', requirePermission('config.ed
   } catch (err) {
     console.error('[Admin Scopes] Pipeline defaults PUT error:', err);
     res.status(500).json({ error: 'Failed to save pipeline defaults', details: (err as Error).message });
+  }
+});
+
+// ============================================================================
+// GET /:workspaceId/admin/numeric-fields
+// Returns the list of numeric CRM fields available in this workspace's deals,
+// including standard fields and any custom_fields keys with numeric values.
+// Used to populate the value_field dropdown in Pipeline Config and Scope Field Overrides.
+// ============================================================================
+
+router.get('/:workspaceId/admin/numeric-fields', requirePermission('config.view'), async (req: Request, res: Response): Promise<void> => {
+  const workspaceId = req.params.workspaceId as string;
+
+  try {
+    // Standard numeric fields always available
+    const standardFields = [
+      { key: 'amount',        label: 'Amount (default)' },
+      { key: 'probability',   label: 'Probability' },
+    ];
+
+    // Discover numeric custom_fields keys by sampling deals in this workspace.
+    // We cast each value to text and try to parse; keys with numeric-looking values are included.
+    let customFields: Array<{ key: string; label: string }> = [];
+    try {
+      const sampleResult = await query<{ custom_fields: any }>(
+        `SELECT custom_fields FROM deals
+         WHERE workspace_id = $1 AND custom_fields IS NOT NULL AND custom_fields != '{}'
+         LIMIT 50`,
+        [workspaceId]
+      );
+
+      const numericKeys = new Set<string>();
+      for (const row of sampleResult.rows) {
+        if (row.custom_fields && typeof row.custom_fields === 'object') {
+          for (const [k, v] of Object.entries(row.custom_fields)) {
+            if (v !== null && v !== '' && !isNaN(Number(v))) {
+              numericKeys.add(k);
+            }
+          }
+        }
+      }
+
+      customFields = Array.from(numericKeys).sort().map(k => ({
+        key: `custom_fields.${k}`,
+        label: k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+      }));
+    } catch (_e) {
+      // custom_fields column may not exist — skip gracefully
+    }
+
+    res.json({
+      fields: [...standardFields, ...customFields],
+    });
+  } catch (err) {
+    console.error('[Admin Scopes] numeric-fields error:', err);
+    res.status(500).json({ error: 'Failed to load numeric fields' });
+  }
+});
+
+// ============================================================================
+// PATCH /:workspaceId/analysis-scopes/:scopeId/field-overrides
+// Merges submitted field overrides into analysis_scopes.field_overrides JSONB.
+// Validates that submitted keys are from an allowed set.
+// ============================================================================
+
+const ALLOWED_FIELD_OVERRIDE_KEYS = new Set([
+  'value_field',
+  'value_formula',
+  'stale_deal_days',
+  'coverage_target',
+]);
+
+router.patch('/:workspaceId/analysis-scopes/:scopeId/field-overrides', requirePermission('config.edit'), async (req: Request, res: Response): Promise<void> => {
+  const workspaceId = req.params.workspaceId as string;
+  const scopeId = req.params.scopeId as string;
+  const overrides = req.body as Record<string, any>;
+
+  if (!overrides || typeof overrides !== 'object' || Array.isArray(overrides)) {
+    res.status(400).json({ error: 'Request body must be a JSON object of field overrides' });
+    return;
+  }
+
+  // Validate keys
+  const invalidKeys = Object.keys(overrides).filter(k => !ALLOWED_FIELD_OVERRIDE_KEYS.has(k));
+  if (invalidKeys.length > 0) {
+    res.status(400).json({
+      error: `Invalid override keys: ${invalidKeys.join(', ')}`,
+      allowed_keys: Array.from(ALLOWED_FIELD_OVERRIDE_KEYS),
+    });
+    return;
+  }
+
+  try {
+    // Verify scope exists and belongs to this workspace
+    const scopeCheck = await query<{ field_overrides: any }>(
+      `SELECT field_overrides FROM analysis_scopes WHERE workspace_id = $1 AND scope_id = $2`,
+      [workspaceId, scopeId]
+    );
+
+    if (scopeCheck.rows.length === 0) {
+      res.status(404).json({ error: 'Scope not found' });
+      return;
+    }
+
+    const existing = scopeCheck.rows[0].field_overrides || {};
+    const merged = { ...existing, ...overrides };
+
+    const result = await query<{ scope_id: string; field_overrides: any; updated_at: string }>(
+      `UPDATE analysis_scopes
+       SET field_overrides = $3::jsonb, updated_at = now()
+       WHERE workspace_id = $1 AND scope_id = $2
+       RETURNING scope_id, field_overrides, updated_at`,
+      [workspaceId, scopeId, JSON.stringify(merged)]
+    );
+
+    res.json({ scope_id: scopeId, field_overrides: result.rows[0].field_overrides });
+  } catch (err) {
+    console.error('[Admin Scopes] field-overrides PATCH error:', err);
+    res.status(500).json({ error: 'Failed to update field overrides' });
   }
 });
 

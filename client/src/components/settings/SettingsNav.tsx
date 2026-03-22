@@ -28,6 +28,7 @@ const adminTabs: NavItem[] = [
   { key: 'roles', label: 'Roles', icon: 'target' },
   { key: 'notifications', label: 'Notifications', icon: 'wifi' },
   { key: 'features', label: 'Features', icon: 'lightbulb' },
+  { key: 'pipeline-config', label: 'Pipeline Config', icon: 'chart-growth' },
   { key: 'crm-sync', label: 'CRM Sync', icon: 'refresh' },
   { key: 'deal-fields', label: 'Deal Fields', icon: 'edit' },
   { key: 'methodology', label: 'Methodology', icon: 'target' },

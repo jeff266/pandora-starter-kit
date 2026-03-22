@@ -221,6 +221,19 @@ export default function CommandCenter() {
   const [greetingData, setGreetingData] = useState<any>(null);
   const [latestFeed, setLatestFeed] = useState<{ operators: any[]; events: ToolCallEvent[] } | null>(null);
   const [feedCollapsed, setFeedCollapsed] = useState(true);
+  const [pipelineConfigs, setPipelineConfigs] = useState<Array<{ id: string; name: string; value_field?: string; filter?: { field: string; values: string[] } }>>([]);
+
+  const valueFieldLabel = useMemo(() => {
+    let config: { value_field?: string } | undefined;
+    if (selectedPipeline && selectedPipeline !== 'all' && selectedPipeline !== 'default') {
+      config = pipelineConfigs.find(p => p.id === selectedPipeline || p.name === selectedPipeline);
+    }
+    if (!config) config = pipelineConfigs[0];
+    const vf = config?.value_field;
+    if (!vf || vf === 'amount') return 'Amount';
+    const rawKey = vf.includes('.') ? vf.split('.').pop()! : vf;
+    return rawKey.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
+  }, [pipelineConfigs, selectedPipeline]);
 
   // Brief streaming for "Show Your Work" tool call visibility
   const { state: briefStreamState, loadBrief } = useBriefStream();
@@ -324,6 +337,10 @@ export default function CommandCenter() {
         const arr = Array.isArray(d) ? d : d.findings || [];
         setFindings(arr);
       }),
+      api.get('/workspace-config').then((cfg: any) => {
+        const pipelines: any[] = cfg?.config?.pipelines || [];
+        setPipelineConfigs(pipelines);
+      }).catch(() => {}),
       api.get('/connectors/status').then(d => {
         setConnectorStatus(Array.isArray(d) ? d : d.connectors || []);
       }).catch(() => {}),
@@ -1204,6 +1221,7 @@ export default function CommandCenter() {
           metric={metricBreakdown}
           scopeId={selectedPipeline}
           onClose={() => setMetricBreakdown(null)}
+          valueFieldLabel={valueFieldLabel}
         />
       )}
 
@@ -1226,6 +1244,7 @@ export default function CommandCenter() {
             onAskAboutStage={() => setAskingAbout(askingAbout === 'stage' ? null : 'stage')}
             onAskAboutDeal={(deal) => setAskingAbout(askingAbout === deal ? null : deal)}
             onAskPandora={handleAskPandora}
+            valueFieldLabel={valueFieldLabel}
           />
         </>
       )}
@@ -1289,7 +1308,7 @@ function fmtAmt(n: number) {
 }
 
 function StageDrillDownPanel({
-  stage, loading, askingAbout, isMobile, onClose, onAskAboutStage, onAskAboutDeal, onAskPandora
+  stage, loading, askingAbout, isMobile, onClose, onAskAboutStage, onAskAboutDeal, onAskPandora, valueFieldLabel = 'Amount'
 }: {
   stage: SelectedStage;
   loading: boolean;
@@ -1299,6 +1318,7 @@ function StageDrillDownPanel({
   onAskAboutStage: () => void;
   onAskAboutDeal: (deal: DealSummaryFull) => void;
   onAskPandora: (prompt: string, scope?: any) => void;
+  valueFieldLabel?: string;
 }) {
   const { anon } = useDemoMode();
   const [sortBy, setSortBy] = useState<'amount' | 'days' | 'probability' | 'risk'>('amount');
@@ -1434,13 +1454,13 @@ function StageDrillDownPanel({
           position: 'sticky', top: 0, background: '#111827', zIndex: 2,
         }}>
           {([
-            { label: 'Deal', sortKey: null },
-            { label: 'Category', sortKey: null },
-            { label: 'Amount', sortKey: 'amount' as const },
-            { label: 'Days', sortKey: 'days' as const },
-            { label: 'Prob', sortKey: 'probability' as const },
-            { label: '', sortKey: null },
-          ] as const).filter(h => isMobile ? (h.label === 'Deal' || h.label === 'Amount') : true).map(h => (
+            { label: 'Deal', sortKey: null as 'amount' | 'days' | 'probability' | null },
+            { label: 'Category', sortKey: null as 'amount' | 'days' | 'probability' | null },
+            { label: valueFieldLabel, sortKey: 'amount' as 'amount' | 'days' | 'probability' | null },
+            { label: 'Days', sortKey: 'days' as 'amount' | 'days' | 'probability' | null },
+            { label: 'Prob', sortKey: 'probability' as 'amount' | 'days' | 'probability' | null },
+            { label: '', sortKey: null as 'amount' | 'days' | 'probability' | null },
+          ]).filter(h => isMobile ? (h.label === 'Deal' || h.label === valueFieldLabel) : true).map(h => (
             <div
               key={h.label}
               onClick={() => h.sortKey && setSortBy(h.sortKey)}
@@ -1448,7 +1468,7 @@ function StageDrillDownPanel({
                 fontSize: 10, fontWeight: 600,
                 color: h.sortKey && sortBy === h.sortKey ? '#3B82F6' : '#5A6A80',
                 textTransform: 'uppercase', letterSpacing: '0.05em',
-                textAlign: (h.label === 'Amount' || h.label === 'Days' || h.label === 'Prob') ? 'right' : 'left',
+                textAlign: (h.label === valueFieldLabel || h.label === 'Days' || h.label === 'Prob') ? 'right' : 'left',
                 cursor: h.sortKey ? 'pointer' : 'default',
                 transition: 'color 0.15s',
               }}
@@ -2064,7 +2084,7 @@ function MetricCard({ label, value, color, onClick }: { label: string; value: st
   );
 }
 
-function MetricBreakdownModal({ metric, scopeId, onClose }: { metric: string; scopeId?: string; onClose: () => void }) {
+function MetricBreakdownModal({ metric, scopeId, onClose, valueFieldLabel = 'Amount' }: { metric: string; scopeId?: string; onClose: () => void; valueFieldLabel?: string }) {
   const { anon } = useDemoMode();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -2077,8 +2097,8 @@ function MetricBreakdownModal({ metric, scopeId, onClose }: { metric: string; sc
 
     const isWinRate = metric === 'win_rate';
     const headers = isWinRate
-      ? ['Deal ID', 'Deal', 'Owner', 'Amount', 'Stage', 'Outcome', 'Close Date']
-      : ['Deal ID', 'Deal', 'Owner', 'Amount', 'Probability', 'Weighted', 'Stage', 'Close Date'];
+      ? ['Deal ID', 'Deal', 'Owner', valueFieldLabel, 'Stage', 'Outcome', 'Close Date']
+      : ['Deal ID', 'Deal', 'Owner', valueFieldLabel, 'Probability', 'Weighted', 'Stage', 'Close Date'];
 
     const rows = data.deals.map((d: any) => {
       if (isWinRate) {
@@ -2235,7 +2255,7 @@ function MetricBreakdownModal({ metric, scopeId, onClose }: { metric: string; sc
                 <tr>
                   <th onClick={() => handleSort('name')} style={sortHeaderStyle('name')}>Deal {sortKey === 'name' ? (sortDir === 'desc' ? '↓' : '↑') : ''}</th>
                   <th onClick={() => handleSort('owner')} style={sortHeaderStyle('owner')}>Owner {sortKey === 'owner' ? (sortDir === 'desc' ? '↓' : '↑') : ''}</th>
-                  <th onClick={() => handleSort('amount')} style={sortHeaderStyle('amount')}>Amount {sortKey === 'amount' ? (sortDir === 'desc' ? '↓' : '↑') : ''}</th>
+                  <th onClick={() => handleSort('amount')} style={sortHeaderStyle('amount')}>{valueFieldLabel} {sortKey === 'amount' ? (sortDir === 'desc' ? '↓' : '↑') : ''}</th>
                   {!isWinRate && <th onClick={() => handleSort('probability')} style={sortHeaderStyle('probability')}>Probability {sortKey === 'probability' ? (sortDir === 'desc' ? '↓' : '↑') : ''}</th>}
                   {!isWinRate && <th onClick={() => handleSort('weighted_amount')} style={sortHeaderStyle('weighted_amount')}>Weighted {sortKey === 'weighted_amount' ? (sortDir === 'desc' ? '↓' : '↑') : ''}</th>}
                   <th onClick={() => handleSort('stage')} style={sortHeaderStyle('stage')}>Stage {sortKey === 'stage' ? (sortDir === 'desc' ? '↓' : '↑') : ''}</th>
