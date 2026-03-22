@@ -39,6 +39,7 @@ const adminTabs: NavItem[] = [
   { key: 'dimensions', label: 'Dimensions', icon: 'filter' },
   { key: 'token-usage', label: 'Token Usage', icon: 'trending' },
   { key: 'ai-keys', label: 'AI Keys', icon: 'brain' },
+  { key: 'claude', label: 'Claude', icon: '✦' },
   { key: 'connectors', label: 'Connectors', icon: 'transfer' },
   { key: 'connectors-health', label: 'Conn. Health', icon: 'wifi' },
 ];

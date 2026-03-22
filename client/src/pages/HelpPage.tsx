@@ -26,7 +26,7 @@ const faqCategories: Category[] = [
       {
         id: 'api-key',
         question: 'What is an API key and where do I find mine?',
-        answer: 'Your Pandora API key authenticates your workspace when connecting external tools like Claude Desktop. Find it at Settings → Integrations → API Key. If none exists, click Generate. Keep this key private — it grants full read/write access to your workspace data.',
+        answer: 'Your Pandora API key authenticates your workspace when connecting external tools like Claude Desktop. Find it at Settings → Claude → API Key. If none exists, Pandora will generate one automatically when you open that tab. Keep this key private — it grants full read/write access to your workspace data.',
       },
       {
         id: 'ui-vs-claude',
