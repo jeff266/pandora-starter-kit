@@ -1,4 +1,5 @@
 import { Editor } from '@tiptap/react';
+import { getSectionEditor } from './sectionEditorRegistry';
 
 function formatCellValue(value: string | number | null | undefined, format?: string): string {
   if (value === null || value === undefined) return '—';
@@ -84,4 +85,23 @@ export function insertTableIntoEditor(
     .join('');
   const html = `<table><thead><tr>${headers}</tr></thead><tbody>${bodyRows}</tbody></table>`;
   editor.chain().focus().insertContent(html).run();
+}
+
+export function replaceSelectionInEditor(
+  newText: string,
+  sectionId: string
+): void {
+  const sectionEditor = getSectionEditor(sectionId);
+  if (!sectionEditor || sectionEditor.isDestroyed) return;
+
+  // Get current selection range
+  const { from, to } = sectionEditor.state.selection;
+
+  // Delete the selection and insert new content
+  sectionEditor
+    .chain()
+    .focus()
+    .deleteRange({ from, to })
+    .insertContentAt(from, `<p>${markdownToHtml(newText)}</p>`)
+    .run();
 }

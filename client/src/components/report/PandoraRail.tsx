@@ -3,7 +3,7 @@ import { api } from '../../lib/api';
 import { colors, fonts } from '../../styles/theme';
 import { renderMarkdown } from '../../lib/render-markdown';
 import { getActiveSectionEditor, getAnyActiveEditor } from '../../lib/sectionEditorRegistry';
-import { insertTextIntoEditor } from '../../lib/insertBlock';
+import { insertTextIntoEditor, replaceSelectionInEditor } from '../../lib/insertBlock';
 
 interface ReportContext {
   documentId?: string;
@@ -13,11 +13,19 @@ interface ReportContext {
   activeSectionTitle?: string | null;
 }
 
+interface InjectedPrompt {
+  instruction: string;
+  selectedText: string;
+  sectionId: string;
+}
+
 interface PandoraRailProps {
   workspaceId: string;
   reportContext?: ReportContext;
   forcedMode: string | null;
   onModeChange: (mode: string | null) => void;
+  injectedPrompt?: InjectedPrompt;
+  onInjectedPromptConsumed?: () => void;
 }
 
 interface RailMessage {
@@ -72,7 +80,14 @@ function buildReportPreamble(ctx: ReportContext, modeInstruction: string | null)
   return lines.join(' ');
 }
 
-export default function PandoraRail({ workspaceId, reportContext = {}, forcedMode, onModeChange }: PandoraRailProps) {
+export default function PandoraRail({
+  workspaceId,
+  reportContext = {},
+  forcedMode,
+  onModeChange,
+  injectedPrompt,
+  onInjectedPromptConsumed,
+}: PandoraRailProps) {
   const [messages, setMessages] = useState<RailMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -83,6 +98,7 @@ export default function PandoraRail({ workspaceId, reportContext = {}, forcedMod
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const prevSectionRef = useRef<string | null | undefined>(null);
+  const lastRewriteSectionIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -93,6 +109,32 @@ export default function PandoraRail({ workspaceId, reportContext = {}, forcedMod
       prevSectionRef.current = reportContext.activeSectionId;
     }
   }, [reportContext.activeSectionId, messages.length]);
+
+  // Handle injected rewrite prompts
+  useEffect(() => {
+    if (!injectedPrompt) return;
+
+    const sectionTitle = reportContext.activeSectionTitle || 'this section';
+    const rewriteMessage = `Rewrite the following text from the "${sectionTitle}" section.
+
+Original text:
+"${injectedPrompt.selectedText}"
+
+Instruction: ${injectedPrompt.instruction}
+
+Return only the rewritten text. No preamble, no explanation.`;
+
+    // Store section ID for later replacement
+    lastRewriteSectionIdRef.current = injectedPrompt.sectionId;
+
+    // Auto-submit the message
+    sendMessage(rewriteMessage);
+
+    // Clear injected prompt after consumption
+    if (onInjectedPromptConsumed) {
+      onInjectedPromptConsumed();
+    }
+  }, [injectedPrompt, reportContext.activeSectionTitle, sendMessage, onInjectedPromptConsumed]);
 
   const currentMode = MODES.find(m => m.id === forcedMode) ?? null;
 
@@ -147,6 +189,20 @@ export default function PandoraRail({ workspaceId, reportContext = {}, forcedMod
   };
 
   const handleInsert = useCallback((idx: number, content: string) => {
+    // Check if this is a rewrite response (last message after a rewrite prompt)
+    const isRewrite = lastRewriteSectionIdRef.current !== null && idx === messages.length - 1;
+
+    if (isRewrite && lastRewriteSectionIdRef.current) {
+      // Replace the selected text in the specific section
+      replaceSelectionInEditor(content, lastRewriteSectionIdRef.current);
+      setInsertedMsgIdx(idx);
+      setTimeout(() => setInsertedMsgIdx(n => n === idx ? null : n), 2000);
+      // Clear the rewrite ref after use
+      lastRewriteSectionIdRef.current = null;
+      return;
+    }
+
+    // Standard insert flow
     const editor =
       getActiveSectionEditor(reportContext.activeSectionId ?? null) ??
       getAnyActiveEditor();
@@ -158,7 +214,7 @@ export default function PandoraRail({ workspaceId, reportContext = {}, forcedMod
     insertTextIntoEditor(editor, content);
     setInsertedMsgIdx(idx);
     setTimeout(() => setInsertedMsgIdx(n => n === idx ? null : n), 2000);
-  }, [reportContext.activeSectionId]);
+  }, [reportContext.activeSectionId, messages.length]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', background: colors.surface }}>
@@ -294,7 +350,11 @@ export default function PandoraRail({ workspaceId, reportContext = {}, forcedMod
                         transition: 'all 120ms ease',
                       }}
                     >
-                      {insertedMsgIdx === i ? '✓ Inserted' : '↓ Insert'}
+                      {insertedMsgIdx === i
+                        ? '✓ Inserted'
+                        : lastRewriteSectionIdRef.current !== null && i === messages.length - 1
+                          ? '↩ Replace selection'
+                          : '↓ Insert'}
                     </button>
                     {noSectionMsgIdx === i && (
                       <span style={{ fontSize: 11, color: colors.textMuted, fontFamily: fonts.sans, fontStyle: 'italic' }}>

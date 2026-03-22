@@ -182,6 +182,21 @@ export default function ReportViewer() {
   const shareMenuRef = useRef<HTMLDivElement>(null);
   const overflowMenuRef = useRef<HTMLDivElement>(null);
 
+  // Text rewrite toolbar
+  const [rewriteToolbar, setRewriteToolbar] = useState<{
+    visible: boolean;
+    x: number;
+    y: number;
+    selectedText: string;
+    sectionId: string;
+  } | null>(null);
+  const [rewriteInstruction, setRewriteInstruction] = useState('');
+  const [injectedPrompt, setInjectedPrompt] = useState<{
+    instruction: string;
+    selectedText: string;
+    sectionId: string;
+  } | null>(null);
+
   useEffect(() => {
     if (isDirectBriefing) {
       loadDirectGeneration();
@@ -257,6 +272,67 @@ export default function ReportViewer() {
     map.forEach((el) => observer.observe(el));
     return () => observer.disconnect();
   }, [reportDocument?.id]);
+
+  // Text rewrite selection detection
+  useEffect(() => {
+    function handleMouseUp(e: MouseEvent) {
+      setTimeout(() => {
+        const selection = window.getSelection();
+        const selectedText = selection?.toString().trim() ?? '';
+
+        if (!selectedText || selectedText.length < 10) {
+          setRewriteToolbar(null);
+          return;
+        }
+
+        // Only trigger inside a section editor container
+        const anchorNode = selection?.anchorNode;
+        const sectionEl = (anchorNode as Element)?.closest?.('[data-section-id]')
+          ?? (anchorNode as Text)?.parentElement?.closest('[data-section-id]');
+
+        if (!sectionEl) {
+          setRewriteToolbar(null);
+          return;
+        }
+
+        const sectionId = sectionEl.getAttribute('data-section-id');
+        if (!sectionId) return;
+
+        // Position the toolbar above the selection
+        const range = selection!.getRangeAt(0);
+        const rect = range.getBoundingClientRect();
+
+        setRewriteToolbar({
+          visible: true,
+          x: rect.left + rect.width / 2,
+          y: rect.top + window.scrollY - 48,
+          selectedText,
+          sectionId,
+        });
+      }, 10);
+    }
+
+    document.addEventListener('mouseup', handleMouseUp);
+    return () => document.removeEventListener('mouseup', handleMouseUp);
+  }, []);
+
+  function handleRewriteSubmit() {
+    if (!rewriteToolbar || !rewriteInstruction.trim()) return;
+
+    // Open the Pandora rail if not already open
+    setPandoraOpen(true);
+
+    // Pass the rewrite prompt to the rail
+    setInjectedPrompt({
+      instruction: rewriteInstruction.trim(),
+      selectedText: rewriteToolbar.selectedText,
+      sectionId: rewriteToolbar.sectionId,
+    });
+
+    // Clear toolbar
+    setRewriteToolbar(null);
+    setRewriteInstruction('');
+  }
 
   async function loadDirectGeneration() {
     try {
@@ -1785,11 +1861,74 @@ export default function ReportViewer() {
                 }}
                 forcedMode={pandoraMode}
                 onModeChange={setPandoraMode}
+                injectedPrompt={injectedPrompt}
+                onInjectedPromptConsumed={() => setInjectedPrompt(null)}
               />
             </div>
           </div>
         )}
       </div>
+
+      {/* Floating rewrite toolbar */}
+      {rewriteToolbar?.visible && (
+        <div
+          style={{
+            position: 'absolute',
+            left: rewriteToolbar.x,
+            top: rewriteToolbar.y - 50,
+            transform: 'translateX(-50%)',
+            zIndex: 1000,
+            background: colors.surfaceElevated,
+            border: `1px solid ${colors.border}`,
+            borderRadius: 8,
+            boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+            padding: '8px 10px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            maxWidth: 400,
+          }}
+        >
+          <input
+            type="text"
+            placeholder="How should I rewrite this?"
+            value={rewriteInstruction}
+            onChange={(e) => setRewriteInstruction(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleRewriteSubmit();
+              if (e.key === 'Escape') setRewriteToolbar(null);
+            }}
+            autoFocus
+            style={{
+              flex: 1,
+              border: 'none',
+              outline: 'none',
+              background: 'transparent',
+              fontFamily: fonts.sans,
+              fontSize: 13,
+              color: colors.text,
+              padding: '4px 0',
+            }}
+          />
+          <button
+            onClick={handleRewriteSubmit}
+            disabled={!rewriteInstruction.trim()}
+            style={{
+              background: rewriteInstruction.trim() ? colors.accent : colors.surfaceMuted,
+              color: rewriteInstruction.trim() ? '#fff' : colors.textMuted,
+              border: 'none',
+              borderRadius: 4,
+              padding: '4px 8px',
+              cursor: rewriteInstruction.trim() ? 'pointer' : 'not-allowed',
+              display: 'flex',
+              alignItems: 'center',
+              fontSize: 12,
+            }}
+          >
+            →
+          </button>
+        </div>
+      )}
 
     </div>
   );
