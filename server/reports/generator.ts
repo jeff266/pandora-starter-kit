@@ -17,6 +17,7 @@ import { renderReportPDF } from '../renderers/report-pdf-renderer.js';
 import { renderDOCX } from '../renderers/docx-renderer.js';
 import { renderPPTX } from '../renderers/pptx-renderer-full.js';
 import { generateEditorialReport } from './editorial-generator.js';
+import { generateExecSummary } from './exec-summary.js';
 
 const logger = createLogger('ReportGenerator');
 
@@ -306,7 +307,14 @@ export async function generateReport(request: GenerateReportRequest): Promise<Re
     const skillsOmitted = sections
       .filter(s => s.content.startsWith('⚠'))
       .flatMap(s => s.source_skills);
-    const headline = `${template.name} — ${period_label ?? new Date().toLocaleDateString()}`;
+    const mechanicalHeadline = `${template.name} — ${period_label ?? new Date().toLocaleDateString()}`;
+    const llmSummary = await generateExecSummary(
+      workspace_id,
+      sectionsContent,
+      document_type,
+      period_label ?? ''
+    );
+    const headline = llmSummary ?? mechanicalHeadline;
     const docResult = await query<{ id: string }>(
       `INSERT INTO report_documents
          (workspace_id, document_type, week_label, headline, sections,
@@ -321,8 +329,8 @@ export async function generateReport(request: GenerateReportRequest): Promise<Re
         headline,
         JSON.stringify(sections),
         JSON.stringify([]),
-        JSON.stringify(Array.from(new Set(skillsIncluded))),
-        JSON.stringify(Array.from(new Set(skillsOmitted))),
+        Array.from(new Set(skillsIncluded)),
+        Array.from(new Set(skillsOmitted)),
         0,
       ]
     ).catch(err => {

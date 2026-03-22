@@ -1258,24 +1258,46 @@ export default function ReportViewer() {
             {reportDocument ? (
               /* ── New path: ReportDocument from orchestrator ── */
               <>
-                {/* Headline */}
-                <div style={{
-                  background: colors.surface,
-                  borderRadius: 8,
-                  border: `1px solid ${colors.border}`,
-                  padding: 24,
-                }}>
-                  <p style={{
-                    fontSize: 16,
-                    lineHeight: 1.6,
-                    color: colors.text,
-                    fontFamily: fonts.sans,
-                    margin: 0,
-                    fontWeight: 500,
-                  }}>
-                    {reportDocument.headline}
-                  </p>
-                </div>
+                {/* Headline / Executive Summary */}
+                {(() => {
+                  const isWbrQbr = reportDocument.document_type === 'wbr' || reportDocument.document_type === 'qbr';
+                  const isMechanical = /^(WBR|QBR|Weekly Business Review|Quarterly Business Review)\s+[—–-]/.test(reportDocument.headline);
+                  const showAsSummary = isWbrQbr && !isMechanical;
+                  return (
+                    <div style={{
+                      background: showAsSummary ? `${colors.accent}08` : colors.surface,
+                      borderRadius: 8,
+                      border: `1px solid ${showAsSummary ? `${colors.accent}30` : colors.border}`,
+                      padding: 24,
+                    }}>
+                      {showAsSummary && (
+                        <p style={{
+                          fontSize: 11,
+                          fontWeight: 700,
+                          letterSpacing: '0.07em',
+                          textTransform: 'uppercase',
+                          color: colors.accent,
+                          fontFamily: fonts.sans,
+                          margin: '0 0 10px',
+                          opacity: 0.8,
+                        }}>
+                          Executive Summary
+                        </p>
+                      )}
+                      <p style={{
+                        fontSize: showAsSummary ? 14 : 16,
+                        lineHeight: 1.65,
+                        color: showAsSummary ? colors.text : colors.text,
+                        fontFamily: fonts.sans,
+                        margin: 0,
+                        fontWeight: showAsSummary ? 400 : 500,
+                        maxWidth: 680,
+                      }}>
+                        {reportDocument.headline}
+                      </p>
+                    </div>
+                  );
+                })()}
 
                 {/* Sections */}
                 {reportDocument.sections.map((section, sectionIndex) => {

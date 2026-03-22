@@ -1,0 +1,48 @@
+BUILD 1 — WBR/QBR Executive    
+  Summary is now complete.                
+                                          
+  BUILD 1 Summary                         
+                                          
+  Created files:                          
+  - server/reports/exec-summary.ts -      
+  LLM-powered summary generation with     
+  compression logic                       
+                                          
+  Modified files:                         
+  - server/reports/generator.ts - Calls   
+  exec summary before document INSERT for 
+  WBR/QBR                                 
+  - client/src/pages/ReportViewer.tsx -   
+  Renders LLM summary in document banner  
+  when available                          
+                                          
+  Key implementation details:             
+  1. Compression: Limits input to ~1500   
+  tokens by extracting first 2 sentences +
+   top 2 metrics per section              
+  2. Prompt: Generates exactly 3 sentences
+   covering: key metric, biggest          
+  risk/change, needed action              
+  3. Fallback: Silent failure returns     
+  mechanical headline if LLM call fails   
+  4. UI Rendering: Summary appears below  
+  title row in banner, only when different
+   from mechanical default                
+  5. Styling: Uses banner.accent color at 
+  80% opacity, 680px max width, 14px font 
+  size                                    
+                                          
+  To verify BUILD 1 works:                
+  1. Generate a WBR or QBR document       
+  (manual generation)                     
+  2. Check that the document banner shows 
+  a 3-sentence executive summary          
+  3. Verify the summary is specific       
+  (mentions actual metrics, deals, or     
+  reps)                                   
+  4. Confirm it's under 60 words and has  
+  no em dashes                            
+                                          
+  Once you've confirmed BUILD 1 is        
+  working, I'll proceed with BUILD 2 —    
+  Text Rewrite Interaction.          
