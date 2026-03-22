@@ -5,6 +5,7 @@ import {
 } from '../llm/training-capture.js';
 import { query } from '../db.js';
 import { INTENT_CLASSIFIER_SYSTEM_PROMPT } from './intent-classifier.js';
+import { PANDORA_PRODUCT_KNOWLEDGE, PANDORA_SUPPORT_CONTEXT } from './pandora-knowledge.js';
 import { runScopedAnalysis } from '../analysis/scoped-analysis.js';
 import { tryHeuristic } from './heuristic-router.js';
 import { classifyDirectQuestion, classifyIntent, logIntentClassification } from './intent-classifier.js';
@@ -1485,7 +1486,12 @@ Never pick a methodology as definitively correct. Explain the mechanism. The foo
 
 Tailor your recommendations to this company's specific profile.
 For example, objection handling for a $150K ACV enterprise product looks very different
-from objection handling for a $10K SMB product.`;
+from objection handling for a $10K SMB product.
+
+## Pandora Product Knowledge
+${PANDORA_PRODUCT_KNOWLEDGE}
+
+${PANDORA_SUPPORT_CONTEXT}`;
 }
 
 async function handleAdvisoryResponse(

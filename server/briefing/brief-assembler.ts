@@ -1,4 +1,5 @@
 import { query } from '../db.js';
+import { PANDORA_PRODUCT_KNOWLEDGE, PANDORA_SUPPORT_CONTEXT } from '../chat/pandora-knowledge.js';
 import { writeMemoryFromBriefAssembly, getForecastAccuracyContext, writeQuarterlyForecastAccuracy, getCurrentPeriodLabel } from '../memory/workspace-memory.js';
 import { getOutcomeSummaryForBrief } from '../documents/recommendation-tracker.js';
 import {
@@ -858,7 +859,12 @@ async function synthesizeBriefNarrative(
 
 <workspace_context>
 ${workspaceContext}
-</workspace_context>`;
+</workspace_context>
+
+## Pandora Product Knowledge
+${PANDORA_PRODUCT_KNOWLEDGE}
+
+${PANDORA_SUPPORT_CONTEXT}`;
 
   const dynamicContent = buildDynamicBriefContent(liveData);
 

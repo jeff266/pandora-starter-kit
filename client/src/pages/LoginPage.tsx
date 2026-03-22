@@ -226,6 +226,11 @@ export default function LoginPage() {
           Forgot password?
         </button>
       </form>
+      <p style={{ textAlign: 'center', margin: '16px 0 0', fontSize: 12, color: colors.textMuted }}>
+        <a href="/help" target="_blank" rel="noopener noreferrer" style={{ color: colors.accent, textDecoration: 'none' }}>
+          Help & FAQ
+        </a>
+      </p>
     </Shell>
   );
 }

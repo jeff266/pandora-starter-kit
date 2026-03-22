@@ -157,6 +157,29 @@ export default function SettingsNav({ activeTab, onTabChange, isAdmin = false }:
           })}
         </>
       )}
+      <div style={{ borderTop: `1px solid ${colors.border}`, margin: '12px 0 4px' }} />
+      <a
+        href="/help"
+        target="_blank"
+        rel="noopener noreferrer"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          padding: '10px 16px',
+          fontSize: 13,
+          fontWeight: 400,
+          fontFamily: 'inherit',
+          color: colors.textSecondary,
+          textDecoration: 'none',
+          borderLeft: '3px solid transparent',
+          transition: 'color 0.12s',
+        }}
+        onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.color = colors.accent; }}
+        onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.color = colors.textSecondary; }}
+      >
+        <span>Help & Support</span>
+      </a>
       </nav>
 
       {/* Mobile navigation - horizontal scrollable */}

@@ -13,6 +13,7 @@ import NotificationBell from './components/notifications/NotificationBell';
 import Placeholder from './components/Placeholder';
 import ChatPanel from './components/ChatPanel';
 import LoginPage from './pages/LoginPage';
+import HelpPage from './pages/HelpPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
 import AuthCallback from './pages/AuthCallback';
 import PandoraHomepage from './pages/PandoraHomepage';
@@ -334,6 +335,10 @@ export default function App() {
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     );
+  }
+
+  if (location.pathname === '/help') {
+    return <HelpPage />;
   }
 
   if (!isAuthenticated) {
