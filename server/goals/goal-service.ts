@@ -175,6 +175,7 @@ export class GoalService {
 
     const pipelineNeeded = bookingsGoal.target_value / funnel.win_rate;
     const pipelineGoal = await this.create(workspaceId, {
+      workspace_id: workspaceId,
       metric_type: 'pipeline',
       label: `${motion?.label || 'Pipeline'} Pipeline Target`,
       level: bookingsGoal.level,
@@ -199,6 +200,7 @@ export class GoalService {
     if (funnel.avg_deal_size > 0) {
       const oppsNeeded = Math.ceil(pipelineNeeded / funnel.avg_deal_size);
       const oppGoal = await this.create(workspaceId, {
+        workspace_id: workspaceId,
         metric_type: 'opportunities',
         label: `${motion?.label || 'Pipeline'} Opportunity Target`,
         level: bookingsGoal.level,

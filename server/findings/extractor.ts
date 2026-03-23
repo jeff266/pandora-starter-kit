@@ -648,10 +648,11 @@ export async function insertFindings(findings: FindingRow[]): Promise<FindingRow
 
   // Trigger workflow rules for each finding (fire-and-forget)
   for (const finding of insertedFindings) {
+    if (!finding.id) continue;
     import('../workflow/trigger-manager.js')
       .then(({ workflowTriggerManager }) => {
         workflowTriggerManager.onFindingCreated({
-          id: finding.id!,
+          id: finding.id as string,
           workspace_id: workspaceId,
           category: finding.category,
           severity: finding.severity,

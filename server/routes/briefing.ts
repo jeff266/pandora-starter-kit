@@ -133,7 +133,7 @@ router.get(
       const brief = await getOrAssembleBrief(workspaceId, userId);
       const pandoraRole = (brief?.user?.pandoraRole ?? null) as PandolaRole | null;
       const greeting = await buildConciergeGreeting(workspaceId, pandoraRole, {
-        temporal: (brief?.temporal ?? null) as unknown as Record<string, unknown> | null,
+        temporal: brief?.temporal ?? null,
         targets: (brief?.targets ?? null) as Record<string, unknown> | null,
       });
       res.json({ greeting });

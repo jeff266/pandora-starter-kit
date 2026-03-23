@@ -15,13 +15,13 @@ export interface DataScope {
   canExport: boolean;
 }
 
-type Permissions = Record<string, boolean>;
+import type { PermissionSet } from './types.js';
 
 /**
  * Derive a DataScope from a resolved permission set.
  * Call this after resolving the user's workspace_role permissions.
  */
-export function getDataVisibilityScope(permissions: Permissions): DataScope {
+export function getDataVisibilityScope(permissions: PermissionSet | Record<string, boolean>): DataScope {
   const repsViewAll = permissions['data.reps_view_all'] === true;
   const repsViewTeam = permissions['data.reps_view_team'] === true;
 

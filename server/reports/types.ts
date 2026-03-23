@@ -217,7 +217,7 @@ export interface ReportGeneration {
   sections_snapshot: ReportSection[];
   sections_content?: SectionContent[];
   opening_narrative?: string;
-  editorial_decisions?: Record<string, unknown>[];
+  editorial_decisions?: import('../agents/editorial-types.js').EditorialDecision[];
   skills_run?: string[];
   total_tokens: number;
   generation_duration_ms?: number;

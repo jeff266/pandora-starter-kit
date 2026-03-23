@@ -5,6 +5,7 @@
  * validate → review → explain → compare → pending_approval (or rejected)
  */
 
+import { query } from '../db.js';
 import {
   createGovernanceRecord,
   getGovernanceRecord,

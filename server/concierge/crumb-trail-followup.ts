@@ -138,7 +138,7 @@ In 1-2 sentences: acknowledge that 6 weeks have passed and invite the user to sh
 
   let synthesis = '';
   try {
-    const llmResult = await callLLM(workspaceId, 'synthesize' as any, {
+    const llmResult = await callLLM(workspaceId, 'generate', {
       systemPrompt: PANDORA_VOICE_STANDARD,
       messages: [{ role: 'user', content: prompt }],
       maxTokens: 200,

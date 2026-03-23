@@ -102,7 +102,7 @@ export async function syncGoogleCalendar(workspaceId: string): Promise<{
       events = events.concat(response.data.items || []);
       pageToken = response.data.nextPageToken || undefined;
     } catch (err: any) {
-      logger.error('Error fetching calendar events', { err, workspaceId });
+      logger.error('Error fetching calendar events', { error: err?.message, workspaceId });
       errors.push(`Fetch error: ${err.message}`);
       break;
     }
@@ -174,7 +174,7 @@ export async function syncGoogleCalendar(workspaceId: string): Promise<{
 
       synced++;
     } catch (err: any) {
-      logger.error('Error upserting calendar event', { err, eventId: event.id });
+      logger.error('Error upserting calendar event', { error: err?.message, eventId: event.id });
       errors.push(`Upsert error for ${event.id}: ${err.message}`);
     }
   }

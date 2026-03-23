@@ -281,7 +281,7 @@ export async function getActivitySignalTypeBreakdown(
     params
   );
 
-  const breakdown = result.rows.map(row => ({
+  const breakdown: Array<{ signal_type: string; count: number; avg_confidence: number; framework_breakdown?: Array<{ field: string; count: number }> }> = result.rows.map(row => ({
     signal_type: row.signal_type,
     count: parseInt(row.count, 10),
     avg_confidence: parseFloat(row.avg_confidence),

@@ -109,7 +109,7 @@ router.get(
         return;
       }
 
-      const dataScope = getDataVisibilityScope(permissions as any);
+      const dataScope = getDataVisibilityScope(permissions);
 
       // Build deal scope filter based on visibility
       let dealScopeSQL = '';

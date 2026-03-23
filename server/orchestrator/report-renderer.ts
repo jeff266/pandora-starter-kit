@@ -276,6 +276,7 @@ export async function renderDocx(
           children.push(new Paragraph({
             children: [
               new ImageRun({
+                type: 'png',
                 data: node.chart_png,
                 transformation: {
                   width: 450,
@@ -325,6 +326,7 @@ export async function renderDocx(
         children.push(new Paragraph({
           children: [
             new ImageRun({
+              type: 'png',
               data: chart.chart_png,
               transformation: {
                 width: 500,

@@ -173,8 +173,8 @@ ${truncated}`;
       win_phrases: Array.isArray(parsed.win_phrases) ? parsed.win_phrases.slice(0, 10) : [],
       pipeline_vocabulary: Array.isArray(parsed.pipeline_vocabulary) ? parsed.pipeline_vocabulary.slice(0, 10) : [],
       common_shorthand: (parsed.common_shorthand && typeof parsed.common_shorthand === 'object' && !Array.isArray(parsed.common_shorthand))
-        ? Object.fromEntries(Object.entries(parsed.common_shorthand as Record<string, string>).slice(0, 10)) as Record<string, string>
-        : {} as Record<string, string>,
+        ? Object.fromEntries(Object.entries(parsed.common_shorthand).slice(0, 10).map(([k, v]) => [k, String(v)]))
+        : {},
       confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0,
     };
 

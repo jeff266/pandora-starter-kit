@@ -1,5 +1,19 @@
 import { query } from '../../db.js';
 import type { McpTool } from './index.js';
+import type { AssembledBrief } from '../../briefing/brief-types.js';
+
+function briefToResponse(brief: AssembledBrief) {
+  return {
+    workspace_id: brief.workspace_id,
+    generated_at: brief.generated_at ?? new Date().toISOString(),
+    headline: brief.ai_blurbs?.key_action ?? null,
+    narrative: brief.ai_blurbs?.overall_summary ?? brief.ai_blurbs?.pulse_summary ?? null,
+    signals: brief.deals_to_watch?.items ?? [],
+    actions: [],
+    pipeline: brief.the_number ?? null,
+    forecast: brief.the_number?.forecast ?? null,
+  };
+}
 
 export const getConciergeBrief: McpTool = {
   name: 'get_concierge_brief',
@@ -20,26 +34,19 @@ export const getConciergeBrief: McpTool = {
 
     if (!brief) {
       const { assembleLiveBrief } = await import('../../briefing/brief-assembler.js');
-      const live = await assembleLiveBrief(workspaceId, 'user_request');
-      const liveBrief = live.brief as any;
+      const result = await assembleLiveBrief(workspaceId, 'user_request');
+      if (result.brief) {
+        return briefToResponse(result.brief);
+      }
       return {
         workspace_id: workspaceId,
         generated_at: new Date().toISOString(),
-        narrative: liveBrief?.narrative ?? null,
-        signals: liveBrief?.signals ?? [],
-        actions: liveBrief?.actions ?? [],
+        narrative: null,
+        signals: [],
+        actions: [],
       };
     }
 
-    return {
-      workspace_id: workspaceId,
-      generated_at: (brief as any).generated_at ?? new Date().toISOString(),
-      headline: (brief as any).headline ?? null,
-      narrative: (brief as any).narrative ?? (brief as any).opening_narrative ?? null,
-      signals: (brief as any).signals ?? [],
-      actions: (brief as any).actions ?? (brief as any).action_items ?? [],
-      pipeline: (brief as any).pipeline ?? null,
-      forecast: (brief as any).forecast ?? null,
-    };
+    return briefToResponse(brief);
   },
 };

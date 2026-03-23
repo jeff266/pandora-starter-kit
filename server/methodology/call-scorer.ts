@@ -173,7 +173,7 @@ Return ONLY valid JSON. No preamble. Schema:
       throw new Error(`DeepSeek API error: ${response.status} ${errorText}`);
     }
 
-    const data = await response.json() as any;
+    const data = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
     return data.choices?.[0]?.message?.content || '';
   }
 

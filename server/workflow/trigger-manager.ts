@@ -197,13 +197,13 @@ export class WorkflowTriggerManager {
     trigger: { type: string; source_id: string }
   ): Promise<{ matched: boolean; executed: boolean }> {
     // Get deal data if finding has a deal_id
-    let deal = null;
+    let deal: Record<string, any> | undefined;
     if (finding.deal_id) {
-      const dealResult = await query(
+      const dealResult = await query<Record<string, any>>(
         `SELECT * FROM deals WHERE id = $1`,
         [finding.deal_id]
       );
-      deal = dealResult.rows[0] || null;
+      deal = dealResult.rows[0] || undefined;
     }
 
     // Build context
@@ -216,7 +216,7 @@ export class WorkflowTriggerManager {
         summary: finding.summary,
         metadata: finding.metadata,
       },
-      deal: deal as Record<string, any> | undefined,
+      deal: deal,
       trigger,
     };
 

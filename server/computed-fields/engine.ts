@@ -50,6 +50,7 @@ export interface ComputeResult {
   deals: { processed: number; updated: number };
   contacts: { processed: number; updated: number };
   accounts: { processed: number; updated: number };
+  rfm?: { scored: number; mode: string };
 }
 
 export async function computeFields(workspaceId: string): Promise<ComputeResult> {

@@ -449,6 +449,7 @@ export class WorkspaceConfigLoader {
           loss_values: ['closed_lost'],
           included_in_default_scope: true,
           value_field: 'amount',
+          value_formula: null,
           forecast_eligible: true,
         },
       ],

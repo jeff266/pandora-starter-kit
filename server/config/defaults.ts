@@ -67,7 +67,14 @@ export function getDefaultConfig(workspaceId: string): WorkspaceConfig & { _meta
       detail_level: 'standard',
       framing: 'balanced',
       alert_threshold: 'watch_and_act',
-    } as any,
+      persona: 'teammate',
+      ownership_pronoun: 'we',
+      directness: 'direct',
+      name_entities: true,
+      celebrate_wins: true,
+      surface_uncertainty: true,
+      temporal_awareness: 'both',
+    },
     tool_filters: {
       global: {
         exclude_stages: [],

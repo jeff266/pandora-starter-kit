@@ -359,7 +359,7 @@ export async function generateEditorialReport(
     sections_snapshot: enabledSections,
     sections_content: editorial.sections,
     opening_narrative: editorial.opening_narrative,
-    editorial_decisions: editorial.editorial_decisions as unknown as Record<string, unknown>[],
+    editorial_decisions: editorial.editorial_decisions,
     skills_run: agent.skills.map(s => s.skillId),
     total_tokens: editorial.tokens_used,
     generation_duration_ms: generationDuration,

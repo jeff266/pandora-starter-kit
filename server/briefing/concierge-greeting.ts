@@ -1,5 +1,6 @@
 import { query } from '../db.js';
 import type { PandolaRole } from '../context/pandora-role.js';
+import type { TemporalContext } from '../context/opening-brief.js';
 
 interface GreetingCtx {
   timeGreeting: string;
@@ -92,7 +93,7 @@ function repGreeting(ctx: GreetingCtx): string {
 export async function buildConciergeGreeting(
   workspaceId: string,
   pandoraRole: PandolaRole | null,
-  briefData: { temporal: Record<string, unknown> | null; targets: Record<string, unknown> | null }
+  briefData: { temporal: TemporalContext | Record<string, unknown> | null; targets: Record<string, unknown> | null }
 ): Promise<string> {
   const now = new Date();
   const hour = now.getUTCHours();

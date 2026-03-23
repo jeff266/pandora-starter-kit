@@ -58,7 +58,7 @@ export interface AccountFilters {
   revenueMin?: number;
   revenueMax?: number;
   search?: string;
-  sortBy?: 'name' | 'annual_revenue' | 'employee_count' | 'health_score' | 'created_at' | 'total_score' | 'open_deals' | 'pipeline_value' | 'last_activity';
+  sortBy?: 'name' | 'annual_revenue' | 'employee_count' | 'health_score' | 'created_at' | 'total_score' | 'open_deals' | 'pipeline_value' | 'last_activity' | 'quality_pipeline';
   sortDir?: 'asc' | 'desc';
   limit?: number;
   offset?: number;

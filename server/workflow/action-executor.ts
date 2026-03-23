@@ -662,7 +662,7 @@ export class ActionExecutor {
     // Send to configured channel
     if (settings.notify_channel) {
       try {
-        await slackClient.sendMessage(workspaceId, settings.notify_channel, message);
+        await slackClient.postMessage(workspaceId, settings.notify_channel, [{ type: 'section', text: { type: 'mrkdwn', text: message } }]);
         logger.info('Sent high-threshold notification to channel', {
           workspace_id: workspaceId,
           channel: settings.notify_channel,
