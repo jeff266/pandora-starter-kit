@@ -22,13 +22,15 @@ describe('APConnectionProvisioner', () => {
     getProjectByExternalId: jest.fn(),
     createFlow: jest.fn(),
     updateFlow: jest.fn(),
+    getFlow: jest.fn(),
     getFlowRun: jest.fn(),
     triggerFlow: jest.fn(),
     createConnection: jest.fn(),
     updateConnection: jest.fn(),
     listConnections: jest.fn(),
+    listFlows: jest.fn(),
+    deleteFlow: jest.fn(),
     deleteConnection: jest.fn(),
-    healthCheck: jest.fn(),
   };
 
   beforeEach(() => {

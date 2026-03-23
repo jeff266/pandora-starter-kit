@@ -17,6 +17,7 @@ describe('APProjectManager', () => {
     getProjectByExternalId: jest.fn(),
     createFlow: jest.fn(),
     updateFlow: jest.fn(),
+    getFlow: jest.fn(),
     getFlowRun: jest.fn(),
     triggerFlow: jest.fn(),
     createConnection: jest.fn(),
@@ -25,7 +26,6 @@ describe('APProjectManager', () => {
     listFlows: jest.fn(),
     deleteFlow: jest.fn(),
     deleteConnection: jest.fn(),
-    healthCheck: jest.fn(),
   };
 
   beforeEach(() => {

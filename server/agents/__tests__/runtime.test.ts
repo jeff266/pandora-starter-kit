@@ -57,7 +57,6 @@ const makeSkillOutput = (
   tokenUsage: null,
   duration: 0,
   evidence: claims.length > 0 ? {
-    skillId,
     claims: claims.map((c, i) => ({
       claim_id: `c${i}`,
       claim_text: c.claim_text,
@@ -69,6 +68,8 @@ const makeSkillOutput = (
       threshold_applied: '',
     })),
     evaluated_records: [],
+    data_sources: [],
+    parameters: [],
   } : undefined,
 });
 

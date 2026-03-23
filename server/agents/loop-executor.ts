@@ -46,16 +46,16 @@ export async function executeLoop(input: LoopExecutorInput): Promise<LoopRunResu
 
   const systemPrompt = config.planning_prompt || buildPlanningPrompt(agent, availableSkills);
 
-  logger.info({ workspaceId, runId, question: question.slice(0, 100) }, 'Loop executor starting');
+  logger.info('Loop executor starting', { workspaceId, runId, question: question.slice(0, 100) });
 
   for (let i = 0; i < maxIterations; i++) {
     // Token guard
     if (totalLoopTokens > TOKEN_BUDGET) {
-      logger.warn({ totalLoopTokens, iteration: i }, 'Token budget exceeded — forcing synthesis');
+      logger.warn('Token budget exceeded — forcing synthesis', { totalLoopTokens, iteration: i });
       break;
     }
     if (totalLoopTokens > TOKEN_WARNING) {
-      logger.warn({ totalLoopTokens }, 'Token warning threshold reached');
+      logger.warn('Token warning threshold reached', { totalLoopTokens });
     }
 
     // Build planning input
@@ -85,7 +85,7 @@ export async function executeLoop(input: LoopExecutorInput): Promise<LoopRunResu
         },
       });
     } catch (err) {
-      logger.error({ err, iteration: i }, 'Planning LLM call failed');
+      logger.error('Planning LLM call failed', { err, iteration: i });
       break;
     }
 
@@ -115,7 +115,7 @@ export async function executeLoop(input: LoopExecutorInput): Promise<LoopRunResu
     if (plan.action === 'run_skill' && plan.skill_id) {
       // Guard: don't re-run same skill with same params
       if (skillsExecuted.includes(plan.skill_id)) {
-        logger.info({ skill_id: plan.skill_id }, 'Skipping duplicate skill execution');
+        logger.info('Skipping duplicate skill execution', { skill_id: plan.skill_id });
         plan.evaluation = `Skipped ${plan.skill_id} — already executed. Using cached results.`;
       } else {
         skillOutput = await executeSkillForLoop(workspaceId, plan.skill_id, plan.skill_params || {});
@@ -159,7 +159,7 @@ Voice: direct, peer-level, no hedging. Show your math.`,
       },
     });
   } catch (err) {
-    logger.error({ err }, 'Synthesis LLM call failed');
+    logger.error('Synthesis LLM call failed', { err });
     return {
       iterations,
       termination_reason: 'error',
@@ -172,19 +172,19 @@ Voice: direct, peer-level, no hedging. Show your math.`,
 
   const finalText = synthesisResponse.content?.[0]?.text || synthesisResponse.content || '';
 
-  logger.info({
+  logger.info('Loop executor complete', {
     workspaceId,
     runId,
     iterations: iterations.length,
     totalTokens: totalLoopTokens,
     termination: goalSatisfied ? 'goal_satisfied' : 'max_iterations',
-  }, 'Loop executor complete');
+  });
 
-  logger.info({
+  logger.info('Loop executor returning result', {
     finalTextLength: finalText?.length,
     finalTextPreview: finalText?.slice(0, 100),
     termination: goalSatisfied ? 'goal_satisfied' : 'max_iterations',
-  }, 'Loop executor returning result');
+  });
 
   return {
     iterations,
@@ -227,7 +227,7 @@ async function executeSkillForLoop(
     );
 
     if (cached.rows.length > 0) {
-      logger.info({ skillId }, 'Using cached skill output');
+      logger.info('Using cached skill output', { skillId });
       return resolveSkillOutput(cached.rows[0]);
     }
 
@@ -240,16 +240,16 @@ async function executeSkillForLoop(
     );
 
     if (recent.rows.length > 0) {
-      logger.info({ skillId, age: recent.rows[0].started_at }, 'Using recent (>60min) skill output');
+      logger.info('Using recent (>60min) skill output', { skillId, age: recent.rows[0].started_at });
       return resolveSkillOutput(recent.rows[0]);
     }
 
     // No cached output — log and return null (loop will note unavailability)
-    logger.info({ skillId }, 'No cached skill output available — skill has not run recently');
+    logger.info('No cached skill output available — skill has not run recently', { skillId });
     return null;
 
   } catch (err) {
-    logger.error({ err, skillId }, 'Error fetching skill output for loop');
+    logger.error('Error fetching skill output for loop', { err, skillId });
     return null;
   }
 }
