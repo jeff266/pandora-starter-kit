@@ -1363,33 +1363,6 @@ export default function ReportViewer() {
             {reportDocument ? (
               /* ── New path: ReportDocument from orchestrator ── */
               <>
-                {/* Headline — only for non-WBR/QBR types that lack a dedicated Executive Summary section */}
-                {(() => {
-                  const isWbrQbr = reportDocument.document_type === 'wbr' || reportDocument.document_type === 'qbr';
-                  const isMechanical = /^(WBR|QBR|wbr|qbr|Weekly Business Review|Quarterly Business Review)\s*[—–-]/i.test(reportDocument.headline);
-                  if (isWbrQbr && !isMechanical) return null;
-                  return (
-                    <div style={{
-                      background: colors.surface,
-                      borderRadius: 8,
-                      border: `1px solid ${colors.border}`,
-                      padding: 24,
-                    }}>
-                      <p style={{
-                        fontSize: 16,
-                        lineHeight: 1.65,
-                        color: colors.text,
-                        fontFamily: fonts.sans,
-                        margin: 0,
-                        fontWeight: 500,
-                        maxWidth: 680,
-                      }}>
-                        {reportDocument.headline}
-                      </p>
-                    </div>
-                  );
-                })()}
-
                 {/* Sections */}
                 {reportDocument.sections.map((rawSection: any, sectionIndex) => {
                   const section = {
