@@ -104,7 +104,7 @@ async function testDataScopeComputation() {
 
   // Test member dataScope
   const memberPerms = SYSTEM_ROLE_PERMISSIONS.member;
-  const memberScope = getDataVisibilityScope(memberPerms);
+  const memberScope = getDataVisibilityScope(memberPerms as any);
   logTest(
     'Member dataScope',
     memberScope.dealsFilter === 'own',
@@ -116,7 +116,7 @@ async function testDataScopeComputation() {
 
   // Test viewer dataScope
   const viewerPerms = SYSTEM_ROLE_PERMISSIONS.viewer;
-  const viewerScope = getDataVisibilityScope(viewerPerms);
+  const viewerScope = getDataVisibilityScope(viewerPerms as any);
   logTest(
     'Viewer dataScope',
     viewerScope.dealsFilter === 'own',
@@ -128,7 +128,7 @@ async function testDataScopeComputation() {
 
   // Test manager dataScope
   const managerPerms = SYSTEM_ROLE_PERMISSIONS.manager;
-  const managerScope = getDataVisibilityScope(managerPerms);
+  const managerScope = getDataVisibilityScope(managerPerms as any);
   logTest(
     'Manager dataScope',
     managerScope.dealsFilter === 'all',
@@ -140,7 +140,7 @@ async function testDataScopeComputation() {
 
   // Test analyst dataScope
   const analystPerms = SYSTEM_ROLE_PERMISSIONS.analyst;
-  const analystScope = getDataVisibilityScope(analystPerms);
+  const analystScope = getDataVisibilityScope(analystPerms as any);
   logTest(
     'Analyst dataScope',
     analystScope.dealsFilter === 'all',
@@ -160,7 +160,7 @@ async function testScopeFilterGeneration() {
 
   const mockUser = { email: 'test@example.com' };
   const memberPerms = SYSTEM_ROLE_PERMISSIONS.member;
-  const memberScope = getDataVisibilityScope(memberPerms);
+  const memberScope = getDataVisibilityScope(memberPerms as any);
 
   const mockReq = {
     dataScope: memberScope,
@@ -206,7 +206,7 @@ async function testScopeFilterGeneration() {
 
   // Test admin (no filter)
   const adminPerms = SYSTEM_ROLE_PERMISSIONS.admin;
-  const adminScope = getDataVisibilityScope(adminPerms);
+  const adminScope = getDataVisibilityScope(adminPerms as any);
   const adminReq = { dataScope: adminScope, user: mockUser } as any;
   const adminDealFilter = buildDealScopeFilter(adminReq, 0);
 
@@ -270,7 +270,7 @@ async function testDatabaseScoping(workspaceId: string) {
       ? JSON.parse(member.permissions)
       : (member.permissions || {});
 
-    const dataScope = getDataVisibilityScope(permissions);
+    const dataScope = getDataVisibilityScope(permissions as any);
     const mockReq = { dataScope, user: { email: member.email } } as any;
     const scopeFilter = buildDealScopeFilter(mockReq, 0);
 

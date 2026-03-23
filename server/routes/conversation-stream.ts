@@ -506,7 +506,7 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
         }
       }
       for (const toolCall of pandoraAction.evidence?.tool_calls ?? []) {
-        actionBuilder.recordTool(toolCall.tool_name);
+        actionBuilder.recordTool(toolCall.tool);
       }
       const actionPandoraResponse = actionBuilder.build('ask_pandora', workspaceId, pandoraAction.tokens_used);
       sse(res, { type: 'pandora_response', response: actionPandoraResponse });
@@ -712,7 +712,7 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
           }
         }
         for (const toolCall of pandoraT1.evidence?.tool_calls ?? []) {
-          t1Builder.recordTool(toolCall.tool_name);
+          t1Builder.recordTool(toolCall.tool);
         }
         const t1PandoraResponse = t1Builder.build('ask_pandora', workspaceId, pandoraT1.tokens_used);
         sse(res, { type: 'pandora_response', response: t1PandoraResponse });
@@ -862,7 +862,7 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
           }
         }
         for (const toolCall of pandoraFallback.evidence?.tool_calls ?? []) {
-          fbBuilder.recordTool(toolCall.tool_name);
+          fbBuilder.recordTool(toolCall.tool);
         }
         const fbPandoraResponse = fbBuilder.build('ask_pandora', workspaceId, pandoraFallback.tokens_used);
         sse(res, { type: 'pandora_response', response: fbPandoraResponse });

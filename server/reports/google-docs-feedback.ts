@@ -140,8 +140,8 @@ Be specific. Under 150 words.`;
 
         diffSummary = response.content.trim();
       } catch (err) {
-        logger.error('Failed to generate diff summary', err instanceof Error ? err : undefined);
-        diffSummary = `Changes detected (${Math.round(changeRatio * 100)}% of content modified) but summary generation failed.`;
+        logger.error('Failed to generate diff summary', { error: err instanceof Error ? err.message : String(err) });
+        diffSummary = `Changes detected (${Math.round(ratio * 100)}% of content modified) but summary generation failed.`;
       }
     }
 

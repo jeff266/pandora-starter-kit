@@ -20,13 +20,14 @@ export const getConciergeBrief: McpTool = {
 
     if (!brief) {
       const { assembleLiveBrief } = await import('../../briefing/brief-assembler.js');
-      const live = await assembleLiveBrief(workspaceId);
+      const live = await assembleLiveBrief(workspaceId, 'user_request');
+      const liveBrief = live.brief as any;
       return {
         workspace_id: workspaceId,
         generated_at: new Date().toISOString(),
-        narrative: live.narrative ?? null,
-        signals: live.signals ?? [],
-        actions: live.actions ?? [],
+        narrative: liveBrief?.narrative ?? null,
+        signals: liveBrief?.signals ?? [],
+        actions: liveBrief?.actions ?? [],
       };
     }
 

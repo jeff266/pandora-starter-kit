@@ -163,7 +163,7 @@ export async function generateReport(request: GenerateReportRequest): Promise<Re
         }
       }
     } catch (err) {
-      logger.warn('Failed to load prior feedback (non-fatal)', err instanceof Error ? err : undefined);
+      logger.warn('Failed to load prior feedback (non-fatal)', { error: err instanceof Error ? err.message : String(err) });
     }
   }
 

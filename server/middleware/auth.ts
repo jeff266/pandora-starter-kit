@@ -109,7 +109,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function extractWorkspaceId(req: Request): string | undefined {
-  if (req.params.workspaceId) return req.params.workspaceId;
+  if (req.params.workspaceId) return req.params.workspaceId as string;
   const match = req.path.match(/\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
   return match?.[1];
 }

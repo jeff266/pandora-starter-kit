@@ -22,7 +22,7 @@ router.get('/:workspaceId/workflow-rules',
   requirePermission('config.view'),
   async (req: Request, res: Response): Promise<void> => {
     try {
-      const { workspaceId } = req.params;
+      const { workspaceId } = req.params as Record<string, string>;
 
       const result = await query(
         `SELECT id, name, description, trigger_type, trigger_skill_id, trigger_finding_category,
@@ -50,7 +50,7 @@ router.post('/:workspaceId/workflow-rules',
   requirePermission('config.edit'),
   async (req: Request, res: Response): Promise<void> => {
     try {
-      const { workspaceId } = req.params;
+      const { workspaceId } = req.params as Record<string, string>;
       const userId = (req as any).user?.user_id;
       const {
         name,
@@ -150,7 +150,7 @@ router.get('/:workspaceId/workflow-rules/:ruleId',
   requirePermission('config.view'),
   async (req: Request, res: Response): Promise<void> => {
     try {
-      const { workspaceId, ruleId } = req.params;
+      const { workspaceId, ruleId } = req.params as Record<string, string>;
 
       const result = await query(
         `SELECT * FROM workflow_rules WHERE workspace_id = $1 AND id = $2`,
@@ -177,7 +177,7 @@ router.patch('/:workspaceId/workflow-rules/:ruleId',
   requirePermission('config.edit'),
   async (req: Request, res: Response): Promise<void> => {
     try {
-      const { workspaceId, ruleId } = req.params;
+      const { workspaceId, ruleId } = req.params as Record<string, string>;
       const updates = req.body;
 
       const allowedFields = [
@@ -252,7 +252,7 @@ router.delete('/:workspaceId/workflow-rules/:ruleId',
   requirePermission('config.edit'),
   async (req: Request, res: Response): Promise<void> => {
     try {
-      const { workspaceId, ruleId } = req.params;
+      const { workspaceId, ruleId } = req.params as Record<string, string>;
 
       const result = await query(
         `UPDATE workflow_rules SET is_active = false WHERE workspace_id = $1 AND id = $2 RETURNING id`,
@@ -280,7 +280,7 @@ router.post('/:workspaceId/workflow-rules/:ruleId/run-now',
   requirePermission('config.edit'),
   async (req: Request, res: Response): Promise<void> => {
     try {
-      const { workspaceId, ruleId } = req.params;
+      const { workspaceId, ruleId } = req.params as Record<string, string>;
 
       // TODO: Implement manual rule execution
       // This should evaluate the rule against current workspace state
@@ -301,7 +301,7 @@ router.get('/:workspaceId/workflow-rules/:ruleId/history',
   requirePermission('config.view'),
   async (req: Request, res: Response): Promise<void> => {
     try {
-      const { workspaceId, ruleId } = req.params;
+      const { workspaceId, ruleId } = req.params as Record<string, string>;
       const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 20;
 
       const result = await query(
@@ -324,10 +324,10 @@ router.get('/:workspaceId/workflow-rules/:ruleId/history',
  * Get all pending actions waiting for approval
  */
 router.get('/:workspaceId/workflow-rules/pending',
-  requirePermission('deals.view'),
+  requirePermission('data.deals_view' as any),
   async (req: Request, res: Response): Promise<void> => {
     try {
-      const { workspaceId } = req.params;
+      const { workspaceId } = req.params as Record<string, string>;
 
       const result = await query(
         `SELECT a.*, wr.name as rule_name, d.name as deal_name
@@ -353,10 +353,10 @@ router.get('/:workspaceId/workflow-rules/pending',
  * Approve and execute a pending action
  */
 router.post('/:workspaceId/workflow-rules/pending/:actionId/approve',
-  requirePermission('deals.edit'),
+  requirePermission('config.edit' as any),
   async (req: Request, res: Response): Promise<void> => {
     try {
-      const { workspaceId, actionId } = req.params;
+      const { workspaceId, actionId } = req.params as Record<string, string>;
       const userId = (req as any).user?.user_id;
 
       if (!userId) {
@@ -392,10 +392,10 @@ router.post('/:workspaceId/workflow-rules/pending/:actionId/approve',
  * Reject a pending action
  */
 router.post('/:workspaceId/workflow-rules/pending/:actionId/reject',
-  requirePermission('deals.edit'),
+  requirePermission('config.edit' as any),
   async (req: Request, res: Response): Promise<void> => {
     try {
-      const { workspaceId, actionId } = req.params;
+      const { workspaceId, actionId } = req.params as Record<string, string>;
       const userId = (req as any).user?.user_id;
       const { reason } = req.body;
 
@@ -434,10 +434,10 @@ router.post('/:workspaceId/workflow-rules/pending/:actionId/reject',
  * Bulk approve multiple pending actions
  */
 router.post('/:workspaceId/workflow-rules/pending/bulk-approve',
-  requirePermission('deals.edit'),
+  requirePermission('config.edit' as any),
   async (req: Request, res: Response): Promise<void> => {
     try {
-      const { workspaceId } = req.params;
+      const { workspaceId } = req.params as Record<string, string>;
       const userId = (req as any).user?.user_id;
       const { action_ids } = req.body;
 

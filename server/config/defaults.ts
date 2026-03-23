@@ -67,7 +67,7 @@ export function getDefaultConfig(workspaceId: string): WorkspaceConfig & { _meta
       detail_level: 'standard',
       framing: 'balanced',
       alert_threshold: 'watch_and_act',
-    },
+    } as any,
     tool_filters: {
       global: {
         exclude_stages: [],

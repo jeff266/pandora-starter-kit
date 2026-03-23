@@ -18,7 +18,7 @@ const logger = createLogger('AgenticActionsRoutes');
  */
 router.get('/:workspaceId/agentic-actions/settings', async (req, res) => {
   try {
-    const { workspaceId } = req.params;
+    const { workspaceId } = req.params as Record<string, string>;
 
     const resolver = getActionThresholdResolver();
     const settings = await resolver.getSettings(workspaceId);
@@ -40,7 +40,7 @@ router.get('/:workspaceId/agentic-actions/settings', async (req, res) => {
  */
 router.put('/:workspaceId/agentic-actions/settings', requirePermission('settings.manage'), async (req, res) => {
   try {
-    const { workspaceId } = req.params;
+    const { workspaceId } = req.params as Record<string, string>;
     const {
       action_threshold,
       protected_stages,

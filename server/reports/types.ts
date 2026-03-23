@@ -136,6 +136,7 @@ export interface SankeyStageNode {
   value: number;
   entered: number;
   enteredValue: number;
+  startOfPeriod?: number;
   won: number;
   wonValue: number;
   lostCount: number;

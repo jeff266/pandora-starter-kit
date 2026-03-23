@@ -225,7 +225,7 @@ export async function loadCustomSkills(workspaceId?: string): Promise<void> {
       `SELECT * FROM custom_skills WHERE status = 'active' ${whereClause} ORDER BY created_at ASC`,
       params
     );
-    for (const row of rows.rows) {
+    for (const row of rows.rows as any[]) {
       const skillDef = buildCustomSkillDefinition(row);
       if (registry.has(skillDef.id)) registry.unregister(skillDef.id);
       registry.register(skillDef);
@@ -248,7 +248,7 @@ export async function registerCustomSkill(skillId: string, workspaceId: string):
     [skillId, workspaceId]
   );
   if (result.rows.length > 0) {
-    const skillDef = buildCustomSkillDefinition(result.rows[0]);
+    const skillDef = buildCustomSkillDefinition(result.rows[0] as any);
     if (registry.has(skillDef.id)) registry.unregister(skillDef.id);
     registry.register(skillDef);
   }

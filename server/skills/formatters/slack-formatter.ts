@@ -1663,8 +1663,8 @@ function formatPipelineMovement(result: SkillResult, skill: SkillDefinition): Sl
   }
 
   // Also check result_data.summary (written by the runtime)
-  const summary = summaryJson || (result.resultData as any)?.summary || null;
-  const netDelta = (result.resultData as any)?.net_delta || null;
+  const summary = summaryJson || (result as any).resultData?.summary || null;
+  const netDelta = (result as any).resultData?.net_delta || null;
 
   const headline    = summary?.headline ?? skill.name;
   const trendSignal = summary?.trend_signal ?? 'neutral';

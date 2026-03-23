@@ -4,7 +4,7 @@ import { runSkillWithAutoSave } from './skills/helpers.js';
 
 const InputSchema = z.object({
   skill_id: z.string().min(1),
-  params: z.record(z.any()).optional().default({}),
+  params: z.record(z.string(), z.any()).optional().default({}),
   save: z.boolean().optional().default(true),
 });
 

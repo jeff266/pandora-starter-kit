@@ -755,8 +755,9 @@ router.post('/:workspaceId/suggested-actions/sync', async (req: Request, res: Re
     const dedupHash = createHash('sha256').update(dedupInput).digest('hex').slice(0, 32);
     const summary = action.description || action.evidence || action.title;
 
+    const actionAny = action as any;
     const sourceSkill =
-      action.type === 'run_skill' ? (action.action_payload?.skill_id as string | undefined) || action.type :
+      action.type === 'run_skill' ? (actionAny.action_payload?.skill_id as string | undefined) || action.type :
       action.type === 'run_meddic_coverage' ? 'meddic-coverage' :
       action.type;
 
@@ -794,11 +795,7 @@ router.post('/:workspaceId/suggested-actions/sync', async (req: Request, res: Re
           priority: cardPriority,
           source,
           suggested_crm_action: crmAction,
-          action_type: action.type,
-          skill_id: (action.type === 'run_skill' || action.type === 'run_meddic_coverage')
-            ? (action.action_payload?.skill_id as string | undefined) || undefined
-            : undefined,
-        });
+        } as any);
       }
     } catch (err) {
       console.error('[SuggestedActions] Failed to persist action:', (err as Error).message);
@@ -818,8 +815,8 @@ router.post('/:workspaceId/suggested-actions/sync', async (req: Request, res: Re
 router.post(
   '/:workspaceId/actions/assign-to-rep',
   requireWorkspaceAccess,
-  async (req: Request<WorkspaceParams>, res: Response) => {
-    const workspaceId = req.params.workspaceId;
+  async (req: Request, res: Response) => {
+    const workspaceId = (req.params as Record<string, string>).workspaceId;
     const userId      = (req as any).user?.user_id as string;
 
     if (!userId) {

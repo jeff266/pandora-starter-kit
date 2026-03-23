@@ -193,7 +193,7 @@ export class GoalService {
       confidence: funnel.source === 'manual' ? 0.9 : 0.7,
       inferred_from: `Derived from $${bookingsGoal.target_value.toLocaleString()} bookings target at ${(funnel.win_rate * 100).toFixed(0)}% win rate`,
       is_active: true,
-    });
+    } as any);
     created.push(pipelineGoal);
 
     if (funnel.avg_deal_size > 0) {
@@ -217,7 +217,7 @@ export class GoalService {
         confidence: funnel.source === 'manual' ? 0.85 : 0.65,
         inferred_from: `Derived from $${Math.round(pipelineNeeded).toLocaleString()} pipeline target at $${funnel.avg_deal_size.toLocaleString()} avg deal size`,
         is_active: true,
-      });
+      } as any);
       created.push(oppGoal);
     }
 

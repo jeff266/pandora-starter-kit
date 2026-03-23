@@ -31,7 +31,7 @@ function generateSkillId(name: string): string {
  */
 router.get('/:workspaceId/skills/custom', async (req, res) => {
   try {
-    const { workspaceId } = req.params;
+    const { workspaceId } = req.params as Record<string, string>;
     const result = await query(
       `SELECT * FROM custom_skills WHERE workspace_id = $1 AND status = 'active' ORDER BY created_at DESC`,
       [workspaceId]
@@ -49,7 +49,7 @@ router.get('/:workspaceId/skills/custom', async (req, res) => {
  */
 router.post('/:workspaceId/skills/custom', async (req, res) => {
   try {
-    const { workspaceId } = req.params;
+    const { workspaceId } = req.params as Record<string, string>;
     const {
       name,
       description,
@@ -116,7 +116,7 @@ router.post('/:workspaceId/skills/custom', async (req, res) => {
     await registerCustomSkill(skillId, workspaceId);
 
     if (schedule_cron) {
-      registerCustomSkillCron(row);
+      registerCustomSkillCron(row as any);
     }
 
     return res.status(201).json({ skill: row, registered: true });
@@ -132,7 +132,7 @@ router.post('/:workspaceId/skills/custom', async (req, res) => {
  */
 router.put('/:workspaceId/skills/custom/:skillId', async (req, res) => {
   try {
-    const { workspaceId, skillId } = req.params;
+    const { workspaceId, skillId } = req.params as Record<string, string>;
     const {
       name,
       description,
@@ -196,7 +196,7 @@ router.put('/:workspaceId/skills/custom/:skillId', async (req, res) => {
 
     unregisterCustomSkillCron(skillId);
     if (row.schedule_cron) {
-      registerCustomSkillCron(row);
+      registerCustomSkillCron(row as any);
     }
 
     return res.json({ skill: row, registered: true });
@@ -212,7 +212,7 @@ router.put('/:workspaceId/skills/custom/:skillId', async (req, res) => {
  */
 router.delete('/:workspaceId/skills/custom/:skillId', async (req, res) => {
   try {
-    const { workspaceId, skillId } = req.params;
+    const { workspaceId, skillId } = req.params as Record<string, string>;
 
     const result = await query(
       `UPDATE custom_skills SET status = 'disabled', updated_at = now()
@@ -241,7 +241,7 @@ router.delete('/:workspaceId/skills/custom/:skillId', async (req, res) => {
  */
 router.post('/:workspaceId/skills/custom/:skillId/run', requirePermission('skills.run_manual'), async (req, res) => {
   try {
-    const { workspaceId, skillId } = req.params;
+    const { workspaceId, skillId } = req.params as Record<string, string>;
     const registry = getSkillRegistry();
     const skill = registry.get(skillId);
     if (!skill) {
@@ -270,7 +270,7 @@ router.post('/:workspaceId/skills/custom/:skillId/run', requirePermission('skill
           JSON.stringify(result.steps),
           JSON.stringify(result.totalTokenUsage),
           result.totalDuration_ms,
-          result.errors?.length > 0 ? result.errors.map((e: any) => `${e.step}: ${e.error}`).join('; ') : null,
+          (result.errors?.length ?? 0) > 0 ? (result.errors ?? []).map((e: any) => `${e.step}: ${e.error}`).join('; ') : null,
           result.completedAt,
           result.completedAt,
         ]

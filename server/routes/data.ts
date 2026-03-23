@@ -1095,7 +1095,7 @@ router.get('/:id/signals/scan-status', async (req: Request, res: Response): Prom
 // ── Command palette search index ─────────────────────────────────────────────
 // GET /:id/search-index  — returns deals, reps, hypotheses, skills for Cmd+K
 router.get('/:id/search-index', async (req: Request, res: Response): Promise<void> => {
-  const workspaceId = req.params.id;
+  const workspaceId = req.params.id as string;
   try {
     const [dealsResult, repsResult, hypothesesResult] = await Promise.all([
       query(

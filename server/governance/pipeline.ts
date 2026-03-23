@@ -16,6 +16,7 @@ import {
   updateSnapshot,
   type SkillGovernanceRecord,
 } from './db.js';
+import { query } from '../db.js';
 import { validateChangeShape } from './shape-validator.js';
 import { reviewProposedChange } from './review-agent.js';
 import { explainProposedChange } from './explainer-agent.js';

@@ -2285,10 +2285,10 @@ export async function scoreLeads(workspaceId: string, pipelineConfig?: Pick<Pipe
         topPositiveFactor: s.topPositiveFactor,
         topNegativeFactor: s.topNegativeFactor,
         recommendedAction: s.recommendedAction ?? undefined,
-        scoreFactors: s.scoreFactors ?? [],
+        scoreFactors: s.factors ?? [],
         previousScore: s.previousScore ?? null,
         scoreChange: s.scoreChange ?? null,
-        scoredAt: s.scoredAt,
+        scoredAt: new Date().toISOString(),
       };
     });
     const contactEntities: ScoredEntity[] = contactScores.map(s => {
@@ -2313,10 +2313,10 @@ export async function scoreLeads(workspaceId: string, pipelineConfig?: Pick<Pipe
         topPositiveFactor: s.topPositiveFactor,
         topNegativeFactor: s.topNegativeFactor,
         recommendedAction: s.recommendedAction ?? undefined,
-        scoreFactors: s.scoreFactors ?? [],
+        scoreFactors: s.factors ?? [],
         previousScore: s.previousScore ?? null,
         scoreChange: s.scoreChange ?? null,
-        scoredAt: s.scoredAt,
+        scoredAt: new Date().toISOString(),
       };
     });
     emitProspectScoredEvents(workspaceId, [...dealEntities, ...contactEntities])

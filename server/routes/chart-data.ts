@@ -129,7 +129,7 @@ async function resolveRepName(workspaceId: string, email: string): Promise<strin
 
 router.get('/:workspaceId/chart-data/sources', requirePermission('agents.view'), async (req: Request, res: Response) => {
   try {
-    const { workspaceId } = req.params;
+    const { workspaceId } = req.params as Record<string, string>;
     const result = await query(`
       SELECT DISTINCT ON (skill_id)
         skill_id,
@@ -188,7 +188,7 @@ const FILL_RATE_TTL_MS = 60_000;
 
 router.get('/:workspaceId/chart-data/fill-rates/:entityType', requirePermission('agents.view'), async (req: Request, res: Response) => {
   try {
-    const { workspaceId, entityType } = req.params;
+    const { workspaceId, entityType } = req.params as Record<string, string>;
 
     const entityConfig = QUERYABLE_FIELDS[entityType];
     if (!entityConfig) {
@@ -204,7 +204,7 @@ router.get('/:workspaceId/chart-data/fill-rates/:entityType', requirePermission(
     const { table, fields: fieldDefs } = entityConfig;
 
     // Only compute fill rate for non-system fields
-    const targetFields = fieldDefs.filter(f => f.name !== 'workspace_id');
+    const targetFields = (fieldDefs as FieldDef[]).filter((f: FieldDef) => f.name !== 'workspace_id');
 
     if (targetFields.length === 0) {
       return res.json({ fill_rates: [] });
@@ -212,7 +212,7 @@ router.get('/:workspaceId/chart-data/fill-rates/:entityType', requirePermission(
 
     // Single-query approach: SELECT COUNT(f1)/COUNT(*)*100 AS f1, COUNT(f2)/COUNT(*)*100 AS f2, ...
     // Field names come from a hardcoded whitelist so safe to interpolate
-    const selectParts = targetFields.map(f =>
+    const selectParts = targetFields.map((f: FieldDef) =>
       `ROUND(COUNT(${f.name}) * 100.0 / NULLIF(COUNT(*), 0)) AS "${f.name}"`
     ).join(', ');
 
@@ -222,10 +222,10 @@ router.get('/:workspaceId/chart-data/fill-rates/:entityType', requirePermission(
     );
 
     const row = result.rows[0] || {};
-    const fillRates = targetFields.map(f => ({
+    const fillRates = targetFields.map((f: FieldDef) => ({
       field_name: f.name,
       fill_rate: Number(row[f.name] ?? 0),
-    })).sort((a, b) => b.fill_rate - a.fill_rate);
+    })).sort((a: { fill_rate: number }, b: { fill_rate: number }) => b.fill_rate - a.fill_rate);
 
     fillRateCache.set(cacheKey, { data: fillRates, expiresAt: Date.now() + FILL_RATE_TTL_MS });
 
@@ -240,14 +240,14 @@ router.get('/:workspaceId/chart-data/fill-rates/:entityType', requirePermission(
 
 router.get('/:workspaceId/chart-data/field-values/:entityType/:fieldName', requirePermission('agents.view'), async (req: Request, res: Response) => {
   try {
-    const { workspaceId, entityType, fieldName } = req.params;
+    const { workspaceId, entityType, fieldName } = req.params as Record<string, string>;
 
     const entityConfig = QUERYABLE_FIELDS[entityType];
     if (!entityConfig) {
       return res.status(400).json({ error: 'Invalid entity_type' });
     }
 
-    const fieldDef = entityConfig.fields.find(f => f.name === fieldName);
+    const fieldDef = entityConfig.fields.find((f: FieldDef) => f.name === fieldName);
     if (!fieldDef) {
       return res.status(400).json({ error: `Field '${fieldName}' not allowed for ${entityType}` });
     }
@@ -297,7 +297,7 @@ router.get('/:workspaceId/chart-data/field-values/:entityType/:fieldName', requi
 
 router.get('/:workspaceId/chart-data/queries', requirePermission('agents.view'), async (req: Request, res: Response) => {
   try {
-    const { workspaceId } = req.params;
+    const { workspaceId } = req.params as Record<string, string>;
 
     const result = await query(
       `SELECT
@@ -329,7 +329,7 @@ router.get('/:workspaceId/chart-data/queries', requirePermission('agents.view'),
 
 router.get('/:workspaceId/chart-data/:skillId', requirePermission('agents.view'), async (req: Request, res: Response) => {
   try {
-    const { workspaceId, skillId } = req.params;
+    const { workspaceId, skillId } = req.params as Record<string, string>;
 
     if (!CHARTABLE_SKILLS.includes(skillId)) {
       return res.status(400).json({ error: 'Skill not chartable' });
@@ -368,7 +368,7 @@ router.get('/:workspaceId/chart-data/:skillId', requirePermission('agents.view')
 
 router.post('/:workspaceId/chart-data/query', requirePermission('agents.view'), async (req: Request, res: Response) => {
   try {
-    const { workspaceId } = req.params;
+    const { workspaceId } = req.params as Record<string, string>;
     const { entity_type, filters = [], group_by, aggregate, render_chart, limit: rawLimit } = req.body;
 
     // Clamp limit
@@ -548,7 +548,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 router.post('/:workspaceId/chart-data/queries/:queryId/run', requirePermission('agents.view'), async (req: Request, res: Response) => {
   try {
-    const { workspaceId, queryId } = req.params;
+    const { workspaceId, queryId } = req.params as Record<string, string>;
 
     if (!UUID_RE.test(workspaceId)) {
       res.status(400).json({ error: 'Invalid workspace ID format' });

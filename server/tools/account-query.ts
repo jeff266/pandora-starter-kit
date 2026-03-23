@@ -184,7 +184,7 @@ export async function queryAccounts(workspaceId: string, filters: AccountFilters
   }
 
   // Default sort: accounts with open deals first, then by recent conversation activity
-  const rawSort = filters.sortBy && VALID_SORT_COLUMNS.has(filters.sortBy) ? filters.sortBy : 'open_deals';
+  const rawSort = (filters.sortBy && VALID_SORT_COLUMNS.has(filters.sortBy) ? filters.sortBy : 'open_deals') as string;
   const sortDir = filters.sortDir === 'desc' ? 'DESC' : 'ASC';
 
   // Map sort field to SQL expression

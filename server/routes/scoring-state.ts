@@ -21,7 +21,7 @@ const router = Router();
  */
 router.get('/:workspaceId/scoring/state', async (req, res) => {
   try {
-    const { workspaceId } = req.params;
+    const { workspaceId } = req.params as Record<string, string>;
 
     const ws = await query('SELECT id FROM workspaces WHERE id = $1', [workspaceId]);
     if (ws.rows.length === 0) return res.status(404).json({ error: 'Workspace not found' });
@@ -41,7 +41,7 @@ router.get('/:workspaceId/scoring/state', async (req, res) => {
  */
 router.get('/:workspaceId/scoring/state/poll', async (req, res) => {
   try {
-    const { workspaceId } = req.params;
+    const { workspaceId } = req.params as Record<string, string>;
 
     // Recompute state to catch transitions (ICP Discovery may have completed)
     await recomputeScoringState(workspaceId);
@@ -81,7 +81,7 @@ router.get('/:workspaceId/scoring/state/poll', async (req, res) => {
  */
 router.post('/:workspaceId/scoring/activate', requirePermission('skills.run_manual'), async (req, res) => {
   try {
-    const { workspaceId } = req.params;
+    const { workspaceId } = req.params as Record<string, string>;
 
     const ws = await query('SELECT id FROM workspaces WHERE id = $1', [workspaceId]);
     if (ws.rows.length === 0) return res.status(404).json({ error: 'Workspace not found' });
@@ -183,7 +183,7 @@ router.post('/:workspaceId/scoring/activate', requirePermission('skills.run_manu
  */
 router.post('/:workspaceId/scoring/refresh-icp', async (req, res) => {
   try {
-    const { workspaceId } = req.params;
+    const { workspaceId } = req.params as Record<string, string>;
 
     const ws = await query('SELECT id FROM workspaces WHERE id = $1', [workspaceId]);
     if (ws.rows.length === 0) return res.status(404).json({ error: 'Workspace not found' });

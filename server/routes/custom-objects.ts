@@ -176,7 +176,7 @@ async function saveCustomObjectsConfig(
 router.get(
   '/:workspaceId/connectors/salesforce/objects',
   async (req: Request, res: Response) => {
-    const { workspaceId } = req.params;
+    const { workspaceId } = req.params as Record<string, string>;
     try {
       const creds = await getConnectorCredentials(workspaceId, 'salesforce');
       if (!creds) {
@@ -218,7 +218,7 @@ router.get(
 router.get(
   '/:workspaceId/connectors/salesforce/objects/:objectName/fields',
   async (req: Request, res: Response) => {
-    const { workspaceId, objectName } = req.params;
+    const { workspaceId, objectName } = req.params as Record<string, string>;
 
     try {
       const creds = await getConnectorCredentials(workspaceId, 'salesforce');
@@ -248,7 +248,7 @@ router.get(
  * Returns the workspace's custom object configurations.
  */
 router.get('/:workspaceId/custom-objects', async (req: Request, res: Response) => {
-  const { workspaceId } = req.params;
+  const { workspaceId } = req.params as Record<string, string>;
   try {
     const configs = await getCustomObjectsConfig(workspaceId);
     res.json({ custom_objects: configs });
@@ -264,7 +264,7 @@ router.get('/:workspaceId/custom-objects', async (req: Request, res: Response) =
  * Body: { custom_objects: CustomObjectConfig[] }
  */
 router.put('/:workspaceId/custom-objects', async (req: Request, res: Response) => {
-  const { workspaceId } = req.params;
+  const { workspaceId } = req.params as Record<string, string>;
   const { custom_objects } = req.body;
 
   if (!Array.isArray(custom_objects)) {

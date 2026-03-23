@@ -10,7 +10,7 @@ router.post(
   '/:workspaceId/admin/retro-accuracy-bootstrap',
   requirePermission('config.view'),
   async (req: Request, res: Response) => {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
     try {
       console.log(`[Admin] Retro accuracy bootstrap triggered for workspace ${workspaceId}`);
       const result = await retroAccuracyBootstrap(workspaceId);
@@ -27,7 +27,7 @@ router.post(
   '/:workspaceId/admin/backfill-agent-runs',
   requirePermission('config.view'),
   async (req: Request, res: Response) => {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
     try {
       // Fetch all completed agent runs with synthesized output for this workspace
       const runsResult = await query(

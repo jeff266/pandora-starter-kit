@@ -91,8 +91,8 @@ export async function computeFields(workspaceId: string): Promise<ComputeResult>
     deals: dealResult,
     contacts: contactResult,
     accounts: accountResult,
-    rfm: rfmResult,
-  };
+    ...(rfmResult !== undefined ? { rfm: rfmResult } : {}),
+  } as any;
 }
 
 async function computeDeals(

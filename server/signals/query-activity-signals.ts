@@ -301,7 +301,7 @@ export async function getActivitySignalTypeBreakdown(
         params
       );
 
-      item.framework_breakdown = frameworkResult.rows.map(row => ({
+      (item as any).framework_breakdown = frameworkResult.rows.map(row => ({
         field: row.framework_field,
         count: parseInt(row.count, 10),
       }));

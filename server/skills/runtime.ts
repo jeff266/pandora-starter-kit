@@ -166,7 +166,7 @@ export class SkillRuntime {
     let voiceBlock = '';
     try {
       const voiceConfig = await configLoader.getVoiceConfig(workspaceId);
-      voiceBlock = voiceConfig.promptBlock;
+      voiceBlock = (voiceConfig as any).promptBlock ?? '';
     } catch (err) {
       console.warn(`[Skill Runtime] Failed to load voice config for ${workspaceId}, using defaults`);
     }
@@ -233,9 +233,9 @@ export class SkillRuntime {
           sections.push('');
         }
 
-        if (mergedConfig.config?.qualifying_questions?.length > 0) {
+        if ((mergedConfig.config?.qualifying_questions?.length ?? 0) > 0) {
           sections.push('QUALIFYING QUESTIONS:');
-          sections.push(mergedConfig.config.qualifying_questions.join('\n'));
+          sections.push(mergedConfig.config.qualifying_questions!.join('\n'));
           sections.push('');
         }
 
@@ -248,8 +248,9 @@ export class SkillRuntime {
         if (mergedConfig.config?.framework_fields && Object.keys(mergedConfig.config.framework_fields).length > 0) {
           sections.push('FRAMEWORK FIELD DETECTION HINTS:');
           for (const [fieldKey, fieldConfig] of Object.entries(mergedConfig.config.framework_fields as any)) {
-            if (fieldConfig?.detection_hints) {
-              sections.push(`${fieldKey}: ${fieldConfig.detection_hints}`);
+            const fc = fieldConfig as any;
+            if (fc?.detection_hints) {
+              sections.push(`${fieldKey}: ${fc.detection_hints}`);
             }
           }
           sections.push('');
@@ -286,7 +287,7 @@ export class SkillRuntime {
     } catch (err) {
       console.warn(`[Skill Runtime] Failed to load methodology config for ${workspaceId}, continuing without it:`, err instanceof Error ? err.message : err);
       // Fallback: use static methodology from context_layer.definitions if available
-      const staticMethodology = contextData?.definitions?.onboarding_Q11_methodology?.value?.methodology;
+      const staticMethodology = (contextData as any)?.definitions?.onboarding_Q11_methodology?.value?.methodology;
       if (staticMethodology) {
         methodologyBlock = `\n\nMETHODOLOGY: ${staticMethodology} (system default — no custom config)`;
       }
@@ -599,7 +600,7 @@ export class SkillRuntime {
               workspaceId,
               runId,
               stepResults,
-              contextData
+              (contextData ?? {}) as Record<string, any>
             );
             if (generatedCount > 0) {
               console.log(`[Actions] Generated ${generatedCount} actions programmatically from ${skill.id} run ${runId}`);
@@ -639,7 +640,7 @@ export class SkillRuntime {
            WHERE workspace_id = $1 AND skill_run_id = $2`,
           [workspaceId, runId]
         );
-        workflowTriggerManager.onSkillRunComplete(runId, workspaceId, findingsResult.rows);
+        workflowTriggerManager.onSkillRunComplete(runId, workspaceId, findingsResult.rows as any);
       } catch {
         // Non-fatal — workflow trigger failure never blocks skill completion
       }

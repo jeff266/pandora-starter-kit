@@ -19,8 +19,15 @@ describe('WorkflowService', () => {
     getProjectByExternalId: jest.fn(),
     createFlow: jest.fn(),
     updateFlow: jest.fn(),
+    getFlow: jest.fn(),
+    listFlows: jest.fn(),
+    deleteFlow: jest.fn(),
     getFlowRun: jest.fn(),
     triggerFlow: jest.fn(),
+    listConnections: jest.fn(),
+    createConnection: jest.fn(),
+    updateConnection: jest.fn(),
+    deleteConnection: jest.fn(),
   };
 
   const validTree: WorkflowTree = {

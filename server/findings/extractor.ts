@@ -651,7 +651,7 @@ export async function insertFindings(findings: FindingRow[]): Promise<FindingRow
     import('../workflow/trigger-manager.js')
       .then(({ workflowTriggerManager }) => {
         workflowTriggerManager.onFindingCreated({
-          id: finding.id,
+          id: finding.id!,
           workspace_id: workspaceId,
           category: finding.category,
           severity: finding.severity,

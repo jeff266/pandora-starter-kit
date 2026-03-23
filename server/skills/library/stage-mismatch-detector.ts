@@ -239,28 +239,12 @@ OUTPUT BUDGET REMINDER: Stay within {{output_budget.complexity}} complexity. If 
     },
   ],
 
-  evidenceBuilder: 'stageMismatchEvidence',
-  actionGenerator: 'stageMismatchActions',
-
-  outputFormats: ['markdown', 'slack', 'in_app'],
+  outputFormat: 'markdown',
 
   schedule: {
     cron: '0 9 1,15 * *',
     trigger: 'on_demand',
   },
 
-  scheduling: {
-    recommendedCadence: 'daily',
-    minInterval: '6h',
-    defaultEnabled: true,
-  },
-
-  metadata: {
-    icon: '🎯',
-    color: '#f97316',
-    tags: ['pipeline-health', 'data-quality', 'automation', 'crm-hygiene'],
-    estimatedRuntime: '45-90s',
-    primaryUseCase: 'Systematically detect and correct CRM stage data drift based on conversation analysis',
-    benefitStatement: 'Keeps pipeline stages accurate, enabling better forecasting and preventing deals from stalling unnoticed',
-  },
+  estimatedDuration: '45-90s',
 };

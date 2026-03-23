@@ -448,6 +448,8 @@ export class WorkspaceConfigLoader {
           stage_probabilities: {},
           loss_values: ['closed_lost'],
           included_in_default_scope: true,
+          value_field: 'amount',
+          forecast_eligible: true,
         },
       ],
       win_rate: {

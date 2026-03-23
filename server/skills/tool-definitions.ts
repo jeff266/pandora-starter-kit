@@ -8789,7 +8789,7 @@ const survivalCurveQuery: ToolDefinition = {
         segments: segmentSummaries,
         metadata: {
           sampleSize: result.metadata.totalDeals,
-          eventCount: result.metadata.eventCount,
+          eventCount: (result.metadata as any).eventCount,
           dataTier,
           dataTierLabel: ['', 'Very Limited (<20 wins)', 'Limited (20-49 wins)', 'Moderate (50-199 wins)', 'Robust (200+ wins)'][dataTier] || 'Unknown',
           groupBy,
@@ -9562,39 +9562,39 @@ export const toolRegistry = new Map<string, ToolDefinition>([
     description: 'Compute week-3 pipeline conversion rates for the last N completed quarters',
     tier: 'compute',
     parameters: { type: 'object', properties: { lookbackQuarters: { type: 'number' } }, required: [] },
-    execute: async (params, context) => safeExecute('computeCompletedQuarterConversions', async () => {
+    execute: async (params: any, context: any) => safeExecute('computeCompletedQuarterConversions', async () => {
       const result = await computeConversionRateTrend(context.workspaceId, params.lookbackQuarters ?? 6);
       return result;
     }, params),
-  } as ToolDefinition],
+  } as unknown as ToolDefinition],
 
   ['computeCurrentQuarterProjection', {
     name: 'computeCurrentQuarterProjection',
     description: 'Return the current quarter conversion projection already computed in completed_quarters step',
     tier: 'compute',
     parameters: { type: 'object', properties: {}, required: [] },
-    execute: async (params, context) => safeExecute('computeCurrentQuarterProjection', async () => {
+    execute: async (params: any, context: any) => safeExecute('computeCurrentQuarterProjection', async () => {
       const prev = (context.stepResults as any).completed_quarters;
       return prev?.currentQuarterProjection ?? null;
     }, params),
-  } as ToolDefinition],
+  } as unknown as ToolDefinition],
 
   ['computeWinRateAnalysis', {
     name: 'computeWinRateAnalysis',
     description: 'Compute narrow vs. broad win rates, derail rate trend, and primary competitive pressure',
     tier: 'compute',
     parameters: { type: 'object', properties: { lookbackQuarters: { type: 'number' } }, required: [] },
-    execute: async (params, context) => safeExecute('computeWinRateAnalysis', async () => {
+    execute: async (params: any, context: any) => safeExecute('computeWinRateAnalysis', async () => {
       return computeWinRates(context.workspaceId, params.lookbackQuarters ?? 6);
     }, params),
-  } as ToolDefinition],
+  } as unknown as ToolDefinition],
 
   ['computeCoverageAdequacy', {
     name: 'computeCoverageAdequacy',
     description: 'Compare actual coverage ratio to conversion-implied coverage need; compute the $ gap',
     tier: 'compute',
     parameters: { type: 'object', properties: {}, required: [] },
-    execute: async (params, context) => safeExecute('computeCoverageAdequacy', async () => {
+    execute: async (params: any, context: any) => safeExecute('computeCoverageAdequacy', async () => {
       const convData = (context.stepResults as any).completed_quarters;
       const quotaConfig = (context.stepResults as any).quota_config;
       const impliedTarget = convData?.impliedCoverageTarget ?? 3.3;
@@ -9616,14 +9616,14 @@ export const toolRegistry = new Map<string, ToolDefinition>([
         conversionRate: convData?.completedQuarters?.[convData.completedQuarters.length - 1]?.conversionRate ?? 0,
       };
     }, params),
-  } as ToolDefinition],
+  } as unknown as ToolDefinition],
 
   ['prepareConversionSummary', {
     name: 'prepareConversionSummary',
     description: 'Prepare condensed conversion rate summary for Claude synthesis',
     tier: 'compute',
     parameters: { type: 'object', properties: {}, required: [] },
-    execute: async (params, context) => safeExecute('prepareConversionSummary', async () => {
+    execute: async (params: any, context: any) => safeExecute('prepareConversionSummary', async () => {
       const steps = context.stepResults as any;
       return {
         completedQuarters: steps.completed_quarters?.completedQuarters ?? [],
@@ -9633,7 +9633,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
         classification: steps.classification,
       };
     }, params),
-  } as ToolDefinition],
+  } as unknown as ToolDefinition],
 
   // ── Pipeline Progression skill tools ─────────────────────────────────────
   ['resolveQuarters', {
@@ -9641,7 +9641,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
     description: 'Resolve Q0 (current), Q+1, and Q+2 quarter date bounds and team quota',
     tier: 'compute',
     parameters: { type: 'object', properties: {}, required: [] },
-    execute: async (params, context) => safeExecute('resolveQuarters', async () => {
+    execute: async (params: any, context: any) => safeExecute('resolveQuarters', async () => {
       const now = new Date();
       const quarters = [0, 1, 2].map(offset => {
         const q = Math.floor(now.getMonth() / 3);
@@ -9653,47 +9653,47 @@ export const toolRegistry = new Map<string, ToolDefinition>([
       const quotaConfig = (context.stepResults as any).quota_config;
       return { quarters, teamQuota: quotaConfig?.teamQuota ?? 0, coverageTarget: 3.0 };
     }, params),
-  } as ToolDefinition],
+  } as unknown as ToolDefinition],
 
   ['snapshotCurrentPipeline', {
     name: 'snapshotCurrentPipeline',
     description: 'Snapshot current pipeline for Q0, Q+1, and Q+2 with coverage ratios and deal counts',
     tier: 'compute',
     parameters: { type: 'object', properties: {}, required: [] },
-    execute: async (params, context) => safeExecute('snapshotCurrentPipeline', async () => {
+    execute: async (params: any, context: any) => safeExecute('snapshotCurrentPipeline', async () => {
       const snapshot = await pipelineProgressionSnapshot(context.workspaceId);
       return { snapshot };
     }, params),
-  } as ToolDefinition],
+  } as unknown as ToolDefinition],
 
   ['loadHistoricalSnapshots', {
     name: 'loadHistoricalSnapshots',
     description: 'Load 12 weeks of historical pipeline progression snapshots and compute trend lines',
     tier: 'compute',
     parameters: { type: 'object', properties: { weeksBack: { type: 'number' } }, required: [] },
-    execute: async (params, context) => safeExecute('loadHistoricalSnapshots', async () => {
+    execute: async (params: any, context: any) => safeExecute('loadHistoricalSnapshots', async () => {
       const history = await pipelineProgressionHistory(context.workspaceId, params.weeksBack ?? 12);
       return history;
     }, params),
-  } as ToolDefinition],
+  } as unknown as ToolDefinition],
 
   ['detectEarlyWarnings', {
     name: 'detectEarlyWarnings',
     description: 'Detect early warnings for Q+1 and Q+2 based on trend projections',
     tier: 'compute',
     parameters: { type: 'object', properties: {}, required: [] },
-    execute: async (params, context) => safeExecute('detectEarlyWarnings', async () => {
+    execute: async (params: any, context: any) => safeExecute('detectEarlyWarnings', async () => {
       const history = (context.stepResults as any).history;
       return { earlyWarnings: history?.earlyWarnings ?? [] };
     }, params),
-  } as ToolDefinition],
+  } as unknown as ToolDefinition],
 
   ['prepareProgressionSummary', {
     name: 'prepareProgressionSummary',
     description: 'Prepare condensed pipeline progression summary for Claude synthesis',
     tier: 'compute',
     parameters: { type: 'object', properties: {}, required: [] },
-    execute: async (params, context) => safeExecute('prepareProgressionSummary', async () => {
+    execute: async (params: any, context: any) => safeExecute('prepareProgressionSummary', async () => {
       const steps = context.stepResults as any;
       return {
         snapshot: steps.snapshot?.snapshot,
@@ -9702,7 +9702,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
         classification: steps.classification,
       };
     }, params),
-  } as ToolDefinition],
+  } as unknown as ToolDefinition],
 
   // ── GTM Health Diagnostic skill tools ────────────────────────────────────
   ['loadSkillOutputs', {
@@ -9717,7 +9717,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
       },
       required: ['skillIds'],
     },
-    execute: async (params, context) => safeExecute('loadSkillOutputs', async () => {
+    execute: async (params: any, context: any) => safeExecute('loadSkillOutputs', async () => {
       const skillIds: string[] = params.skillIds ?? [];
       const maxAge = params.maxAgeDays ?? 7;
       const outputs: Record<string, any> = {};
@@ -9735,14 +9735,14 @@ export const toolRegistry = new Map<string, ToolDefinition>([
       }
       return outputs;
     }, params),
-  } as ToolDefinition],
+  } as unknown as ToolDefinition],
 
   ['computeGtmCoverageAdequacy', {
     name: 'computeGtmCoverageAdequacy',
     description: 'Compare actual coverage to conversion-implied coverage target and compute the adjusted gap',
     tier: 'compute',
     parameters: { type: 'object', properties: {}, required: [] },
-    execute: async (params, context) => safeExecute('computeGtmCoverageAdequacy', async () => {
+    execute: async (params: any, context: any) => safeExecute('computeGtmCoverageAdequacy', async () => {
       const skillOutputs = (context.stepResults as any).skill_outputs ?? {};
       const coverage = skillOutputs['pipeline-coverage'];
       const conversion = skillOutputs['pipeline-conversion-rate'];
@@ -9777,14 +9777,14 @@ export const toolRegistry = new Map<string, ToolDefinition>([
         adjustedGap: Math.round(gap * 100) / 100,
       };
     }, params),
-  } as ToolDefinition],
+  } as unknown as ToolDefinition],
 
   ['computeGtmHistoricalContext', {
     name: 'computeGtmHistoricalContext',
     description: 'Load last 6 quarters of coverage and conversion from skill_run history; detect floating bar',
     tier: 'compute',
     parameters: { type: 'object', properties: { lookbackQuarters: { type: 'number' } }, required: [] },
-    execute: async (params, context) => safeExecute('computeGtmHistoricalContext', async () => {
+    execute: async (params: any, context: any) => safeExecute('computeGtmHistoricalContext', async () => {
       const lq = params.lookbackQuarters ?? 6;
       const conversionHistory = await query<{ output: any; started_at: string }>(
         `SELECT output, started_at
@@ -9823,14 +9823,14 @@ export const toolRegistry = new Map<string, ToolDefinition>([
         quartersOfData: Math.min(conversions.length, coverages.length),
       };
     }, params),
-  } as ToolDefinition],
+  } as unknown as ToolDefinition],
 
   ['prepareGtmSummary', {
     name: 'prepareGtmSummary',
     description: 'Prepare condensed GTM health summary for Claude synthesis',
     tier: 'compute',
     parameters: { type: 'object', properties: {}, required: [] },
-    execute: async (params, context) => safeExecute('prepareGtmSummary', async () => {
+    execute: async (params: any, context: any) => safeExecute('prepareGtmSummary', async () => {
       const steps = context.stepResults as any;
       return {
         skillOutputs: steps.skill_outputs,
@@ -9839,7 +9839,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
         classification: steps.classification,
       };
     }, params),
-  } as ToolDefinition],
+  } as unknown as ToolDefinition],
 
   // ── Rep Ramp (rep-scorecard enhancement) ─────────────────────────────────
   ['computeRepRamp', {
@@ -9847,10 +9847,10 @@ export const toolRegistry = new Map<string, ToolDefinition>([
     description: 'Compute rep ramp curve, tenure-relative productivity cohorts, and new rep risk',
     tier: 'compute',
     parameters: { type: 'object', properties: {}, required: [] },
-    execute: async (params, context) => safeExecute('computeRepRamp', async () => {
+    execute: async (params: any, context: any) => safeExecute('computeRepRamp', async () => {
       return repRampAnalysis(context.workspaceId);
     }, params),
-  } as ToolDefinition],
+  } as unknown as ToolDefinition],
 
   // ── Triangulation (forecast-rollup enhancement) ───────────────────────────
   ['computeTriangulationBearings', {
@@ -9858,7 +9858,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
     description: 'Compute all 5 forecast triangulation bearings (rep rollup, stage EV, category EV, capacity model) and divergence analysis',
     tier: 'compute',
     parameters: { type: 'object', properties: {}, required: [] },
-    execute: async (params, context) => safeExecute('computeTriangulationBearings', async () => {
+    execute: async (params: any, context: any) => safeExecute('computeTriangulationBearings', async () => {
       const timeWindows = (context.stepResults as any).time_windows;
       const quotaConfig = (context.stepResults as any).quota_config;
       const qStart = timeWindows?.analysisRange?.start ? new Date(timeWindows.analysisRange.start) : new Date();
@@ -9955,7 +9955,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
         },
       };
     }, params),
-  } as ToolDefinition],
+  } as unknown as ToolDefinition],
 
   // ── Behavioral-Adjusted EV (forecast-rollup bearing 6) ────────────────────
   ['computeBehavioralAdjustedEV', {
@@ -9963,7 +9963,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
     description: 'Compute the 6th triangulation bearing: apply behavioral stage corrections from stage-mismatch-detector to open-deal EVs',
     tier: 'compute',
     parameters: { type: 'object', properties: {}, required: [] },
-    execute: async (params, context) => safeExecute('computeBehavioralAdjustedEV', async () => {
+    execute: async (params: any, context: any) => safeExecute('computeBehavioralAdjustedEV', async () => {
       const { computeBehavioralAdjustedEV: computeFn } = await import('../analysis/behavioral-stage-correction.js');
       const timeWindows = (context.stepResults as any).time_windows ?? {};
       const qStart = timeWindows?.analysisRange?.start
@@ -10002,7 +10002,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
 
       return computeFn(context.workspaceId, openDeals, stageCloseProbabilities);
     }, params),
-  } as ToolDefinition],
+  } as unknown as ToolDefinition],
 
   // ── To-Go Coverage (pipeline-coverage enhancement) ───────────────────────
   ['computeToGoCoverage', {
@@ -10010,7 +10010,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
     description: 'Compute intra-quarter to-go coverage: weekly pipeline snapshots, burn rate, and fake pipeline risk',
     tier: 'compute',
     parameters: { type: 'object', properties: {}, required: [] },
-    execute: async (params, context) => safeExecute('computeToGoCoverage', async () => {
+    execute: async (params: any, context: any) => safeExecute('computeToGoCoverage', async () => {
       const timeWindows = (context.stepResults as any).time_windows;
       const quotaConfig = (context.stepResults as any).quota_config;
       const qStart = timeWindows?.analysisRange?.start ? new Date(timeWindows.analysisRange.start) : new Date();
@@ -10056,14 +10056,14 @@ export const toolRegistry = new Map<string, ToolDefinition>([
         },
       };
     }, params),
-  } as ToolDefinition],
+  } as unknown as ToolDefinition],
 
   ['detectFakePipeline', {
     name: 'detectFakePipeline',
     description: 'Identify deals that were in the quarter at week 3 but have since been removed (fake pipeline)',
     tier: 'compute',
     parameters: { type: 'object', properties: {}, required: [] },
-    execute: async (params, context) => safeExecute('detectFakePipeline', async () => {
+    execute: async (params: any, context: any) => safeExecute('detectFakePipeline', async () => {
       const timeWindows = (context.stepResults as any).time_windows;
       const qStart = timeWindows?.analysisRange?.start ? new Date(timeWindows.analysisRange.start) : new Date();
       const week3Date = new Date(qStart);
@@ -10107,7 +10107,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
         fakePipelineRisk: fakePct > 0.20 ? 'high' : fakePct > 0.10 ? 'medium' : 'low',
       };
     }, params),
-  } as ToolDefinition],
+  } as unknown as ToolDefinition],
 
   // ── Methodology Divergence — pipeline-conversion-rate ─────────────────────
   ['computeMethodologyDivergence', {
@@ -10115,7 +10115,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
     description: 'Compute divergence between week-3 conversion rate implied coverage and win-rate implied coverage. Pure arithmetic — no AI tokens.',
     tier: 'compute',
     parameters: { type: 'object', properties: {}, required: [] },
-    execute: async (params, context) => safeExecute('computeMethodologyDivergence', async () => {
+    execute: async (params: any, context: any) => safeExecute('computeMethodologyDivergence', async () => {
       const completedQ = (context.stepResults as any).completed_quarters ?? {};
       const winRates = (context.stepResults as any).win_rates ?? {};
 
@@ -10149,7 +10149,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
         derailRate: winRates.derailRate ?? 0,
       };
     }, params),
-  } as ToolDefinition],
+  } as unknown as ToolDefinition],
 
   // ── Load Bearing Calibration — forecast-rollup ────────────────────────────
   ['loadBearingCalibration', {
@@ -10157,7 +10157,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
     description: 'Load workspace-specific forecast bearing calibration from context_layer.definitions. Returns null calibration if not yet computed.',
     tier: 'compute',
     parameters: { type: 'object', properties: {}, required: [] },
-    execute: async (_params, context) => safeExecute('loadBearingCalibration', async () => {
+    execute: async (_params: any, context: any) => safeExecute('loadBearingCalibration', async () => {
       const result = await query<{ bearing_calibration: any }>(
         `SELECT definitions->'bearing_calibration' AS bearing_calibration
          FROM context_layer
@@ -10182,7 +10182,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
 
       return { calibration, hasCalibration: true };
     }, _params),
-  } as ToolDefinition],
+  } as unknown as ToolDefinition],
 
   // ── Methodology Divergence — forecast-rollup ──────────────────────────────
   ['computeForecastMethodologyDivergence', {
@@ -10190,7 +10190,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
     description: 'Compute divergence between category-weighted EV and stage-weighted EV for the current quarter forecast. Pure arithmetic.',
     tier: 'compute',
     parameters: { type: 'object', properties: {}, required: [] },
-    execute: async (params, context) => safeExecute('computeForecastMethodologyDivergence', async () => {
+    execute: async (params: any, context: any) => safeExecute('computeForecastMethodologyDivergence', async () => {
       const forecastData = (context.stepResults as any).forecast_data ?? {};
       const timeWindows = (context.stepResults as any).time_windows ?? {};
 
@@ -10255,7 +10255,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
         direction,
       };
     }, params),
-  } as ToolDefinition],
+  } as unknown as ToolDefinition],
 
   // ── Extract Methodology Comparison JSON from Synthesis Output ─────────────
   ['extractMethodologyComparison', {
@@ -10270,7 +10270,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
       },
       required: [],
     },
-    execute: async (params, context) => safeExecute('extractMethodologyComparison', async () => {
+    execute: async (params: any, context: any) => safeExecute('extractMethodologyComparison', async () => {
       const synthesisKey = (params as any).synthesisKey ?? 'synthesis';
       const metric = (params as any).metric ?? 'required_coverage';
       const rawText: string = String((context.stepResults as any)[synthesisKey] ?? '');
@@ -10434,7 +10434,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
         methodologyComparisons,
       };
     }, params),
-  } as ToolDefinition],
+  } as unknown as ToolDefinition],
 
   // ── Pre-Mortem Compute Functions ──────────────────────────────────────────
 
@@ -10443,7 +10443,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
     description: 'Derives quarter label, days remaining, P10/P50/P90, quota attainment, composition swing variable, and large deal list from cached skill outputs.',
     tier: 'compute',
     parameters: { type: 'object', properties: {}, required: [] },
-    execute: async (_params, context) => safeExecute('computeQuarterContext', async () => {
+    execute: async (_params: any, context: any) => safeExecute('computeQuarterContext', async () => {
       const skillOutputs = (context.stepResults as any).skill_outputs ?? {};
       const mc = skillOutputs['monte-carlo-forecast'];
       const coverage = skillOutputs['pipeline-coverage'];
@@ -10523,14 +10523,14 @@ export const toolRegistry = new Map<string, ToolDefinition>([
         },
       };
     }, _params),
-  } as ToolDefinition],
+  } as unknown as ToolDefinition],
 
   ['writeStandingHypotheses', {
     name: 'writeStandingHypotheses',
     description: 'Inserts failure-mode rows from the pre-mortem deepseek step into the standing_hypotheses table. Returns the count written and the list of IDs.',
     tier: 'compute',
     parameters: { type: 'object', properties: {}, required: [] },
-    execute: async (_params, context) => safeExecute('writeStandingHypotheses', async () => {
+    execute: async (_params: any, context: any) => safeExecute('writeStandingHypotheses', async () => {
       const workspaceId = context.workspaceId;
       const stepResults = (context.stepResults as any);
       let failureModes = stepResults.failure_modes ?? {};
@@ -10599,14 +10599,14 @@ export const toolRegistry = new Map<string, ToolDefinition>([
       console.log(`[writeStandingHypotheses] Wrote ${written.length} standing hypotheses for workspace ${workspaceId}`);
       return { written: written.length, hypotheses: written };
     }, _params),
-  } as ToolDefinition],
+  } as unknown as ToolDefinition],
 
   ['preparePreMortemSummary', {
     name: 'preparePreMortemSummary',
     description: 'Packages all pre-mortem step outputs into a clean summary for Claude synthesis.',
     tier: 'compute',
     parameters: { type: 'object', properties: {}, required: [] },
-    execute: async (_params, context) => safeExecute('preparePreMortemSummary', async () => {
+    execute: async (_params: any, context: any) => safeExecute('preparePreMortemSummary', async () => {
       const stepResults = (context.stepResults as any);
       const quarterContext = stepResults.quarter_context ?? {};
       const skillOutputs = stepResults.skill_outputs ?? {};
@@ -10645,7 +10645,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
         dataAvailability: quarterContext.dataAvailability ?? {},
       };
     }, _params),
-  } as ToolDefinition],
+  } as unknown as ToolDefinition],
 ]);
 
 // ============================================================================

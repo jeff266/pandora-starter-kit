@@ -34,7 +34,7 @@ export async function syncGoogleCalendar(workspaceId: string): Promise<{
   );
 
   if (connResult.rows.length === 0) {
-    logger.info({ workspaceId }, 'No google-calendar connection found — skipping');
+    logger.info('No google-calendar connection found — skipping', { workspaceId });
     return { synced: 0, resolved: 0, errors: [] };
   }
 
@@ -102,13 +102,13 @@ export async function syncGoogleCalendar(workspaceId: string): Promise<{
       events = events.concat(response.data.items || []);
       pageToken = response.data.nextPageToken || undefined;
     } catch (err: any) {
-      logger.error({ err, workspaceId }, 'Error fetching calendar events');
+      logger.error('Error fetching calendar events', { err, workspaceId });
       errors.push(`Fetch error: ${err.message}`);
       break;
     }
   } while (pageToken);
 
-  logger.info({ workspaceId, count: events.length }, 'Fetched calendar events');
+  logger.info('Fetched calendar events', { workspaceId, count: events.length });
 
   // 4. Filter: exclude events where user declined or all-day non-work events
   const relevantEvents = events.filter(event => {
@@ -174,7 +174,7 @@ export async function syncGoogleCalendar(workspaceId: string): Promise<{
 
       synced++;
     } catch (err: any) {
-      logger.error({ err, eventId: event.id }, 'Error upserting calendar event');
+      logger.error('Error upserting calendar event', { err, eventId: event.id });
       errors.push(`Upsert error for ${event.id}: ${err.message}`);
     }
   }
@@ -189,7 +189,7 @@ export async function syncGoogleCalendar(workspaceId: string): Promise<{
     [workspaceId]
   );
 
-  logger.info({ workspaceId, synced, resolved }, 'Calendar sync complete');
+  logger.info('Calendar sync complete', { workspaceId, synced, resolved });
   return { synced, resolved, errors };
 }
 

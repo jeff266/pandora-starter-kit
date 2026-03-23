@@ -111,8 +111,8 @@ router.post('/:workspaceId/chat', async (req: Request, res: Response): Promise<v
       tool_call_count: result.tool_call_count,
       latency_ms: result.latency_ms,
       ...(result.evidence ? { evidence: result.evidence } : {}),
-      ...(result.chart_specs?.length ? { chart_specs: result.chart_specs } : {}),
-      ...(result.chart ? { chart: result.chart } : {}),
+      ...((result as any).chart_specs?.length ? { chart_specs: (result as any).chart_specs } : {}),
+      ...((result as any).chart ? { chart: (result as any).chart } : {}),
       ...(suggestedActions.length > 0 ? { suggested_actions: suggestedActions } : {}),
       ...(result.deliberation ? { deliberation: result.deliberation } : {}),
       ...((result as any).pandora_response ? { pandora_response: (result as any).pandora_response } : {}),
@@ -160,8 +160,8 @@ router.post('/:workspaceId/chat', async (req: Request, res: Response): Promise<v
       ...(result.tool_call_count != null ? { tool_call_count: result.tool_call_count } : {}),
       ...(result.latency_ms != null ? { latency_ms: result.latency_ms } : {}),
       ...(result.inline_actions ? { inline_actions: result.inline_actions } : {}),
-      ...(result.chart_specs?.length ? { chart_specs: result.chart_specs } : {}),
-      ...(result.chart ? { chart: result.chart } : {}),
+      ...((result as any).chart_specs?.length ? { chart_specs: (result as any).chart_specs } : {}),
+      ...((result as any).chart ? { chart: (result as any).chart } : {}),
       ...(suggestedActions.length > 0 ? { suggested_actions: suggestedActions } : {}),
       ...(result.deliberation ? { deliberation: result.deliberation } : {}),
     });
@@ -599,7 +599,7 @@ router.post('/:workspaceId/chat/guided-agent', async (req: Request, res: Respons
           const result = await callLLM(workspaceId, 'generate', {
             messages: llmMessages,
             systemPrompt: GUIDED_AGENT_SYSTEM_PROMPT,
-            max_tokens: 150,
+            maxTokens: 150,
             temperature: 0.7,
           });
           return typeof result === 'string' ? result : (result as any).content ?? 'Got it. Tell me more.';

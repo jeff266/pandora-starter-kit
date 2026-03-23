@@ -59,6 +59,7 @@ export interface ConversationTurnInput {
     agent_run_id?: string;
     report_type?: string;
     result?: any;
+    type?: string;
   };
   conciergeContext?: {
     quarter?: string;
@@ -175,7 +176,7 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
       }
     }
     await appendMessage(workspaceId, channelId, threadId, {
-      role: 'system',
+      role: 'user' as any,
       content: parts.join('\n'),
       timestamp: new Date().toISOString(),
     });
@@ -210,7 +211,7 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
           graphParts.push(`\nPRE-LOADED ENTITY:\n${JSON.stringify(graphCtx.pre_loaded, null, 2)}`);
         }
         await appendMessage(workspaceId, channelId, threadId, {
-          role: 'system',
+          role: 'user' as any,
           content: graphParts.join('\n'),
           timestamp: new Date().toISOString(),
         });
@@ -561,9 +562,10 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
           const workspaceName = workspaceRow.rows[0]?.name ?? 'Your Workspace';
           const retroResult = await runRetroPipeline(workspaceId, message, workspaceName);
 
-          const assistantMsg = await appendMessage(workspaceId, channelId, threadId, {
+          await appendMessage(workspaceId, channelId, threadId, {
             role: 'assistant',
             content: retroResult.answer,
+            timestamp: new Date().toISOString(),
           });
 
           return {
@@ -574,7 +576,7 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
             data_strategy: `phase_${retroResult.phase_reached}`,
             tokens_used: retroResult.tokens_used,
             feedback_enabled: true,
-            response_id: assistantMsg?.id,
+            response_id: undefined,
           };
         } catch (err) {
           console.error('[orchestrator] Retrospective pipeline failed, falling through:', err);
@@ -975,7 +977,7 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
 
       // 4. Record tools used
       for (const toolCall of pandoraResult.evidence?.tool_calls ?? []) {
-        builder.recordTool(toolCall.tool_name);
+        builder.recordTool(toolCall.tool);
       }
 
       // 5. Add deliberation block based on mode
@@ -1007,7 +1009,7 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
 
       if (deliberationResult && deliberationMode === 'boardroom') {
         builder.addDeliberation({
-          mode: 'boardroom',
+          mode: 'boardroom' as any,
           hypothesis: message,
           panels: deliberationResult.panels.map((p: any) => ({
             role: p.role,
@@ -1022,7 +1024,7 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
 
       if (deliberationResult && deliberationMode === 'socratic') {
         builder.addDeliberation({
-          mode: 'socratic',
+          mode: 'socratic' as any,
           hypothesis: message,
           panels: [
             {
@@ -1046,7 +1048,7 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
 
       if (deliberationResult && deliberationMode === 'prosecutor_defense') {
         builder.addDeliberation({
-          mode: 'prosecutor_defense',
+          mode: 'prosecutor_defense' as any,
           hypothesis: message,
           panels: [
             {

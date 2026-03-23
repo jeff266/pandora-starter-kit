@@ -153,7 +153,7 @@ export async function assembleCorpus(
       calls_kept: keptCalls.length,
       emails_kept: emails.length,
       notes_kept: notes.length,
-      bookend_applied,
+      bookend_applied: bookendApplied,
     },
     limited_evidence: limitedEvidence,
     insufficient_data: false,

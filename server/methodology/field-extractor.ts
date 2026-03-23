@@ -152,7 +152,7 @@ Only include fields where evidence exists. Omit fields with no evidence.`;
       throw new Error(`DeepSeek API error: ${response.status} ${errorText}`);
     }
 
-    const data = await response.json();
+    const data = await response.json() as any;
     return data.choices?.[0]?.message?.content || '';
   }
 

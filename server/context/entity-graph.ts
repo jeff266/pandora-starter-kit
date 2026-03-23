@@ -124,8 +124,8 @@ export const PANDORA_ENTITY_GRAPH: EntityGraph = {
       sources: ['gong', 'fireflies', 'fathom'],
       link_confidence: ['confirmed', 'inferred', 'unlinked'],
       pandora_principle: 'Surface WHAT HAPPENED BECAUSE OF a call, not what was said in it. Never recreate what Gong/Fireflies do natively.',
-      fields: ['title', 'started_at', 'duration_seconds', 'participants',
-               'summary', 'link_confidence', 'crm_deal_id'],
+      fields: { native: ['title', 'started_at', 'duration_seconds', 'participants',
+               'summary', 'link_confidence', 'crm_deal_id'] },
       temporal_join: {
         pattern: 'conversations.started_at BETWEEN stage_history.changed_at AND COALESCE(next_stage.changed_at, NOW())',
       },
@@ -139,8 +139,8 @@ export const PANDORA_ENTITY_GRAPH: EntityGraph = {
       table: 'contacts',
       primary_key: 'id',
       workspace_scoped: true,
-      fields: ['name', 'title', 'email', 'seniority', 'buying_role',
-               'last_activity_date', 'crm_deal_id'],
+      fields: { native: ['name', 'title', 'email', 'seniority', 'buying_role',
+               'last_activity_date', 'crm_deal_id'] },
       relationships: {
         deal:          { via: 'crm_deal_id', type: 'many_to_one' },
         conversations: { via: 'email_match OR domain_match', type: 'inferred' },
@@ -152,7 +152,7 @@ export const PANDORA_ENTITY_GRAPH: EntityGraph = {
       primary_key: 'id',
       workspace_scoped: true,
       sync: '15-minute background sync via Google Calendar OAuth (workspace-level)',
-      fields: ['title', 'start_time', 'end_time', 'attendees', 'deal_id', 'status'],
+      fields: { native: ['title', 'start_time', 'end_time', 'attendees', 'deal_id', 'status'] },
       relationships: {
         deal:          { via: 'deal_id',      type: 'many_to_one', nullable: true },
         stage_context: { via: 'temporal_join', type: 'derived' },

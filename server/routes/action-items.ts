@@ -724,9 +724,9 @@ router.post('/:workspaceId/action-items/:actionId/snooze', async (req: Request<W
 // Trigger Red Team deliberation for a hypothesis
 router.post(
   '/:workspaceId/deliberation/hypothesis/:hypothesisId',
-  requirePermission('read'),
-  async (req: Request<WorkspaceParams & { hypothesisId: string }>, res: Response) => {
-    const { workspaceId, hypothesisId } = req.params;
+  requirePermission('agents.view' as any),
+  async (req: Request, res: Response) => {
+    const { workspaceId, hypothesisId } = req.params as Record<string, string>;
 
     try {
       console.log(`[RedTeam] Triggering hypothesis deliberation for ${hypothesisId}`);
@@ -758,8 +758,8 @@ router.post(
 // Fetch a completed deliberation run by ID, scoped to workspace
 router.get(
   '/:workspaceId/deliberations/:deliberationRunId',
-  requirePermission('read'),
-  async (req: Request<WorkspaceParams & { deliberationRunId: string }>, res: Response) => {
+  requirePermission('agents.view' as any),
+  async (req: Request, res: Response) => {
     const { workspaceId, deliberationRunId } = req.params;
 
     try {

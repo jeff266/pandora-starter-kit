@@ -69,7 +69,7 @@ export function registerChatRoutes(app: Express): void {
 
       // Get conversation history for context
       const messages = await chatStorage.getMessagesByConversation(conversationId);
-      const chatMessages = messages.map((m) => ({
+      const chatMessages = messages.map((m: any) => ({
         role: m.role as "user" | "assistant",
         content: m.content,
       }));

@@ -749,7 +749,7 @@ agentsWorkspaceRouter.delete('/:workspaceId/reports/:reportId/annotations/:annot
 // GET chart suggestions for a report
 agentsWorkspaceRouter.get('/:workspaceId/reports/:reportId/chart-suggestions', requirePermission('agents.view'), async (req: Request, res: Response) => {
   try {
-    const { workspaceId, reportId } = req.params;
+    const { workspaceId, reportId } = req.params as Record<string, string>;
     const result = await query(`
       SELECT section_id, chart_type, title, data_labels, data_values, reasoning, priority
       FROM report_chart_suggestions
@@ -766,7 +766,7 @@ agentsWorkspaceRouter.get('/:workspaceId/reports/:reportId/chart-suggestions', r
 // GET all charts for a report
 agentsWorkspaceRouter.get('/:workspaceId/reports/:reportId/charts', requirePermission('agents.view'), async (req: Request, res: Response) => {
   try {
-    const { workspaceId, reportId } = req.params;
+    const { workspaceId, reportId } = req.params as Record<string, string>;
     const result = await query(`
       SELECT id, section_id, chart_type, title, data_labels, data_values,
              chart_options, position_in_section, created_at, updated_at
@@ -784,7 +784,7 @@ agentsWorkspaceRouter.get('/:workspaceId/reports/:reportId/charts', requirePermi
 // POST create a chart from suggestion or custom
 agentsWorkspaceRouter.post('/:workspaceId/reports/:reportId/charts', requireAnyPermission('agents.edit_own', 'agents.edit_any'), async (req: Request, res: Response) => {
   try {
-    const { workspaceId, reportId } = req.params;
+    const { workspaceId, reportId } = req.params as Record<string, string>;
     const { section_id, chart_type, title, data_labels, data_values, chart_options, position_in_section } = req.body;
 
     // Render chart to PNG via QuickChart.io HTTP API
@@ -838,7 +838,7 @@ agentsWorkspaceRouter.post('/:workspaceId/reports/:reportId/charts', requireAnyP
 // GET chart PNG image
 agentsWorkspaceRouter.get('/:workspaceId/reports/:reportId/charts/:chartId/image', requirePermission('agents.view'), async (req: Request, res: Response) => {
   try {
-    const { workspaceId, chartId } = req.params;
+    const { workspaceId, chartId } = req.params as Record<string, string>;
     const result = await query(`
       SELECT chart_png FROM report_charts
       WHERE workspace_id = $1 AND id = $2
@@ -860,7 +860,7 @@ agentsWorkspaceRouter.get('/:workspaceId/reports/:reportId/charts/:chartId/image
 // DELETE a chart
 agentsWorkspaceRouter.delete('/:workspaceId/reports/:reportId/charts/:chartId', requireAnyPermission('agents.edit_own', 'agents.edit_any'), async (req: Request, res: Response) => {
   try {
-    const { workspaceId, chartId } = req.params;
+    const { workspaceId, chartId } = req.params as Record<string, string>;
     await query(`
       DELETE FROM report_charts
       WHERE workspace_id = $1 AND id = $2
@@ -894,7 +894,7 @@ agentsWorkspaceRouter.post('/:workspaceId/charts/preview', requirePermission('ag
 // GET companion XLSX file with chart data
 agentsWorkspaceRouter.get('/:workspaceId/reports/:reportId/charts-data.xlsx', requirePermission('agents.view'), async (req: Request, res: Response) => {
   try {
-    const { workspaceId, reportId } = req.params;
+    const { workspaceId, reportId } = req.params as Record<string, string>;
 
     // Verify report exists
     const { getReportDocumentById } = await import('../orchestrator/persistence.js');
@@ -1026,7 +1026,6 @@ agentsWorkspaceRouter.post('/:workspaceId/reports/:reportId/export/google-docs',
     // 3. Render as DOCX buffer (same renderer as the existing DOCX export)
     const { renderDocx } = await import('../orchestrator/report-renderer.js');
     const buf = await renderDocx(finalDoc, {
-      format: 'docx',
       audience: 'internal',
       prepared_by: 'RevOps Impact',
       include_actions: true,
@@ -1092,7 +1091,7 @@ async function verifyAgentOwnership(workspaceId: string, agentId: string): Promi
 }
 
 agentsWorkspaceRouter.post('/:workspaceId/agents/:agentId/generate-questions', requirePermission('agents.view'), async (req: Request, res: Response) => {
-  const { workspaceId, agentId } = req.params;
+  const { workspaceId, agentId } = req.params as Record<string, string>;
 
   try {
     // Verify workspace + agent ownership
@@ -1187,7 +1186,7 @@ Generate questions that comprehensively answer this goal using the available dat
 });
 
 agentsWorkspaceRouter.post('/:workspaceId/agents/:agentId/generate-sections', requirePermission('agents.view'), async (req: Request, res: Response) => {
-  const { workspaceId, agentId } = req.params;
+  const { workspaceId, agentId } = req.params as Record<string, string>;
   const { goal, questions } = req.body;
   // questions: string[] — the accepted question texts
 
@@ -1315,7 +1314,7 @@ Design a report structure that answers all ${questions.length} questions.`;
 });
 
 agentsWorkspaceRouter.get('/:workspaceId/agents/:agentId/issue-tree', requirePermission('agents.view'), async (req: Request, res: Response) => {
-  const { workspaceId, agentId } = req.params;
+  const { workspaceId, agentId } = req.params as Record<string, string>;
   try {
     if (!await verifyAgentOwnership(workspaceId, agentId)) {
       return res.status(404).json({ error: 'Agent not found' });
@@ -1337,7 +1336,7 @@ agentsWorkspaceRouter.get('/:workspaceId/agents/:agentId/issue-tree', requirePer
 });
 
 agentsWorkspaceRouter.post('/:workspaceId/agents/:agentId/issue-tree', requirePermission('agents.view'), async (req: Request, res: Response) => {
-  const { workspaceId, agentId } = req.params;
+  const { workspaceId, agentId } = req.params as Record<string, string>;
   const {
     node_id, title, standing_question, mece_category, primary_skill_ids, position,
     section_intent, action_format, data_extraction_config, reasoning_layers
@@ -1383,7 +1382,7 @@ agentsWorkspaceRouter.post('/:workspaceId/agents/:agentId/issue-tree', requirePe
 });
 
 agentsWorkspaceRouter.patch('/:workspaceId/agents/:agentId/issue-tree/reorder', requirePermission('agents.view'), async (req: Request, res: Response) => {
-  const { workspaceId, agentId } = req.params;
+  const { workspaceId, agentId } = req.params as Record<string, string>;
   const { positions } = req.body as { positions: { node_id: string; position: number }[] };
   try {
     if (!await verifyAgentOwnership(workspaceId, agentId)) {
@@ -1409,7 +1408,7 @@ agentsWorkspaceRouter.patch('/:workspaceId/agents/:agentId/issue-tree/reorder', 
 });
 
 agentsWorkspaceRouter.patch('/:workspaceId/agents/:agentId/issue-tree/:nodeId', requirePermission('agents.view'), async (req: Request, res: Response) => {
-  const { workspaceId, agentId, nodeId } = req.params;
+  const { workspaceId, agentId, nodeId } = req.params as Record<string, string>;
   const {
     title, standing_question, mece_category, primary_skill_ids, position, confirmed_pattern, pattern_summary,
     section_intent, action_format, data_extraction_config, reasoning_layers
@@ -1456,7 +1455,7 @@ agentsWorkspaceRouter.patch('/:workspaceId/agents/:agentId/issue-tree/:nodeId', 
 });
 
 agentsWorkspaceRouter.delete('/:workspaceId/agents/:agentId/issue-tree/:nodeId', requirePermission('agents.view'), async (req: Request, res: Response) => {
-  const { workspaceId, agentId, nodeId } = req.params;
+  const { workspaceId, agentId, nodeId } = req.params as Record<string, string>;
   try {
     if (!await verifyAgentOwnership(workspaceId, agentId)) {
       return res.status(404).json({ error: 'Agent not found' });

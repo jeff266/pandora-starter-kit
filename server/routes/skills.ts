@@ -145,7 +145,7 @@ router.post('/:workspaceId/skills/:skillId/run', requirePermission('skills.run_m
   try {
     const { workspaceId, skillId } = req.params;
     const { params } = req.body || {};
-    return await handleSkillRun(workspaceId, skillId, params, res);
+    return await handleSkillRun(workspaceId as string, skillId as string, params, res);
   } catch (err) {
     console.error('[skills] Error running skill:', err);
     return res.status(500).json({ error: 'Internal server error' });
@@ -590,7 +590,7 @@ router.post('/:workspaceId/skills/run-all', requirePermission('skills.run_manual
     console.log(`[Skills] Running ${skillIds.length} skills for workspace ${workspaceId}`);
 
     // Run skills in staggered sequence
-    const results = await runScheduledSkills(workspaceId, skillIds, 'manual_batch');
+    const results = await runScheduledSkills(workspaceId as string, skillIds, 'manual_batch');
 
     const summary = {
       total: results.length,
@@ -712,7 +712,7 @@ async function postSkillToSlack(workspaceId: string, skillId: string, result: Sk
 
   try {
     // Check for insufficient data — send a 4-line alert instead of the full message
-    const rdata = (result.resultData as any) ?? {};
+    const rdata = (result as any).resultData ?? {};
     const hasInsufficientData =
       rdata.totalDeals === 0 ||
       rdata.activityCoverage === 0 ||
@@ -1685,8 +1685,8 @@ router.get('/:workspaceId/skill-runs/:skillRunId/evidence', async (req, res) => 
 
 // POST /api/workspaces/:id/jobs/retro-accuracy-bootstrap
 // Runs the retroactive forecast accuracy bootstrap for a workspace.
-router.post('/:id/jobs/retro-accuracy-bootstrap', async (req: Request, res: Response): Promise<void> => {
-  const workspaceId = req.params.id;
+router.post('/:id/jobs/retro-accuracy-bootstrap', async (req, res) => {
+  const workspaceId = req.params.id as string;
   if (!workspaceId) { res.status(400).json({ error: 'Missing workspaceId' }); return; }
   try {
     const { retroAccuracyBootstrap } = await import('../jobs/retro-accuracy-bootstrap.js');
@@ -1702,8 +1702,8 @@ router.post('/:id/jobs/retro-accuracy-bootstrap', async (req: Request, res: Resp
 
 // POST /api/workspaces/:id/jobs/refresh-bearing-calibration
 // Recomputes forecast bearing calibration from forecast_accuracy_log and stores in context_layer.
-router.post('/:id/jobs/refresh-bearing-calibration', async (req: Request, res: Response): Promise<void> => {
-  const workspaceId = req.params.id;
+router.post('/:id/jobs/refresh-bearing-calibration', async (req, res) => {
+  const workspaceId = req.params.id as string;
   if (!workspaceId) { res.status(400).json({ error: 'Missing workspaceId' }); return; }
   try {
     const { refreshBearingCalibration } = await import('../jobs/refresh-bearing-calibration.js');
@@ -1718,15 +1718,15 @@ router.post('/:id/jobs/refresh-bearing-calibration', async (req: Request, res: R
 
 // POST /api/workspaces/:id/connectors/hubspot/backfill-field-history
 // Backfills forecastcategory, amount, closedate property history from HubSpot.
-router.post('/:id/connectors/hubspot/backfill-field-history', async (req: Request, res: Response): Promise<void> => {
-  const workspaceId = req.params.id;
+router.post('/:id/connectors/hubspot/backfill-field-history', async (req, res) => {
+  const workspaceId = req.params.id as string;
   if (!workspaceId) { res.status(400).json({ error: 'Missing workspaceId' }); return; }
   try {
     const { getConnectorCredentials } = await import('../lib/credential-store.js');
     const creds = await getConnectorCredentials(workspaceId, 'hubspot');
     if (!creds?.access_token) { res.status(400).json({ error: 'No HubSpot connection for this workspace' }); return; }
     const { backfillFieldHistory } = await import('../connectors/hubspot/field-history-backfill.js');
-    const fullBackfill = req.body?.fullBackfill === true;
+    const fullBackfill = (req.body as any)?.fullBackfill === true;
     backfillFieldHistory(workspaceId, creds.access_token, { fullBackfill })
       .then(result => console.log(`[FieldHistoryBackfill] Complete for ${workspaceId}:`, result))
       .catch(err => console.error(`[FieldHistoryBackfill] Failed for ${workspaceId}:`, err?.message));

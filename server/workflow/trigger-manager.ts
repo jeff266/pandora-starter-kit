@@ -216,7 +216,7 @@ export class WorkflowTriggerManager {
         summary: finding.summary,
         metadata: finding.metadata,
       },
-      deal: deal,
+      deal: deal as Record<string, any> | undefined,
       trigger,
     };
 

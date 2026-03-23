@@ -36,7 +36,7 @@ router.get('/:workspaceId/crm-writeback/fields', async (req, res) => {
  */
 router.get('/:workspaceId/crm-writeback/crm-properties', async (req, res) => {
   try {
-    const { workspaceId } = req.params;
+    const { workspaceId } = req.params as Record<string, string>;
     const { objectType } = req.query;
 
     if (!objectType || !['deal', 'account', 'company', 'contact'].includes(objectType as string)) {
@@ -63,7 +63,7 @@ router.get('/:workspaceId/crm-writeback/crm-properties', async (req, res) => {
  */
 router.get('/:workspaceId/crm-writeback/mappings', async (req, res) => {
   try {
-    const { workspaceId } = req.params;
+    const { workspaceId } = req.params as Record<string, string>;
 
     const mappingsResult = await query(
       `SELECT * FROM crm_property_mappings
@@ -103,7 +103,7 @@ router.get('/:workspaceId/crm-writeback/mappings', async (req, res) => {
  */
 router.post('/:workspaceId/crm-writeback/mappings', requirePermission('connectors.connect'), async (req, res) => {
   try {
-    const { workspaceId } = req.params;
+    const { workspaceId } = req.params as Record<string, string>;
     const {
       crm_type,
       pandora_field,
@@ -188,7 +188,7 @@ router.post('/:workspaceId/crm-writeback/mappings', requirePermission('connector
  */
 router.patch('/:workspaceId/crm-writeback/mappings/:mappingId', requirePermission('connectors.connect'), async (req, res) => {
   try {
-    const { workspaceId, mappingId } = req.params;
+    const { workspaceId, mappingId } = req.params as Record<string, string>;
     const updates = req.body;
 
     // Build update query dynamically
@@ -248,7 +248,7 @@ router.patch('/:workspaceId/crm-writeback/mappings/:mappingId', requirePermissio
  */
 router.delete('/:workspaceId/crm-writeback/mappings/:mappingId', requirePermission('connectors.connect'), async (req, res) => {
   try {
-    const { workspaceId, mappingId } = req.params;
+    const { workspaceId, mappingId } = req.params as Record<string, string>;
 
     const result = await query(
       `UPDATE crm_property_mappings
@@ -276,7 +276,7 @@ router.delete('/:workspaceId/crm-writeback/mappings/:mappingId', requirePermissi
  */
 router.post('/:workspaceId/crm-writeback/mappings/:mappingId/test', requirePermission('connectors.trigger_sync'), async (req, res) => {
   try {
-    const { workspaceId, mappingId } = req.params;
+    const { workspaceId, mappingId } = req.params as Record<string, string>;
     const { crm_record_id } = req.body;
 
     if (!crm_record_id) {
@@ -315,7 +315,7 @@ router.post('/:workspaceId/crm-writeback/mappings/:mappingId/test', requirePermi
  */
 router.get('/:workspaceId/crm-writeback/log', async (req, res) => {
   try {
-    const { workspaceId } = req.params;
+    const { workspaceId } = req.params as Record<string, string>;
     const { mapping_id, limit = '50', offset = '0' } = req.query;
 
     let queryText = `
@@ -349,7 +349,7 @@ router.get('/:workspaceId/crm-writeback/log', async (req, res) => {
  */
 router.post('/:workspaceId/crm-writeback/sync-all', requirePermission('connectors.trigger_sync'), async (req, res) => {
   try {
-    const { workspaceId } = req.params;
+    const { workspaceId } = req.params as Record<string, string>;
 
     // This would typically start a background job
     // For now, return a job started message
@@ -370,9 +370,9 @@ router.post('/:workspaceId/crm-writeback/sync-all', requirePermission('connector
  * Export CRM write log as CSV
  * Query params: start_date, end_date, status, initiated_by
  */
-router.get('/:workspaceId/crm-writeback/log/export', requirePermission('connectors.view_logs'), async (req, res) => {
+router.get('/:workspaceId/crm-writeback/log/export', requirePermission('connectors.view' as any), async (req, res) => {
   try {
-    const { workspaceId } = req.params;
+    const { workspaceId } = req.params as Record<string, string>;
     const { start_date, end_date, status, initiated_by } = req.query;
 
     let queryText = `
@@ -526,7 +526,7 @@ function escapeCsvValue(value: any): string {
  */
 router.post('/:workspaceId/crm-writeback/log/:writeLogId/reverse', requirePermission('connectors.trigger_sync'), async (req, res) => {
   try {
-    const { workspaceId, writeLogId } = req.params;
+    const { workspaceId, writeLogId } = req.params as Record<string, string>;
     const userId = (req as any).user?.id; // From auth middleware
 
     if (!userId) {

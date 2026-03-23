@@ -23,7 +23,7 @@ router.use(requireWorkspaceAccess);
  */
 router.get('/', async (req, res) => {
   try {
-    const workspaceId = req.workspaceId!;
+    const workspaceId = (req as any).workspaceId as string;
     const resolver = getMethodologyConfigResolver();
     const configs = await resolver.listConfigs(workspaceId);
 
@@ -38,8 +38,8 @@ router.get('/', async (req, res) => {
  */
 router.post('/', async (req, res) => {
   try {
-    const workspaceId = req.workspaceId!;
-    const userId = req.user?.id;
+    const workspaceId = (req as any).workspaceId as string;
+    const userId = (req.user as any)?.id as string | undefined;
 
     const {
       scope_type = 'workspace',
@@ -114,8 +114,8 @@ router.get('/:id', async (req, res) => {
 router.patch('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const workspaceId = req.workspaceId!;
-    const userId = req.user?.id;
+    const workspaceId = (req as any).workspaceId as string;
+    const userId = (req.user as any)?.id as string | undefined;
 
     const { display_name, config } = req.body;
 
@@ -172,7 +172,7 @@ router.patch('/:id', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const workspaceId = req.workspaceId!;
+    const workspaceId = (req as any).workspaceId as string;
 
     await query(
       `UPDATE methodology_configs SET is_current = false WHERE id = $1 AND workspace_id = $2`,
@@ -191,8 +191,8 @@ router.delete('/:id', async (req, res) => {
 router.post('/:id/restore', async (req, res) => {
   try {
     const { id } = req.params;
-    const workspaceId = req.workspaceId!;
-    const userId = req.user?.id;
+    const workspaceId = (req as any).workspaceId as string;
+    const userId = (req.user as any)?.id as string | undefined;
 
     // Load version to restore
     const versionResult = await query<MethodologyConfig>(

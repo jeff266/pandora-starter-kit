@@ -201,7 +201,7 @@ export async function harvestWhaleDealSignals(
             call_count: dealSignals.call_count ?? dealSignals.calls ?? 0,
             positive_sentiment_count: dealSignals.positive_sentiment_count ?? dealSignals.positive_calls ?? 0,
             decision_maker_present: dealSignals.decision_maker_present ?? dealSignals.exec_present ?? false,
-            multi_threaded: dealSignals.multi_threaded ?? (dealSignals.contact_count > 1) ?? false,
+            multi_threaded: dealSignals.multi_threaded ?? (dealSignals.contact_count > 1),
             next_step_committed: dealSignals.next_step_committed ?? dealSignals.next_step ?? false,
           };
         }

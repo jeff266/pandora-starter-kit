@@ -562,7 +562,7 @@ async function assembleQuarterClose(workspaceId: string, now: Date, briefType: B
   const outcomes = await getOutcomeSummaryForBrief(workspaceId, subDays(now, 7));
   if (outcomes.length > 0) {
     const outcomeBlock = "\n\n### Recommendation Outcomes\n" + outcomes.join('\n');
-    rawBlurbs.executive_summary += outcomeBlock;
+    (rawBlurbs as any).executive_summary = ((rawBlurbs as any).executive_summary ?? '') + outcomeBlock;
   }
 
   const aiBlurbs = await annotateBriefNarrative(workspaceId, rawBlurbs, { theNumber, whatChanged, reps: reps.items, deals: deals.items });

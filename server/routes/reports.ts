@@ -33,7 +33,7 @@ function parseMetricValue(value: string): number {
 // List all report documents for workspace (Monday Briefings + agent runs)
 router.get('/:workspaceId/reports', async (req: Request, res: Response) => {
   try {
-    const { workspaceId } = req.params;
+    const { workspaceId } = req.params as Record<string, string>;
     const limit = Math.min(parseInt(req.query.limit as string) || 20, 50);
 
     seedWbrQbrTemplates(workspaceId).catch(err =>
@@ -60,7 +60,7 @@ router.get('/:workspaceId/reports', async (req: Request, res: Response) => {
 // Get single report document (Monday Briefing or agent run)
 router.get('/:workspaceId/reports/:reportId', async (req: Request, res: Response) => {
   try {
-    const { workspaceId, reportId } = req.params;
+    const { workspaceId, reportId } = req.params as Record<string, string>;
 
     const result = await query(
       `SELECT id, document_type, week_label, headline, generated_at,
@@ -86,7 +86,7 @@ router.get('/:workspaceId/reports/:reportId', async (req: Request, res: Response
 // Living Document: Get TipTap content for a report document
 router.get('/:workspaceId/report-documents/:documentId/content', async (req: Request, res: Response) => {
   try {
-    const { workspaceId, documentId } = req.params;
+    const { workspaceId, documentId } = req.params as Record<string, string>;
 
     const result = await query(
       `SELECT tiptap_content FROM report_documents
@@ -109,7 +109,7 @@ router.get('/:workspaceId/report-documents/:documentId/content', async (req: Req
 // Living Document: Update TipTap content for a specific section (merge, not overwrite)
 router.patch('/:workspaceId/report-documents/:documentId', async (req: Request, res: Response) => {
   try {
-    const { workspaceId, documentId } = req.params;
+    const { workspaceId, documentId } = req.params as Record<string, string>;
     const { section_id, content } = req.body;
 
     if (!section_id || !content) {
@@ -145,7 +145,7 @@ router.patch('/:workspaceId/report-documents/:documentId', async (req: Request, 
 // Create chart in report document
 router.post('/:workspaceId/reports/:reportDocumentId/charts', async (req: Request, res: Response) => {
   try {
-    const { workspaceId, reportDocumentId } = req.params;
+    const { workspaceId, reportDocumentId } = req.params as Record<string, string>;
     const { chart_type, title, source_type, chart_spec } = req.body;
 
     if (!chart_spec) {
@@ -171,7 +171,7 @@ router.post('/:workspaceId/reports/:reportDocumentId/charts', async (req: Reques
 // Create new report template
 router.post('/:workspaceId/reports', async (req: Request, res: Response) => {
   try {
-    const { workspaceId } = req.params;
+    const { workspaceId } = req.params as Record<string, string>;
     const {
       name,
       description,
@@ -231,7 +231,7 @@ router.post('/:workspaceId/reports', async (req: Request, res: Response) => {
 // Update report template
 router.put('/:workspaceId/reports/:reportId', async (req: Request, res: Response) => {
   try {
-    const { workspaceId, reportId } = req.params;
+    const { workspaceId, reportId } = req.params as Record<string, string>;
     const {
       name,
       description,
@@ -343,7 +343,7 @@ router.put('/:workspaceId/reports/:reportId', async (req: Request, res: Response
 // Delete report template
 router.delete('/:workspaceId/reports/:reportId', async (req: Request, res: Response) => {
   try {
-    const { workspaceId, reportId } = req.params;
+    const { workspaceId, reportId } = req.params as Record<string, string>;
 
     const result = await query(
       `DELETE FROM report_templates
@@ -397,7 +397,7 @@ router.post('/:workspaceId/reports/:reportId/generate', async (req: Request, res
 // List report generations (history) - summary only
 router.get('/:workspaceId/reports/:reportId/generations', async (req: Request, res: Response) => {
   try {
-    const { workspaceId, reportId } = req.params;
+    const { workspaceId, reportId } = req.params as Record<string, string>;
     const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
     const before = req.query.before as string;
 
@@ -431,7 +431,7 @@ router.get('/:workspaceId/reports/:reportId/generations', async (req: Request, r
 // Get latest generation with full content
 router.get('/:workspaceId/reports/:reportId/generations/latest', async (req: Request, res: Response) => {
   try {
-    const { workspaceId, reportId } = req.params;
+    const { workspaceId, reportId } = req.params as Record<string, string>;
 
     const result = await query(
       `SELECT * FROM report_generations
@@ -526,7 +526,7 @@ router.get('/:workspaceId/generations-by-agent/:agentId', async (req: Request, r
 // Save annotated V2 generation
 router.post('/:workspaceId/reports/:reportId/generations', async (req: Request, res: Response) => {
   try {
-    const { workspaceId, reportId } = req.params;
+    const { workspaceId, reportId } = req.params as Record<string, string>;
     const { parent_generation_id, human_annotations, sections_content, annotated_by } = req.body as {
       parent_generation_id: string;
       human_annotations: any[];
@@ -691,7 +691,7 @@ router.post('/:workspaceId/reports/:reportId/generations', async (req: Request, 
 // Compare two generations
 router.get('/:workspaceId/reports/:reportId/compare', async (req: Request, res: Response) => {
   try {
-    const { workspaceId, reportId } = req.params;
+    const { workspaceId, reportId } = req.params as Record<string, string>;
     const { left, right } = req.query;
 
     if (!left || !right) {
@@ -724,7 +724,7 @@ router.get('/:workspaceId/reports/:reportId/compare', async (req: Request, res: 
 // Get metric trends across generations
 router.get('/:workspaceId/reports/:reportId/trends', async (req: Request, res: Response) => {
   try {
-    const { workspaceId, reportId } = req.params;
+    const { workspaceId, reportId } = req.params as Record<string, string>;
     const metric = req.query.metric as string;
     const periods = Math.min(parseInt(req.query.periods as string) || 8, 52);
 
@@ -790,7 +790,7 @@ router.get('/:workspaceId/report-sections', async (_req: Request, res: Response)
 // List report templates for a workspace (summary — for generation modal template lookup)
 router.get('/:workspaceId/report-templates', async (req: Request, res: Response) => {
   try {
-    const { workspaceId } = req.params;
+    const { workspaceId } = req.params as Record<string, string>;
     // Ensure WBR/QBR templates are seeded before returning results
     await seedWbrQbrTemplates(workspaceId);
     const result = await query(
@@ -1147,7 +1147,7 @@ function parseDuration(duration: string): number {
 // Returns evaluated_records filtered to the claim's entity_ids
 router.get('/:workspaceId/reports/documents/:documentId/evidence', async (req: Request, res: Response) => {
   try {
-    const { workspaceId, documentId } = req.params;
+    const { workspaceId, documentId } = req.params as Record<string, string>;
     const { section_id, claim_id } = req.query as { section_id?: string; claim_id?: string };
 
     if (!section_id || !claim_id) {

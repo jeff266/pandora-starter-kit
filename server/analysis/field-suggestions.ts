@@ -68,7 +68,7 @@ export async function suggestEditableFields(
           suggestions.push(suggestion);
         }
       } catch (err) {
-        logger.warn(`Failed to analyze field ${fieldName}`, err as Error);
+        logger.warn(`Failed to analyze field ${fieldName}`, { error: err instanceof Error ? err.message : String(err) });
       }
     }
 
