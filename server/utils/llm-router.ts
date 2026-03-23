@@ -50,6 +50,7 @@ export interface ToolDef {
     type: 'object';
     properties: Record<string, any>;
     required: string[];
+    additionalProperties?: boolean;
   };
 }
 

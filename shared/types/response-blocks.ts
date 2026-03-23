@@ -2,7 +2,7 @@ import { ChartSpec } from '../../client/src/types/chart-types.js';
 
 export type PandoraBlockType = 'narrative' | 'chart' | 'table' | 'action_card' | 'deliberation' | 'calibration_confirmed';
 
-export type DeliberationMode = 'bull_bear' | 'red_team';
+export type DeliberationMode = 'bull_bear' | 'red_team' | 'boardroom' | 'socratic' | 'prosecutor_defense' | 'none';
 
 export interface DeliberationPanel {
   role: string;           // 'Bull' | 'Bear' | 'Plan' | 'Red Team' | 'Verdict'

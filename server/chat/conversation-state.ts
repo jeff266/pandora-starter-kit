@@ -2,7 +2,7 @@ import { SessionContext } from '../agents/session-context.js';
 import { query } from '../db.js';
 
 export interface ConversationMessage {
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: string;
 }

@@ -107,6 +107,8 @@ export interface ConversationTurnResult {
   };
   inline_actions?: any[];
   deliberation?: DeliberationResult;
+  chart_specs?: any[];
+  chart?: any;
 }
 
 const CONVERSATION_SIGNALS = [
@@ -182,7 +184,7 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
       }
     }
     await appendMessage(workspaceId, channelId, threadId, {
-      role: 'user' as any,
+      role: 'system',
       content: parts.join('\n'),
       timestamp: new Date().toISOString(),
     });
@@ -195,7 +197,7 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
   if (!isFollowUp) {
     try {
       const effectiveRole = (userRole ?? 'admin') as Parameters<typeof buildConversationContext>[0]['role'];
-      const anchorType = (anchor?.type ?? inputScope?.type) as 'deal' | 'rep' | 'pipeline' | undefined;
+      const anchorType = (inputScope?.type) as 'deal' | 'rep' | 'pipeline' | undefined;
       const graphCtx = await buildConversationContext({
         workspaceId,
         userId: userId || '',
@@ -217,7 +219,7 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
           graphParts.push(`\nPRE-LOADED ENTITY:\n${JSON.stringify(graphCtx.pre_loaded, null, 2)}`);
         }
         await appendMessage(workspaceId, channelId, threadId, {
-          role: 'user' as any,
+          role: 'system',
           content: graphParts.join('\n'),
           timestamp: new Date().toISOString(),
         });

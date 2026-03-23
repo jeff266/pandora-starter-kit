@@ -2231,9 +2231,8 @@ The system will transform raw_annotation into a voice-styled annotation automati
       // ── Emit suggested_actions for SuggestedActionsPanel (pattern-match only, no LLM cost) ──
       if (toolTrace.length >= 3) {
         try {
-          const activeScope = currentSessionContext.activeScope as any;
-          const dealCtx = activeScope?.entityType === 'deal'
-            ? { deal_id: activeScope.entityId as string, deal_name: activeScope.entityName as string }
+          const dealCtx = currentSessionContext.activeScope?.type === 'deal' && currentSessionContext.activeScope.entityId
+            ? { deal_id: currentSessionContext.activeScope.entityId, deal_name: currentSessionContext.activeScope.label ?? '' }
             : undefined;
           console.log('[action-extractor] calling extractSuggestedActions, toolTrace.length:', toolTrace.length);
           const suggestedActions = await extractSuggestedActions(
