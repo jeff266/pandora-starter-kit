@@ -1002,16 +1002,13 @@ export default function ReportViewer() {
               })()
             : null;
 
-          const mechanicalHeadline = `${banner.label} — ${reportDocument.week_label}`;
-          const hasLLMSummary = reportDocument.headline && reportDocument.headline !== mechanicalHeadline;
-
           return (
             <div style={{
               background: banner.bg,
               borderBottom: `1px solid ${banner.accent}33`,
               padding: '12px 24px',
               display: 'flex',
-              alignItems: hasLLMSummary ? 'flex-start' : 'center',
+              alignItems: 'center',
               justifyContent: 'space-between',
               flexShrink: 0,
             }}>
@@ -1041,21 +1038,8 @@ export default function ReportViewer() {
                     </span>
                   )}
                 </div>
-                {hasLLMSummary && (
-                  <p style={{
-                    fontSize: 14,
-                    color: `${banner.accent}cc`,
-                    lineHeight: 1.6,
-                    marginTop: 6,
-                    maxWidth: 680,
-                    margin: 0,
-                    fontFamily: fonts.sans,
-                  }}>
-                    {reportDocument.headline}
-                  </p>
-                )}
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, paddingTop: hasLLMSummary ? 0 : 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
                 <button
                   onClick={() => window.print()}
                   style={{

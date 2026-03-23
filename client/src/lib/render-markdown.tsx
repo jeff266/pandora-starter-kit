@@ -61,6 +61,12 @@ export function renderMarkdown(text: string): React.ReactNode {
             {applyInline(line.slice(4))}
           </span>
         );
+      } else if (line.startsWith('# ')) {
+        result.push(
+          <span key={idx} style={{ fontSize: 16, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', display: 'block', marginTop: 16, marginBottom: 6 }}>
+            {applyInline(line.slice(2))}
+          </span>
+        );
       } else if (line.startsWith('## ')) {
         result.push(
           <span key={idx} style={{ fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', display: 'block', marginTop: 12, marginBottom: 4 }}>

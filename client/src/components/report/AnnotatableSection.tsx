@@ -50,6 +50,7 @@ export default function AnnotatableSection({
   const paragraphRefs = useRef<(HTMLParagraphElement | null)[]>([]);
 
   const paragraphs = section.content
+    .replace(/<actions>[\s\S]*?<\/actions>/g, '')
     .split(/\n\n+/)
     .filter(p => p.trim().length > 0);
 
