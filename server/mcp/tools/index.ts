@@ -26,6 +26,14 @@ import {
   runStrategyInsights,
 } from './skills/convenience.js';
 
+import { getDealRiskReview } from './skills/get-deal-risk-review.js';
+import { getCallThemes } from './skills/get-call-themes.js';
+import { getICPProfile } from './skills/get-icp-profile.js';
+import { getCompetitiveLandscape } from './skills/get-competitive-landscape.js';
+import { getFunnelAnalysis } from './skills/get-funnel-analysis.js';
+import { getMonteCarlo } from './skills/get-monte-carlo-forecast.js';
+import { getStrategyInsights } from './skills/get-strategy-insights.js';
+
 import {
   saveClaudeInsight,
   createAction,
@@ -54,7 +62,7 @@ export const tools: McpTool[] = [
   // Skill runner — generic (covers all 38 skills)
   runSkill,
 
-  // Per-skill convenience tools — high-frequency skills with richer output
+  // Per-skill convenience tools — generic runners (run_X pattern)
   runPipelineHygiene,
   runForecastRollupSkill,
   runDealRiskReview,
@@ -65,6 +73,15 @@ export const tools: McpTool[] = [
   runBowtiAnalysis,
   runMonteCarlo,
   runStrategyInsights,
+
+  // Per-skill rich get tools — structured output with field extraction (get_X pattern)
+  getDealRiskReview,
+  getCallThemes,
+  getICPProfile,
+  getCompetitiveLandscape,
+  getFunnelAnalysis,
+  getMonteCarlo,
+  getStrategyInsights,
 
   // Report tools
   generateReportTool,
