@@ -183,7 +183,7 @@ router.get('/:workspaceId/mcp', requireWorkspaceAccess, async (req, res) => {
           },
         },
       },
-      tools_available: 14,
+      tools_available: 21,
       instructions: [
         '1. Copy the claude_desktop_config block above.',
         '2. Add it to your Claude Desktop config file (~/.config/claude/claude_desktop_config.json on macOS).',

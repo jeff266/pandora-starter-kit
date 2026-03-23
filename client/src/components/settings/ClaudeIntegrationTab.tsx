@@ -33,6 +33,13 @@ const TOOL_GROUPS = [
       { name: 'get_concierge_brief', description: 'Latest Monday brief' },
       { name: 'query_deals', description: 'Live CRM query with filters' },
       { name: 'get_skill_status', description: 'Last run time for all skills' },
+      { name: 'get_deal_risk_review', description: 'Deal risk scores and factors' },
+      { name: 'get_call_themes', description: 'Conversation intelligence themes' },
+      { name: 'get_icp_profile', description: 'Ideal customer profile analysis' },
+      { name: 'get_competitive_landscape', description: 'Competitor win/loss patterns' },
+      { name: 'get_funnel_analysis', description: 'Stage-by-stage conversion rates' },
+      { name: 'get_monte_carlo_forecast', description: 'Revenue simulation (P25/P50/P75)' },
+      { name: 'get_strategy_insights', description: 'Cross-skill strategic synthesis' },
     ],
   },
   {

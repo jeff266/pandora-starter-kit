@@ -12,6 +12,7 @@ export const getSkillStatus: McpTool = {
     'Fetches the full output of a skill run by run_id.',
     'Use this after run_skill to retrieve the complete structured output,',
     'evidence, and narrative. The run_id is returned by run_skill.',
+    'Pandora exposes 21 MCP tools in total across intelligence, analysis, reports, and write-back categories.',
   ].join(' '),
   inputSchema: {
     type: 'object',
