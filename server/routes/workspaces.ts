@@ -1,9 +1,12 @@
 import { Router } from 'express';
 import crypto from 'crypto';
+import multer from 'multer';
 import { query } from '../db.js';
 import { requireAdmin, requireWorkspaceAccess, invalidateApiKeyCache } from '../middleware/auth.js';
 import { invalidateSchemaCache, type ObjectType } from '../tools/schema-query.js';
 import { getCalibrationStatus } from '../lib/data-dictionary.js';
+import { importQuotaCSV } from '../lib/quota-import.js';
+import { copyDimensions } from '../lib/dimension-copy.js';
 
 const router = Router();
 
@@ -654,6 +657,63 @@ router.get('/:workspaceId/calibration-status', requireWorkspaceAccess, async (re
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('[workspaces] calibration-status error:', msg);
+    res.status(500).json({ error: msg });
+  }
+});
+
+// Quota CSV Import (Phase 3 BUILD 5)
+const upload = multer({ storage: multer.memoryStorage() });
+
+router.post('/:workspaceId/quota/import', requireWorkspaceAccess, upload.single('quota_csv'), async (req, res) => {
+  try {
+    const workspaceId = req.params.workspaceId as string;
+    const csvText = req.file?.buffer.toString('utf8');
+
+    if (!csvText) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    const result = await importQuotaCSV(workspaceId, csvText);
+    res.json(result);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[workspaces] quota import error:', msg);
+    res.status(500).json({ error: msg });
+  }
+});
+
+// Multi-Workspace Dimension Copy (Phase 3 BUILD 6)
+router.post('/:workspaceId/dimensions/copy-from', requireWorkspaceAccess, async (req, res) => {
+  try {
+    const targetWorkspaceId = req.params.workspaceId as string;
+    const { source_workspace_id, options } = req.body;
+
+    if (!source_workspace_id) {
+      return res.status(400).json({ error: 'source_workspace_id is required' });
+    }
+
+    // Verify user has access to BOTH workspaces
+    const sourceAccess = await query(
+      `SELECT 1 FROM user_workspaces
+       WHERE user_id = $1 AND workspace_id = $2
+       LIMIT 1`,
+      [req.user?.id, source_workspace_id]
+    );
+
+    if (sourceAccess.rows.length === 0) {
+      return res.status(403).json({ error: 'No access to source workspace' });
+    }
+
+    const result = await copyDimensions({
+      source_workspace_id,
+      target_workspace_id: targetWorkspaceId,
+      ...options,
+    });
+
+    res.json(result);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[workspaces] dimension copy error:', msg);
     res.status(500).json({ error: msg });
   }
 });

@@ -7,6 +7,7 @@ import type { McpTool } from './index.js';
 const InputSchema = z.object({
   include_stale_deals: z.boolean().optional().default(true),
   include_single_thread: z.boolean().optional().default(true),
+  dimension_key: z.string().optional(),
 });
 
 export const getPipelineHealth: McpTool = {
@@ -28,6 +29,10 @@ export const getPipelineHealth: McpTool = {
       include_single_thread: {
         type: 'boolean',
         description: 'Include single-threaded deal findings (default: true)',
+      },
+      dimension_key: {
+        type: 'string',
+        description: 'Optional. Filter to a specific business dimension. Use list_dimensions to see available keys for this workspace. If omitted, uses the workspace default dimension.',
       },
     },
   },
@@ -54,7 +59,7 @@ export const getPipelineHealth: McpTool = {
       const skill = registry.get('pipeline-hygiene');
       if (!skill) throw new Error('pipeline-hygiene skill not found');
       const runtime = new SkillRuntime();
-      const result = await runtime.executeSkill(skill, workspaceId, {});
+      const result = await runtime.executeSkill(skill, workspaceId, input.dimension_key ? { dimension_key: input.dimension_key } : {});
       const run = await query(
         `SELECT output FROM skill_runs WHERE run_id = $1`,
         [result.runId]

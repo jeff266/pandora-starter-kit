@@ -5,6 +5,8 @@ import { query } from '../db.js';
 import { ReportSection, SectionContent, VoiceConfig, MetricCard, DealCard, ActionItem } from './types.js';
 import { computeSkillDiff, MetricDelta } from './skill-diff.js';
 import { createLogger } from '../utils/logger.js';
+import { getDimension } from '../lib/data-dictionary.js';
+import { buildFilterSummary } from '../lib/filter-summary.js';
 
 const logger = createLogger('SectionGenerator');
 
@@ -217,6 +219,31 @@ export async function generateSectionContent(
     if (ev.run_id) skillRunIds[skillId] = ev.run_id;
   }
 
+  // Extract dimension provenance from first skill's output
+  let dimensionKey: string | undefined;
+  let dimensionLabel: string | undefined;
+  let calibrated: boolean = false;
+  let dimensionSummary: string | undefined;
+
+  const firstEvidence = evidenceMap.values().next().value;
+  if (firstEvidence?.output) {
+    dimensionKey = firstEvidence.output.dimension_key;
+    dimensionLabel = firstEvidence.output.dimension_label;
+    calibrated = firstEvidence.output.calibrated ?? false;
+
+    // Generate plain-English filter summary if dimension is calibrated
+    if (calibrated && dimensionKey && dimensionKey !== '_default') {
+      try {
+        const dim = await getDimension(workspaceId, dimensionKey);
+        if (dim) {
+          dimensionSummary = await buildFilterSummary(dim);
+        }
+      } catch (err) {
+        logger.warn('Failed to generate dimension summary', { dimensionKey, error: err });
+      }
+    }
+  }
+
   const content: SectionContent = {
     section_id: section.id,
     title: section.label,
@@ -228,6 +255,10 @@ export async function generateSectionContent(
     metrics: [],
     deal_cards: [],
     action_items: [],
+    dimension_key: dimensionKey,
+    dimension_label: dimensionLabel,
+    calibrated,
+    dimension_summary: dimensionSummary,
   };
 
   if (freshnessNotes.length > 0) {

@@ -6,6 +6,7 @@ const InputSchema = z.object({
   skill_id: z.string().min(1),
   params: z.record(z.string(), z.any()).optional().default({}),
   save: z.boolean().optional().default(true),
+  dimension_key: z.string().optional(),
 });
 
 export const runSkill: McpTool = {
@@ -56,14 +57,21 @@ export const runSkill: McpTool = {
         type: 'boolean',
         description: 'Auto-save insight summary to Pandora (default: true)',
       },
+      dimension_key: {
+        type: 'string',
+        description: 'Optional. Filter to a specific business dimension. Use list_dimensions to see available keys for this workspace. If omitted, uses the workspace default dimension.',
+      },
     },
   },
   handler: async (args: any, workspaceId: string) => {
     const input = InputSchema.parse(args);
+    const params = input.dimension_key
+      ? { ...input.params, dimension_key: input.dimension_key }
+      : input.params;
     return runSkillWithAutoSave(
       workspaceId,
       input.skill_id,
-      input.params,
+      params,
       input.save,
       `run_skill: ${input.skill_id}`
     );

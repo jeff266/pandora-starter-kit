@@ -6,6 +6,7 @@ import { maybeAutoSave } from './types.js';
 const InputSchema = z.object({
   rep_email: z.string().optional(),
   save: z.boolean().optional().default(true),
+  dimension_key: z.string().optional(),
 });
 
 export const getRepScorecard: McpTool = {
@@ -27,6 +28,10 @@ export const getRepScorecard: McpTool = {
         type: 'boolean',
         description: 'Auto-save findings to claude_insights (default: true)',
       },
+      dimension_key: {
+        type: 'string',
+        description: 'Optional. Filter to a specific business dimension. Use list_dimensions to see available keys for this workspace. If omitted, uses the workspace default dimension.',
+      },
     },
   },
   handler: async (args: any, workspaceId: string) => {
@@ -35,7 +40,7 @@ export const getRepScorecard: McpTool = {
     const result = await runSkillWithAutoSave(
       workspaceId,
       'rep-scorecard',
-      {},
+      input.dimension_key ? { dimension_key: input.dimension_key } : {},
       false,
       'get_rep_scorecard'
     );

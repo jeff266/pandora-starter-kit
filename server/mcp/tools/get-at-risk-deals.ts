@@ -5,6 +5,7 @@ import type { McpTool } from './index.js';
 const InputSchema = z.object({
   min_amount: z.number().optional(),
   limit: z.number().optional().default(20),
+  dimension_key: z.string().optional(),
 });
 
 export const getAtRiskDeals: McpTool = {
@@ -25,6 +26,10 @@ export const getAtRiskDeals: McpTool = {
       limit: {
         type: 'number',
         description: 'Max deals to return (default: 20, max: 50)',
+      },
+      dimension_key: {
+        type: 'string',
+        description: 'Optional. Filter to a specific business dimension. Use list_dimensions to see available keys for this workspace. If omitted, uses the workspace default dimension.',
       },
     },
   },

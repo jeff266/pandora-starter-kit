@@ -1,5 +1,10 @@
+import { z } from 'zod';
 import { query } from '../../db.js';
 import type { McpTool } from './index.js';
+
+const InputSchema = z.object({
+  dimension_key: z.string().optional(),
+});
 
 export const getPipelineSummary: McpTool = {
   name: 'get_pipeline_summary',
@@ -11,9 +16,15 @@ export const getPipelineSummary: McpTool = {
   ].join(' '),
   inputSchema: {
     type: 'object',
-    properties: {},
+    properties: {
+      dimension_key: {
+        type: 'string',
+        description: 'Optional. Filter to a specific business dimension. Use list_dimensions to see available keys for this workspace. If omitted, uses the workspace default dimension.',
+      },
+    },
   },
-  handler: async (_args: any, workspaceId: string) => {
+  handler: async (args: any, workspaceId: string) => {
+    const input = InputSchema.parse(args ?? {});
     const stageResult = await query(`
       SELECT
         stage_normalized AS stage,

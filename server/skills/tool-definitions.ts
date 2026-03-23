@@ -22,6 +22,7 @@ import { generatePipelineSnapshot } from '../analysis/pipeline-snapshot.js';
 import { computeFields } from '../computed-fields/engine.js';
 import { getDefaultDimension } from '../lib/data-dictionary.js';
 import { executeDimension, executeDefaultDimension } from '../lib/dimension-executor.js';
+import { resolveSkillDimension, type SkillDimensionContext } from '../lib/skill-dimension-resolver.js';
 import { resolveOwnerNames, resolveOwnerName } from '../utils/owner-resolver.js';
 import {
   aggregateBy,
@@ -959,18 +960,19 @@ const computePipelineCoverage: ToolDefinition = {
       const staleDays = params.staleDaysThreshold || staleThreshold.warning;
       const snapshot = await generatePipelineSnapshot(context.workspaceId, params.quota, staleDays);
 
+      // Resolve dimension for this skill
+      const ctx = await resolveSkillDimension(context.workspaceId, {
+        skillCategory: 'pipeline',
+        includeQuota: true,
+        paramOffset: 2
+      });
+
       // Attempt to use a calibrated dimension for the pipeline total
       let dimensionResult: Awaited<ReturnType<typeof executeDefaultDimension>> | null = null;
-      let calibrated = false;
-      let dimensionKey = 'active_pipeline';
-      let dimensionLabel = 'Active Pipeline (default)';
       try {
         const defaultDim = await getDefaultDimension(context.workspaceId);
         if (defaultDim?.confirmed) {
           dimensionResult = await executeDimension(context.workspaceId, defaultDim, { includeQuota: true });
-          calibrated = true;
-          dimensionKey = dimensionResult.dimension_key;
-          dimensionLabel = dimensionResult.dimension_label;
         } else {
           dimensionResult = await executeDefaultDimension(context.workspaceId);
         }
@@ -985,8 +987,8 @@ const computePipelineCoverage: ToolDefinition = {
          JOIN deals d ON d.id = ls.entity_id AND d.workspace_id = ls.workspace_id
          WHERE ls.workspace_id = $1
            AND ls.entity_type = 'deal'
-           AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')`,
-        [context.workspaceId]
+           AND ${ctx.where_clause}`,
+        [context.workspaceId, ...ctx.params]
       );
 
       const hasIcpScores = icpResult.rows.length > 0;
@@ -999,9 +1001,9 @@ const computePipelineCoverage: ToolDefinition = {
             open_pipeline: dimensionResult.total_value,
             dealCount:     dimensionResult.deal_count,
           } : {}),
-          dimension_key:   dimensionKey,
-          dimension_label: dimensionLabel,
-          calibrated,
+          dimension_key:   ctx.dimension_key,
+          dimension_label: ctx.dimension_label,
+          calibrated:      ctx.calibrated,
         };
       }
 
@@ -1069,9 +1071,9 @@ const computePipelineCoverage: ToolDefinition = {
           open_pipeline: dimensionResult.total_value,
           dealCount:     dimensionResult.deal_count,
         } : {}),
-        dimension_key:   dimensionKey,
-        dimension_label: dimensionLabel,
-        calibrated,
+        dimension_key:   ctx.dimension_key,
+        dimension_label: ctx.dimension_label,
+        calibrated:      ctx.calibrated,
       };
     }, params);
   },
@@ -2676,6 +2678,13 @@ const coverageByRepTool: ToolDefinition = {
   },
   execute: async (params, context) => {
     return safeExecute('coverageByRep', async () => {
+      // Resolve dimension for this skill
+      const ctx = await resolveSkillDimension(context.workspaceId, {
+        skillCategory: 'pipeline',
+        includeQuota: true,
+        paramOffset: 4
+      });
+
       // Auto-extract from step results if not provided
       const timeWindows = (context.stepResults as any).time_windows;
       const quotaConfig = (context.stepResults as any).quota_config;
@@ -2719,8 +2728,8 @@ const coverageByRepTool: ToolDefinition = {
          WHERE workspace_id = $1
            AND amount > 0
            AND close_date >= $2 AND close_date <= $3
-           AND stage_normalized NOT IN ('closed_lost', 'closed_won')`,
-        [context.workspaceId, quarterStart, quarterEnd]
+           AND ${ctx.where_clause}`,
+        [context.workspaceId, quarterStart, quarterEnd, ...ctx.params]
       );
 
       if (dealSizeResult.rows[0]?.count >= 20) {
@@ -2780,7 +2789,12 @@ const coverageByRepTool: ToolDefinition = {
         }
       }
 
-      return coverageData;
+      return {
+        ...coverageData,
+        dimension_key: ctx.dimension_key,
+        dimension_label: ctx.dimension_label,
+        calibrated: ctx.calibrated,
+      };
     }, params);
   },
 };
@@ -3127,6 +3141,13 @@ const forecastRollup: ToolDefinition = {
   },
   execute: async (params, context) => {
     return safeExecute('forecastRollup', async () => {
+      // Resolve dimension for this skill
+      const ctx = await resolveSkillDimension(context.workspaceId, {
+        skillCategory: 'forecast',
+        includeQuota: true,
+        paramOffset: 2
+      });
+
       const nameMap = await resolveOwnerNames(context.workspaceId);
 
       // Resolve calibrated pipeline dimension totals and quota if available
@@ -3220,13 +3241,13 @@ const forecastRollup: ToolDefinition = {
           COUNT(*) AS deal_count,
           COALESCE(SUM(amount), 0) AS total_amount,
           COALESCE(SUM(amount * CASE WHEN probability IS NULL THEN 0 WHEN probability > 1 THEN probability / 100.0 ELSE probability END), 0) AS weighted_amount
-        FROM deals
-        WHERE workspace_id = $1
-          AND forecast_category IS NOT NULL
-          AND stage_normalized NOT IN ('closed_lost')
+        FROM deals d
+        WHERE d.workspace_id = $1
+          AND d.forecast_category IS NOT NULL
+          AND ${ctx.where_clause}
           ${closedWonDateClause}${dealOwnerClause}
         GROUP BY forecast_category`,
-        [context.workspaceId]
+        [context.workspaceId, ...ctx.params]
       );
 
       const categories: Record<string, { count: number; amount: number; weighted: number }> = {
@@ -3278,12 +3299,12 @@ const forecastRollup: ToolDefinition = {
         const curve = survResult.overall;
         if (assessDataTier(curve) >= 2) {
           const openDealsRes = await query(
-            `SELECT amount, created_at, close_date FROM deals
-             WHERE workspace_id = $1
-               AND stage_normalized NOT IN ('closed_won', 'closed_lost')
-               AND amount > 0 AND amount IS NOT NULL
-               AND created_at IS NOT NULL${dealOwnerClause}`,
-            [context.workspaceId]
+            `SELECT amount, created_at, close_date FROM deals d
+             WHERE d.workspace_id = $1
+               AND ${ctx.where_clause}
+               AND d.amount > 0 AND d.amount IS NOT NULL
+               AND d.created_at IS NOT NULL${dealOwnerClause}`,
+            [context.workspaceId, ...ctx.params]
           );
           const now = new Date();
           const qStart = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1);
@@ -3315,20 +3336,20 @@ const forecastRollup: ToolDefinition = {
 
       const repResult = await query(
         `SELECT
-          owner,
-          forecast_category,
+          d.owner,
+          d.forecast_category,
           COUNT(*) AS deal_count,
-          COALESCE(SUM(amount), 0) AS total_amount,
-          COALESCE(SUM(amount * CASE WHEN probability IS NULL THEN 0 WHEN probability > 1 THEN probability / 100.0 ELSE probability END), 0) AS weighted_amount
-        FROM deals
-        WHERE workspace_id = $1
-          AND forecast_category IS NOT NULL
-          AND stage_normalized NOT IN ('closed_lost')
-          AND owner IS NOT NULL
+          COALESCE(SUM(d.amount), 0) AS total_amount,
+          COALESCE(SUM(d.amount * CASE WHEN d.probability IS NULL THEN 0 WHEN d.probability > 1 THEN d.probability / 100.0 ELSE d.probability END), 0) AS weighted_amount
+        FROM deals d
+        WHERE d.workspace_id = $1
+          AND d.forecast_category IS NOT NULL
+          AND ${ctx.where_clause}
+          AND d.owner IS NOT NULL
           ${closedWonDateClause}${excludeClause}${dealOwnerClause}
-        GROUP BY owner, forecast_category
-        ORDER BY owner`,
-        [context.workspaceId, ...excludedOwners]
+        GROUP BY d.owner, d.forecast_category
+        ORDER BY d.owner`,
+        [context.workspaceId, ...ctx.params, ...excludedOwners]
       );
 
       const repMap = new Map<string, {
@@ -3418,8 +3439,8 @@ const forecastRollup: ToolDefinition = {
            AND ls.entity_type = 'deal'
          WHERE d.workspace_id = $1
            AND d.forecast_category IS NOT NULL
-           AND d.stage_normalized NOT IN ('closed_lost')`,
-        [context.workspaceId]
+           AND ${ctx.where_clause}`,
+        [context.workspaceId, ...ctx.params]
       );
 
       const hasIcpScores = icpDealsResult.rows.some((r: any) => r.score_grade !== null);
@@ -3498,9 +3519,9 @@ const forecastRollup: ToolDefinition = {
 
       // FEEDBACK SIGNAL: Forecast category coverage
       const totalDealsResult = await query<{ total: number }>(
-        `SELECT COUNT(*) as total FROM deals
-         WHERE workspace_id = $1 AND stage_normalized NOT IN ('closed_lost', 'closed_won')`,
-        [context.workspaceId]
+        `SELECT COUNT(*) as total FROM deals d
+         WHERE d.workspace_id = $1 AND ${ctx.where_clause}`,
+        [context.workspaceId, ...ctx.params]
       );
       const totalDeals = totalDealsResult.rows[0]?.total || 0;
       const forecastedDeals = Object.values(categories).reduce((s, c) => s + c.count, 0);
@@ -3559,17 +3580,17 @@ const forecastRollup: ToolDefinition = {
         const nonForecastNames = nonForecastPipelines.map(p => p.name);
         const nonForecastResult = await query(
           `SELECT
-             COALESCE(pipeline, 'unknown') AS pipeline_name,
+             COALESCE(d.pipeline, 'unknown') AS pipeline_name,
              COUNT(*) AS deal_count,
-             COALESCE(SUM(amount), 0) AS total_amount,
-             COUNT(*) FILTER (WHERE stage_normalized = 'closed_won' AND close_date >= '${quarterStart}' AND close_date <= '${quarterEnd}') AS closed_won_count,
-             COALESCE(SUM(amount) FILTER (WHERE stage_normalized = 'closed_won' AND close_date >= '${quarterStart}' AND close_date <= '${quarterEnd}'), 0) AS closed_won_amount
-           FROM deals
-           WHERE workspace_id = $1
-             AND pipeline = ANY($2)
-             AND stage_normalized NOT IN ('closed_lost')${dealOwnerClause}
-           GROUP BY pipeline`,
-          [context.workspaceId, nonForecastNames]
+             COALESCE(SUM(d.amount), 0) AS total_amount,
+             COUNT(*) FILTER (WHERE d.stage_normalized = 'closed_won' AND d.close_date >= '${quarterStart}' AND d.close_date <= '${quarterEnd}') AS closed_won_count,
+             COALESCE(SUM(d.amount) FILTER (WHERE d.stage_normalized = 'closed_won' AND d.close_date >= '${quarterStart}' AND d.close_date <= '${quarterEnd}'), 0) AS closed_won_amount
+           FROM deals d
+           WHERE d.workspace_id = $1
+             AND d.pipeline = ANY($2)
+             AND ${ctx.where_clause}${dealOwnerClause}
+           GROUP BY d.pipeline`,
+          [context.workspaceId, nonForecastNames, ...ctx.params]
         );
         nonForecastSummary = {
           pipelines: nonForecastResult.rows.map((r: any) => ({
@@ -3631,6 +3652,9 @@ const forecastRollup: ToolDefinition = {
             total: categories.closed.amount,
           },
         ],
+        dimension_key: ctx.dimension_key,
+        dimension_label: ctx.dimension_label,
+        calibrated: ctx.calibrated,
       };
     }, params);
   },
@@ -3964,6 +3988,13 @@ const gatherDealConcentrationRisk: ToolDefinition = {
   },
   execute: async (params, context) => {
     return safeExecute('gatherDealConcentrationRisk', async () => {
+      // Resolve dimension for this skill
+      const ctx = await resolveSkillDimension(context.workspaceId, {
+        skillCategory: 'forecast',
+        includeQuota: false,
+        paramOffset: 2
+      });
+
       const quotaConfig = (context.stepResults as any).quota_config;
       const forecast = (context.stepResults as any).forecast_data;
 
@@ -3978,14 +4009,14 @@ const gatherDealConcentrationRisk: ToolDefinition = {
         owner: string | null;
         close_date: string | null;
       }>(
-        `SELECT id, name, amount, probability, forecast_category, stage_normalized, owner, close_date
-         FROM deals
-         WHERE workspace_id = $1
-           AND stage_normalized NOT IN ('closed_lost', 'closed_won')
-           AND amount IS NOT NULL
-         ORDER BY amount DESC
+        `SELECT d.id, d.name, d.amount, d.probability, d.forecast_category, d.stage_normalized, d.owner, d.close_date
+         FROM deals d
+         WHERE d.workspace_id = $1
+           AND ${ctx.where_clause}
+           AND d.amount IS NOT NULL
+         ORDER BY d.amount DESC
          LIMIT 50`,
-        [context.workspaceId]
+        [context.workspaceId, ...ctx.params]
       );
 
       const nameMap = await resolveOwnerNames(context.workspaceId);
@@ -4068,6 +4099,9 @@ const gatherDealConcentrationRisk: ToolDefinition = {
         whaleConcentration: whaleConcentration,
         hasQuotaConfig: quotaConfig?.hasQuotas || false,
         riskLevel,
+        dimension_key: ctx.dimension_key,
+        dimension_label: ctx.dimension_label,
+        calibrated: ctx.calibrated,
       };
     }, params);
   },
@@ -4084,6 +4118,13 @@ const computeForecastAnnotationsTool: ToolDefinition = {
   },
   execute: async (params, context) => {
     return safeExecute('computeForecastAnnotations', async () => {
+      // Resolve dimension for this skill
+      const ctx = await resolveSkillDimension(context.workspaceId, {
+        skillCategory: 'forecast',
+        includeQuota: false,
+        paramOffset: 2
+      });
+
       const forecastData = (context.stepResults as any).forecast_data;
       const previousForecast = (context.stepResults as any).previous_forecast;
       const wowDelta = (context.stepResults as any).wow_delta;
@@ -4098,14 +4139,14 @@ const computeForecastAnnotationsTool: ToolDefinition = {
 
       // Get all open deals with enriched data
       const dealsResult = await query<any>(
-        `SELECT id, name, amount, probability, forecast_category, stage_normalized,
-                owner, close_date, last_activity_date, days_in_stage, created_at
-         FROM deals
-         WHERE workspace_id = $1
-           AND stage_normalized NOT IN ('closed_lost', 'closed_won')
-           AND amount IS NOT NULL
-         ORDER BY amount DESC`,
-        [context.workspaceId]
+        `SELECT d.id, d.name, d.amount, d.probability, d.forecast_category, d.stage_normalized,
+                d.owner, d.close_date, d.last_activity_date, d.days_in_stage, d.created_at
+         FROM deals d
+         WHERE d.workspace_id = $1
+           AND ${ctx.where_clause}
+           AND d.amount IS NOT NULL
+         ORDER BY d.amount DESC`,
+        [context.workspaceId, ...ctx.params]
       );
 
       const deals = dealsResult.rows;
@@ -4169,7 +4210,12 @@ const computeForecastAnnotationsTool: ToolDefinition = {
         query
       );
 
-      return rawAnnotations;
+      return {
+        ...rawAnnotations,
+        dimension_key: ctx.dimension_key,
+        dimension_label: ctx.dimension_label,
+        calibrated: ctx.calibrated,
+      };
     }, params);
   },
 };
@@ -4529,33 +4575,40 @@ const prepareWaterfallSummaryTool: ToolDefinition = {
   },
   execute: async (params, context) => {
     return safeExecute('prepareWaterfallSummary', async () => {
+      // Resolve dimension for this skill
+      const ctx = await resolveSkillDimension(context.workspaceId, {
+        skillCategory: 'pipeline',
+        includeQuota: false,
+        paramOffset: 2
+      });
+
       const staleThreshold = await configLoader.getStaleThreshold(context.workspaceId);
       const staleDays = staleThreshold.warning;
 
       const stageRows = await query(
-        `SELECT stage_normalized, COUNT(*) as count, SUM(amount) as total_value
-         FROM deals
-         WHERE workspace_id = $1 AND stage_normalized NOT IN ('closed_won', 'closed_lost')
-         GROUP BY stage_normalized`,
-        [context.workspaceId]
+        `SELECT d.stage_normalized, COUNT(*) as count, SUM(d.amount) as total_value
+         FROM deals d
+         WHERE d.workspace_id = $1 AND ${ctx.where_clause}
+         GROUP BY d.stage_normalized`,
+        [context.workspaceId, ...ctx.params]
       );
 
       const highRiskRows = await query(
-        `SELECT name, amount, owner, deal_risk, stage_normalized, days_in_stage
-         FROM deals
-         WHERE workspace_id = $1 AND deal_risk >= 60 AND stage_normalized NOT IN ('closed_won', 'closed_lost')
-         ORDER BY deal_risk DESC, amount DESC
+        `SELECT d.name, d.amount, d.owner, d.deal_risk, d.stage_normalized, d.days_in_stage
+         FROM deals d
+         WHERE d.workspace_id = $1 AND d.deal_risk >= 60 AND ${ctx.where_clause}
+         ORDER BY d.deal_risk DESC, d.amount DESC
          LIMIT 5`,
-        [context.workspaceId]
+        [context.workspaceId, ...ctx.params]
       );
 
       const staleRows = await query(
-        `SELECT name, amount, owner, stage_normalized, EXTRACT(DAY FROM NOW() - last_activity_date)::int as days_since_activity
-         FROM deals
-         WHERE workspace_id = $1 AND last_activity_date < NOW() - INTERVAL '${staleDays} days' AND stage_normalized NOT IN ('closed_won', 'closed_lost')
-         ORDER BY amount DESC
+        `SELECT d.name, d.amount, d.owner, d.stage_normalized, EXTRACT(DAY FROM NOW() - d.last_activity_date)::int as days_since_activity
+         FROM deals d
+         WHERE d.workspace_id = $1 AND d.last_activity_date < NOW() - INTERVAL '${staleDays} days' AND ${ctx.where_clause}
+         ORDER BY d.amount DESC
          LIMIT 5`,
-        [context.workspaceId]
+        [context.workspaceId, ...ctx.params]
       );
 
       const stageDistribution = stageRows.rows.map((r: any) => ({
@@ -4589,6 +4642,9 @@ const prepareWaterfallSummaryTool: ToolDefinition = {
           totalOpenValue,
           avgDealSize: totalOpenDeals > 0 ? Math.round(totalOpenValue / totalOpenDeals) : 0,
         },
+        dimension_key: ctx.dimension_key,
+        dimension_label: ctx.dimension_label,
+        calibrated: ctx.calibrated,
       };
     }, params);
   },
@@ -4733,6 +4789,13 @@ const prepareRepScorecardSummaryTool: ToolDefinition = {
   },
   execute: async (params, context) => {
     return safeExecute('prepareRepScorecardSummary', async () => {
+      // Resolve dimension for this skill
+      const ctx = await resolveSkillDimension(context.workspaceId, {
+        skillCategory: 'rep',
+        includeQuota: false,
+        paramOffset: 2
+      });
+
       const scorecard = (context.stepResults as any).scorecard;
       if (!scorecard) {
         throw new Error('scorecard not found in context. Run repScorecardCompute first.');
@@ -4743,10 +4806,10 @@ const prepareRepScorecardSummaryTool: ToolDefinition = {
 
       const [stageRows, recentWinsRows, atRiskRows, staleRows] = await Promise.all([
         query(
-          `SELECT stage_normalized, COUNT(*) as count, SUM(amount) as total_value
-           FROM deals WHERE workspace_id = $1 AND stage_normalized NOT IN ('closed_won', 'closed_lost')
-           GROUP BY stage_normalized`,
-          [context.workspaceId]
+          `SELECT d.stage_normalized, COUNT(*) as count, SUM(d.amount) as total_value
+           FROM deals d WHERE d.workspace_id = $1 AND ${ctx.where_clause}
+           GROUP BY d.stage_normalized`,
+          [context.workspaceId, ...ctx.params]
         ),
         query(
           `SELECT name, amount, owner, close_date
@@ -4755,15 +4818,15 @@ const prepareRepScorecardSummaryTool: ToolDefinition = {
           [context.workspaceId]
         ),
         query(
-          `SELECT name, amount, owner, deal_risk, stage_normalized
-           FROM deals WHERE workspace_id = $1 AND deal_risk >= 70 AND stage_normalized NOT IN ('closed_won', 'closed_lost')
-           ORDER BY deal_risk DESC, amount DESC LIMIT 5`,
-          [context.workspaceId]
+          `SELECT d.name, d.amount, d.owner, d.deal_risk, d.stage_normalized
+           FROM deals d WHERE d.workspace_id = $1 AND d.deal_risk >= 70 AND ${ctx.where_clause}
+           ORDER BY d.deal_risk DESC, d.amount DESC LIMIT 5`,
+          [context.workspaceId, ...ctx.params]
         ),
         query(
-          `SELECT COUNT(*) as count, COALESCE(SUM(amount), 0) as total_value
-           FROM deals WHERE workspace_id = $1 AND last_activity_date < NOW() - INTERVAL '${staleDays} days' AND stage_normalized NOT IN ('closed_won', 'closed_lost')`,
-          [context.workspaceId]
+          `SELECT COUNT(*) as count, COALESCE(SUM(d.amount), 0) as total_value
+           FROM deals d WHERE d.workspace_id = $1 AND d.last_activity_date < NOW() - INTERVAL '${staleDays} days' AND ${ctx.where_clause}`,
+          [context.workspaceId, ...ctx.params]
         ),
       ]);
 
@@ -4799,6 +4862,9 @@ const prepareRepScorecardSummaryTool: ToolDefinition = {
           totalOpenDeals,
           totalOpenValue,
         },
+        dimension_key: ctx.dimension_key,
+        dimension_label: ctx.dimension_label,
+        calibrated: ctx.calibrated,
       };
     }, params);
   },
@@ -5628,6 +5694,13 @@ const svbComputeBenchmarks: ToolDefinition = {
   },
   execute: async (params, context) => {
     return safeExecute('svbComputeBenchmarks', async () => {
+      // Resolve dimension for this skill
+      const ctx = await resolveSkillDimension(context.workspaceId, {
+        skillCategory: 'pipeline',
+        includeQuota: false,
+        paramOffset: 3
+      });
+
       const lookbackMonths = params.lookback_months || 12;
       const result = await query<any>(
         `WITH stage_windows AS (
@@ -5638,9 +5711,10 @@ const svbComputeBenchmarks: ToolDefinition = {
              dsh.entered_at,
              LEAD(dsh.entered_at) OVER (PARTITION BY dsh.deal_id ORDER BY dsh.entered_at) AS next_entered_at
            FROM deal_stage_history dsh
+           JOIN deals d ON d.id = dsh.deal_id AND d.workspace_id = dsh.workspace_id
            WHERE dsh.workspace_id = $1
              AND dsh.entered_at >= NOW() - ($2 || ' months')::interval
-             AND dsh.stage_normalized NOT IN ('closed_won', 'closed_lost')
+             AND ${ctx.where_clause}
          ),
          durations AS (
            SELECT stage_normalized, stage,
@@ -5659,7 +5733,7 @@ const svbComputeBenchmarks: ToolDefinition = {
          GROUP BY stage_normalized, stage
          HAVING COUNT(*) >= 2
          ORDER BY median_days`,
-        [context.workspaceId, lookbackMonths]
+        [context.workspaceId, lookbackMonths, ...ctx.params]
       );
 
       // Conversion rates per stage
@@ -5683,20 +5757,25 @@ const svbComputeBenchmarks: ToolDefinition = {
         else if (r.to_norm !== r.from_norm) convMap[r.from_norm].advance += r.cnt;
       }
 
-      return result.rows.map((r: any) => {
-        const conv = convMap[r.stage_normalized] || { advance: 0, drop: 0, total: 0 };
-        return {
-          stage: r.stage,
-          stage_normalized: r.stage_normalized,
-          median_days: parseFloat(r.median_days) || 0,
-          p75_days: parseFloat(r.p75_days) || 0,
-          p90_days: parseFloat(r.p90_days) || 0,
-          mean_days: parseFloat(r.mean_days) || 0,
-          sample_size: r.sample_size,
-          conversion_rate: conv.total > 0 ? Math.round((conv.advance / conv.total) * 100) : 0,
-          drop_rate: conv.total > 0 ? Math.round((conv.drop / conv.total) * 100) : 0,
-        };
-      });
+      return {
+        benchmarks: result.rows.map((r: any) => {
+          const conv = convMap[r.stage_normalized] || { advance: 0, drop: 0, total: 0 };
+          return {
+            stage: r.stage,
+            stage_normalized: r.stage_normalized,
+            median_days: parseFloat(r.median_days) || 0,
+            p75_days: parseFloat(r.p75_days) || 0,
+            p90_days: parseFloat(r.p90_days) || 0,
+            mean_days: parseFloat(r.mean_days) || 0,
+            sample_size: r.sample_size,
+            conversion_rate: conv.total > 0 ? Math.round((conv.advance / conv.total) * 100) : 0,
+            drop_rate: conv.total > 0 ? Math.round((conv.drop / conv.total) * 100) : 0,
+          };
+        }),
+        dimension_key: ctx.dimension_key,
+        dimension_label: ctx.dimension_label,
+        calibrated: ctx.calibrated,
+      };
     }, params);
   },
 };
@@ -5708,6 +5787,13 @@ const svbFlagSlowDeals: ToolDefinition = {
   parameters: { type: 'object', properties: {}, required: [] },
   execute: async (params, context) => {
     return safeExecute('svbFlagSlowDeals', async () => {
+      // Resolve dimension for this skill
+      const ctx = await resolveSkillDimension(context.workspaceId, {
+        skillCategory: 'pipeline',
+        includeQuota: false,
+        paramOffset: 2
+      });
+
       const benchmarks = (context.stepResults as any).benchmarks as any[];
       if (!benchmarks?.length) return [];
 
@@ -5727,9 +5813,9 @@ const svbFlagSlowDeals: ToolDefinition = {
            ORDER BY entered_at DESC LIMIT 1
          ) dsh ON true
          WHERE d.workspace_id = $1
-           AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
+           AND ${ctx.where_clause}
            AND d.amount > 0`,
-        [context.workspaceId]
+        [context.workspaceId, ...ctx.params]
       );
 
       const flagged = [];
@@ -5757,7 +5843,12 @@ const svbFlagSlowDeals: ToolDefinition = {
         });
       }
 
-      return flagged.sort((a, b) => b.days_over_benchmark - a.days_over_benchmark);
+      return {
+        flagged_deals: flagged.sort((a, b) => b.days_over_benchmark - a.days_over_benchmark),
+        dimension_key: ctx.dimension_key,
+        dimension_label: ctx.dimension_label,
+        calibrated: ctx.calibrated,
+      };
     }, params);
   },
 };
@@ -5911,6 +6002,13 @@ const fmScoreOpenDeals: ToolDefinition = {
   parameters: { type: 'object', properties: {}, required: [] },
   execute: async (params, context) => {
     return safeExecute('fmScoreOpenDeals', async () => {
+      // Resolve dimension for this skill
+      const ctx = await resolveSkillDimension(context.workspaceId, {
+        skillCategory: 'forecast',
+        includeQuota: false,
+        paramOffset: 2
+      });
+
       const result = await query<any>(
         `SELECT d.id, d.name, d.amount, d.stage, d.stage_normalized, d.close_date,
                 d.owner as owner_name, d.account_id, d.forecast_category,
@@ -5920,11 +6018,11 @@ const fmScoreOpenDeals: ToolDefinition = {
                      ELSE NULL END as days_to_close
          FROM deals d
          WHERE d.workspace_id = $1
-           AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
+           AND ${ctx.where_clause}
            AND d.amount IS NOT NULL AND d.amount > 0
          ORDER BY d.amount DESC NULLS LAST
          LIMIT 100`,
-        [context.workspaceId]
+        [context.workspaceId, ...ctx.params]
       );
 
       // Get call counts per deal
@@ -6774,6 +6872,13 @@ const crrGatherContactsNeedingRoles: ToolDefinition = {
   },
   execute: async (params, context) => {
     return safeExecute('crrGatherContactsNeedingRoles', async () => {
+      // Resolve dimension for this skill
+      const ctx = await resolveSkillDimension(context.workspaceId, {
+        skillCategory: 'deal',
+        includeQuota: false,
+        paramOffset: 3
+      });
+
       const limit = Math.min(params.limit || 100, 200);
 
       const result = await query<any>(
@@ -6785,11 +6890,11 @@ const crrGatherContactsNeedingRoles: ToolDefinition = {
          JOIN deals d ON d.id = dc.deal_id AND d.workspace_id = dc.workspace_id
          WHERE dc.workspace_id = $1
            AND (dc.role IS NULL OR dc.role = '' OR dc.role = 'unknown')
-           AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
+           AND ${ctx.where_clause}
            AND d.amount > 0
          ORDER BY d.amount DESC NULLS LAST
          LIMIT $2`,
-        [context.workspaceId, limit]
+        [context.workspaceId, ...ctx.params, limit]
       );
 
       return {
@@ -6808,6 +6913,9 @@ const crrGatherContactsNeedingRoles: ToolDefinition = {
           deal_owner: r.owner,
         })),
         total_needing_roles: result.rows.length,
+        dimension_key: ctx.dimension_key,
+        dimension_label: ctx.dimension_label,
+        calibrated: ctx.calibrated,
       };
     }, params);
   },
@@ -6917,6 +7025,13 @@ const crrGenerateCoverageFindings: ToolDefinition = {
   parameters: { type: 'object', properties: {}, required: [] },
   execute: async (params, context) => {
     return safeExecute('crrGenerateCoverageFindings', async () => {
+      // Resolve dimension for this skill
+      const ctx = await resolveSkillDimension(context.workspaceId, {
+        skillCategory: 'deal',
+        includeQuota: false,
+        paramOffset: 2
+      });
+
       const result = await query<any>(
         `SELECT d.id as deal_id, d.name as deal_name, d.amount, d.owner,
                 d.stage, d.stage_normalized,
@@ -6927,12 +7042,12 @@ const crrGenerateCoverageFindings: ToolDefinition = {
          FROM deals d
          LEFT JOIN deal_contacts dc ON dc.deal_id = d.id AND dc.workspace_id = d.workspace_id
          WHERE d.workspace_id = $1
-           AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
+           AND ${ctx.where_clause}
            AND d.amount > 0
          GROUP BY d.id, d.name, d.amount, d.owner, d.stage, d.stage_normalized
          ORDER BY d.amount DESC NULLS LAST
          LIMIT 50`,
-        [context.workspaceId]
+        [context.workspaceId, ...ctx.params]
       );
 
       const findings = result.rows
@@ -6962,6 +7077,9 @@ const crrGenerateCoverageFindings: ToolDefinition = {
           deals_no_contacts: findings.filter(f => f.total_contacts === 0).length,
           total_open_deals_analyzed: result.rows.length,
         },
+        dimension_key: ctx.dimension_key,
+        dimension_label: ctx.dimension_label,
+        calibrated: ctx.calibrated,
       };
     }, params);
   },
@@ -6978,6 +7096,13 @@ const dsmGatherOpenDeals: ToolDefinition = {
   parameters: { type: 'object', properties: {}, required: [] },
   execute: async (params, context) => {
     return safeExecute('dsmGatherOpenDeals', async () => {
+      // Resolve dimension for this skill
+      const ctx = await resolveSkillDimension(context.workspaceId, {
+        skillCategory: 'deal',
+        includeQuota: false,
+        paramOffset: 2
+      });
+
       const result = await query<any>(
         `SELECT
            d.id, d.name, d.amount, d.stage, d.stage_normalized,
@@ -6999,14 +7124,14 @@ const dsmGatherOpenDeals: ToolDefinition = {
          LEFT JOIN deal_contacts dc ON dc.deal_id = d.id AND dc.workspace_id = d.workspace_id
          LEFT JOIN activities a ON a.deal_id = d.id AND a.workspace_id = d.workspace_id
          WHERE d.workspace_id = $1
-           AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
+           AND ${ctx.where_clause}
            AND d.amount > 0
          GROUP BY d.id, d.name, d.amount, d.stage, d.stage_normalized,
                   d.close_date, d.owner, d.days_in_stage, d.probability,
                   d.forecast_category,
                   d.created_at
          ORDER BY d.amount DESC NULLS LAST`,
-        [context.workspaceId]
+        [context.workspaceId, ...ctx.params]
       );
 
       const deals = result.rows.map((r: any) => ({
@@ -7039,6 +7164,9 @@ const dsmGatherOpenDeals: ToolDefinition = {
         deals,
         total_open_deals: deals.length,
         total_pipeline_value: deals.reduce((sum: number, d: any) => sum + d.amount, 0),
+        dimension_key: ctx.dimension_key,
+        dimension_label: ctx.dimension_label,
+        calibrated: ctx.calibrated,
       };
     }, params);
   },
@@ -7410,8 +7538,15 @@ const icpScoreOpenDeals: ToolDefinition = {
   parameters: { type: 'object', properties: {}, required: [] },
   execute: async (params, context) => {
     return safeExecute('icpScoreOpenDeals', async () => {
+      // Resolve dimension for this skill
+      const ctx = await resolveSkillDimension(context.workspaceId, {
+        skillCategory: 'deal',
+        includeQuota: false,
+        paramOffset: 2
+      });
+
       const discoveryResult = (context.stepResults as any).discovery_result;
-      if (!discoveryResult) return { scored: 0, top_icp: [], bottom_icp: [] };
+      if (!discoveryResult) return { scored: 0, top_icp: [], bottom_icp: [], dimension_key: ctx.dimension_key, dimension_label: ctx.dimension_label, calibrated: ctx.calibrated };
 
       // Extract ICP profile from discoverICP output
       const profile = discoveryResult.companyProfile || {};
@@ -7434,10 +7569,10 @@ const icpScoreOpenDeals: ToolDefinition = {
          FROM deals d
          LEFT JOIN accounts a ON a.id = d.account_id AND a.workspace_id = d.workspace_id
          WHERE d.workspace_id = $1
-           AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
+           AND ${ctx.where_clause}
            AND d.amount > 0
          ORDER BY d.amount DESC`,
-        [context.workspaceId]
+        [context.workspaceId, ...ctx.params]
       ).catch(() => ({ rows: [] as any[] }));
 
       const scored: any[] = [];
@@ -7527,6 +7662,9 @@ const icpScoreOpenDeals: ToolDefinition = {
         pipeline_off_icp_value: pipelineOffIcpValue,
         top_icp_deals: topIcp,
         bottom_icp_deals: bottomIcp,
+        dimension_key: ctx.dimension_key,
+        dimension_label: ctx.dimension_label,
+        calibrated: ctx.calibrated,
       };
     }, params);
   },
@@ -8387,6 +8525,13 @@ const pcfResolveContext: ToolDefinition = {
   parameters: { type: 'object', properties: {}, required: [] },
   execute: async (_params, context) => {
     return safeExecute('pcfResolveContext', async () => {
+      // Resolve dimension for this skill
+      const ctx = await resolveSkillDimension(context.workspaceId, {
+        skillCategory: 'pipeline',
+        includeQuota: true,
+        paramOffset: 2
+      });
+
       const now = new Date();
       const currentQStart = new Date(Date.UTC(now.getUTCFullYear(), Math.floor(now.getUTCMonth() / 3) * 3, 1));
       const currentQEnd = new Date(Date.UTC(now.getUTCFullYear(), Math.floor(now.getUTCMonth() / 3) * 3 + 3, 0));
@@ -8404,8 +8549,8 @@ const pcfResolveContext: ToolDefinition = {
           [context.workspaceId, currentQStart.toISOString().split('T')[0], currentQEnd.toISOString().split('T')[0]]
         ),
         query<any>(
-          `SELECT COALESCE(SUM(amount),0)::numeric as total, COUNT(*)::int as cnt FROM deals WHERE workspace_id = $1 AND stage_normalized NOT IN ('closed_won','closed_lost') AND amount > 0`,
-          [context.workspaceId]
+          `SELECT COALESCE(SUM(d.amount),0)::numeric as total, COUNT(*)::int as cnt FROM deals d WHERE d.workspace_id = $1 AND ${ctx.where_clause} AND d.amount > 0`,
+          [context.workspaceId, ...ctx.params]
         ),
         query<any>(
           `SELECT COALESCE(SUM(amount),0)::numeric as total, COUNT(*)::int as cnt FROM deals WHERE workspace_id = $1 AND created_at >= $2 AND amount > 0`,
@@ -8446,6 +8591,9 @@ const pcfResolveContext: ToolDefinition = {
           period_end: r.period_end,
           quota: Math.round(parseFloat(r.quota)),
         })),
+        dimension_key: ctx.dimension_key,
+        dimension_label: ctx.dimension_label,
+        calibrated: ctx.calibrated,
       };
     }, _params);
   },

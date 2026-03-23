@@ -12,6 +12,7 @@ import { exportReportToGoogleDocs } from './export-report.js';
 import { runSkill } from './run-skill.js';
 import { getSkillStatus } from './get-skill-status.js';
 import { getPipelineSummary } from './get-pipeline-summary.js';
+import { listDimensions } from './list-dimensions.js';
 
 import {
   runPipelineHygiene,
@@ -58,6 +59,7 @@ export const tools: McpTool[] = [
   getConciergeBrief,
   queryDeals,
   getSkillStatus,
+  listDimensions,
 
   // Skill runner — generic (covers all 38 skills)
   runSkill,

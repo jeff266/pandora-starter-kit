@@ -88,6 +88,12 @@ export interface SectionContent {
   skill_run_ids?: Record<string, string>; // skill_id → run_id, populated at generation time
   data_freshness: string;               // ISO timestamp
   confidence: number;                   // 0-1, from underlying evidence
+
+  // Dimension provenance (Phase 3 BUILD 4)
+  dimension_key?: string;               // Dimension used for this section's data
+  dimension_label?: string;             // Human-readable dimension name
+  calibrated?: boolean;                 // Whether dimension was user-confirmed
+  dimension_summary?: string;           // Plain-English filter description
 }
 
 export interface MetricCard {

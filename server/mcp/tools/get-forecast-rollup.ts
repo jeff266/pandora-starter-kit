@@ -5,6 +5,7 @@ import { runSkillWithAutoSave } from './skills/helpers.js';
 const InputSchema = z.object({
   include_rep_breakdown: z.boolean().optional().default(true),
   save: z.boolean().optional().default(true),
+  dimension_key: z.string().optional(),
 });
 
 export const getForecastRollup: McpTool = {
@@ -25,6 +26,10 @@ export const getForecastRollup: McpTool = {
         type: 'boolean',
         description: 'Auto-save findings to claude_insights (default: true)',
       },
+      dimension_key: {
+        type: 'string',
+        description: 'Optional. Filter to a specific business dimension. Use list_dimensions to see available keys for this workspace. Examples: "enterprise_new_biz", "smb_self_serve", "apac_region". If omitted, uses the workspace default dimension.',
+      },
     },
   },
   handler: async (args: any, workspaceId: string) => {
@@ -33,7 +38,7 @@ export const getForecastRollup: McpTool = {
     const result = await runSkillWithAutoSave(
       workspaceId,
       'forecast-rollup',
-      {},
+      input.dimension_key ? { dimension_key: input.dimension_key } : {},
       input.save,
       'get_forecast_rollup'
     );

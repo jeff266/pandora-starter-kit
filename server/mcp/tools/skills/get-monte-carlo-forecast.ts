@@ -1,7 +1,13 @@
+import { z } from 'zod';
 import type { McpTool } from '../index.js';
 import { runSkillWithAutoSave } from './helpers.js';
 import { query } from '../../../db.js';
 import { maybeAutoSave } from '../types.js';
+
+const InputSchema = z.object({
+  save: z.boolean().optional().default(true),
+  dimension_key: z.string().optional(),
+});
 
 export const getMonteCarlo: McpTool = {
   name: 'get_monte_carlo_forecast',
@@ -17,10 +23,15 @@ export const getMonteCarlo: McpTool = {
         type: 'boolean',
         description: 'Auto-save results to Pandora (default: true)',
       },
+      dimension_key: {
+        type: 'string',
+        description: 'Optional. Filter to a specific business dimension. Use list_dimensions to see available keys for this workspace. If omitted, uses the workspace default dimension.',
+      },
     },
   },
   handler: async (args: any, workspaceId: string) => {
-    const save = args.save !== false;
+    const input = InputSchema.parse(args ?? {});
+    const save = input.save;
 
     // 7-day cache
     const recent = await query(
@@ -50,7 +61,7 @@ export const getMonteCarlo: McpTool = {
       const result = await runSkillWithAutoSave(
         workspaceId,
         'monte-carlo-forecast',
-        {},
+        input.dimension_key ? { dimension_key: input.dimension_key } : {},
         false,
         'get_monte_carlo_forecast'
       );
