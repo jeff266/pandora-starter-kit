@@ -1,17 +1,17 @@
 import { z } from 'zod';
-import { query } from '../../db.js';
-import { getSkillRegistry } from '../../skills/registry.js';
-import { SkillRuntime } from '../../skills/runtime.js';
 import type { McpTool } from './index.js';
+import { runSkillWithAutoSave } from './skills/helpers.js';
+import { maybeAutoSave } from './types.js';
 
 const InputSchema = z.object({
   rep_email: z.string().optional(),
+  save: z.boolean().optional().default(true),
 });
 
 export const getRepScorecard: McpTool = {
   name: 'get_rep_scorecard',
   description: [
-    'Returns rep performance scorecard.',
+    'Returns rep performance scorecard as a structured narrative.',
     'Includes QTD attainment, pipeline coverage, activity metrics,',
     'and deal velocity per rep. Optionally filter to a single rep by email.',
     'Uses the most recent rep-scorecard skill run (< 8 hours) or triggers a fresh one.',
@@ -23,52 +23,79 @@ export const getRepScorecard: McpTool = {
         type: 'string',
         description: 'Filter to a specific rep by email (optional — returns all reps if omitted)',
       },
+      save: {
+        type: 'boolean',
+        description: 'Auto-save findings to claude_insights (default: true)',
+      },
     },
   },
   handler: async (args: any, workspaceId: string) => {
     const input = InputSchema.parse(args ?? {});
 
-    const recent = await query(`
-      SELECT output, created_at
-      FROM skill_runs
-      WHERE workspace_id = $1
-        AND skill_id = 'rep-scorecard'
-        AND status = 'completed'
-        AND created_at > NOW() - INTERVAL '8 hours'
-      ORDER BY created_at DESC
-      LIMIT 1
-    `, [workspaceId]);
+    const result = await runSkillWithAutoSave(
+      workspaceId,
+      'rep-scorecard',
+      {},
+      false,
+      'get_rep_scorecard'
+    );
 
-    let output: any;
+    const rawOutput = result.output;
 
-    if (recent.rows.length) {
-      output = recent.rows[0].output;
-    } else {
-      const registry = getSkillRegistry();
-      const skill = registry.get('rep-scorecard');
-      if (!skill) throw new Error('rep-scorecard skill not found');
-      const runtime = new SkillRuntime();
-      const result = await runtime.executeSkill(skill, workspaceId, {});
-      const run = await query(
-        `SELECT output FROM skill_runs WHERE run_id = $1`,
-        [result.runId]
-      );
-      output = run.rows[0]?.output ?? result.output;
+    // rep-scorecard output is a plain markdown string stored
+    // directly as JSONB string — not a structured object
+    const narrative: string =
+      typeof rawOutput === 'string'
+        ? rawOutput
+        : rawOutput?.narrative ?? rawOutput?.summary ?? result.narrative ?? '';
+
+    // Filter narrative to the relevant rep section if rep_email provided
+    let filteredNarrative = narrative;
+    if (input.rep_email && narrative) {
+      const lines = narrative.split('\n');
+      const repSection: string[] = [];
+      let inSection = false;
+
+      for (const line of lines) {
+        if (line.toLowerCase().includes(input.rep_email.toLowerCase())) {
+          inSection = true;
+        }
+        if (inSection) {
+          repSection.push(line);
+          // Stop at next rep header that isn't this rep
+          if (
+            repSection.length > 3 &&
+            line.startsWith('##') &&
+            !line.toLowerCase().includes(input.rep_email.toLowerCase())
+          ) {
+            repSection.pop();
+            break;
+          }
+        }
+      }
+
+      if (repSection.length > 0) {
+        filteredNarrative = repSection.join('\n');
+      }
     }
 
-    const reps: any[] = output?.reps ?? output?.scorecard ?? output?.rep_scorecards ?? [];
-
-    const filtered = input.rep_email
-      ? reps.filter((r: any) =>
-          r.email?.toLowerCase() === input.rep_email!.toLowerCase() ||
-          r.owner_email?.toLowerCase() === input.rep_email!.toLowerCase()
-        )
-      : reps;
+    if (input.save && narrative) {
+      await maybeAutoSave(
+        workspaceId,
+        'rep-scorecard',
+        narrative.slice(0, 1000),
+        'rep',
+        'info',
+        'get_rep_scorecard'
+      );
+    }
 
     return {
-      workspace_id: workspaceId,
-      reps: filtered,
-      count: filtered.length,
+      skill_id: 'rep-scorecard',
+      run_id: result.run_id,
+      narrative: filteredNarrative.slice(0, 3000),
+      rep_email_filter: input.rep_email ?? null,
+      saved: input.save && !!narrative,
       generated_at: new Date().toISOString(),
     };
   },

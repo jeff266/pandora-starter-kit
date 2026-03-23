@@ -1,11 +1,10 @@
 import { z } from 'zod';
-import { query } from '../../db.js';
-import { getSkillRegistry } from '../../skills/registry.js';
-import { SkillRuntime } from '../../skills/runtime.js';
 import type { McpTool } from './index.js';
+import { runSkillWithAutoSave } from './skills/helpers.js';
 
 const InputSchema = z.object({
   include_rep_breakdown: z.boolean().optional().default(true),
+  save: z.boolean().optional().default(true),
 });
 
 export const getForecastRollup: McpTool = {
@@ -22,58 +21,70 @@ export const getForecastRollup: McpTool = {
         type: 'boolean',
         description: 'Include per-rep breakdown (default: true)',
       },
+      save: {
+        type: 'boolean',
+        description: 'Auto-save findings to claude_insights (default: true)',
+      },
     },
   },
   handler: async (args: any, workspaceId: string) => {
     const input = InputSchema.parse(args ?? {});
 
-    const recent = await query(`
-      SELECT output, created_at
-      FROM skill_runs
-      WHERE workspace_id = $1
-        AND skill_id = 'forecast-rollup'
-        AND status = 'completed'
-        AND created_at > NOW() - INTERVAL '4 hours'
-      ORDER BY created_at DESC
-      LIMIT 1
-    `, [workspaceId]);
+    const result = await runSkillWithAutoSave(
+      workspaceId,
+      'forecast-rollup',
+      {},
+      input.save,
+      'get_forecast_rollup'
+    );
 
-    let output: any;
+    const output = result.output ?? {};
+    const evidence = output.evidence ?? {};
+    const claims: any[] = evidence.claims ?? [];
+    const narrative = result.narrative ?? '';
 
-    if (recent.rows.length) {
-      output = recent.rows[0].output;
-    } else {
-      const registry = getSkillRegistry();
-      const skill = registry.get('forecast-rollup');
-      if (!skill) throw new Error('forecast-rollup skill not found');
-      const runtime = new SkillRuntime();
-      const result = await runtime.executeSkill(skill, workspaceId, {});
-      const run = await query(
-        `SELECT output FROM skill_runs WHERE run_id = $1`,
-        [result.runId]
-      );
-      output = run.rows[0]?.output ?? result.output;
-    }
+    const findClaim = (id: string) =>
+      claims.find((c: any) => c.claim_id === id);
 
-    const summary = output?.summary ?? output?.narrative ?? output;
+    const commitClaim =
+      findClaim('commit_total') ??
+      findClaim('forecast_commit') ??
+      claims.find((c: any) => c.metric_name?.includes('commit'));
 
-    const totals = {
-      commit: output?.commit ?? output?.totals?.commit ?? null,
-      best_case: output?.best_case ?? output?.totals?.best_case ?? null,
-      pipeline: output?.pipeline ?? output?.totals?.pipeline ?? null,
-      quota: output?.quota ?? output?.totals?.quota ?? null,
-      attainment_pct: output?.attainment_pct ?? output?.totals?.attainment_pct ?? null,
-    };
+    const pipelineClaim =
+      findClaim('pipeline_total') ??
+      claims.find((c: any) => c.metric_name?.includes('pipeline'));
 
+    const attainmentClaim =
+      findClaim('attainment_pct') ??
+      findClaim('team_attainment') ??
+      claims.find((c: any) => c.metric_name?.includes('attainment'));
+
+    const records: any[] = evidence.evaluated_records ?? [];
     const repBreakdown = input.include_rep_breakdown
-      ? (output?.reps ?? output?.rep_breakdown ?? [])
+      ? records
+          .filter((r: any) => r.entity_type === 'rep' || r.fields?.owner_email)
+          .slice(0, 20)
+          .map((r: any) => ({
+            name: r.entity_name ?? r.fields?.owner_name,
+            email: r.owner_email ?? r.fields?.owner_email,
+            attainment_pct: r.fields?.attainment_pct,
+            commit: r.fields?.commit,
+            pipeline: r.fields?.pipeline,
+            status: r.flags?.status ?? r.severity,
+          }))
       : [];
 
     return {
-      workspace_id: workspaceId,
-      totals,
+      skill_id: 'forecast-rollup',
+      run_id: result.run_id,
+      commit: commitClaim?.metric_values?.[0] ?? null,
+      pipeline_total: pipelineClaim?.metric_values?.[0] ?? null,
+      attainment_pct: attainmentClaim?.metric_values?.[0] ?? null,
+      top_findings: result.top_findings,
       rep_breakdown: repBreakdown,
-      narrative: typeof summary === 'string' ? summary : null,
+      narrative,
+      saved: result.saved,
       generated_at: new Date().toISOString(),
     };
   },
