@@ -121,7 +121,7 @@ function CalibrationBanner() {
 
   useEffect(() => {
     if (dismissed || !wsId) return;
-    api.get(`/workspaces/${wsId}/calibration-status`).then((d: any) => {
+    api.get('/calibration-status').then((d: any) => {
       setCalStatus(d.status ?? 'not_started');
     }).catch(() => {});
   }, [dismissed, wsId]);

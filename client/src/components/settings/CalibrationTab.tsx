@@ -4,6 +4,8 @@ import { colors, fonts } from '../../styles/theme';
 import { useWorkspace } from '../../context/WorkspaceContext';
 import CalibrationProgress from '../calibration/CalibrationProgress';
 import type { CalibrationStep } from '../calibration/CalibrationProgress';
+import QuotaImportSection from '../calibration/QuotaImportSection';
+import DimensionCopySection from '../calibration/DimensionCopySection';
 import { api } from '../../lib/api';
 
 interface CalibrationStatus {
@@ -96,8 +98,8 @@ export default function CalibrationTab() {
     setError(null);
     try {
       const [statusData, interviewData] = await Promise.all([
-        api.get(`/workspaces/${wsId}/calibration-status`),
-        api.get(`/workspaces/${wsId}/calibration-interview-state`).catch(() => null),
+        api.get('/calibration-status'),
+        api.get('/calibration-interview-state').catch(() => null),
       ]);
       setStatus(statusData);
       if (interviewData) setInterview(interviewData);
@@ -334,6 +336,9 @@ export default function CalibrationTab() {
           })}
         </div>
       </div>
+
+      <QuotaImportSection onImportComplete={load} />
+      <DimensionCopySection onCopyComplete={load} />
     </div>
   );
 }

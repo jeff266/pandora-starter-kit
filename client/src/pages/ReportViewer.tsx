@@ -72,6 +72,8 @@ interface ReportDocSection {
   severity?: 'critical' | 'warning' | 'info';
   calibrated?: boolean;
   dimension_label?: string;
+  dimension_key?: string;
+  dimension_summary?: string;
 }
 
 interface ReportDocAction {
@@ -2046,34 +2048,43 @@ function ReportSection({ section, isCollapsed, onToggle, anonymizeMode, workspac
           <h2 style={{ fontSize: 20, fontWeight: 700, color: colors.text, fontFamily: fonts.sans, margin: 0 }}>{section.title}</h2>
           {primaryDelta && <DeltaBadge metric={primaryDelta} />}
           {section.calibrated === false && (
-            <span style={{
-              fontSize: 10,
-              fontWeight: 700,
-              background: '#fef3c7',
-              color: '#92400e',
-              padding: '2px 7px',
-              borderRadius: 10,
-              textTransform: 'uppercase',
-              letterSpacing: '0.05em',
-              fontFamily: fonts.sans,
-              flexShrink: 0,
-            }}>
-              Uncalibrated
+            <span
+              title="Default definition — click to calibrate"
+              onClick={() => window.dispatchEvent(new CustomEvent('pandora:open-ask', { detail: { initialMessage: 'Calibrate my pipeline definition' } }))}
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                background: '#fef3c7',
+                color: '#92400e',
+                padding: '2px 7px',
+                borderRadius: 10,
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
+                fontFamily: fonts.sans,
+                flexShrink: 0,
+                cursor: 'pointer',
+              }}
+            >
+              ⚠ Default definition
             </span>
           )}
           {section.calibrated === true && section.dimension_label && (
-            <span style={{
-              fontSize: 10,
-              fontWeight: 700,
-              background: '#dcfce7',
-              color: '#15803d',
-              padding: '2px 7px',
-              borderRadius: 10,
-              textTransform: 'uppercase',
-              letterSpacing: '0.05em',
-              fontFamily: fonts.sans,
-              flexShrink: 0,
-            }}>
+            <span
+              title={section.dimension_summary ?? `Confirmed definition for ${section.dimension_label}`}
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                background: 'rgba(20,184,166,0.12)',
+                color: '#0d9488',
+                padding: '2px 7px',
+                borderRadius: 10,
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
+                fontFamily: fonts.sans,
+                flexShrink: 0,
+                cursor: 'help',
+              }}
+            >
               ✓ {section.dimension_label}
             </span>
           )}

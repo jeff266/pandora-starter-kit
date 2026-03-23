@@ -1,0 +1,352 @@
+Send this to Replit:
+
+```
+# Phase 3 UI — Three Calibration Components
+
+## Context
+
+Phase 3 server-side work is complete. Three UI components
+need to be built to surface it. All server endpoints and
+data already exist — this is purely frontend work.
+
+## Before Starting
+
+Read these files:
+1. client/src/pages/ReportViewer.tsx — find where section
+   headers render. The SectionContent type now has
+   dimension_key, dimension_label, calibrated, and
+   dimension_summary fields. Show how section headers
+   are currently rendered.
+2. client/src/pages/CalibrationSettingsTab.tsx — show the
+   full current layout. What sections exist? How are
+   dimension cards rendered?
+3. server/routes/workspaces.ts — confirm these two routes
+   exist and show their response shapes:
+   - POST /:workspaceId/quota/import
+   - POST /:workspaceId/dimensions/copy-from
+4. What existing fetch/upload pattern is used elsewhere
+   in the app for file uploads? Search for FormData or
+   multipart in client/src/.
+
+---
+
+## Component 1 — Dimension Badge in Report Viewer
+
+File: client/src/pages/ReportViewer.tsx
+
+### What to build
+
+Each WBR/QBR section header already shows a calibration
+pill from Phase 2 (teal "✓ [dimension]" or amber
+"⚠ Default definition"). Extend that pill to show a
+tooltip with the full filter summary on hover.
+
+### Data available on each section
+
+```typescript
+section.dimension_key      // 'enterprise_new_biz'
+section.dimension_label    // 'Enterprise New Business'
+section.calibrated         // true | false
+section.dimension_summary  // plain English filter text:
+// "Open deals in Evaluation, Demo, Proposal, Negotiation
+//  closing this quarter, excluding Pricing Review"
+```
+
+### Badge behavior
+
+When calibrated = true:
+- Pill text: "✓ [dimension_label]"
+- Pill color: teal (#14B8A6), small, rounded
+- On hover: show tooltip with dimension_summary text
+- Tooltip style: dark background (#1E293B), white text,
+  11px, max-width 280px, appears above the badge
+- cursor: help on the badge
+
+When calibrated = false:
+- Pill text: "⚠ Default definition"
+- Pill color: amber (#F59E0B)
+- On hover: tooltip shows "This number uses Pandora's
+  default pipeline filter, not a definition confirmed
+  for your business. Click to calibrate."
+- Clicking the amber pill opens Ask Pandora rail
+  pre-loaded with "Calibrate my pipeline definition"
+  (use the same mechanism as the Phase 2 amber banner
+  link — check how that was implemented)
+
+### Implementation
+
+Use the title attribute for the tooltip in v1:
+```typescript
+<span
+  title={section.calibrated
+    ? section.dimension_summary
+    : "Default definition — click to calibrate"
+  }
+  style={{
+    cursor: section.calibrated ? 'help' : 'pointer',
+    // ... existing pill styles
+  }}
+  onClick={!section.calibrated ? handleCalibrateClick : undefined}
+>
+  {section.calibrated
+    ? `✓ ${section.dimension_label}`
+    : '⚠ Default definition'
+  }
+</span>
+```
+
+If the existing Phase 2 badge already uses title
+attribute — just extend it. Don't rebuild what's there.
+
+---
+
+## Component 2 — Quota CSV Upload
+
+File: client/src/pages/CalibrationSettingsTab.tsx
+
+### What to build
+
+A new "Import Quota" section added to the Calibration
+settings page. Placed after the dimension cards, before
+the "Copy from another workspace" section.
+
+### Section header
+
+```
+── Quota Import ──────────────────────────────────────
+
+Import quota targets from a spreadsheet. Supports
+rep-level and team-level CSV formats.
+```
+
+### Upload area
+
+```
+┌─────────────────────────────────────────────────────┐
+│                                                     │
+│     ↑  Drop a CSV file here, or click to browse    │
+│                                                     │
+│     Accepted formats:                               │
+│     Rep-level:  rep_email, quota, period, dimension │
+│     Team-level: dimension, quota, period            │
+│                                                     │
+└─────────────────────────────────────────────────────┘
+```
+
+Style: dashed border (#2A3F52), dark background, centered
+text, teal upload icon. On hover: border brightens to
+teal. On drag-over: teal background tint.
+
+### After file selected — preview state
+
+Before uploading, show a preview table of the first 5
+rows parsed from the CSV (parse client-side using a
+simple CSV split — no library needed for this):
+
+```
+Preview (12 rows detected)
+
+rep_email              quota      period    dimension
+nate@frontera.health   250,000    Q1 2026   enterprise
+sara@frontera.health   180,000    Q1 2026   enterprise
+carter@frontera.health 150,000    Q1 2026   smb
+...
+
+[Cancel]  [Import 12 rows →]
+```
+
+### Upload flow
+
+On "Import rows" click:
+- POST to /api/workspaces/:workspaceId/quota/import
+- Use FormData with field name 'quota_csv'
+- Show loading spinner on the button
+
+### Result state (success)
+
+```
+✓ Import complete
+
+  12 rows parsed
+   9 rows applied  →  3 dimensions updated
+   3 rows skipped  →  "total" dimension not found
+
+[Import another file]
+```
+
+Show rows_applied in teal, rows_skipped in amber,
+errors[] in coral (one line per error).
+
+On success: refresh the dimension cards above so they
+show the newly imported quota values. Use whatever
+data-refresh pattern the rest of the tab uses.
+
+### Error state
+
+If the server returns an error or the file is invalid:
+```
+✗ Import failed
+
+  Could not parse the file. Check that it has the
+  correct column headers and is saved as CSV.
+
+[Try again]
+```
+
+---
+
+## Component 3 — Multi-Workspace Dimension Copy
+
+File: client/src/pages/CalibrationSettingsTab.tsx
+
+### What to build
+
+A new "Copy from another workspace" section at the
+bottom of the Calibration settings page. Below the
+Quota Import section.
+
+### Section header
+
+```
+── Copy from Another Workspace ───────────────────────
+
+Copy confirmed dimension definitions from another
+workspace you have access to. Copied dimensions will
+be unconfirmed until you review them.
+```
+
+### Step 1 — Workspace selector
+
+```
+Source workspace:
+[Dropdown — select a workspace]  [Load dimensions →]
+```
+
+The dropdown lists all workspaces the current user
+has access to, excluding the current workspace.
+
+Fetch the list from GET /api/workspaces (existing
+endpoint — check what it returns and how other
+workspace selectors in the app are built).
+
+### Step 2 — Dimension selector (after loading)
+
+After selecting a source workspace and clicking
+"Load dimensions", fetch its confirmed dimensions
+via GET /api/workspaces/:sourceId/calibration-status.
+
+Show a checklist:
+
+```
+Select dimensions to copy:
+
+☑  Active Pipeline       $2.1M confirmed  (3 conditions)
+☑  Enterprise Segment    $1.4M confirmed  (2 conditions)
+☐  Commit Definition     $890K confirmed  (1 condition)
+
+Options:
+☐  Copy quota targets
+☑  Copy coverage/win rate targets
+
+[Cancel]  [Copy selected (2) →]
+```
+
+Each dimension shows: label, confirmed_value formatted
+as currency, condition count.
+
+Options checkboxes map to copy_quota and copy_targets
+in the request body.
+
+### Step 3 — Compatibility warnings (if any)
+
+Before executing the copy, show a warning panel if the
+source dimensions reference custom fields that may not
+exist in this workspace:
+
+```
+⚠ Compatibility warnings
+
+  "Enterprise Segment" uses field "segment__c" which
+  was not found in this workspace's CRM data. This
+  condition will be copied but marked as unverified.
+
+[Back]  [Copy anyway →]
+```
+
+Skip this step if no warnings.
+
+### Copy execution
+
+POST to /api/workspaces/:workspaceId/dimensions/copy-from
+
+Request body:
+```typescript
+{
+  source_workspace_id: string,
+  options: {
+    dimension_keys: string[],  // selected keys
+    copy_quota: boolean,
+    copy_targets: boolean,
+    reset_confirmed: true      // always true from UI
+  }
+}
+```
+
+### Result state
+
+```
+✓ Copy complete
+
+  3 dimensions copied
+  12 stage mappings copied
+  0 errors
+
+Copied dimensions are unconfirmed. Review and confirm
+each one via the calibration interview.
+
+[Start review →]
+```
+
+"Start review" sends "Continue my calibration" to
+Ask Pandora — same as the "Resume calibration" button
+in CalibrationProgress.
+
+On completion: refresh the full calibration status
+display at the top of the page.
+
+---
+
+## Acceptance Criteria
+
+Component 1 — Report Viewer Badge
+1. Teal badge with dimension label renders on calibrated
+   sections
+2. Amber badge renders on uncalibrated sections
+3. title tooltip shows dimension_summary on hover
+4. Uncalibrated badge is clickable and opens calibration
+5. Sections with no dimension data show no badge
+
+Component 2 — Quota CSV Upload
+1. File drop zone accepts CSV files
+2. Client-side preview shows first 5 rows before upload
+3. POST to correct endpoint with FormData
+4. Success state shows rows_applied, rows_skipped counts
+5. Skipped rows show reason (amber)
+6. Errors shown in coral
+7. Dimension cards refresh after successful import
+8. Cancel clears the file and resets to drop zone state
+9. Invalid file shows error state clearly
+
+Component 3 — Dimension Copy
+1. Workspace dropdown lists accessible workspaces
+   excluding current
+2. Load dimensions fetches and shows checklist
+3. Copy quota and copy targets options work correctly
+4. Compatibility warnings shown before executing copy
+5. POST to correct endpoint with selected keys
+6. Result state shows dimensions_copied count
+7. "Start review" triggers calibration conversation
+8. Calibration status header refreshes after copy
+9. Empty workspace (no confirmed dimensions) shows
+   appropriate empty state
+```
