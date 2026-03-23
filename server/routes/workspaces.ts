@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import { query } from '../db.js';
 import { requireAdmin, requireWorkspaceAccess, invalidateApiKeyCache } from '../middleware/auth.js';
 import { invalidateSchemaCache, type ObjectType } from '../tools/schema-query.js';
+import { getCalibrationStatus } from '../lib/data-dictionary.js';
 
 const router = Router();
 
@@ -641,6 +642,18 @@ router.get('/:workspaceId/usage', requireWorkspaceAccess, async (req, res) => {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('[workspaces] usage stats error:', msg);
+    res.status(500).json({ error: msg });
+  }
+});
+
+router.get('/:workspaceId/calibration-status', requireWorkspaceAccess, async (req, res) => {
+  try {
+    const workspaceId = req.params.workspaceId as string;
+    const status = await getCalibrationStatus(workspaceId);
+    res.json(status);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[workspaces] calibration-status error:', msg);
     res.status(500).json({ error: msg });
   }
 });

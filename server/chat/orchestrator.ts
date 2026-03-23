@@ -40,6 +40,12 @@ import { createSessionContext, type SessionContext } from '../agents/session-con
 import { extractSkillContext, formatMethodologyComparisons } from './context-assembler.js';
 import { buildConversationContext } from '../context/build-conversation-context.js';
 import { PandoraResponseBuilder } from '../lib/pandora-response-builder.js';
+import { getCalibrationStatus } from '../lib/data-dictionary.js';
+import { getInterviewState, buildInterviewPrompt, advanceInterview } from '../lib/calibration-interview.js';
+import { getUnmappedStages, buildStageMappingResponse, confirmStageMapping, isStageMappingComplete } from '../lib/stage-mapping-interview.js';
+import type { NormalizedStage } from '../lib/stage-mapping-interview.js';
+
+const CALIBRATION_TRIGGERS = /\b(calibrat|calibrate|calibration|map.*stage|stage.*map|set up pipeline|define pipeline|what counts as pipeline|define.*at.?risk|define.*commit|define.*win.?rate|setup calibration|start calibration|pipeline definition|interview)\b/i;
 
 export interface ConversationTurnInput {
   surface: 'slack_thread' | 'slack_dm' | 'in_app';
@@ -340,6 +346,69 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
     }
   }
 
+  // ── Calibration Interview Routing ────────────────────────────────────────────
+  // Intercept calibration-intent messages before the heuristic router.
+  // Runs the stage mapping interview first, then the 6-step dimension interview.
+  if (!answer && CALIBRATION_TRIGGERS.test(message)) {
+    try {
+      const calStatus = await getCalibrationStatus(workspaceId);
+
+      // Stage mapping must be done before dimension calibration
+      const unmappedStages = await getUnmappedStages(workspaceId);
+      if (unmappedStages.length > 0) {
+        const top = unmappedStages[0];
+        const stageMappingText = buildStageMappingResponse(top, unmappedStages.length);
+
+        // Try to detect a direct reply like "Qualification" or "yes, Proposal"
+        const normalizedStages = [
+          'prospecting', 'qualification', 'evaluation', 'demo', 'proposal',
+          'negotiation', 'closed_won', 'closed_lost',
+        ];
+        const suggested = normalizedStages.find(s =>
+          message.toLowerCase().includes(s.replace('_', ' ')) || message.toLowerCase().includes(s)
+        );
+        const skipMatch = /\b(skip|ignore|exclude|don't count|dont count)\b/i.test(message);
+
+        if (suggested && unmappedStages.length < (await getUnmappedStages(workspaceId)).length) {
+          await confirmStageMapping(workspaceId, top.crm_stage_name, suggested as NormalizedStage);
+          const remaining = await getUnmappedStages(workspaceId);
+          answer = remaining.length > 0
+            ? buildStageMappingResponse(remaining[0], remaining.length)
+            : 'All stages mapped! Let\'s continue to calibrate your pipeline definitions.';
+        } else if (skipMatch) {
+          await confirmStageMapping(workspaceId, top.crm_stage_name, 'closed_lost');
+          const remaining = await getUnmappedStages(workspaceId);
+          answer = remaining.length > 0
+            ? buildStageMappingResponse(remaining[0], remaining.length)
+            : 'Stages marked. Moving on to pipeline definition calibration.';
+        } else {
+          answer = stageMappingText;
+        }
+
+        routerDecision = 'calibration_stage_mapping';
+        dataStrategy = 'calibration';
+      } else {
+        // Stage mapping done — run dimension interview
+        const interviewState = await getInterviewState(workspaceId);
+        const step = interviewState.current_step;
+
+        if (step === 'complete') {
+          answer = 'Calibration is already complete! All definitions are confirmed. You can re-run calibration any time from Settings → Calibration.';
+        } else {
+          answer = await buildInterviewPrompt(workspaceId, step);
+        }
+
+        routerDecision = 'calibration_interview';
+        dataStrategy = 'calibration';
+      }
+
+      tokensUsed = 0;
+    } catch (calErr) {
+      console.warn('[orchestrator] Calibration routing failed, falling through to LLM:', calErr instanceof Error ? calErr.message : calErr);
+    }
+  }
+
+  if (!answer) {
   try {
     const heuristic = await tryHeuristic(workspaceId, message);
     if (heuristic.matched && heuristic.answer) {
@@ -356,6 +425,7 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
     }
   } catch (err) {
     console.warn('[orchestrator] Heuristic router failed, continuing to LLM path:', err);
+  }
   }
 
   // ── Goal-Aware Investigation Routing ─────────────────────────────────────────

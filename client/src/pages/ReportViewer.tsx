@@ -70,6 +70,8 @@ interface ReportDocSection {
   word_count: number;
   source_skills: string[];
   severity?: 'critical' | 'warning' | 'info';
+  calibrated?: boolean;
+  dimension_label?: string;
 }
 
 interface ReportDocAction {
@@ -2043,6 +2045,38 @@ function ReportSection({ section, isCollapsed, onToggle, anonymizeMode, workspac
         <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
           <h2 style={{ fontSize: 20, fontWeight: 700, color: colors.text, fontFamily: fonts.sans, margin: 0 }}>{section.title}</h2>
           {primaryDelta && <DeltaBadge metric={primaryDelta} />}
+          {section.calibrated === false && (
+            <span style={{
+              fontSize: 10,
+              fontWeight: 700,
+              background: '#fef3c7',
+              color: '#92400e',
+              padding: '2px 7px',
+              borderRadius: 10,
+              textTransform: 'uppercase',
+              letterSpacing: '0.05em',
+              fontFamily: fonts.sans,
+              flexShrink: 0,
+            }}>
+              Uncalibrated
+            </span>
+          )}
+          {section.calibrated === true && section.dimension_label && (
+            <span style={{
+              fontSize: 10,
+              fontWeight: 700,
+              background: '#dcfce7',
+              color: '#15803d',
+              padding: '2px 7px',
+              borderRadius: 10,
+              textTransform: 'uppercase',
+              letterSpacing: '0.05em',
+              fontFamily: fonts.sans,
+              flexShrink: 0,
+            }}>
+              ✓ {section.dimension_label}
+            </span>
+          )}
         </div>
         {isCollapsed ? (
           <ChevronRight style={{ width: 20, height: 20, color: colors.textMuted }} />

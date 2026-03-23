@@ -112,6 +112,72 @@ interface ThreadMessage {
   tokens_used?: number;
 }
 
+function CalibrationBanner() {
+  const navigate = useNavigate();
+  const { currentWorkspace } = useWorkspace();
+  const wsId = currentWorkspace?.id || '';
+  const [dismissed, setDismissed] = useState(() => localStorage.getItem('pandora_calibration_banner_dismissed') === 'true');
+  const [calStatus, setCalStatus] = useState<'not_started' | 'in_progress' | 'complete' | null>(null);
+
+  useEffect(() => {
+    if (dismissed || !wsId) return;
+    api.get(`/workspaces/${wsId}/calibration-status`).then((d: any) => {
+      setCalStatus(d.status ?? 'not_started');
+    }).catch(() => {});
+  }, [dismissed, wsId]);
+
+  if (dismissed || calStatus === null || calStatus === 'complete') return null;
+
+  const isInProgress = calStatus === 'in_progress';
+
+  return (
+    <div style={{
+      background: '#fef9ec',
+      border: `1px solid #fde68a`,
+      borderLeft: '4px solid #f59e0b',
+      borderRadius: 8,
+      padding: '10px 16px',
+      display: 'flex',
+      alignItems: 'center',
+      gap: 10,
+      fontFamily: fonts.sans,
+      fontSize: 13,
+    }}>
+      <span style={{ fontSize: 16, flexShrink: 0 }}>⚠</span>
+      <span style={{ color: '#78350f', flex: 1 }}>
+        {isInProgress
+          ? <>Calibration in progress — finish setting up your pipeline definitions so Pandora can give accurate numbers. </>
+          : <>Pandora hasn't been calibrated yet — pipeline and forecast numbers may not match your CRM. </>}
+        <span
+          onClick={() => navigate('/settings/calibration')}
+          style={{ color: '#92400e', cursor: 'pointer', textDecoration: 'underline', fontWeight: 600 }}
+        >
+          {isInProgress ? 'Continue calibration' : 'Set up calibration'}
+        </span>
+      </span>
+      <button
+        onClick={() => {
+          setDismissed(true);
+          localStorage.setItem('pandora_calibration_banner_dismissed', 'true');
+        }}
+        style={{
+          background: 'transparent',
+          color: '#92400e',
+          border: 'none',
+          fontSize: 18,
+          cursor: 'pointer',
+          padding: '2px 6px',
+          lineHeight: 1,
+          flexShrink: 0,
+          opacity: 0.6,
+        }}
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
 function PushBanner() {
   const navigate = useNavigate();
   const [dismissed, setDismissed] = useState(() => localStorage.getItem('pandora_push_banner_dismissed') === 'true');
@@ -708,6 +774,7 @@ export default function CommandCenter() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      <CalibrationBanner />
       <PushBanner />
       <SlackSetupNudge variant="command-center" layout="card" />
 

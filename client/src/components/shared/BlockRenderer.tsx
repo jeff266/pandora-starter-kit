@@ -5,6 +5,7 @@ import NarrativeBlockView from '../blocks/NarrativeBlockView';
 import TableBlockView from '../blocks/TableBlockView';
 import ActionCardBlockView from '../blocks/ActionCardBlockView';
 import DeliberationBlockView from '../blocks/DeliberationBlockView';
+import CalibrationConfirmedBlockView from '../blocks/CalibrationConfirmedBlockView';
 
 interface BlockRendererProps {
   block: PandoraBlock;
@@ -23,6 +24,8 @@ export default function BlockRenderer({ block, compact }: BlockRendererProps) {
       return <ActionCardBlockView block={block} />;
     case 'deliberation':
       return <DeliberationBlockView block={block} />;
+    case 'calibration_confirmed':
+      return <CalibrationConfirmedBlockView block={block} />;
     default:
       console.warn(`Unknown block type: ${(block as any).blockType}`);
       return null;

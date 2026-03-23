@@ -27,10 +27,11 @@ import AgenticActionsTab from '../components/settings/AgenticActionsTab';
 import ConnectorsPage from './ConnectorsPage';
 import ConnectorHealth from './ConnectorHealth';
 import PipelineValueTab from '../components/settings/PipelineValueTab';
+import CalibrationTab from '../components/settings/CalibrationTab';
 
-type SettingsTab = 'profile' | 'security' | 'preferences' | 'workspaces' | 'setup' | 'members' | 'sales-roster' | 'roles' | 'notifications' | 'features' | 'pipeline-config' | 'crm-sync' | 'deal-fields' | 'methodology' | 'automations' | 'agentic-actions' | 'webhooks' | 'billing' | 'dimensions' | 'token-usage' | 'ai-keys' | 'claude' | 'connectors' | 'connectors-health';
+type SettingsTab = 'profile' | 'security' | 'preferences' | 'workspaces' | 'setup' | 'members' | 'sales-roster' | 'roles' | 'notifications' | 'features' | 'pipeline-config' | 'crm-sync' | 'deal-fields' | 'methodology' | 'automations' | 'agentic-actions' | 'webhooks' | 'billing' | 'dimensions' | 'token-usage' | 'ai-keys' | 'claude' | 'calibration' | 'connectors' | 'connectors-health';
 
-const adminTabs: SettingsTab[] = ['setup', 'members', 'sales-roster', 'roles', 'notifications', 'features', 'pipeline-config', 'crm-sync', 'deal-fields', 'methodology', 'automations', 'agentic-actions', 'webhooks', 'billing', 'dimensions', 'token-usage', 'ai-keys', 'claude', 'connectors', 'connectors-health'];
+const adminTabs: SettingsTab[] = ['setup', 'members', 'sales-roster', 'roles', 'notifications', 'features', 'pipeline-config', 'crm-sync', 'deal-fields', 'methodology', 'automations', 'agentic-actions', 'webhooks', 'billing', 'dimensions', 'token-usage', 'ai-keys', 'claude', 'calibration', 'connectors', 'connectors-health'];
 
 export default function SettingsPage() {
   const { tab } = useParams<{ tab?: string }>();
@@ -57,7 +58,7 @@ export default function SettingsPage() {
   }, [tab, navigate]);
 
   const isValidTab = (tabKey: string): boolean => {
-    const validTabs: SettingsTab[] = ['profile', 'security', 'preferences', 'workspaces', 'setup', 'members', 'sales-roster', 'roles', 'notifications', 'features', 'pipeline-config', 'crm-sync', 'deal-fields', 'methodology', 'automations', 'agentic-actions', 'webhooks', 'billing', 'dimensions', 'token-usage', 'ai-keys', 'claude', 'connectors', 'connectors-health'];
+    const validTabs: SettingsTab[] = ['profile', 'security', 'preferences', 'workspaces', 'setup', 'members', 'sales-roster', 'roles', 'notifications', 'features', 'pipeline-config', 'crm-sync', 'deal-fields', 'methodology', 'automations', 'agentic-actions', 'webhooks', 'billing', 'dimensions', 'token-usage', 'ai-keys', 'claude', 'calibration', 'connectors', 'connectors-health'];
     return validTabs.includes(tabKey as SettingsTab);
   };
 
@@ -116,6 +117,8 @@ export default function SettingsPage() {
         return isAdmin ? <AIKeysTab /> : null;
       case 'claude':
         return isAdmin ? <ClaudeIntegrationTab /> : null;
+      case 'calibration':
+        return isAdmin ? <CalibrationTab /> : null;
       case 'connectors':
         return isAdmin ? <ConnectorsPage /> : null;
       case 'connectors-health':

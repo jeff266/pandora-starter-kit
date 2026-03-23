@@ -1,6 +1,6 @@
 import { ChartSpec } from '../../client/src/types/chart-types.js';
 
-export type PandoraBlockType = 'narrative' | 'chart' | 'table' | 'action_card' | 'deliberation';
+export type PandoraBlockType = 'narrative' | 'chart' | 'table' | 'action_card' | 'deliberation' | 'calibration_confirmed';
 
 export type DeliberationMode = 'bull_bear' | 'red_team';
 
@@ -64,12 +64,27 @@ export interface ActionCardBlock {
   cta_href?: string;
 }
 
+export interface CalibrationConfirmedBlock {
+  blockType: 'calibration_confirmed';
+  id: string;
+  dimension_key: string;
+  dimension_label: string;
+  confirmed_value: number;
+  confirmed_count: number;
+  filter_summary: string;
+  step: string;
+  total_steps: number;
+  next_step?: string;
+  is_final: boolean;
+}
+
 export type PandoraBlock =
   | NarrativeBlock
   | ChartBlock
   | TableBlock
   | ActionCardBlock
-  | DeliberationBlock;
+  | DeliberationBlock
+  | CalibrationConfirmedBlock;
 
 export interface PandoraResponse {
   id: string;
