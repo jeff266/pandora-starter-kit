@@ -167,13 +167,13 @@ router.post(
               const arr = JSON.parse(raw);
               if (!Array.isArray(arr)) continue;
               for (const a of arr) {
-                const actionText: string = a.title || a.action || a.summary || '';
+                const actionText: string = a.title || a.action_type || a.action || a.summary || '';
                 if (!actionText) continue;
                 const urgency = VALID_URGENCY.has(a.urgency) ? a.urgency : 'this_week';
-                const item: Record<string, string> = { action: actionText, owner: a.owner_email || a.owner || a.rep_name || '', urgency };
-                if (a.target_deal_name || a.related_deal) {
-                  item.related_deal = a.target_deal_name || a.related_deal;
-                }
+                const owner: string = a.owner_email || a.owner || a.rep_name || '';
+                const relatedDeal: string = a.target_deal_name || a.related_deal || '';
+                const item: Record<string, string> = { action: actionText, owner, urgency };
+                if (relatedDeal) item.related_deal = relatedDeal;
                 parsedActions.push(item);
               }
             } catch {
@@ -181,10 +181,12 @@ router.post(
             }
           }
 
-          // Merge with existing action_items, deduplicating by action text
+          // Merge with existing action_items, deduplicating by full item signature
           const existing: any[] = Array.isArray(section.action_items) ? section.action_items : [];
-          const existingTexts = new Set(existing.map((a: any) => a.action));
-          const merged = [...existing, ...parsedActions.filter(a => !existingTexts.has(a.action))];
+          const itemKey = (a: any): string =>
+            `${a.action}||${a.owner}||${a.urgency}||${a.related_deal || ''}`;
+          const existingKeys = new Set(existing.map(itemKey));
+          const merged = [...existing, ...parsedActions.filter(a => !existingKeys.has(itemKey(a)))];
 
           docModified = true;
           sectionsUpdated++;
