@@ -2272,35 +2272,78 @@ function ReportSection({ section, isCollapsed, onToggle, anonymizeMode, workspac
           ) : (
             <>
               {/* ── Plain text fallback for free-form agent output ── */}
-              <div style={{ color: colors.textSecondary, lineHeight: 1.7, fontFamily: fonts.sans }}>
-                {section.content!.split('\n\n').map((para, idx) => (
-                  <p key={idx} style={{ marginBottom: 16 }}>{renderMarkdown(para)}</p>
-                ))}
-              </div>
-
-              {/* Actions array — rendered if present */}
               {(() => {
-                const actionList = section.actions ?? section.action_items;
-                return actionList && actionList.length > 0 ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    <h3 style={{ fontSize: 14, fontWeight: 600, color: colors.text, textTransform: 'uppercase', letterSpacing: '0.05em', fontFamily: fonts.sans, margin: 0 }}>Action Items</h3>
-                    {actionList.map((action, idx) => {
-                      const blockId = `${section.section_id}:action:${idx}`;
-                      const isStruck = humanAnnotations?.some(a => a.block_id === blockId && a.type === 'strike');
-                      const noteAnnotation = humanAnnotations?.find(a => a.block_id === `${blockId}:note`);
-                      return (
-                        <div key={idx}>
-                          <ActionItemComponent
-                            action={action}
-                            index={idx}
-                            isStruck={isStruck}
-                            noteText={noteAnnotation?.new_value ?? undefined}
-                          />
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : null;
+                const rawContent = section.content!;
+
+                // Strip <actions>...</actions> blocks from the displayed text and collect them
+                const capturedActionBlocks: string[] = [];
+                const cleanedContent = rawContent
+                  .replace(/<actions>([\s\S]*?)<\/actions>/g, (_match, inner: string) => {
+                    capturedActionBlocks.push(inner.trim());
+                    return '';
+                  })
+                  .trim();
+
+                // Parse inline <actions> blocks into ActionItem shape
+                const parsedInlineActions: ActionItem[] = [];
+                for (const raw of capturedActionBlocks) {
+                  try {
+                    const arr = JSON.parse(raw);
+                    if (Array.isArray(arr)) {
+                      for (const a of arr) {
+                        const actionText = a.title || a.action || a.summary || '';
+                        if (actionText) {
+                          const urgency = (['today', 'this_week', 'this_month'] as const).includes(a.urgency)
+                            ? (a.urgency as ActionItem['urgency'])
+                            : 'this_week';
+                          parsedInlineActions.push({
+                            action: actionText,
+                            owner: a.owner_email || a.owner || a.rep_name || '',
+                            urgency,
+                            related_deal: a.target_deal_name || a.related_deal,
+                          });
+                        }
+                      }
+                    }
+                  } catch { /* malformed block — silently suppress */ }
+                }
+
+                // Prefer structured actions from section data; fall back to inline-parsed ones
+                const actionList =
+                  (section.actions && section.actions.length > 0 ? section.actions as unknown as ActionItem[] : null) ??
+                  (section.action_items && section.action_items.length > 0 ? section.action_items : null) ??
+                  (parsedInlineActions.length > 0 ? parsedInlineActions : null);
+
+                return (
+                  <>
+                    <div style={{ color: colors.textSecondary, lineHeight: 1.7, fontFamily: fonts.sans }}>
+                      {cleanedContent.split('\n\n').filter(p => p.trim()).map((para, idx) => (
+                        <div key={idx} style={{ marginBottom: 16 }}>{renderMarkdown(para)}</div>
+                      ))}
+                    </div>
+
+                    {actionList && actionList.length > 0 && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        <h3 style={{ fontSize: 14, fontWeight: 600, color: colors.text, textTransform: 'uppercase', letterSpacing: '0.05em', fontFamily: fonts.sans, margin: 0 }}>Action Items</h3>
+                        {actionList.map((action, idx) => {
+                          const blockId = `${section.section_id}:action:${idx}`;
+                          const isStruck = humanAnnotations?.some(a => a.block_id === blockId && a.type === 'strike');
+                          const noteAnnotation = humanAnnotations?.find(a => a.block_id === `${blockId}:note`);
+                          return (
+                            <div key={idx}>
+                              <ActionItemComponent
+                                action={action}
+                                index={idx}
+                                isStruck={isStruck}
+                                noteText={noteAnnotation?.new_value ?? undefined}
+                              />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </>
+                );
               })()}
             </>
           )}
