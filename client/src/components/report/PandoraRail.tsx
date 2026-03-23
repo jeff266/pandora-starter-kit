@@ -110,32 +110,6 @@ export default function PandoraRail({
     }
   }, [reportContext.activeSectionId, messages.length]);
 
-  // Handle injected rewrite prompts
-  useEffect(() => {
-    if (!injectedPrompt) return;
-
-    const sectionTitle = reportContext.activeSectionTitle || 'this section';
-    const rewriteMessage = `Rewrite the following text from the "${sectionTitle}" section.
-
-Original text:
-"${injectedPrompt.selectedText}"
-
-Instruction: ${injectedPrompt.instruction}
-
-Return only the rewritten text. No preamble, no explanation.`;
-
-    // Store section ID for later replacement
-    lastRewriteSectionIdRef.current = injectedPrompt.sectionId;
-
-    // Auto-submit the message
-    sendMessage(rewriteMessage);
-
-    // Clear injected prompt after consumption
-    if (onInjectedPromptConsumed) {
-      onInjectedPromptConsumed();
-    }
-  }, [injectedPrompt, reportContext.activeSectionTitle, sendMessage, onInjectedPromptConsumed]);
-
   const currentMode = MODES.find(m => m.id === forcedMode) ?? null;
 
   const sendMessage = useCallback(async (text?: string) => {
@@ -170,6 +144,32 @@ Return only the rewritten text. No preamble, no explanation.`;
       setLoading(false);
     }
   }, [input, loading, messages.length, threadId, currentMode, reportContext]);
+
+  // Handle injected rewrite prompts
+  useEffect(() => {
+    if (!injectedPrompt) return;
+
+    const sectionTitle = reportContext.activeSectionTitle || 'this section';
+    const rewriteMessage = `Rewrite the following text from the "${sectionTitle}" section.
+
+Original text:
+"${injectedPrompt.selectedText}"
+
+Instruction: ${injectedPrompt.instruction}
+
+Return only the rewritten text. No preamble, no explanation.`;
+
+    // Store section ID for later replacement
+    lastRewriteSectionIdRef.current = injectedPrompt.sectionId;
+
+    // Auto-submit the message
+    sendMessage(rewriteMessage);
+
+    // Clear injected prompt after consumption
+    if (onInjectedPromptConsumed) {
+      onInjectedPromptConsumed();
+    }
+  }, [injectedPrompt, reportContext.activeSectionTitle, sendMessage, onInjectedPromptConsumed]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
