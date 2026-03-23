@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { Download, Share2, Settings, ChevronLeft, ChevronRight, Eye, Edit3, X, Clock, Plus, MoreHorizontal } from 'lucide-react';
+import { Download, Share2, Settings, ChevronLeft, ChevronRight, Eye, Edit3, X, Clock, Plus, MoreHorizontal, ExternalLink } from 'lucide-react';
 import PandoraRail from '../components/report/PandoraRail';
 import type { SectionContent, MetricCard, DealCard, ActionItem, SankeyChartData } from '../components/reports/types';
 import { api } from '../lib/api';
@@ -1042,50 +1042,40 @@ export default function ReportViewer() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
                 <button
                   onClick={() => window.print()}
+                  title="Download PDF"
                   style={{
-                    padding: '6px 14px',
+                    padding: '6px 10px',
                     background: 'rgba(255,255,255,0.08)',
                     border: `1px solid ${banner.accent}33`,
                     borderRadius: 7,
                     color: banner.accent,
-                    fontSize: 12,
-                    fontWeight: 600,
-                    fontFamily: fonts.sans,
                     cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 6,
                   }}
                   onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.14)')}
                   onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.08)')}
                 >
-                  ↓ Download PDF
+                  <Download style={{ width: 15, height: 15 }} />
                 </button>
                 <div style={{ position: 'relative', display: 'inline-block' }}>
                   <button
                     onClick={handleExportToGoogleDocs}
                     disabled={exportingToGoogleDocs || !reportDocument}
+                    title={googleDocsUrl ? 'Opened in Google Docs' : 'Export to Google Docs'}
                     style={{
-                      padding: '6px 14px',
-                      background: 'rgba(255,255,255,0.08)',
+                      padding: '6px 10px',
+                      background: googleDocsUrl ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.08)',
                       border: `1px solid ${banner.accent}44`,
                       borderRadius: 7,
-                      color: banner.accent,
-                      fontSize: 12,
-                      fontWeight: 600,
-                      fontFamily: fonts.sans,
+                      color: googleDocsUrl ? '#4ade80' : banner.accent,
                       cursor: exportingToGoogleDocs ? 'wait' : 'pointer',
                       display: 'flex',
                       alignItems: 'center',
-                      gap: 6,
-                      opacity: exportingToGoogleDocs ? 0.7 : 1,
+                      opacity: exportingToGoogleDocs ? 0.5 : 1,
                     }}
                   >
-                    {exportingToGoogleDocs
-                      ? 'Exporting...'
-                      : googleDocsUrl
-                        ? '✓ Opened in Google Docs'
-                        : 'Export to Google Docs →'}
+                    <ExternalLink style={{ width: 15, height: 15 }} />
                   </button>
                   {googleDocsError && (
                     <div style={{
@@ -1347,6 +1337,48 @@ export default function ReportViewer() {
             {reportDocument ? (
               /* ── New path: ReportDocument from orchestrator ── */
               <>
+                {/* Executive Summary — shown in report body if headline is LLM-generated */}
+                {(() => {
+                  const docBanner = DOC_TYPE_BANNER[reportDocument.document_type];
+                  const mechanicalHeadline = docBanner
+                    ? `${docBanner.label} — ${reportDocument.week_label}`
+                    : '';
+                  const hasLLMSummary = reportDocument.headline &&
+                    reportDocument.headline !== mechanicalHeadline;
+                  if (!hasLLMSummary) return null;
+                  return (
+                    <div style={{
+                      background: colors.surface,
+                      borderRadius: 8,
+                      border: `1px solid ${colors.border}`,
+                      borderLeft: `3px solid ${docBanner?.accent || '#0D9488'}`,
+                      padding: 24,
+                    }}>
+                      <span style={{
+                        fontSize: 11,
+                        fontWeight: 700,
+                        letterSpacing: '0.08em',
+                        textTransform: 'uppercase' as const,
+                        color: docBanner?.accent || '#0D9488',
+                        fontFamily: fonts.sans,
+                        display: 'block',
+                        marginBottom: 8,
+                      }}>
+                        Executive Summary
+                      </span>
+                      <p style={{
+                        margin: 0,
+                        fontSize: 15,
+                        lineHeight: 1.7,
+                        color: colors.textSecondary,
+                        fontFamily: fonts.sans,
+                      }}>
+                        {reportDocument.headline}
+                      </p>
+                    </div>
+                  );
+                })()}
+
                 {/* Sections */}
                 {reportDocument.sections.map((rawSection: any, sectionIndex) => {
                   const section = {

@@ -47,7 +47,7 @@ export default function AnnotatableSection({
 }: AnnotatableSectionProps) {
   const [activeParagraph, setActiveParagraph] = useState<number | null>(null);
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
-  const paragraphRefs = useRef<(HTMLParagraphElement | null)[]>([]);
+  const paragraphRefs = useRef<(HTMLElement | null)[]>([]);
 
   const paragraphs = section.content
     .replace(/<actions>[\s\S]*?<\/actions>/g, '')
@@ -180,9 +180,9 @@ export default function AnnotatableSection({
           const hasNote = annotation?.annotation_type === 'note';
 
           return (
-            <p
+            <div
               key={index}
-              ref={el => { paragraphRefs.current[index] = el; }}
+              ref={el => { paragraphRefs.current[index] = el as any; }}
               data-section={section.id}
               data-paragraph={String(index)}
               tabIndex={isAnnotating ? 0 : -1}
@@ -245,7 +245,7 @@ export default function AnnotatableSection({
                   marginTop: '4px',
                 }}>●</span>
               )}
-            </p>
+            </div>
           );
         })}
       </div>
