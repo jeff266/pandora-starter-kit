@@ -369,12 +369,12 @@ BEAR CASE SAID: ${bearOutput}`,
   const verdict = parseVerdictFields(verdictOutput, parseFloat(deal.amount || '0'), bullProb, bearProb);
 
   const tokenCost =
-    (bullResult.usage?.input_tokens ?? 0) +
-    (bullResult.usage?.output_tokens ?? 0) +
-    (bearResult.usage?.input_tokens ?? 0) +
-    (bearResult.usage?.output_tokens ?? 0) +
-    (verdictResult.usage?.input_tokens ?? 0) +
-    (verdictResult.usage?.output_tokens ?? 0);
+    (bullResult.usage?.input ?? 0) +
+    (bullResult.usage?.output ?? 0) +
+    (bearResult.usage?.input ?? 0) +
+    (bearResult.usage?.output ?? 0) +
+    (verdictResult.usage?.input ?? 0) +
+    (verdictResult.usage?.output ?? 0);
 
   await query(
     `INSERT INTO deliberation_runs
@@ -611,7 +611,7 @@ Cite specific action titles and their expected values.
     temperature: 0.3,
     _tracking: { workspaceId, phase: 'chat', stepName: 'red-team-plan' },
   });
-  tokenCost += (planResult.usage?.input_tokens ?? 0) + (planResult.usage?.output_tokens ?? 0);
+  tokenCost += (planResult.usage?.input ?? 0) + (planResult.usage?.output ?? 0);
 
   // CALL 2 — Red team attack
   const redTeamResult = await callLLM(workspaceId, 'reason', {
@@ -628,7 +628,7 @@ Be specific. Cite the gap between sprint expected value and the threshold gap.
     temperature: 0.3,
     _tracking: { workspaceId, phase: 'chat', stepName: 'red-team-attack' },
   });
-  tokenCost += (redTeamResult.usage?.input_tokens ?? 0) + (redTeamResult.usage?.output_tokens ?? 0);
+  tokenCost += (redTeamResult.usage?.input ?? 0) + (redTeamResult.usage?.output ?? 0);
 
   // CALL 3 — Verdict
   const verdictResult = await callLLM(workspaceId, 'reason', {
@@ -661,7 +661,7 @@ HYPOTHESIS GAP: ${gapLabel} remaining to close.
     temperature: 0.2,
     _tracking: { workspaceId, phase: 'chat', stepName: 'red-team-verdict' },
   });
-  tokenCost += (verdictResult.usage?.input_tokens ?? 0) + (verdictResult.usage?.output_tokens ?? 0);
+  tokenCost += (verdictResult.usage?.input ?? 0) + (verdictResult.usage?.output ?? 0);
 
   // Parse structured verdict
   const verdictText = verdictResult.content || '';
@@ -803,14 +803,14 @@ Synthesize in 2-3 sentences. Where do they agree? What is the single most import
     const synthesis = synthesisResult.content || '';
 
     const tokenCost =
-      (ceoResult.usage?.input_tokens ?? 0) +
-      (ceoResult.usage?.output_tokens ?? 0) +
-      (cfoResult.usage?.input_tokens ?? 0) +
-      (cfoResult.usage?.output_tokens ?? 0) +
-      (vpResult.usage?.input_tokens ?? 0) +
-      (vpResult.usage?.output_tokens ?? 0) +
-      (synthesisResult.usage?.input_tokens ?? 0) +
-      (synthesisResult.usage?.output_tokens ?? 0);
+      (ceoResult.usage?.input ?? 0) +
+      (ceoResult.usage?.output ?? 0) +
+      (cfoResult.usage?.input ?? 0) +
+      (cfoResult.usage?.output ?? 0) +
+      (vpResult.usage?.input ?? 0) +
+      (vpResult.usage?.output ?? 0) +
+      (synthesisResult.usage?.input ?? 0) +
+      (synthesisResult.usage?.output ?? 0);
 
     // Write to deliberation_runs
     await query(
@@ -905,10 +905,10 @@ Identify the core assumption being made. State it clearly in 1-2 sentences. Then
     const synthesis = `To resolve this: ${probing_questions.split('\n')[0] || 'gather evidence'}`;
 
     const tokenCost =
-      (assumptionResult.usage?.input_tokens ?? 0) +
-      (assumptionResult.usage?.output_tokens ?? 0) +
-      (counterResult.usage?.input_tokens ?? 0) +
-      (counterResult.usage?.output_tokens ?? 0);
+      (assumptionResult.usage?.input ?? 0) +
+      (assumptionResult.usage?.output ?? 0) +
+      (counterResult.usage?.input ?? 0) +
+      (counterResult.usage?.output ?? 0);
 
     // Write to deliberation_runs
     await query(
@@ -1014,12 +1014,12 @@ Make the strongest possible case for why this plan will succeed. What evidence s
     const confidence = confidenceMatch ? parseFloat(confidenceMatch[0]) : 0.5;
 
     const tokenCost =
-      (prosecutionResult.usage?.input_tokens ?? 0) +
-      (prosecutionResult.usage?.output_tokens ?? 0) +
-      (defenseResult.usage?.input_tokens ?? 0) +
-      (defenseResult.usage?.output_tokens ?? 0) +
-      (verdictResult.usage?.input_tokens ?? 0) +
-      (verdictResult.usage?.output_tokens ?? 0);
+      (prosecutionResult.usage?.input ?? 0) +
+      (prosecutionResult.usage?.output ?? 0) +
+      (defenseResult.usage?.input ?? 0) +
+      (defenseResult.usage?.output ?? 0) +
+      (verdictResult.usage?.input ?? 0) +
+      (verdictResult.usage?.output ?? 0);
 
     // Write to deliberation_runs
     await query(
