@@ -197,6 +197,89 @@ router.get('/:workspaceId/mcp', requireWorkspaceAccess, async (req, res) => {
   }
 });
 
+// MCP Activity — tool call history and usage stats
+router.get('/:workspaceId/mcp/activity', requireWorkspaceAccess, async (req, res) => {
+  try {
+    const workspaceId = req.params.workspaceId as string;
+    const days = Math.min(parseInt(req.query.days as string) || 30, 90);
+
+    const [totalsResult, byToolResult, recentResult] = await Promise.all([
+      query<{
+        total_calls: number;
+        error_count: number;
+        avg_duration_ms: number | null;
+        first_call_at: string | null;
+        last_call_at: string | null;
+      }>(
+        `SELECT
+           COUNT(*)::int AS total_calls,
+           COUNT(CASE WHEN error IS NOT NULL THEN 1 END)::int AS error_count,
+           AVG(duration_ms)::int AS avg_duration_ms,
+           MIN(called_at) AS first_call_at,
+           MAX(called_at) AS last_call_at
+         FROM mcp_calls
+         WHERE workspace_id = $1
+           AND called_at > NOW() - ($2 || ' days')::INTERVAL`,
+        [workspaceId, days]
+      ),
+      query<{
+        tool_name: string;
+        calls: number;
+        avg_ms: number | null;
+        errors: number;
+        last_called: string;
+      }>(
+        `SELECT
+           tool_name,
+           COUNT(*)::int AS calls,
+           AVG(duration_ms)::int AS avg_ms,
+           COUNT(CASE WHEN error IS NOT NULL THEN 1 END)::int AS errors,
+           MAX(called_at) AS last_called
+         FROM mcp_calls
+         WHERE workspace_id = $1
+           AND called_at > NOW() - ($2 || ' days')::INTERVAL
+         GROUP BY tool_name
+         ORDER BY calls DESC
+         LIMIT 15`,
+        [workspaceId, days]
+      ),
+      query<{
+        tool_name: string;
+        duration_ms: number | null;
+        error: string | null;
+        called_at: string;
+        input_summary: string | null;
+      }>(
+        `SELECT tool_name, duration_ms, error, called_at, input_summary
+         FROM mcp_calls
+         WHERE workspace_id = $1
+         ORDER BY called_at DESC
+         LIMIT 10`,
+        [workspaceId]
+      ),
+    ]);
+
+    const t = totalsResult.rows[0];
+    const totalCalls = t?.total_calls ?? 0;
+    const errorCount = t?.error_count ?? 0;
+
+    res.json({
+      period_days: days,
+      total_calls: totalCalls,
+      error_count: errorCount,
+      success_count: totalCalls - errorCount,
+      avg_duration_ms: t?.avg_duration_ms ?? null,
+      first_call_at: t?.first_call_at ?? null,
+      last_call_at: t?.last_call_at ?? null,
+      by_tool: byToolResult.rows,
+      recent_calls: recentResult.rows,
+    });
+  } catch (err) {
+    console.error('[mcp/activity]', err instanceof Error ? err.message : err);
+    res.status(500).json({ error: 'Failed to load MCP activity' });
+  }
+});
+
 // Branding Configuration Endpoints
 
 /**

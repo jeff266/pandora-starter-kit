@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { colors, fonts } from '../../styles/theme';
 import { api } from '../../lib/api';
 import { useWorkspace } from '../../context/WorkspaceContext';
+import McpActivityPanel from './McpActivityPanel';
 
 interface McpConfig {
   workspace_id: string;
@@ -566,14 +567,7 @@ export default function ClaudeIntegrationTab() {
           <div style={{ fontSize: 12, color: colors.textMuted, lineHeight: 1.6, marginBottom: 16 }}>
             Pandora will retrieve live data from your connected CRM and return structured findings.
           </div>
-          <div style={{ borderTop: `1px solid ${colors.border}`, paddingTop: 12 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: colors.textMuted, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-              Last MCP Activity
-            </div>
-            <div style={{ fontSize: 12, color: colors.textMuted, fontStyle: 'italic' }}>
-              No activity yet — connect Claude Desktop to get started.
-            </div>
-          </div>
+          {workspaceId && <McpActivityPanel workspaceId={workspaceId} />}
         </Card>
       </div>
     </div>
