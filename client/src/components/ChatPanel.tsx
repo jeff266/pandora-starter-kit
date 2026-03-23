@@ -11,6 +11,7 @@ import DeliberationCard from './DeliberationCard';
 import ChatDocBar from './ChatDocBar';
 import SaveAsAgentBanner from './chat/SaveAsAgentBanner';
 import AddToReportButton from './chat/AddToReportButton';
+import RunBullBearButton from './chat/RunBullBearButton';
 import { useSaveAsAgentTrigger } from '../hooks/useSaveAsAgentTrigger';
 import SuggestedActionsPanel from './assistant/SuggestedActionsPanel';
 import type { SuggestedAction } from './assistant/useConversationStream';
@@ -712,6 +713,18 @@ export default function ChatPanel({ isOpen, onClose, scope, initialSessionId, pe
                 <div style={{ marginTop: 12 }}>
                   <ResponseEnvelopeRenderer response={msg.pandora_response} />
                 </div>
+              )}
+              {msg.role === 'assistant'
+                && !msg.deliberation
+                && scope?.entity_id
+                && scope?.entity_name
+                && !loading
+                && msg === messages.filter(m => m.role === 'assistant').at(-1)
+                && (
+                <RunBullBearButton
+                  entityName={scope.entity_name}
+                  onRun={() => sendMessage(`Run a Bull/Bear analysis on ${scope.entity_name}`)}
+                />
               )}
               {msg.role === 'assistant' && isLongResponse && !alreadyHasDoc && !loading && (
                 <div style={{ marginTop: 10, borderTop: '1px solid #1e293b', paddingTop: 10 }}>
