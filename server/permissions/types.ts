@@ -6,6 +6,7 @@
 export interface PermissionSet {
   // Connectors
   'connectors.view': boolean;
+  'connectors.view_logs': boolean;
   'connectors.connect': boolean;
   'connectors.disconnect': boolean;
   'connectors.trigger_sync': boolean;
@@ -76,6 +77,7 @@ export function hasPermission(
 export function createPermissionSet(defaultValue = false): PermissionSet {
   return {
     'connectors.view': defaultValue,
+    'connectors.view_logs': defaultValue,
     'connectors.connect': defaultValue,
     'connectors.disconnect': defaultValue,
     'connectors.trigger_sync': defaultValue,

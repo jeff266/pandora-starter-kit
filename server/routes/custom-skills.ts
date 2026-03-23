@@ -116,7 +116,12 @@ router.post('/:workspaceId/skills/custom', async (req, res) => {
     await registerCustomSkill(skillId, workspaceId);
 
     if (schedule_cron) {
-      registerCustomSkillCron(row as any);
+      registerCustomSkillCron({
+        skill_id: row.skill_id,
+        workspace_id: row.workspace_id,
+        schedule_cron: row.schedule_cron,
+        name: row.name,
+      });
     }
 
     return res.status(201).json({ skill: row, registered: true });
@@ -196,7 +201,12 @@ router.put('/:workspaceId/skills/custom/:skillId', async (req, res) => {
 
     unregisterCustomSkillCron(skillId);
     if (row.schedule_cron) {
-      registerCustomSkillCron(row as any);
+      registerCustomSkillCron({
+        skill_id: row.skill_id,
+        workspace_id: row.workspace_id,
+        schedule_cron: row.schedule_cron,
+        name: row.name,
+      });
     }
 
     return res.json({ skill: row, registered: true });
@@ -241,7 +251,8 @@ router.delete('/:workspaceId/skills/custom/:skillId', async (req, res) => {
  */
 router.post('/:workspaceId/skills/custom/:skillId/run', requirePermission('skills.run_manual'), async (req, res) => {
   try {
-    const { workspaceId, skillId } = req.params as Record<string, string>;
+    const workspaceId = String(req.params.workspaceId);
+    const skillId = String(req.params.skillId);
     const registry = getSkillRegistry();
     const skill = registry.get(skillId);
     if (!skill) {
@@ -270,7 +281,7 @@ router.post('/:workspaceId/skills/custom/:skillId/run', requirePermission('skill
           JSON.stringify(result.steps),
           JSON.stringify(result.totalTokenUsage),
           result.totalDuration_ms,
-          (result.errors?.length ?? 0) > 0 ? (result.errors ?? []).map((e: any) => `${e.step}: ${e.error}`).join('; ') : null,
+          (result.errors?.length ?? 0) > 0 ? result.errors!.map((e: any) => `${e.step}: ${e.error}`).join('; ') : null,
           result.completedAt,
           result.completedAt,
         ]

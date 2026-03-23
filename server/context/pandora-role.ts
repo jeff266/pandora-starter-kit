@@ -1,6 +1,6 @@
 import { query } from '../db.js';
 
-export type PandolaRole = 'cro' | 'manager' | 'ae' | 'revops' | 'admin' | null;
+export type PandolaRole = 'cro' | 'manager' | 'ae' | 'revops' | 'admin' | 'analyst' | 'viewer' | null;
 
 export type TargetType = 'individual' | 'company' | 'team' | 'board';
 

@@ -12,6 +12,7 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<string, PermissionSet> = {
   member: {
     // Connectors: view + trigger sync (no connect/disconnect)
     'connectors.view': true,
+    'connectors.view_logs': true,
     'connectors.connect': false,
     'connectors.disconnect': false,
     'connectors.trigger_sync': true,
@@ -69,6 +70,7 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<string, PermissionSet> = {
   manager: {
     // Connectors: view + trigger sync
     'connectors.view': true,
+    'connectors.view_logs': true,
     'connectors.connect': false,
     'connectors.disconnect': false,
     'connectors.trigger_sync': true,
@@ -126,6 +128,7 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<string, PermissionSet> = {
   analyst: {
     // Connectors: view only (need to see data freshness)
     'connectors.view': true,
+    'connectors.view_logs': false,
     'connectors.connect': false,
     'connectors.disconnect': false,
     'connectors.trigger_sync': false,
@@ -183,6 +186,7 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<string, PermissionSet> = {
   viewer: {
     // Connectors: none
     'connectors.view': false,
+    'connectors.view_logs': false,
     'connectors.connect': false,
     'connectors.disconnect': false,
     'connectors.trigger_sync': false,

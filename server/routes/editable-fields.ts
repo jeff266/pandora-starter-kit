@@ -46,8 +46,8 @@ router.get('/:workspaceId/editable-fields/suggestions',
   requirePermission('config.edit'),
   async (req: Request, res: Response): Promise<void> => {
     try {
-      const { workspaceId } = req.params as Record<string, string>;
-      const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 5;
+      const workspaceId = String(req.params.workspaceId);
+      const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : 5;
 
       const suggestions = await suggestEditableFields(workspaceId, limit);
 
@@ -67,7 +67,7 @@ router.get('/:workspaceId/editable-fields/suggestions',
 router.get('/:workspaceId/editable-fields/deal-properties',
   requirePermission('config.edit'),
   async (req: Request, res: Response): Promise<void> => {
-    const { workspaceId } = req.params as Record<string, string>;
+    const workspaceId = String(req.params.workspaceId);
     try {
       const crmProperties = await discoverCRMProperties(workspaceId, 'deal');
       const properties = crmProperties.map((p) => ({
@@ -316,10 +316,11 @@ router.post('/:workspaceId/editable-fields/reorder',
  * Update a single deal field and write back to CRM
  */
 router.patch('/:workspaceId/deals/:dealId/field',
-  requirePermission('config.edit' as any),
+  requirePermission('config.edit'),
   async (req: Request, res: Response): Promise<void> => {
     try {
-      const { workspaceId, dealId } = req.params as Record<string, string>;
+      const workspaceId = String(req.params.workspaceId);
+      const dealId = String(req.params.dealId);
       const { field_name, value } = req.body;
 
       if (!field_name) {

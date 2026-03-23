@@ -134,8 +134,8 @@ router.post('/:workspaceId/targets', async (req: Request, res: Response): Promis
       }
 
       // Analysts and Viewers cannot create targets
-      if ((pandoraRole as any) === 'analyst' || (pandoraRole as any) === 'viewer') {
-        res.status(403).json({ error: `${((pandoraRole as any) === 'analyst') ? 'Analysts' : 'Viewers'} cannot create targets` });
+      if (pandoraRole === 'analyst' || pandoraRole === 'viewer') {
+        res.status(403).json({ error: `${pandoraRole === 'analyst' ? 'Analysts' : 'Viewers'} cannot create targets` });
         return;
       }
     }
@@ -289,8 +289,8 @@ router.patch('/:workspaceId/targets/:targetId', async (req: Request, res: Respon
         }
 
         // Analysts and Viewers cannot edit targets
-        if ((pandoraRole as any) === 'analyst' || (pandoraRole as any) === 'viewer') {
-          res.status(403).json({ error: `${((pandoraRole as any) === 'analyst') ? 'Analysts' : 'Viewers'} cannot edit targets` });
+        if (pandoraRole === 'analyst' || pandoraRole === 'viewer') {
+          res.status(403).json({ error: `${pandoraRole === 'analyst' ? 'Analysts' : 'Viewers'} cannot edit targets` });
           return;
         }
       }
@@ -377,8 +377,8 @@ router.delete('/:workspaceId/targets/:targetId', async (req: Request, res: Respo
         }
 
         // Analysts and Viewers cannot delete targets
-        if ((pandoraRole as any) === 'analyst' || (pandoraRole as any) === 'viewer') {
-          res.status(403).json({ error: `${((pandoraRole as any) === 'analyst') ? 'Analysts' : 'Viewers'} cannot delete targets` });
+        if (pandoraRole === 'analyst' || pandoraRole === 'viewer') {
+          res.status(403).json({ error: `${pandoraRole === 'analyst' ? 'Analysts' : 'Viewers'} cannot delete targets` });
           return;
         }
       }

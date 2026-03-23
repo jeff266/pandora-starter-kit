@@ -301,8 +301,8 @@ router.get('/:workspaceId/workflow-rules/:ruleId/history',
   requirePermission('config.view'),
   async (req: Request, res: Response): Promise<void> => {
     try {
-      const { workspaceId, ruleId } = req.params as Record<string, string>;
-      const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 20;
+      const { workspaceId, ruleId } = req.params;
+      const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : 20;
 
       const result = await query(
         `SELECT * FROM workflow_execution_log
@@ -324,7 +324,7 @@ router.get('/:workspaceId/workflow-rules/:ruleId/history',
  * Get all pending actions waiting for approval
  */
 router.get('/:workspaceId/workflow-rules/pending',
-  requirePermission('data.deals_view' as any),
+  requirePermission('data.deals_view'),
   async (req: Request, res: Response): Promise<void> => {
     try {
       const { workspaceId } = req.params as Record<string, string>;
@@ -353,10 +353,11 @@ router.get('/:workspaceId/workflow-rules/pending',
  * Approve and execute a pending action
  */
 router.post('/:workspaceId/workflow-rules/pending/:actionId/approve',
-  requirePermission('config.edit' as any),
+  requirePermission('config.edit'),
   async (req: Request, res: Response): Promise<void> => {
     try {
-      const { workspaceId, actionId } = req.params as Record<string, string>;
+      const workspaceId = String(req.params.workspaceId);
+      const actionId = String(req.params.actionId);
       const userId = (req as any).user?.user_id;
 
       if (!userId) {
@@ -392,7 +393,7 @@ router.post('/:workspaceId/workflow-rules/pending/:actionId/approve',
  * Reject a pending action
  */
 router.post('/:workspaceId/workflow-rules/pending/:actionId/reject',
-  requirePermission('config.edit' as any),
+  requirePermission('config.edit'),
   async (req: Request, res: Response): Promise<void> => {
     try {
       const { workspaceId, actionId } = req.params as Record<string, string>;
@@ -434,7 +435,7 @@ router.post('/:workspaceId/workflow-rules/pending/:actionId/reject',
  * Bulk approve multiple pending actions
  */
 router.post('/:workspaceId/workflow-rules/pending/bulk-approve',
-  requirePermission('config.edit' as any),
+  requirePermission('config.edit'),
   async (req: Request, res: Response): Promise<void> => {
     try {
       const { workspaceId } = req.params as Record<string, string>;

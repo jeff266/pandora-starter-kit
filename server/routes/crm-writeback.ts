@@ -294,8 +294,8 @@ router.post('/:workspaceId/crm-writeback/mappings/:mappingId/test', requirePermi
     }
 
     const result = await executeWriteBack({
-      workspace_id: workspaceId,
-      mapping_id: mappingId,
+      workspace_id: String(workspaceId),
+      mapping_id: String(mappingId),
       crm_record_id,
       entity_type: mappingResult.rows[0].crm_object_type,
       trigger_source: 'test',
@@ -370,7 +370,7 @@ router.post('/:workspaceId/crm-writeback/sync-all', requirePermission('connector
  * Export CRM write log as CSV
  * Query params: start_date, end_date, status, initiated_by
  */
-router.get('/:workspaceId/crm-writeback/log/export', requirePermission('connectors.view' as any), async (req, res) => {
+router.get('/:workspaceId/crm-writeback/log/export', requirePermission('connectors.view_logs'), async (req, res) => {
   try {
     const { workspaceId } = req.params as Record<string, string>;
     const { start_date, end_date, status, initiated_by } = req.query;
@@ -526,7 +526,8 @@ function escapeCsvValue(value: any): string {
  */
 router.post('/:workspaceId/crm-writeback/log/:writeLogId/reverse', requirePermission('connectors.trigger_sync'), async (req, res) => {
   try {
-    const { workspaceId, writeLogId } = req.params as Record<string, string>;
+    const workspaceId = String(req.params.workspaceId);
+    const writeLogId = String(req.params.writeLogId);
     const userId = (req as any).user?.id; // From auth middleware
 
     if (!userId) {

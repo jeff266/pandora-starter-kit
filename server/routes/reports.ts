@@ -33,8 +33,8 @@ function parseMetricValue(value: string): number {
 // List all report documents for workspace (Monday Briefings + agent runs)
 router.get('/:workspaceId/reports', async (req: Request, res: Response) => {
   try {
-    const { workspaceId } = req.params as Record<string, string>;
-    const limit = Math.min(parseInt(req.query.limit as string) || 20, 50);
+    const workspaceId = String(req.params.workspaceId);
+    const limit = Math.min(parseInt(String(req.query.limit)) || 20, 50);
 
     seedWbrQbrTemplates(workspaceId).catch(err =>
       logger.warn('WBR/QBR seed failed (non-fatal)', { error: err?.message })
@@ -397,8 +397,8 @@ router.post('/:workspaceId/reports/:reportId/generate', async (req: Request, res
 // List report generations (history) - summary only
 router.get('/:workspaceId/reports/:reportId/generations', async (req: Request, res: Response) => {
   try {
-    const { workspaceId, reportId } = req.params as Record<string, string>;
-    const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
+    const { workspaceId, reportId } = req.params;
+    const limit = Math.min(parseInt(String(req.query.limit)) || 20, 100);
     const before = req.query.before as string;
 
     let sql = `SELECT
@@ -504,7 +504,7 @@ router.get('/:workspaceId/generations/:generationId', async (req: Request, res: 
 router.get('/:workspaceId/generations-by-agent/:agentId', async (req: Request, res: Response) => {
   try {
     const { workspaceId, agentId } = req.params;
-    const limit = Math.min(parseInt(req.query.limit as string) || 20, 50);
+    const limit = Math.min(parseInt(String(req.query.limit)) || 20, 50);
 
     const result = await query(
       `SELECT id, created_at, triggered_by, generation_duration_ms, total_tokens, opening_narrative,
@@ -790,7 +790,7 @@ router.get('/:workspaceId/report-sections', async (_req: Request, res: Response)
 // List report templates for a workspace (summary — for generation modal template lookup)
 router.get('/:workspaceId/report-templates', async (req: Request, res: Response) => {
   try {
-    const { workspaceId } = req.params as Record<string, string>;
+    const workspaceId = String(req.params.workspaceId);
     // Ensure WBR/QBR templates are seeded before returning results
     await seedWbrQbrTemplates(workspaceId);
     const result = await query(

@@ -721,6 +721,7 @@ router.post('/:workspaceId/suggested-actions/sync', async (req: Request, res: Re
       priority: 'P1' | 'P2' | 'P3';
       deal_id?: string;
       execution_mode?: string;
+      action_payload?: Record<string, unknown>;
     }>;
   };
 
@@ -734,6 +735,8 @@ router.post('/:workspaceId/suggested-actions/sync', async (req: Request, res: Re
     priority: 'P0' | 'P1' | 'P2';
     source: string;
     suggested_crm_action: 'task_create' | 'note_create' | 'field_write' | null;
+    action_type?: string;
+    skill_id?: string;
   }> = [];
 
   for (const action of actions.slice(0, 6)) {
@@ -816,7 +819,7 @@ router.post(
   '/:workspaceId/actions/assign-to-rep',
   requireWorkspaceAccess,
   async (req: Request, res: Response) => {
-    const workspaceId = (req.params as Record<string, string>).workspaceId;
+    const workspaceId = req.params.workspaceId as string;
     const userId      = (req as any).user?.user_id as string;
 
     if (!userId) {
