@@ -161,6 +161,7 @@ export default function ReportViewer() {
   const [exportingToGoogleDocs, setExportingToGoogleDocs] = useState(false);
   const [googleDocsUrl, setGoogleDocsUrl] = useState<string | null>(null);
   const [googleDocsError, setGoogleDocsError] = useState<string | null>(null);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [editingChart, setEditingChart] = useState<any>(null);
   const [sectionCharts, setSectionCharts] = useState<Record<string, any[]>>({});
   const [hoveredSection, setHoveredSection] = useState<string | null>(null);
@@ -617,6 +618,43 @@ export default function ReportViewer() {
     }
   }
 
+  async function handleDownloadPdf() {
+    if (!reportDocument?.id) return;
+    const wid = currentWorkspace?.id || workspaceId;
+    if (!wid) return;
+    setDownloadingPdf(true);
+    try {
+      const token = localStorage.getItem('pandora_session');
+      const res = await fetch(
+        `/api/workspaces/${wid}/reports/${reportDocument.id}/export`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ format: 'pdf' }),
+        }
+      );
+      if (!res.ok) throw new Error('Export failed');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const slug = (reportDocument.week_label || 'report')
+        .replace(/\s+/g, '-')
+        .replace(/[^a-z0-9-]/gi, '')
+        .toLowerCase();
+      a.href = url;
+      a.download = `${slug}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      // silently fail — user can retry
+    } finally {
+      setDownloadingPdf(false);
+    }
+  }
+
   if (loading) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: colors.bg }}>
@@ -1041,7 +1079,8 @@ export default function ReportViewer() {
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
                 <button
-                  onClick={() => window.print()}
+                  onClick={handleDownloadPdf}
+                  disabled={downloadingPdf || !reportDocument}
                   title="Download PDF"
                   style={{
                     padding: '6px 10px',
@@ -1049,11 +1088,12 @@ export default function ReportViewer() {
                     border: `1px solid ${banner.accent}33`,
                     borderRadius: 7,
                     color: banner.accent,
-                    cursor: 'pointer',
+                    cursor: downloadingPdf ? 'wait' : 'pointer',
                     display: 'flex',
                     alignItems: 'center',
+                    opacity: downloadingPdf ? 0.5 : 1,
                   }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.14)')}
+                  onMouseEnter={(e) => { if (!downloadingPdf) e.currentTarget.style.background = 'rgba(255,255,255,0.14)'; }}
                   onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.08)')}
                 >
                   <Download style={{ width: 15, height: 15 }} />
