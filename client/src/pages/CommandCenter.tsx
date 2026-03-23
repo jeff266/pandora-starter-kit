@@ -29,7 +29,6 @@ import AnnotatedPipelineChart from '../components/command-center/AnnotatedPipeli
 import ConnectorStatusStrip from '../components/command-center/ConnectorStatusStrip';
 import AgentConversationFeed, { type ToolCallEvent } from '../components/assistant/AgentConversationFeed';
 import { useBriefStream } from '../components/assistant/useBriefStream';
-import SlackSetupNudge from '../components/SlackSetupNudge';
 
 interface FindingAssumption {
   label: string;
@@ -110,132 +109,6 @@ interface ThreadMessage {
   sources?: string[];
   isThinking?: boolean;
   tokens_used?: number;
-}
-
-function CalibrationBanner() {
-  const navigate = useNavigate();
-  const { currentWorkspace } = useWorkspace();
-  const wsId = currentWorkspace?.id || '';
-  const [dismissed, setDismissed] = useState(() => localStorage.getItem('pandora_calibration_banner_dismissed') === 'true');
-  const [calStatus, setCalStatus] = useState<'not_started' | 'in_progress' | 'complete' | null>(null);
-
-  useEffect(() => {
-    if (dismissed || !wsId) return;
-    api.get('/calibration-status').then((d: any) => {
-      setCalStatus(d.status ?? 'not_started');
-    }).catch(() => {});
-  }, [dismissed, wsId]);
-
-  if (dismissed || calStatus === null || calStatus === 'complete') return null;
-
-  const isInProgress = calStatus === 'in_progress';
-
-  return (
-    <div style={{
-      background: '#fef9ec',
-      border: `1px solid #fde68a`,
-      borderLeft: '4px solid #f59e0b',
-      borderRadius: 8,
-      padding: '10px 16px',
-      display: 'flex',
-      alignItems: 'center',
-      gap: 10,
-      fontFamily: fonts.sans,
-      fontSize: 13,
-    }}>
-      <span style={{ fontSize: 16, flexShrink: 0 }}>⚠</span>
-      <span style={{ color: '#78350f', flex: 1 }}>
-        {isInProgress
-          ? <>Calibration in progress — finish setting up your pipeline definitions so Pandora can give accurate numbers. </>
-          : <>Pandora hasn't been calibrated yet — pipeline and forecast numbers may not match your CRM. </>}
-        <span
-          onClick={() => navigate('/settings/calibration')}
-          style={{ color: '#92400e', cursor: 'pointer', textDecoration: 'underline', fontWeight: 600 }}
-        >
-          {isInProgress ? 'Continue calibration' : 'Set up calibration'}
-        </span>
-      </span>
-      <button
-        onClick={() => {
-          setDismissed(true);
-          localStorage.setItem('pandora_calibration_banner_dismissed', 'true');
-        }}
-        style={{
-          background: 'transparent',
-          color: '#92400e',
-          border: 'none',
-          fontSize: 18,
-          cursor: 'pointer',
-          padding: '2px 6px',
-          lineHeight: 1,
-          flexShrink: 0,
-          opacity: 0.6,
-        }}
-      >
-        ×
-      </button>
-    </div>
-  );
-}
-
-function PushBanner() {
-  const navigate = useNavigate();
-  const [dismissed, setDismissed] = useState(() => localStorage.getItem('pandora_push_banner_dismissed') === 'true');
-  const [hasRules, setHasRules] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    if (dismissed) return;
-    api.get('/push/rules').then(d => {
-      const rules = d.rules || [];
-      setHasRules(rules.some((r: any) => r.is_active));
-    }).catch(() => {});
-  }, [dismissed]);
-
-  if (dismissed || hasRules === null || hasRules) return null;
-
-  return (
-    <div style={{
-      background: colors.accentSoft,
-      border: `1px solid rgba(59,130,246,0.2)`,
-      borderRadius: 8,
-      padding: '10px 16px',
-      marginBottom: 0,
-      display: 'flex',
-      alignItems: 'center',
-      gap: 10,
-      fontFamily: fonts.sans,
-      fontSize: 13,
-    }}>
-      <span style={{ fontSize: 16 }}>{'\uD83D\uDCA1'}</span>
-      <span style={{ color: colors.textSecondary }}>
-        Push findings to Slack automatically —{' '}
-        <span
-          onClick={() => navigate('/push')}
-          style={{ color: colors.accent, cursor: 'pointer', textDecoration: 'underline' }}
-        >
-          Set up delivery rules
-        </span>
-      </span>
-      <button
-        onClick={() => {
-          setDismissed(true);
-          localStorage.setItem('pandora_push_banner_dismissed', 'true');
-        }}
-        style={{
-          marginLeft: 'auto',
-          background: 'transparent',
-          color: colors.textMuted,
-          border: 'none',
-          fontSize: 16,
-          cursor: 'pointer',
-          padding: '2px 6px',
-          lineHeight: 1,
-        }}
-      >
-        ×
-      </button>
-    </div>
-  );
 }
 
 export default function CommandCenter() {
@@ -774,9 +647,6 @@ export default function CommandCenter() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-      <CalibrationBanner />
-      <PushBanner />
-      <SlackSetupNudge variant="command-center" layout="card" />
 
       {/* Combined greeting + controls row */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>

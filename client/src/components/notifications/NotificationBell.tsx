@@ -1,74 +1,122 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { colors, fonts } from '../../styles/theme';
 import { useNotifications } from '../../hooks/useNotifications';
+import { api } from '../../lib/api';
 import NotificationPanel from './NotificationPanel';
+import type { ActionItem } from './NotificationPanel';
 
 interface NotificationBellProps {
   workspaceId: string;
 }
 
+const DISMISS_KEY_CALIBRATION = 'pandora_calibration_banner_dismissed';
+const DISMISS_KEY_PUSH        = 'pandora_push_banner_dismissed';
+
 export default function NotificationBell({ workspaceId }: NotificationBellProps) {
+  const navigate = useNavigate();
   const [isOpen, setIsOpen] = useState(false);
   const [prevCount, setPrevCount] = useState(0);
   const [shouldPulse, setShouldPulse] = useState(false);
   const bellRef = useRef<HTMLDivElement>(null);
 
-  const {
-    notifications,
-    unreadCount,
-    loading,
-    error,
-    markRead,
-    markAllRead,
-  } = useNotifications(workspaceId);
+  const { notifications, unreadCount, loading, error, markRead, markAllRead } = useNotifications(workspaceId);
 
-  // Detect new notifications and trigger pulse animation
+  // --- Action items state ---
+  const [calStatus, setCalStatus]   = useState<'not_started' | 'in_progress' | 'complete' | null>(null);
+  const [hasRules, setHasRules]     = useState<boolean | null>(null);
+  const [calDismissed, setCalDismissed]   = useState(() => localStorage.getItem(DISMISS_KEY_CALIBRATION) === 'true');
+  const [pushDismissed, setPushDismissed] = useState(() => localStorage.getItem(DISMISS_KEY_PUSH) === 'true');
+
   useEffect(() => {
-    if (unreadCount > prevCount && prevCount > 0) {
+    if (!workspaceId) return;
+    if (!calDismissed) {
+      api.get('/calibration-status').then((d: any) => {
+        setCalStatus(d.status ?? 'not_started');
+      }).catch(() => {});
+    }
+    if (!pushDismissed) {
+      api.get('/push/rules').then((d: any) => {
+        const rules = d.rules || [];
+        setHasRules(rules.some((r: any) => r.is_active));
+      }).catch(() => {});
+    }
+  }, [workspaceId, calDismissed, pushDismissed]);
+
+  const dismissCal = useCallback(() => {
+    setCalDismissed(true);
+    localStorage.setItem(DISMISS_KEY_CALIBRATION, 'true');
+  }, []);
+
+  const dismissPush = useCallback(() => {
+    setPushDismissed(true);
+    localStorage.setItem(DISMISS_KEY_PUSH, 'true');
+  }, []);
+
+  // Build action items list
+  const actionItems: ActionItem[] = [];
+
+  if (!calDismissed && calStatus && calStatus !== 'complete') {
+    const isInProgress = calStatus === 'in_progress';
+    actionItems.push({
+      id: 'calibration',
+      icon: '⚠',
+      accentColor: '#f59e0b',
+      title: isInProgress ? 'Calibration in progress' : 'Pipeline not calibrated',
+      body: isInProgress
+        ? 'Finish setting up your pipeline definitions so Pandora can give accurate numbers.'
+        : "Pipeline and forecast numbers may not match your CRM until calibration is complete.",
+      actionLabel: isInProgress ? 'Continue calibration' : 'Set up calibration',
+      onAction: () => { navigate('/settings/calibration'); setIsOpen(false); },
+      onDismiss: dismissCal,
+    });
+  }
+
+  if (!pushDismissed && hasRules === false) {
+    actionItems.push({
+      id: 'slack',
+      icon: '📣',
+      accentColor: colors.accent,
+      title: 'Stay updated with Slack alerts',
+      body: 'Receive pipeline hygiene reports, deal risks, and actionable insights in Slack.',
+      actionLabel: 'Set up delivery rules',
+      onAction: () => { navigate('/push'); setIsOpen(false); },
+      onDismiss: dismissPush,
+    });
+  }
+
+  // Pulse animation when new notifications arrive
+  const totalCount = unreadCount + actionItems.length;
+  useEffect(() => {
+    if (totalCount > prevCount && prevCount > 0) {
       setShouldPulse(true);
       setTimeout(() => setShouldPulse(false), 600);
     }
-    setPrevCount(unreadCount);
-  }, [unreadCount, prevCount]);
+    setPrevCount(totalCount);
+  }, [totalCount, prevCount]);
 
-  // Close panel on outside click
+  // Close on outside click
   useEffect(() => {
     if (!isOpen) return;
-
-    const handleClickOutside = (e: MouseEvent) => {
-      if (bellRef.current && !bellRef.current.contains(e.target as Node)) {
-        setIsOpen(false);
-      }
+    const handler = (e: MouseEvent) => {
+      if (bellRef.current && !bellRef.current.contains(e.target as Node)) setIsOpen(false);
     };
-
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
   }, [isOpen]);
 
-  // Close panel on Escape key
+  // Close on Escape
   useEffect(() => {
     if (!isOpen) return;
-
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setIsOpen(false);
-      }
-    };
-
-    document.addEventListener('keydown', handleEscape);
-    return () => document.removeEventListener('keydown', handleEscape);
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') setIsOpen(false); };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
   }, [isOpen]);
 
-  const badgeCount = unreadCount <= 9 ? unreadCount.toString() : '9+';
+  const badgeCount = totalCount <= 9 ? totalCount.toString() : '9+';
 
   return (
-    <div
-      ref={bellRef}
-      style={{
-        position: 'relative',
-        display: 'inline-block',
-      }}
-    >
+    <div ref={bellRef} style={{ position: 'relative', display: 'inline-block' }}>
       <button
         onClick={() => setIsOpen(!isOpen)}
         style={{
@@ -85,21 +133,16 @@ export default function NotificationBell({ workspaceId }: NotificationBellProps)
           justifyContent: 'center',
           transition: 'background 0.15s',
         }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.background = colors.surfaceHover;
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.background = 'transparent';
-        }}
+        onMouseEnter={(e) => { e.currentTarget.style.background = colors.surfaceHover; }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
         aria-label="Notifications"
       >
-        {/* Bell Icon SVG */}
         <svg
           width="20"
           height="20"
           viewBox="0 0 24 24"
           fill="none"
-          stroke={unreadCount > 0 ? colors.text : colors.textMuted}
+          stroke={totalCount > 0 ? colors.text : colors.textMuted}
           strokeWidth="2"
           strokeLinecap="round"
           strokeLinejoin="round"
@@ -109,8 +152,7 @@ export default function NotificationBell({ workspaceId }: NotificationBellProps)
           <path d="M13.73 21a2 2 0 0 1-3.46 0" />
         </svg>
 
-        {/* Unread Badge */}
-        {unreadCount > 0 && (
+        {totalCount > 0 && (
           <div
             style={{
               position: 'absolute',
@@ -119,7 +161,7 @@ export default function NotificationBell({ workspaceId }: NotificationBellProps)
               minWidth: 16,
               height: 16,
               padding: '0 4px',
-              background: colors.red,
+              background: actionItems.length > 0 && unreadCount === 0 ? '#f59e0b' : colors.red,
               borderRadius: 8,
               display: 'flex',
               alignItems: 'center',
@@ -145,6 +187,7 @@ export default function NotificationBell({ workspaceId }: NotificationBellProps)
           onMarkRead={markRead}
           onMarkAllRead={markAllRead}
           onClose={() => setIsOpen(false)}
+          actionItems={actionItems}
         />
       )}
 

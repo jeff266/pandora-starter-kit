@@ -5,6 +5,17 @@ import { Notification } from '../../hooks/useNotifications';
 import { timeAgo } from '../../utils/time';
 import { Icon, type IconName } from '../icons';
 
+export interface ActionItem {
+  id: string;
+  icon: string;
+  accentColor: string;
+  title: string;
+  body: string;
+  actionLabel: string;
+  onAction: () => void;
+  onDismiss: () => void;
+}
+
 interface NotificationPanelProps {
   notifications: Notification[];
   unreadCount: number;
@@ -13,6 +24,7 @@ interface NotificationPanelProps {
   onMarkRead: (id: string) => void;
   onMarkAllRead: () => void;
   onClose: () => void;
+  actionItems?: ActionItem[];
 }
 
 export default function NotificationPanel({
@@ -23,6 +35,7 @@ export default function NotificationPanel({
   onMarkRead,
   onMarkAllRead,
   onClose,
+  actionItems = [],
 }: NotificationPanelProps) {
   const navigate = useNavigate();
 
@@ -134,6 +147,68 @@ export default function NotificationPanel({
           </button>
         )}
       </div>
+
+      {/* Action items (pinned prompts) */}
+      {actionItems.length > 0 && (
+        <div style={{ borderBottom: `1px solid ${colors.border}` }}>
+          {actionItems.map((item) => (
+            <div
+              key={item.id}
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 10,
+                padding: '12px 16px',
+                background: `${item.accentColor}0d`,
+                borderLeft: `3px solid ${item.accentColor}`,
+              }}
+            >
+              <span style={{ fontSize: 14, flexShrink: 0, marginTop: 1 }}>{item.icon}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: colors.text, marginBottom: 2 }}>
+                  {item.title}
+                </div>
+                <div style={{ fontSize: 12, color: colors.textSecondary, lineHeight: 1.4, marginBottom: 6 }}>
+                  {item.body}
+                </div>
+                <button
+                  onClick={item.onAction}
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: item.accentColor,
+                    background: 'transparent',
+                    border: 'none',
+                    padding: 0,
+                    cursor: 'pointer',
+                    fontFamily: fonts.sans,
+                    textDecoration: 'underline',
+                    textUnderlineOffset: 2,
+                  }}
+                >
+                  {item.actionLabel} →
+                </button>
+              </div>
+              <button
+                onClick={item.onDismiss}
+                title="Dismiss"
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  fontSize: 16,
+                  color: colors.textMuted,
+                  cursor: 'pointer',
+                  padding: '0 2px',
+                  lineHeight: 1,
+                  flexShrink: 0,
+                }}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* List */}
       <div
