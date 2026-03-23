@@ -20,6 +20,8 @@ import * as taskTools from '../tools/task-query.js';
 import * as documentTools from '../tools/document-query.js';
 import { generatePipelineSnapshot } from '../analysis/pipeline-snapshot.js';
 import { computeFields } from '../computed-fields/engine.js';
+import { getDefaultDimension } from '../lib/data-dictionary.js';
+import { executeDimension, executeDefaultDimension } from '../lib/dimension-executor.js';
 import { resolveOwnerNames, resolveOwnerName } from '../utils/owner-resolver.js';
 import {
   aggregateBy,
@@ -957,6 +959,25 @@ const computePipelineCoverage: ToolDefinition = {
       const staleDays = params.staleDaysThreshold || staleThreshold.warning;
       const snapshot = await generatePipelineSnapshot(context.workspaceId, params.quota, staleDays);
 
+      // Attempt to use a calibrated dimension for the pipeline total
+      let dimensionResult: Awaited<ReturnType<typeof executeDefaultDimension>> | null = null;
+      let calibrated = false;
+      let dimensionKey = 'active_pipeline';
+      let dimensionLabel = 'Active Pipeline (default)';
+      try {
+        const defaultDim = await getDefaultDimension(context.workspaceId);
+        if (defaultDim?.confirmed) {
+          dimensionResult = await executeDimension(context.workspaceId, defaultDim, { includeQuota: true });
+          calibrated = true;
+          dimensionKey = dimensionResult.dimension_key;
+          dimensionLabel = dimensionResult.dimension_label;
+        } else {
+          dimensionResult = await executeDefaultDimension(context.workspaceId);
+        }
+      } catch (dimErr: any) {
+        console.log('[computePipelineCoverage] Dimension executor error, using snapshot fallback:', dimErr.message);
+      }
+
       // Load ICP scores for all open deals
       const icpResult = await query(
         `SELECT ls.score_grade, d.amount, d.id, d.stage_normalized, d.last_activity_date
@@ -971,7 +992,17 @@ const computePipelineCoverage: ToolDefinition = {
       const hasIcpScores = icpResult.rows.length > 0;
 
       if (!hasIcpScores) {
-        return { ...snapshot, icpSummary: null };
+        return {
+          ...snapshot,
+          icpSummary: null,
+          ...(dimensionResult ? {
+            open_pipeline: dimensionResult.total_value,
+            dealCount:     dimensionResult.deal_count,
+          } : {}),
+          dimension_key:   dimensionKey,
+          dimension_label: dimensionLabel,
+          calibrated,
+        };
       }
 
       // Build ICP quality summary
@@ -1031,7 +1062,17 @@ const computePipelineCoverage: ToolDefinition = {
         ? Math.round(((icpSummary.by_grade.D.value + icpSummary.by_grade.F.value) / totalValue) * 100)
         : 0;
 
-      return { ...snapshot, icpSummary };
+      return {
+        ...snapshot,
+        icpSummary,
+        ...(dimensionResult ? {
+          open_pipeline: dimensionResult.total_value,
+          dealCount:     dimensionResult.deal_count,
+        } : {}),
+        dimension_key:   dimensionKey,
+        dimension_label: dimensionLabel,
+        calibrated,
+      };
     }, params);
   },
 };
@@ -3088,6 +3129,20 @@ const forecastRollup: ToolDefinition = {
     return safeExecute('forecastRollup', async () => {
       const nameMap = await resolveOwnerNames(context.workspaceId);
 
+      // Resolve calibrated pipeline dimension totals and quota if available
+      let calibratedPipelineTotal: number | undefined;
+      let calibratedQuota: number | undefined;
+      try {
+        const defaultDim = await getDefaultDimension(context.workspaceId);
+        if (defaultDim?.confirmed) {
+          const dimResult = await executeDimension(context.workspaceId, defaultDim, { includeQuota: true });
+          calibratedPipelineTotal = dimResult.total_value;
+          calibratedQuota = dimResult.quota;
+        }
+      } catch (dimErr: any) {
+        console.log('[forecastRollup] Dimension executor error, using standard forecast logic:', dimErr.message);
+      }
+
       // Load forecast-eligible and non-forecast-eligible pipelines
       const forecastPipelines = await configLoader.getForecastPipelines(context.workspaceId);
       const nonForecastPipelines = await configLoader.getNonForecastPipelines(context.workspaceId);
@@ -3199,7 +3254,9 @@ const forecastRollup: ToolDefinition = {
       const closedWon = Math.max(categories.closed.amount, stageClosedWon);
       const commit = categories.commit.amount;
       const bestCase = categories.best_case.amount;
-      const pipelineAmt = categories.pipeline.amount;
+      // When a calibrated dimension is confirmed, use its total as the authoritative pipeline total.
+      // The forecast-category aggregation still powers rep breakdowns and behavioral analysis.
+      const pipelineAmt = calibratedPipelineTotal ?? categories.pipeline.amount;
 
       // CRM category sums (kept as raw reference values)
       const crmBearCase = closedWon + commit;
@@ -3315,7 +3372,8 @@ const forecastRollup: ToolDefinition = {
       }
 
       const quotaConfig = (context.stepResults as any).quota_config;
-      const teamQuota = quotaConfig?.teamQuota ?? null;
+      // Use calibrated quota from dimension when available; fall back to workspace quota config.
+      const teamQuota = calibratedQuota ?? quotaConfig?.teamQuota ?? null;
       const repQuotas = quotaConfig?.repQuotas ?? null;
 
       const byRep = Array.from(repMap.entries()).map(([name, data]) => {
