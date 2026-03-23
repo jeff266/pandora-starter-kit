@@ -697,7 +697,7 @@ router.post('/:workspaceId/dimensions/copy-from', requireWorkspaceAccess, async 
       `SELECT 1 FROM user_workspaces
        WHERE user_id = $1 AND workspace_id = $2
        LIMIT 1`,
-      [req.user?.id, source_workspace_id]
+      [req.user?.user_id, source_workspace_id]
     );
 
     if (sourceAccess.rows.length === 0) {
