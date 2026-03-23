@@ -2310,7 +2310,7 @@ function ReportSection({ section, isCollapsed, onToggle, anonymizeMode, workspac
 
                 // Prefer structured actions from section data; fall back to inline-parsed ones
                 const actionList =
-                  (section.actions && section.actions.length > 0 ? section.actions as unknown as ActionItem[] : null) ??
+                  (section.actions && section.actions.length > 0 ? section.actions : null) ??
                   (section.action_items && section.action_items.length > 0 ? section.action_items : null) ??
                   (parsedInlineActions.length > 0 ? parsedInlineActions : null);
 
