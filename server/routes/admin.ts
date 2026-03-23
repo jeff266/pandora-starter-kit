@@ -114,4 +114,103 @@ router.post(
   }
 );
 
+// Backfill: strip <actions> blocks from existing report_documents sections and
+// store the parsed action objects in section.action_items
+router.post(
+  '/:workspaceId/admin/backfill-actions',
+  requirePermission('config.view'),
+  async (req: Request, res: Response) => {
+    const workspaceId = req.params.workspaceId as string;
+    try {
+      // Only fetch documents that actually contain <actions> text
+      const docsResult = await query(
+        `SELECT id, sections
+         FROM report_documents
+         WHERE workspace_id = $1
+           AND sections::text LIKE '%<actions>%'`,
+        [workspaceId]
+      );
+
+      if (docsResult.rows.length === 0) {
+        res.json({ success: true, processed: 0, sections_updated: 0, skipped: 0, message: 'No documents with <actions> blocks found.' });
+        return;
+      }
+
+      const VALID_URGENCY = new Set(['today', 'this_week', 'this_month']);
+      let processed = 0;
+      let sectionsUpdated = 0;
+      let skipped = 0;
+
+      for (const doc of docsResult.rows) {
+        const sections: any[] = Array.isArray(doc.sections) ? doc.sections : [];
+        let docModified = false;
+
+        const updatedSections = sections.map((section: any) => {
+          const content: string = typeof section.content === 'string' ? section.content : '';
+          if (!content.includes('<actions>')) return section;
+
+          // Extract all <actions>...</actions> blocks from the content
+          const capturedBlocks: string[] = [];
+          const cleanedContent = content
+            .replace(/<actions>([\s\S]*?)<\/actions>/g, (_m: string, inner: string) => {
+              capturedBlocks.push(inner.trim());
+              return '';
+            })
+            .trim();
+
+          if (capturedBlocks.length === 0) return section;
+
+          // Parse each captured block into ActionItem shape
+          const parsedActions: any[] = [];
+          for (const raw of capturedBlocks) {
+            try {
+              const arr = JSON.parse(raw);
+              if (!Array.isArray(arr)) continue;
+              for (const a of arr) {
+                const actionText: string = a.title || a.action || a.summary || '';
+                if (!actionText) continue;
+                const urgency = VALID_URGENCY.has(a.urgency) ? a.urgency : 'this_week';
+                const item: Record<string, string> = { action: actionText, owner: a.owner_email || a.owner || a.rep_name || '', urgency };
+                if (a.target_deal_name || a.related_deal) {
+                  item.related_deal = a.target_deal_name || a.related_deal;
+                }
+                parsedActions.push(item);
+              }
+            } catch {
+              // Malformed JSON block — skip silently
+            }
+          }
+
+          // Merge with existing action_items, deduplicating by action text
+          const existing: any[] = Array.isArray(section.action_items) ? section.action_items : [];
+          const existingTexts = new Set(existing.map((a: any) => a.action));
+          const merged = [...existing, ...parsedActions.filter(a => !existingTexts.has(a.action))];
+
+          docModified = true;
+          sectionsUpdated++;
+
+          return { ...section, content: cleanedContent, action_items: merged };
+        });
+
+        if (!docModified) {
+          skipped++;
+          continue;
+        }
+
+        await query(
+          `UPDATE report_documents SET sections = $1::jsonb WHERE id = $2`,
+          [JSON.stringify(updatedSections), doc.id]
+        );
+        processed++;
+      }
+
+      console.log(`[Admin] Backfill actions: ${processed} docs updated, ${sectionsUpdated} sections cleaned, ${skipped} skipped`);
+      res.json({ success: true, processed, sections_updated: sectionsUpdated, skipped });
+    } catch (err: any) {
+      console.error('[Admin] Backfill actions failed:', err?.message);
+      res.status(500).json({ error: 'Backfill failed', message: err?.message });
+    }
+  }
+);
+
 export default router;
