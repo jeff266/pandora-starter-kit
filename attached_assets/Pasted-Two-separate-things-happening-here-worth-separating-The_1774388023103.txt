@@ -1,0 +1,152 @@
+Two separate things happening here worth separating:
+
+**The good news:** It IS advancing. The first answer (closed_lost) moved it from 7 stages to 6 and asked about closed_won. The state machine is working. The "Noted." on the second answer is the same intermittent fallthrough — it saved the mapping but didn't build the next prompt that turn. The fix prompt already sent to Replit covers this.
+
+**The tabular format question — yes, absolutely.**
+
+Asking about one stage per turn when there are 7 unmapped stages means 7 back-and-forth exchanges just to get through stage mapping. That's exhausting. The better UX is to show all unmapped stages at once in a confirmation table, let the user correct the ones that are wrong, and confirm the rest in one shot.
+
+The ideal first message:
+```
+I found 7 stages I need to map. Here's my best 
+guess for each — correct anything that's wrong:
+
+Stage          Guess          Deals    Value
+─────────────────────────────────────────────
+closed_lost    Closed Lost    227      $2.7M
+closed_won     Closed Won     122      $3.3M
+new_business   Prospecting    45       $890K
+...
+
+Any of these wrong? Tell me which ones to fix,
+or say "looks right" to confirm all.
+```
+
+One message, one response, done. Then move to active pipeline.Send this to Replit — combines both the self-advance fix and the table format:
+
+```
+# Calibration Interview: Two fixes in one build
+
+## Fix 1 — Stage mapping: show all stages at once
+
+File: server/lib/stage-mapping-interview.ts
+
+Currently: buildStageMappingQuestion() asks about
+ONE unmapped stage per turn. With 7 stages this
+means 7 exchanges just for stage mapping.
+
+Change to: show ALL unmapped stages in a single
+table on the first question, with Pandora's best
+guess for each. User corrects wrong ones or
+confirms all in one reply.
+
+```typescript
+// Build the full stage table prompt:
+function buildStageMappingTablePrompt(
+  unmappedStages: UnmappedStage[],
+  knownFunnelPositions: string[]
+): string {
+  const rows = unmappedStages
+    .map(s => {
+      const guess = inferStageMapping(s.name)
+      const dealCount = s.deal_count.toLocaleString()
+      const value = formatCurrency(s.total_value)
+      return `${s.name} | ${guess} | ${dealCount} | ${value}`
+    })
+    .join('\n')
+
+  return `I found ${unmappedStages.length} stages ` +
+    `I need to map. Here's my best guess for each — ` +
+    `correct anything that's wrong:\n\n` +
+    `Stage | My Guess | Deals | Value\n` +
+    `${'─'.repeat(60)}\n` +
+    `${rows}\n\n` +
+    `Your funnel order: ` +
+    `${knownFunnelPositions.join(' → ')}\n\n` +
+    `Any of these wrong? Tell me which ones to fix, ` +
+    `or say "looks right" to confirm all.`
+}
+```
+
+When the user responds, parse their answer:
+- "looks right" or "all correct" → confirm all
+  mappings as-is, advance to next step
+- Corrections like "deal_value_1 is actually
+  Evaluation not Demo" → update that one,
+  re-show the table with the correction applied,
+  ask again if anything else needs fixing
+- Once all confirmed → advance to active_pipeline
+
+## Fix 2 — Self-advance: ask the next question
+## in the same turn
+
+File: server/chat/orchestrator.ts
+
+The calibration branch currently calls
+advanceInterview() to save an answer, but then
+returns the LLM's raw acknowledgment ("Noted.")
+without asking the next question.
+
+After advanceInterview() saves an answer,
+immediately call buildInterviewPrompt() for the
+NEXT step and return that as the response.
+
+The pattern:
+
+```typescript
+// In the calibration routing branch,
+// when a user is answering a calibration question:
+
+// 1. Parse their answer
+const parsed = await parseCalibrationAnswer(
+  workspaceId, message, currentState
+)
+
+// 2. Save and advance
+await advanceInterview(workspaceId, parsed)
+
+// 3. Get the next question immediately
+const nextState = await getInterviewState(workspaceId)
+const nextPrompt = await buildInterviewPrompt(
+  workspaceId,
+  nextState,
+  conversationHistory
+)
+
+// 4. Return next question as the response
+// The user never sees "Noted." — they see
+// the next question immediately
+if (nextPrompt) {
+  answer = nextPrompt
+} else {
+  // All steps complete
+  answer =
+    `All done. I've mapped your pipeline definitions. ` +
+    `Here's what I now know:\n\n` +
+    `[summary of confirmed definitions]\n\n` +
+    `Let me run your first analysis with these definitions.`
+}
+```
+
+The LLM should not be writing the "Noted."
+acknowledgment at all. The orchestrator controls
+the response. Remove any prompt instruction that
+tells the LLM to acknowledge before asking the
+next question.
+
+## Acceptance criteria
+
+1. Stage mapping shows ALL unmapped stages in a
+   single table on the first message
+2. "looks right" / "all correct" confirms all
+   mappings and advances to active_pipeline
+3. Corrections to specific stages update that
+   mapping and re-show the table
+4. After any confirmed answer, the NEXT question
+   appears in the same response — no "Noted."
+5. After all steps complete, a clear completion
+   summary is shown — not silence
+6. The completion message lists what Pandora
+   confirmed so the user knows calibration worked
+7. Zero TypeScript errors
+```
