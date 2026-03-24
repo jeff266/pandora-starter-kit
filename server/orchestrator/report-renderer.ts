@@ -648,7 +648,7 @@ export async function renderPdf(
   // so they must be restored here for inline rendering to work.
   for (const section of doc.sections) {
     if (!section.reasoning_tree?.length) continue;
-    const sectionCharts = pdfChartsBySection.get(section.id) || [];
+    const sectionCharts = pdfChartsBySection.get((section as any).section_id || section.id) || [];
     for (let i = 0; i < section.reasoning_tree.length; i++) {
       const node = section.reasoning_tree[i];
       if (node.chart_spec && sectionCharts[i]) {
@@ -669,9 +669,168 @@ export async function renderPdf(
        .text(section.title, 99, barY, { width: W - 9 });
     pdf.moveDown(0.5);
 
-    pdf.fillColor(hexToRgb(MID)).font('Helvetica').fontSize(10.5)
-       .text(section.content || '', { width: W, lineGap: 4 });
-    pdf.moveDown(1.8);
+    // Newer reports store body in `narrative` + structured fields (metrics, deal_cards,
+    // table, action_items). Fall back to plain `content` for legacy sections.
+    const s = section as any;
+    const bodyText: string = s.content || s.narrative || '';
+
+    if (bodyText) {
+      pdf.fillColor(hexToRgb(MID)).font('Helvetica').fontSize(10.5)
+         .text(bodyText, { width: W, lineGap: 4 });
+      pdf.moveDown(1.2);
+    }
+
+    // ── Metrics grid ────────────────────────────────────────────────────────
+    if (Array.isArray(s.metrics) && s.metrics.length > 0) {
+      const cols = Math.min(s.metrics.length, 3);
+      const cardW = (W - (cols - 1) * 10) / cols;
+      const cardH = 52;
+
+      for (let mi = 0; mi < s.metrics.length; mi += cols) {
+        if (pdf.y + cardH + 10 > pdf.page.height - 72) pdf.addPage();
+        const rowY = pdf.y;
+
+        for (let mj = 0; mj < cols && mi + mj < s.metrics.length; mj++) {
+          const m = s.metrics[mi + mj];
+          const mx = 90 + mj * (cardW + 10);
+
+          const bgColor = m.severity === 'critical' ? hexToRgb('#FEE2E2')
+            : m.severity === 'warning'  ? hexToRgb('#FEF3C7')
+            : m.severity === 'good'     ? hexToRgb('#D1FAE5')
+            : hexToRgb('#F8FAFC');
+          const barColor = m.severity === 'critical' ? hexToRgb('#DC2626')
+            : m.severity === 'warning'  ? hexToRgb('#D97706')
+            : m.severity === 'good'     ? hexToRgb('#16A34A')
+            : hexToRgb('#CBD5E1');
+
+          pdf.rect(mx, rowY, cardW, cardH).fill(bgColor);
+          pdf.rect(mx, rowY, 4, cardH).fill(barColor);
+          pdf.fillColor(hexToRgb('#64748B')).font('Helvetica').fontSize(7.5)
+             .text((m.label || '').toUpperCase(), mx + 10, rowY + 7, { width: cardW - 16 });
+          const valueText = m.delta
+            ? `${m.value}  ${m.delta_direction === 'up' ? '▲' : m.delta_direction === 'down' ? '▼' : '—'} ${m.delta}`
+            : (m.value || '');
+          const fgColor = m.severity === 'critical' ? hexToRgb('#B91C1C')
+            : m.severity === 'warning'  ? hexToRgb('#B45309')
+            : m.severity === 'good'     ? hexToRgb('#15803D')
+            : hexToRgb('#1E293B');
+          pdf.fillColor(fgColor).font('Helvetica-Bold').fontSize(15)
+             .text(valueText, mx + 10, rowY + 22, { width: cardW - 16 });
+        }
+
+        pdf.y = rowY + cardH + 8;
+      }
+      pdf.moveDown(0.8);
+    }
+
+    // ── Deal cards ──────────────────────────────────────────────────────────
+    if (Array.isArray(s.deal_cards) && s.deal_cards.length > 0) {
+      if (pdf.y > pdf.page.height - 100) pdf.addPage();
+      pdf.fillColor(hexToRgb(DARK)).font('Helvetica-Bold').fontSize(10.5)
+         .text('Deals Requiring Attention', 90, pdf.y, { width: W });
+      pdf.moveDown(0.4);
+
+      for (const card of (s.deal_cards as any[]).slice(0, 10)) {
+        const cardH = 50;
+        if (pdf.y + cardH + 6 > pdf.page.height - 72) pdf.addPage();
+        const cy = pdf.y;
+
+        const cbg = card.signal_severity === 'critical' ? hexToRgb('#FEE2E2')
+          : card.signal_severity === 'warning' ? hexToRgb('#FEF3C7')
+          : hexToRgb('#F8FAFC');
+        const cbar = card.signal_severity === 'critical' ? hexToRgb('#DC2626')
+          : card.signal_severity === 'warning' ? hexToRgb('#D97706')
+          : hexToRgb('#2563EB');
+
+        pdf.rect(90, cy, W, cardH).fill(cbg);
+        pdf.rect(90, cy, 4, cardH).fill(cbar);
+
+        pdf.fillColor(hexToRgb(DARK)).font('Helvetica-Bold').fontSize(10)
+           .text(card.name || '', 102, cy + 5, { width: W * 0.58 - 12 });
+        if (card.amount) {
+          const amtColor = card.signal_severity === 'critical' ? hexToRgb('#B91C1C')
+            : card.signal_severity === 'warning' ? hexToRgb('#B45309')
+            : hexToRgb('#1D4ED8');
+          pdf.fillColor(amtColor).font('Helvetica-Bold').fontSize(11)
+             .text(card.amount, 90 + W * 0.63, cy + 5, { width: W * 0.37 - 10, align: 'right' });
+        }
+
+        const meta = [card.owner, card.stage, card.signal].filter(Boolean).join(' · ');
+        pdf.fillColor(hexToRgb('#64748B')).font('Helvetica').fontSize(8)
+           .text(meta, 102, cy + 21, { width: W - 22 });
+
+        if (card.action) {
+          pdf.fillColor(hexToRgb(TEAL)).font('Helvetica').fontSize(8)
+             .text(`→ ${card.action}`, 102, cy + 35, { width: W - 22 });
+        }
+
+        pdf.y = cy + cardH + 5;
+      }
+      pdf.moveDown(0.8);
+    }
+
+    // ── Table ───────────────────────────────────────────────────────────────
+    if (s.table?.headers?.length && s.table?.rows?.length) {
+      if (pdf.y > pdf.page.height - 100) pdf.addPage();
+      const hdrs: string[] = s.table.headers;
+      const rows: any[]  = s.table.rows;
+      const colW = W / hdrs.length;
+      const rowH = 20;
+
+      // Header row
+      if (pdf.y + rowH * 2 > pdf.page.height - 72) pdf.addPage();
+      const hdrY = pdf.y;
+      pdf.rect(90, hdrY, W, rowH).fill(hexToRgb('#0F172A'));
+      hdrs.forEach((h, hi) => {
+        pdf.fillColor(hexToRgb('#FFFFFF')).font('Helvetica-Bold').fontSize(7.5)
+           .text(h, 90 + hi * colW + 4, hdrY + 5, { width: colW - 8, ellipsis: true, lineBreak: false });
+      });
+      pdf.y = hdrY + rowH;
+
+      for (let ri = 0; ri < Math.min(rows.length, 20); ri++) {
+        if (pdf.y + rowH > pdf.page.height - 72) pdf.addPage();
+        const ry = pdf.y;
+        const tbg = ri % 2 === 0 ? hexToRgb('#FFFFFF') : hexToRgb('#F8FAFC');
+        pdf.rect(90, ry, W, rowH).fill(tbg);
+        hdrs.forEach((h, hi) => {
+          const val = rows[ri][h] ?? '';
+          pdf.fillColor(hexToRgb('#374151')).font('Helvetica').fontSize(8)
+             .text(String(val), 90 + hi * colW + 4, ry + 5, { width: colW - 8, ellipsis: true, lineBreak: false });
+        });
+        pdf.y = ry + rowH;
+      }
+      pdf.moveDown(0.8);
+    }
+
+    // ── Action items ────────────────────────────────────────────────────────
+    if (Array.isArray(s.action_items) && s.action_items.length > 0) {
+      if (pdf.y > pdf.page.height - 100) pdf.addPage();
+      pdf.fillColor(hexToRgb(DARK)).font('Helvetica-Bold').fontSize(10.5)
+         .text('Action Items', 90, pdf.y, { width: W });
+      pdf.moveDown(0.4);
+
+      const urgColors: Record<string, string> = {
+        today: '#DC2626', this_week: '#D97706', this_month: '#16A34A',
+      };
+
+      for (const ai of (s.action_items as any[]).slice(0, 15)) {
+        if (pdf.y + 18 > pdf.page.height - 72) pdf.addPage();
+        const aiy = pdf.y;
+        const dotC = hexToRgb(urgColors[ai.urgency] || '#64748B');
+        pdf.circle(99, aiy + 5, 3.5).fill(dotC);
+        pdf.fillColor(hexToRgb('#1E293B')).font('Helvetica').fontSize(9.5)
+           .text(ai.action || '', 108, aiy, { width: W - 100, lineGap: 2 });
+        if (ai.owner) {
+          pdf.fillColor(hexToRgb('#64748B')).font('Helvetica').fontSize(8.5)
+             .text(ai.owner, 90 + W - 90, aiy, { width: 90, align: 'right' });
+        }
+        pdf.y = Math.max(pdf.y, aiy + 16);
+        pdf.moveDown(0.15);
+      }
+      pdf.moveDown(0.6);
+    }
+
+    pdf.moveDown(0.6);
 
     // Render reasoning tree (McKinsey-style reasoning layers)
     if (section.reasoning_tree?.length) {
@@ -753,7 +912,7 @@ export async function renderPdf(
 
     // Embed section-level charts — skip if inline charts already rendered via reasoning_tree
     const hasInlineCharts = section.reasoning_tree?.some((n: any) => n.chart_png);
-    const pdfSectionCharts = hasInlineCharts ? [] : (pdfChartsBySection.get(section.id) || []);
+    const pdfSectionCharts = hasInlineCharts ? [] : (pdfChartsBySection.get((section as any).section_id || section.id) || []);
     for (const chart of pdfSectionCharts) {
       if (chart.chart_png) {
         if (pdf.y > pdf.page.height - 300) pdf.addPage();
