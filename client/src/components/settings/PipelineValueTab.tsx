@@ -242,7 +242,7 @@ export default function PipelineValueTab() {
   return (
     <div style={{ maxWidth: 800 }}>
       <h1 style={{ fontSize: 20, fontWeight: 700, color: colors.text, margin: '0 0 6px', fontFamily: fonts.sans }}>
-        Pipeline Value Field
+        Pipeline Config
       </h1>
       <p style={{ fontSize: 13, color: colors.textSecondary, marginBottom: 28, fontFamily: fonts.sans }}>
         Configure which CRM field represents deal value for each pipeline. Skills use this when

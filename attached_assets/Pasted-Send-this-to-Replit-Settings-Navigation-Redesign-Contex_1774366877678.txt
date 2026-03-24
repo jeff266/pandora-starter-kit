@@ -1,0 +1,320 @@
+Send this to Replit:
+
+```
+# Settings Navigation Redesign
+
+## Context
+
+Full audit of all 25 settings tabs is complete.
+This build restructures the nav into four labeled
+sections, fixes bugs discovered during the audit,
+and resolves two duplicate-input problems.
+
+## Before Starting
+
+Read these files:
+
+1. client/src/components/settings/SettingsNav.tsx
+   Full file. Show how sections/groups are currently
+   defined and how admin-only items are gated.
+
+2. client/src/pages/SettingsPage.tsx
+   Show renderTabContent() and the full tab routing
+   switch. Note every case and what component it
+   renders.
+
+3. client/src/components/settings/SetupChecklistTab.tsx
+   (or wherever Setup Guide renders). Show all 9
+   checklist items and how completion state is
+   determined per item.
+
+4. client/src/components/settings/AIKeysTab.tsx
+   Find the Anthropic/Claude provider card. Show
+   what field/endpoint it saves the key to.
+
+5. client/src/components/settings/ClaudeIntegrationTab.tsx
+   Find the API Key section. Show what field/endpoint
+   it saves to. Confirm whether it is the same field
+   as AIKeysTab or different.
+
+6. client/src/components/settings/AgenticActionsTab.tsx
+   Find the Audit Webhook field (URL input for
+   receiving POST events). Show exactly how it
+   is currently rendered.
+
+7. Find the Dimensions tab component — could be
+   DimensionsTab.tsx, SegmentsTab.tsx, or similar.
+   Confirm the "Create Dimension Group" button has
+   an empty onClick.
+
+Report findings then build.
+
+---
+
+## Part 1 — Four-Section Nav Structure
+
+Restructure SettingsNav.tsx into four labeled sections.
+
+```
+ACCOUNT
+  Profile
+  Security
+  Preferences
+  Workspaces
+
+CONNECT
+  Connectors
+  Connector Health
+  CRM Sync
+  Deal Fields
+  Webhooks
+  Claude
+
+CONFIGURE
+  Setup Guide       ← amber badge showing steps remaining
+  Calibration
+  Sales Roster
+  Targets
+  Pipeline Config
+  Methodology
+  Automations
+  Agentic Actions
+  Segments          ← renamed from Dimensions
+  Notifications
+
+MANAGE
+  Members
+  Roles
+  Features
+  AI Keys
+  Token Usage
+  Billing
+```
+
+### Section label styling
+
+```typescript
+// Section label above each group:
+// 10px, uppercase, letter-spacing: 0.08em
+// color: var(--color-text-secondary)
+// margin-top: 20px (first section: 0)
+// margin-bottom: 6px
+// padding-left: match existing item indent
+```
+
+### Setup Guide nav badge
+
+Fetch GET /api/workspaces/:id/calibration-status
+on SettingsNav mount (or reuse if already fetched
+elsewhere in the settings shell).
+
+If calibration_status !== 'complete':
+Show a small amber dot badge on the Setup Guide
+nav item — same size and style as any existing
+notification badges in the nav.
+
+If all steps complete:
+Show a small teal ✓ mark inline after the label.
+Or just the plain label with no badge.
+
+---
+
+## Part 2 — Setup Guide Updates
+
+File: SetupChecklistTab.tsx (or equivalent)
+
+### Add step 10: Calibrate your pipeline definitions
+
+Add as the last checklist item:
+
+```
+Step 10: Calibrate your pipeline definitions
+
+Define how your team measures pipeline, coverage,
+and win rate so every Pandora number matches your
+CRM reports.
+
+[Start calibration →]
+```
+
+Button navigates to /settings/calibration.
+
+Mark as complete when calibration_status === 'complete'
+(read from the same calibration-status API call).
+
+### Completion state
+
+When all 10 steps are complete, replace the checklist
+with a completion state:
+
+```
+✓  Setup complete
+
+Your workspace is fully configured. Pandora is
+ready to work.
+
+[View your pipeline →]    [Adjust settings →]
+```
+
+"View your pipeline" → navigates to /
+"Adjust settings" → stays on settings, dismisses
+the completion card and shows the normal nav
+
+Keep the checklist accessible via a small
+"Review setup steps ↓" link below the completion
+card for users who want to revisit.
+
+---
+
+## Part 3 — Rename Dimensions → Segments
+
+Global rename throughout settings UI only.
+Do NOT rename anything in the database, API routes,
+or backend code — this is UI text only.
+
+Changes:
+1. SettingsNav.tsx — nav item label: "Segments"
+2. SettingsPage.tsx — add case 'segments' that
+   renders the same component as 'dimensions'.
+   Keep case 'dimensions' working as a redirect:
+   ```typescript
+   case 'dimensions':
+     // redirect to segments
+     navigate('/settings/segments', { replace: true })
+     return null
+   case 'segments':
+     return <DimensionsTab />
+     // (don't rename the component file —
+     //  just add the new route alias)
+   ```
+3. Inside the DimensionsTab component:
+   - h1/page heading → "Segments"
+   - Any "Dimension Group" labels → "Segment Group"
+   - "Create Dimension Group" button → "Create Segment"
+   - All body text referencing "dimensions" →
+     "segments" where it refers to this feature
+   - Do NOT change references to "business dimensions"
+     or the calibration system — only this tab's UI
+
+---
+
+## Part 4 — Consolidate Anthropic API Key
+
+Currently Anthropic key appears in two places.
+Before making UI changes, check if AIKeysTab and
+ClaudeIntegrationTab save to the same field.
+
+IF they save to the same field:
+- In AIKeysTab: replace the Anthropic provider card
+  with a simple link row:
+
+```
+┌─────────────────────────────────────────────────┐
+│  Anthropic / Claude                             │
+│  API key configured in the Claude tab           │
+│                              [Go to Claude →]   │
+└─────────────────────────────────────────────────┘
+```
+
+Same card visual as existing provider cards but
+no key input — just the label and a link.
+[Go to Claude →] navigates to /settings/claude.
+
+IF they save to different fields:
+- Consolidate writes: make AIKeysTab write to the
+  same field as ClaudeIntegrationTab
+- Then apply the UI change above
+- Note which field was canonical and which was
+  redundant in the commit message
+
+---
+
+## Part 5 — Fix Agentic Actions Audit Webhook
+
+File: AgenticActionsTab.tsx
+
+Find the Audit Webhook URL input field.
+Replace it with a reference card:
+
+```
+┌─────────────────────────────────────────────────┐
+│  Audit webhook                                  │
+│  Agentic action events are delivered via        │
+│  Pandora's webhook system.                      │
+│                                                 │
+│              [Configure in Webhooks →]          │
+└─────────────────────────────────────────────────┘
+```
+
+Button navigates to /settings/webhooks.
+
+Keep all other Agentic Actions controls unchanged.
+
+---
+
+## Part 6 — Fix Pipeline Config Label Mismatch
+
+File: wherever Pipeline Config tab renders
+(PipelineValueTab.tsx or similar)
+
+The nav says "Pipeline Config" but the h1 inside
+says "Pipeline Value Field."
+
+Fix: change the page h1 to "Pipeline Config".
+Update the subtitle/description if needed to
+reflect that this covers pipeline value field
+configuration (keep the content accurate — just
+fix the label mismatch).
+
+---
+
+## Part 7 — Remove Preferences Notification Stub
+
+File: PreferencesTab.tsx
+
+Find the "Notification Preferences" section —
+a greyed-out card labeled "Coming Soon" with no
+interactive elements.
+
+Remove the entire section. Do not replace it with
+anything. The Fiscal Year and Anonymize Output
+sections above it remain unchanged.
+
+---
+
+## Acceptance Criteria
+
+1. Settings nav has four labeled sections:
+   ACCOUNT, CONNECT, CONFIGURE, MANAGE
+2. All 25 tabs appear exactly once in the correct
+   section — none missing, none duplicated
+3. Section labels: 10px, uppercase, letter-spacing
+   0.08em, muted color, correct spacing
+4. Setup Guide shows amber dot badge on nav item
+   when calibration_status !== 'complete'
+5. Setup Guide shows teal ✓ when all steps done
+6. Setup Guide has a 10th step for Calibration
+7. Calibration step marked complete when
+   calibration_status === 'complete'
+8. Setup Guide shows completion card when all
+   10 steps done
+9. "Review setup steps" link available in
+   completion state
+10. Nav item "Dimensions" renamed to "Segments"
+11. /settings/dimensions redirects to
+    /settings/segments (no broken routes)
+12. Page heading inside the tab reads "Segments"
+13. All "Dimension Group" UI text → "Segment"
+    within that tab
+14. AI Keys tab Anthropic card shows link to
+    Claude tab instead of key input
+15. Both tabs read/write the same underlying
+    field after consolidation
+16. Agentic Actions audit webhook replaced with
+    link card to /settings/webhooks
+17. Pipeline Config page h1 matches nav label
+18. Preferences "Coming Soon" stub removed
+19. All existing /settings/:tab routes still work
+20. No TypeScript errors
+21. No visual regression on any tab's content
+```

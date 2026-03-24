@@ -44,10 +44,9 @@ export default function DimensionBuilder() {
     setLoading(true);
     try {
       const res = await api.get('/filters/dimensions');
-      // The endpoint returns dimensions in a format we can use
       setDimensions(res.dimensions || []);
     } catch (err: any) {
-      setError(err.message || 'Failed to load dimensions');
+      setError(err.message || 'Failed to load segments');
     } finally {
       setLoading(false);
     }
@@ -61,7 +60,7 @@ export default function DimensionBuilder() {
     <div style={{ padding: isMobile ? 16 : 32, maxWidth: 1000, margin: '0 auto', fontFamily: fonts.sans }}>
       <div style={{ marginBottom: 32 }}>
         <h1 style={{ fontSize: 24, fontWeight: 700, color: colors.text, margin: '0 0 8px' }}>
-          Dimension Builder
+          Segments
         </h1>
         <p style={{ fontSize: 14, color: colors.textSecondary, maxWidth: 600 }}>
           Define high-level business segments (like Region or Customer Tier) that the AI can use to filter and group data.
@@ -75,7 +74,7 @@ export default function DimensionBuilder() {
       )}
 
       {loading ? (
-        <div style={{ color: colors.textSecondary }}>Loading dimensions...</div>
+        <div style={{ color: colors.textSecondary }}>Loading segments…</div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 32 }}>
           {dimensions.map(dim => (
@@ -84,10 +83,10 @@ export default function DimensionBuilder() {
 
           {dimensions.length === 0 && (
             <div style={{ padding: 48, textAlign: 'center', background: colors.surface, border: `1px dashed ${colors.border}`, borderRadius: 12 }}>
-              <p style={{ color: colors.textSecondary }}>No custom dimensions defined yet.</p>
+              <p style={{ color: colors.textSecondary }}>No segments defined yet.</p>
             </div>
           )}
-          
+
           <button
             style={{
               padding: '12px 24px',
@@ -97,11 +96,11 @@ export default function DimensionBuilder() {
               borderRadius: 8,
               fontWeight: 600,
               cursor: 'pointer',
-              alignSelf: 'flex-start'
+              alignSelf: 'flex-start',
             }}
-            onClick={() => {/* Open modal for new group */}}
+            onClick={() => {}}
           >
-            + Create Dimension Group
+            + Create Segment
           </button>
         </div>
       )}
@@ -110,7 +109,6 @@ export default function DimensionBuilder() {
 }
 
 function DimensionGroupCard({ dimension, onRefresh }: { dimension: DimensionGroup; onRefresh: () => void }) {
-  // Simplification for now, would need full implementation of adding/editing
   return (
     <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 12, overflow: 'hidden' }}>
       <div style={{ padding: '16px 20px', background: colors.surfaceRaised, borderBottom: `1px solid ${colors.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -132,9 +130,7 @@ function DimensionGroupCard({ dimension, onRefresh }: { dimension: DimensionGrou
               <tr key={opt.value} style={{ borderBottom: `1px solid ${colors.borderLight}` }}>
                 <td style={{ padding: '12px 20px', fontWeight: 500 }}>{opt.label}</td>
                 <td style={{ padding: '12px 20px', color: colors.textDim, fontFamily: fonts.mono }}>{opt.filter_id || 'builtin'}</td>
-                <td style={{ padding: '12px 20px' }}>
-                  {opt.usage_count || 0} times
-                </td>
+                <td style={{ padding: '12px 20px' }}>{opt.usage_count || 0} times</td>
                 <td style={{ padding: '12px 20px' }}>
                   <button style={{ background: 'none', border: 'none', color: colors.accent, cursor: 'pointer', fontSize: 12, marginRight: 12 }}>Edit</button>
                   <button style={{ background: 'none', border: 'none', color: colors.red, cursor: 'pointer', fontSize: 12 }}>Delete</button>

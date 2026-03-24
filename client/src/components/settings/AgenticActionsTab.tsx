@@ -455,71 +455,51 @@ export default function AgenticActionsTab() {
         />
       </div>
 
-      {/* Audit Webhook */}
-      <div style={{ marginBottom: 32 }}>
-        <h3 style={{ fontSize: 16, fontWeight: 600, color: colors.text, marginBottom: 16 }}>
-          Audit Webhook
-        </h3>
-
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, cursor: 'pointer' }}>
-          <input
-            type="checkbox"
-            checked={auditWebhookEnabled}
-            onChange={(e) => setAuditWebhookEnabled(e.target.checked)}
-            style={{ cursor: 'pointer' }}
-          />
-          <span style={{ fontSize: 14, color: colors.text }}>
-            Enable audit webhook
-          </span>
-        </label>
-
-        <div style={{ marginBottom: 12 }}>
-          <label style={{ fontSize: 13, color: colors.textSecondary, display: 'block', marginBottom: 6 }}>
-            Webhook URL
-          </label>
-          <input
-            type="url"
-            value={auditWebhookUrl}
-            onChange={(e) => setAuditWebhookUrl(e.target.value)}
-            placeholder="https://your-endpoint.com/webhook"
-            disabled={!auditWebhookEnabled}
-            style={{
-              width: '100%',
-              padding: '10px 12px',
-              fontSize: 14,
-              fontFamily: fonts.mono,
-              color: colors.text,
-              background: colors.surface,
-              border: `1px solid ${colors.border}`,
-              borderRadius: 6,
-              opacity: auditWebhookEnabled ? 1 : 0.5,
-            }}
-          />
-        </div>
-
+      {/* Audit Webhook — managed in Webhooks settings */}
+      <div style={{
+        marginBottom: 32,
+        padding: '14px 16px',
+        borderRadius: 8,
+        background: colors.surface,
+        border: `1px solid ${colors.border}`,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 16,
+      }}>
         <div>
-          <label style={{ fontSize: 13, color: colors.textSecondary, display: 'block', marginBottom: 6 }}>
-            HMAC Secret
-          </label>
-          <input
-            type="password"
-            value={auditWebhookSecret}
-            onChange={(e) => setAuditWebhookSecret(e.target.value)}
-            placeholder="Your HMAC-SHA256 signing key"
-            disabled={!auditWebhookEnabled}
-            style={{
-              width: '100%',
-              padding: '10px 12px',
-              fontSize: 14,
-              fontFamily: fonts.mono,
-              color: colors.text,
-              background: colors.surface,
-              border: `1px solid ${colors.border}`,
-              borderRadius: 6,
-              opacity: auditWebhookEnabled ? 1 : 0.5,
-            }}
-          />
+          <div style={{ fontSize: 13, fontWeight: 600, color: colors.text, marginBottom: 3 }}>Audit Webhook</div>
+          <div style={{ fontSize: 12, color: colors.textMuted }}>
+            Configure audit webhook endpoints in the Webhooks settings page.
+          </div>
         </div>
+        <a
+          href="/settings/webhooks"
+          style={{
+            flexShrink: 0,
+            padding: '6px 14px',
+            fontSize: 12,
+            fontWeight: 600,
+            fontFamily: fonts.sans,
+            color: colors.accent,
+            border: `1px solid ${colors.accent}`,
+            borderRadius: 6,
+            background: colors.accentSoft,
+            textDecoration: 'none',
+            whiteSpace: 'nowrap',
+            transition: 'all 0.15s',
+          }}
+          onMouseEnter={e => {
+            (e.currentTarget as HTMLAnchorElement).style.background = colors.accent;
+            (e.currentTarget as HTMLAnchorElement).style.color = '#fff';
+          }}
+          onMouseLeave={e => {
+            (e.currentTarget as HTMLAnchorElement).style.background = colors.accentSoft;
+            (e.currentTarget as HTMLAnchorElement).style.color = colors.accent;
+          }}
+        >
+          Go to Webhooks →
+        </a>
       </div>
 
       {/* Save Button */}

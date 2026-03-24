@@ -357,7 +357,61 @@ export default function AIKeysTab() {
 
       {/* Provider key cards */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 40 }}>
-        {PROVIDERS.map(provider => {
+        {/* Anthropic — configured in Claude Integration tab */}
+        <div style={{
+          background: colors.surface,
+          border: `1px solid ${colors.border}`,
+          borderRadius: 8,
+          padding: '14px 18px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 16,
+        }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: colors.text }}>Anthropic</span>
+              {isConnected('anthropic') && (
+                <span style={{ fontSize: 9, color: colors.green, background: colors.greenSoft, padding: '2px 7px', borderRadius: 3, letterSpacing: '0.1em', fontWeight: 600 }}>
+                  CONNECTED
+                </span>
+              )}
+            </div>
+            <div style={{ fontSize: 12, color: colors.textMuted }}>
+              Anthropic (Claude) API key is configured in the Claude Integration settings.
+            </div>
+          </div>
+          <a
+            href="/settings/claude"
+            style={{
+              flexShrink: 0,
+              padding: '6px 14px',
+              fontSize: 12,
+              fontWeight: 600,
+              fontFamily: fonts.sans,
+              color: colors.accent,
+              border: `1px solid ${colors.accent}`,
+              borderRadius: 6,
+              background: colors.accentSoft,
+              textDecoration: 'none',
+              whiteSpace: 'nowrap',
+              transition: 'all 0.15s',
+            }}
+            onMouseEnter={e => {
+              (e.currentTarget as HTMLAnchorElement).style.background = colors.accent;
+              (e.currentTarget as HTMLAnchorElement).style.color = '#fff';
+            }}
+            onMouseLeave={e => {
+              (e.currentTarget as HTMLAnchorElement).style.background = colors.accentSoft;
+              (e.currentTarget as HTMLAnchorElement).style.color = colors.accent;
+            }}
+          >
+            Go to Claude →
+          </a>
+        </div>
+
+        {/* Other providers */}
+        {PROVIDERS.filter(p => p.key !== 'anthropic').map(provider => {
           const state = providers[provider.key];
           const connected = isConnected(provider.key);
           const isSaving = saving === provider.key;

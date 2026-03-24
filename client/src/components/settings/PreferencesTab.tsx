@@ -279,41 +279,6 @@ export default function PreferencesTab() {
         )}
       </div>
 
-      {/* SECTION 3: Coming Soon - Notification Preferences */}
-      <div
-        style={{
-          background: colors.surface,
-          border: `1px solid ${colors.border}`,
-          borderRadius: 8,
-          padding: 32,
-          opacity: 0.5,
-          cursor: 'not-allowed',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
-          <h2 style={{ fontSize: 16, fontWeight: 600, color: colors.textMuted }}>
-            Notification Preferences
-          </h2>
-          <span
-            style={{
-              fontSize: 11,
-              fontWeight: 600,
-              color: colors.textMuted,
-              background: colors.surfaceHover,
-              padding: '2px 8px',
-              borderRadius: 4,
-              textTransform: 'uppercase',
-              letterSpacing: '0.05em',
-            }}
-          >
-            Coming Soon
-          </span>
-        </div>
-        <p style={{ fontSize: 13, color: colors.textMuted, lineHeight: 1.6 }}>
-          Control which notifications you receive and how.
-        </p>
-      </div>
-
       {toast && (
         <Toast
           message={toast.message}

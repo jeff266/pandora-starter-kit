@@ -29,9 +29,9 @@ import ConnectorHealth from './ConnectorHealth';
 import PipelineValueTab from '../components/settings/PipelineValueTab';
 import CalibrationTab from '../components/settings/CalibrationTab';
 
-type SettingsTab = 'profile' | 'security' | 'preferences' | 'workspaces' | 'setup' | 'members' | 'sales-roster' | 'roles' | 'notifications' | 'features' | 'pipeline-config' | 'crm-sync' | 'deal-fields' | 'methodology' | 'automations' | 'agentic-actions' | 'webhooks' | 'billing' | 'dimensions' | 'token-usage' | 'ai-keys' | 'claude' | 'calibration' | 'connectors' | 'connectors-health';
+type SettingsTab = 'profile' | 'security' | 'preferences' | 'workspaces' | 'setup' | 'members' | 'sales-roster' | 'roles' | 'notifications' | 'features' | 'pipeline-config' | 'crm-sync' | 'deal-fields' | 'methodology' | 'automations' | 'agentic-actions' | 'webhooks' | 'billing' | 'dimensions' | 'segments' | 'token-usage' | 'ai-keys' | 'claude' | 'calibration' | 'connectors' | 'connectors-health';
 
-const adminTabs: SettingsTab[] = ['setup', 'members', 'sales-roster', 'roles', 'notifications', 'features', 'pipeline-config', 'crm-sync', 'deal-fields', 'methodology', 'automations', 'agentic-actions', 'webhooks', 'billing', 'dimensions', 'token-usage', 'ai-keys', 'claude', 'calibration', 'connectors', 'connectors-health'];
+const adminTabs: SettingsTab[] = ['setup', 'members', 'sales-roster', 'roles', 'notifications', 'features', 'pipeline-config', 'crm-sync', 'deal-fields', 'methodology', 'automations', 'agentic-actions', 'webhooks', 'billing', 'dimensions', 'segments', 'token-usage', 'ai-keys', 'claude', 'calibration', 'connectors', 'connectors-health'];
 
 export default function SettingsPage() {
   const { tab } = useParams<{ tab?: string }>();
@@ -49,6 +49,11 @@ export default function SettingsPage() {
   }, [currentWorkspace]);
 
   useEffect(() => {
+    // Redirect legacy 'dimensions' path to 'segments'
+    if (tab === 'dimensions') {
+      navigate('/settings/segments', { replace: true });
+      return;
+    }
     // Set active tab from URL param or default to profile
     if (tab && isValidTab(tab)) {
       setActiveTab(tab as SettingsTab);
@@ -58,7 +63,7 @@ export default function SettingsPage() {
   }, [tab, navigate]);
 
   const isValidTab = (tabKey: string): boolean => {
-    const validTabs: SettingsTab[] = ['profile', 'security', 'preferences', 'workspaces', 'setup', 'members', 'sales-roster', 'roles', 'notifications', 'features', 'pipeline-config', 'crm-sync', 'deal-fields', 'methodology', 'automations', 'agentic-actions', 'webhooks', 'billing', 'dimensions', 'token-usage', 'ai-keys', 'claude', 'calibration', 'connectors', 'connectors-health'];
+    const validTabs: SettingsTab[] = ['profile', 'security', 'preferences', 'workspaces', 'setup', 'members', 'sales-roster', 'roles', 'notifications', 'features', 'pipeline-config', 'crm-sync', 'deal-fields', 'methodology', 'automations', 'agentic-actions', 'webhooks', 'billing', 'dimensions', 'segments', 'token-usage', 'ai-keys', 'claude', 'calibration', 'connectors', 'connectors-health'];
     return validTabs.includes(tabKey as SettingsTab);
   };
 
@@ -109,7 +114,7 @@ export default function SettingsPage() {
         return isAdmin ? <WebhooksTab /> : null;
       case 'billing':
         return isAdmin ? <BillingTab /> : null;
-      case 'dimensions':
+      case 'segments':
         return isAdmin ? <DimensionBuilder /> : null;
       case 'token-usage':
         return isAdmin ? <TokenUsagePage /> : null;
