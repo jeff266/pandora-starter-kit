@@ -41,21 +41,32 @@ const DEFAULT_STALENESS: Record<string, number> = {
 };
 
 /**
+ * Skill evidence paired with the skill_runs.id that produced it.
+ * The run_id is used for Claim Provenance drill-through so the
+ * Evidence Drawer can load the exact run that backs each claim.
+ */
+export interface SkillEvidenceEntry {
+  output: SkillEvidence;
+  run_id: string;
+}
+
+/**
  * Gather fresh evidence for all skills in the list.
  * Uses cache if evidence is fresh enough, otherwise triggers new run.
+ * Returns a map of { output: SkillEvidence; run_id: string } per skill.
  */
 export async function gatherFreshEvidence(
   skillIds: string[],
   workspaceId: string,
   maxStaleness?: Record<string, number>
-): Promise<Record<string, SkillEvidence>> {
+): Promise<Record<string, SkillEvidenceEntry>> {
   logger.info('[EvidenceGatherer] Starting evidence gathering', {
     workspace_id: workspaceId,
     skill_count: skillIds.length,
     skills: skillIds,
   });
 
-  const evidence: Record<string, SkillEvidence> = {};
+  const evidence: Record<string, SkillEvidenceEntry> = {};
   const stalenessStats = {
     cached: 0,
     fresh_run: 0,
@@ -76,12 +87,13 @@ export async function gatherFreshEvidence(
       });
 
       if (hoursOld <= threshold && latest?.status === 'completed' && latest?.output) {
-        // Use cached evidence
-        evidence[skillId] = latest.output;
+        // Use cached evidence — carry the DB row id so callers can link claims
+        evidence[skillId] = { output: latest.output, run_id: latest.id };
         stalenessStats.cached++;
         logger.info('[EvidenceGatherer] Using cached evidence', {
           skill_id: skillId,
           age_hours: hoursOld,
+          run_id: latest.id,
         });
       } else {
         // Trigger fresh run
@@ -91,8 +103,8 @@ export async function gatherFreshEvidence(
         });
 
         const fresh = await runSkill(skillId, workspaceId);
-        if (fresh?.output) {
-          evidence[skillId] = fresh.output;
+        if (fresh?.output && fresh.id) {
+          evidence[skillId] = { output: fresh.output, run_id: fresh.id };
           stalenessStats.fresh_run++;
         } else {
           logger.error('[EvidenceGatherer] Fresh run failed or produced no output', { skill_id: skillId });
@@ -181,11 +193,12 @@ async function runSkill(
     logger.info('[EvidenceGatherer] Skill execution complete', {
       skill_id: skillId,
       status: result.status,
+      run_id: result.runId,
       has_output: !!result.output,
     });
 
     return {
-      id: (result as any).id,
+      id: result.runId,
       status: result.status,
       output: result.output || null,
     };

@@ -1288,7 +1288,7 @@ export function cleanupReportFiles() {
 // Claim Provenance Drill-Through — trace-claim endpoint
 router.post(
   '/:workspaceId/reports/trace-claim',
-  requirePermission('workspaces', 'read'),
+  requirePermission('skills.view_evidence'),
   async (req: Request, res: Response) => {
     const { workspaceId } = req.params;
     const { claim_id, skill_run_id, section_id, document_id } = req.body;
@@ -1365,7 +1365,7 @@ router.post(
       if (dimKey && dimKey !== '_default') {
         const { getDimension } = await import('../lib/data-dictionary.js');
         const { buildFilterSummary } = await import('../lib/filter-summary.js');
-        const dim = await getDimension(workspaceId, dimKey);
+        const dim = await getDimension(String(workspaceId), String(dimKey));
         if (dim) {
           dimensionSummary = await buildFilterSummary(dim);
         }
@@ -1396,7 +1396,7 @@ router.post(
         records:        records.slice(0, 10),
       });
     } catch (err) {
-      logger.error('trace-claim error', err);
+      logger.error('trace-claim error', err instanceof Error ? err : undefined);
       return res.status(500).json({
         error: 'Failed to trace claim',
         details: err instanceof Error ? err.message : String(err),

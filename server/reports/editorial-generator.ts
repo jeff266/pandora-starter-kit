@@ -99,12 +99,25 @@ export async function generateEditorialReport(
     throw new Error('Report has no enabled sections');
   }
 
-  // 5. Gather fresh evidence for all skills
+  // 5. Gather fresh evidence for all skills.
+  // Returns { output: SkillEvidence; run_id: string } per skill so claim tags
+  // can be linked to the exact DB run that produced the evidence.
   logger.info('[EditorialGenerator] Gathering skill evidence', { skills: agent.skills });
-  const skillEvidence = await gatherFreshEvidence(agent.skills.map(s => s.skillId), workspace_id);
+  const evidenceWithIds = await gatherFreshEvidence(agent.skills.map((s: any) => s.skillId), workspace_id);
+
+  // Split into separate maps:
+  //  skillEvidence — outputs only, passed to editorial synthesizer (keeps its existing type)
+  //  skillRunIds   — DB row IDs, used only for claim provenance tags
+  const skillEvidence: Record<string, any> = {};
+  const skillRunIds: Record<string, string> = {};
+  for (const [skillId, entry] of Object.entries(evidenceWithIds)) {
+    skillEvidence[skillId] = entry.output;
+    if (entry.run_id) skillRunIds[skillId] = entry.run_id;
+  }
 
   logger.info('[EditorialGenerator] Evidence gathered', {
     skill_count: Object.keys(skillEvidence).length,
+    skills_with_run_ids: Object.keys(skillRunIds).length,
   });
 
   // 6. Load tuning pairs
@@ -208,35 +221,20 @@ export async function generateEditorialReport(
     }
   }
 
-  // 9b. Process claim tags in section narratives
-  // Pre-fetch the latest completed skill_run id for each agent skill in one query.
-  // gatherFreshEvidence() returns the output JSONB only (no DB row id), so we must
-  // look up run ids directly from skill_runs here.
-  const allSkillIds = agent.skills.map((s: any) => s.skillId);
-  const skillRunIdBySkillId: Record<string, string> = {};
-  if (allSkillIds.length > 0) {
-    const skillRunRows = await query<{ skill_id: string; id: string }>(
-      `SELECT DISTINCT ON (skill_id) skill_id, id
-       FROM skill_runs
-       WHERE workspace_id = $1 AND skill_id = ANY($2) AND status = 'completed'
-       ORDER BY skill_id, completed_at DESC`,
-      [workspace_id, allSkillIds]
-    );
-    for (const row of skillRunRows.rows) {
-      skillRunIdBySkillId[row.skill_id] = row.id;
-    }
-  }
-
+  // 9b. Process claim tags in section narratives.
+  // skillRunIds is built from gatherFreshEvidence return values — each entry
+  // carries the exact skill_runs.id that produced the evidence, ensuring that
+  // claim provenance in the Evidence Drawer links to the correct DB run.
   const { processClaimTags } = await import('./claim-tag-processor.js');
   for (const section of editorial.sections) {
     if (!section.narrative) continue;
 
-    // Resolve skill_run_id from our pre-fetched map
+    // Resolve skill_run_id from the evidence-gatherer-supplied map
     let skillRunId: string | undefined;
     if (section.source_skills && section.source_skills.length > 0) {
       for (const sid of section.source_skills) {
-        if (skillRunIdBySkillId[sid]) {
-          skillRunId = skillRunIdBySkillId[sid];
+        if (skillRunIds[sid]) {
+          skillRunId = skillRunIds[sid];
           break;
         }
       }
@@ -391,16 +389,16 @@ export async function generateEditorialReport(
     // 10b. Create report_documents record so the Report Viewer can display this
     //      editorial synthesis output and load claim-tagged tiptap_content.
     try {
-      // Build tiptap_content map: { [section.id]: tiptapDoc }
+      // Build tiptap_content map: { [section.section_id]: tiptapDoc }
       const tiptapContentMap: Record<string, any> = {};
       for (const section of editorial.sections) {
         const tc = (section as any).tiptap_content;
-        if (tc) tiptapContentMap[section.id] = tc;
+        if (tc) tiptapContentMap[section.section_id] = tc;
       }
 
       // Convert editorial sections to report_documents.sections array format
       const sectionsForDoc = editorial.sections.map((s, i) => ({
-        id: s.id,
+        id: s.section_id,
         title: s.title,
         content: s.narrative || (s as any).content || '',
         source_skills: s.source_skills || [],
@@ -432,12 +430,11 @@ export async function generateEditorialReport(
            (workspace_id, agent_id, agent_run_id, document_type, week_label, headline,
             sections, actions, skills_included, tokens_used, tiptap_content, config,
             orchestrator_run_id, generated_at, created_at)
-         VALUES ($1, $2, $3::uuid, $4, $5, $6, $7, $8, $9, $10, $11, $12, gen_random_uuid(), NOW(), NOW())
+         VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8, $9, $10, $11, gen_random_uuid(), NOW(), NOW())
          RETURNING id`,
         [
           workspace_id,
           agent.id,
-          generationId,
           docType,
           weekLabel,
           docHeadline,
