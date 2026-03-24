@@ -443,7 +443,7 @@ export default function DealDetail() {
   const isMobile = useIsMobile();
   const [dossier, setDossier] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [narrativeLoading, setNarrativeLoading] = useState(false);
+  const [narrativeLoading, setNarrativeLoading] = useState(true);
   const [error, setError] = useState('');
   const [dismissingId, setDismissingId] = useState<string | null>(null);
   const [snoozingId, setSnoozingId] = useState<string | null>(null);
@@ -542,37 +542,38 @@ export default function DealDetail() {
 
   useEffect(() => {
     if (!dealId) return;
-    api.get(`/deals/${dealId}/coaching`)
-      .then((data: any) => {
-        if (data?.composite?.label) setDealComposite({ label: data.composite.label, color: data.composite.color });
-        if (data?.composite?.next_step) setCoachingNextStep(data.composite.next_step);
-      })
-      .catch(() => {});
-  }, [dealId]);
 
-  useEffect(() => {
-    if (!dealId) return;
-    api.post('/activity-signals/coverage', { deal_ids: [dealId] })
-      .then((data: any) => {
-        setMeddicCoverage(data.coverage?.[dealId] ?? { covered_fields: [] });
-      })
-      .catch(() => { setMeddicCoverage({ covered_fields: [] }); });
-  }, [dealId]);
+    // WAVE 1 — fire immediately on mount (above-the-fold content)
+    Promise.all([
+      fetchDossier(false),
+      fetchMeddicCoverage(),
+      api.get('/deals/pipelines').then((res: any) => {
+        setPipelines(res.data || []);
+      }).catch(() => {}),
+    ]).then(() => {
+      // NARRATIVE — deferred, after Wave 1 so the base dossier is in place first.
+      // Fires independently and does not block Wave 2/3 progression.
+      fetchDossier(true);
 
-  useEffect(() => {
-    fetchDossier(true);
-    fetchMeddicCoverage();
-    if (dealId) {
-      api.get(`/deals/${dealId}/score-history`).then((res: any) => {
-        setScoreHistory(res.snapshots || []);
+      // WAVE 2 — secondary content, fires after Wave 1 resolves
+      return Promise.all([
+        api.get(`/deals/${dealId}/coaching`).then((data: any) => {
+          if (data?.composite?.label) setDealComposite({ label: data.composite.label, color: data.composite.color });
+          if (data?.composite?.next_step) setCoachingNextStep(data.composite.next_step);
+        }).catch(() => {}),
+        api.post('/activity-signals/coverage', { deal_ids: [dealId] }).then((data: any) => {
+          setMeddicCoverage(data.coverage?.[dealId] ?? { covered_fields: [] });
+        }).catch(() => { setMeddicCoverage({ covered_fields: [] }); }),
+        api.get(`/deals/${dealId}/score-history`).then((res: any) => {
+          setScoreHistory(res.snapshots || []);
+        }).catch(() => {}),
+      ]);
+    }).then(() => {
+      // WAVE 3 — below-the-fold panel content, fires after Wave 2 resolves
+      api.get('/admin/scopes').then((res: any) => {
+        const confirmed = (res.scopes || []).filter((s: any) => s.scope_id !== 'default');
+        setScopes(confirmed.map((s: any) => ({ scope_id: s.scope_id, name: s.name || s.scope_id })));
       }).catch(() => {});
-    }
-    api.get('/deals/pipelines').then((res: any) => {
-      setPipelines(res.data || []);
-    }).catch(() => {});
-    api.get('/admin/scopes').then((res: any) => {
-      const confirmed = (res.scopes || []).filter((s: any) => s.scope_id !== 'default');
-      setScopes(confirmed.map((s: any) => ({ scope_id: s.scope_id, name: s.name || s.scope_id })));
     }).catch(() => {});
   }, [dealId]);
 

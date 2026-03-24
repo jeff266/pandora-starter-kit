@@ -1,0 +1,106 @@
+Read only. No changes until you've reported findings.
+
+The calibration interview is not routing correctly.
+When a user sends "Let's calibrate my pipeline
+definitions", Pandora gives general pipeline analysis
+advice instead of running the structured calibration
+interview (Step 1: active pipeline definition).
+
+I need to understand exactly where the routing breaks.
+
+## Step 1 — Find the CALIBRATION_TRIGGERS check
+
+File: server/chat/orchestrator.ts
+
+Search for CALIBRATION_TRIGGERS or 'calibrat' in
+the orchestrator. Show:
+- The exact trigger pattern (array of strings or regex)
+- What happens immediately after a trigger matches —
+  what function is called, what is returned
+- Whether the calibration routing branch bypasses the
+  normal PandoraAgent tool loop entirely, or whether
+  it still goes through the agent
+- Whether there is a try/catch that could silently
+  swallow a calibration routing error and fall back
+  to normal analysis
+
+Show the full routing switch/if-chain so I can see
+where calibration_interview sits relative to other
+intents.
+
+## Step 2 — Trace the calibration interview flow
+
+File: server/lib/calibration-interview.ts
+
+Show the full file. Specifically:
+- Does getInterviewState() exist and what does it
+  return for a workspace that has never started
+  calibration? (What is the default current_step?)
+- Does buildInterviewPrompt() exist and what does
+  it do for step 'active_pipeline'?
+- Does it call previewFilter()? Does previewFilter()
+  require any parameters that might be missing?
+- Is there any error handling that returns null or
+  undefined silently?
+
+## Step 3 — Check stage mapping prerequisite
+
+File: server/lib/stage-mapping-interview.ts
+
+Does getUnmappedStages() exist?
+What does it return for a workspace with many
+custom stage names (like Imubit with 10+ stages)?
+Is it possible that getUnmappedStages() is throwing
+or returning unexpected data that blocks the
+interview from starting?
+
+## Step 4 — Check if calibration branch actually runs
+
+In orchestrator.ts, add a temporary console.log
+(read-only investigation — describe what you WOULD
+add, don't actually add it) that would confirm
+whether the calibration branch is being entered
+at all when the trigger message arrives.
+
+Specifically: what log line placed at the top of
+the calibration routing branch would confirm it
+was reached?
+
+## Step 5 — Check the agent log evidence
+
+The screenshot shows:
+- [PandoraAgent] iter=7, history=23 msgs
+- stopReason=end_turn, toolCalls=0 on final iter
+- action-extractor extracted: create_crm_tasks,
+  update_forecast_category x2
+
+This means the agent ran 7 iterations using tools
+(23 message history implies multiple tool calls
+earlier), then synthesized a response with no tools
+on the final iteration.
+
+If the calibration branch bypasses PandoraAgent
+entirely, history=23 msgs should not be possible —
+that implies it went THROUGH the agent.
+
+Does the calibration routing inject a system prompt
+or user message into the agent loop and let the
+agent handle it? Or does it bypass the agent
+completely and call buildInterviewPrompt() directly?
+
+Show exactly which code path runs when intent
+=== 'calibration_interview'.
+
+## Report format
+
+For each step, answer:
+- Does this code exist as described in the spec?
+- If yes: show the relevant lines
+- If no: what exists instead, or what is missing?
+- What is the most likely cause of the bug based
+  on what you found?
+
+Conclude with:
+THE BUG IS: [one sentence root cause]
+THE FIX IS: [one sentence fix]
+FILES TO CHANGE: [list]

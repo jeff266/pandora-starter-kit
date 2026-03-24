@@ -1,0 +1,214 @@
+# Deal Page Perf #3 — Stagger Client-Side API Calls on Mount
+
+## Context
+
+Every deal page navigation fires 7 API calls
+simultaneously on mount, then an 8th fires as soon as
+the dossier resolves. All compete for DB connections
+and server resources simultaneously. The heaviest call
+(dossier with AI narrative) blocks perceived load even
+though most of the page can render without it.
+
+Fix #1 (narrative caching) is already live — the
+narrative now returns from cache in <100ms when fresh.
+Fix #2 (coaching parallelization) is already done.
+
+This build staggers the client-side calls into
+priority waves so the deal page renders structural
+content immediately, and secondary data loads behind it.
+
+## Before Starting
+
+Read these files:
+
+1. Find the deal detail page component — could be:
+   - client/src/pages/DealPage.tsx
+   - client/src/pages/DealDetailPage.tsx
+   - client/src/components/deal/DealDossier.tsx
+   Search for useEffect with multiple fetch() or
+   axios calls on mount. Show the full useEffect
+   block and every API call it contains.
+
+2. Find where the dossier is called — specifically:
+   - Is narrative fetched as part of dossier or
+     separately?
+   - Is there a ?narrative=true param or equivalent?
+   - Does the dossier response include a loading
+     skeleton for the narrative section?
+
+3. Show the current loading state pattern — are all
+   7 endpoints using a single loading boolean, or
+   does each have its own loading state?
+
+Report findings then build.
+
+---
+
+## The Wave Structure
+
+### Wave 1 — fire immediately on mount
+Above-the-fold content. Page must not render blank.
+
+- Dossier WITHOUT narrative (?include_narrative=false
+  or equivalent — check what param the server accepts)
+- MEDDIC coverage
+- Pipelines list
+
+### Wave 2 — fire after Wave 1 resolves
+Secondary content. Loads behind the fold.
+
+- Coaching
+- Activity signals coverage
+- Score history
+
+### Wave 3 — fire after Wave 2 resolves OR deferred
+Below-the-fold or panel content.
+
+- Scopes list
+- Actions / next-steps
+
+### Narrative — separate deferred call
+After Wave 1 resolves, fire a second dossier call
+WITH narrative (?include_narrative=true or equivalent).
+The narrative section shows a loading skeleton until
+this resolves.
+
+If the server doesn't support splitting the dossier
+into narrative vs non-narrative, add
+?narrative=false support:
+
+In the dossier route handler, check:
+```typescript
+const includeNarrative = req.query.narrative !== 'false'
+if (!includeNarrative) {
+  // Skip synthesizeDealNarrative() entirely
+  // Return dossier with narrative: null
+}
+```
+
+---
+
+## Implementation Pattern
+```typescript
+// In the deal page component:
+
+const [dossierData, setDossierData] = useState(null)
+const [narrativeData, setNarrativeData] = useState(null)
+const [narrativeLoading, setNarrativeLoading] = useState(true)
+const [meddic, setMeddic] = useState(null)
+const [pipelines, setPipelines] = useState(null)
+const [coaching, setCoaching] = useState(null)
+const [activitySignals, setActivitySignals] = useState(null)
+const [scoreHistory, setScoreHistory] = useState(null)
+const [scopes, setScopes] = useState(null)
+const [actions, setActions] = useState(null)
+
+useEffect(() => {
+  if (!dealId) return
+
+  // WAVE 1 — fire immediately
+  Promise.all([
+    fetchDossier(dealId, { narrative: false }),
+    fetchMeddic(dealId),
+    fetchPipelines(dealId),
+  ]).then(([dossier, meddic, pipelines]) => {
+    setDossierData(dossier)
+    setMeddic(meddic)
+    setPipelines(pipelines)
+
+    // WAVE 2 — after Wave 1
+    Promise.all([
+      fetchCoaching(dealId),
+      fetchActivitySignals(dealId),
+      fetchScoreHistory(dealId),
+    ]).then(([coaching, signals, scores]) => {
+      setCoaching(coaching)
+      setActivitySignals(signals)
+      setScoreHistory(scores)
+
+      // WAVE 3 — after Wave 2
+      Promise.all([
+        fetchScopes(dealId),
+        fetchActions(dealId),
+      ]).then(([scopes, actions]) => {
+        setScopes(scopes)
+        setActions(actions)
+      })
+    })
+  })
+
+  // NARRATIVE — deferred, independent of wave chain
+  setNarrativeLoading(true)
+  fetchDossier(dealId, { narrative: true })
+    .then(data => {
+      setNarrativeData(data.narrative)
+    })
+    .finally(() => {
+      setNarrativeLoading(false)
+    })
+
+}, [dealId])
+```
+
+Adapt this pattern to match the actual fetch functions,
+state variable names, and component structure.
+The wave ordering and the narrative separation are
+the key requirements — the exact implementation
+should match existing code conventions.
+
+---
+
+## Narrative Loading Skeleton
+
+In the section of the deal page that renders the
+AI narrative, show a skeleton while narrativeLoading
+is true:
+```typescript
+{narrativeLoading ? (
+  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+    {[100, 85, 92, 70].map((w, i) => (
+      <div key={i} style={{
+        height: 14,
+        width: `${w}%`,
+        borderRadius: 4,
+        background: 'var(--color-background-secondary)',
+        animation: 'pulse 1.5s ease-in-out infinite',
+      }} />
+    ))}
+  </div>
+) : (
+  <div>{narrativeData}</div>
+)}
+```
+
+Use whatever skeleton/shimmer pattern the rest of
+the app uses for consistency. The key is: the
+narrative section shows a pulsing placeholder
+instead of a blank space while the AI call is
+in-flight.
+
+---
+
+## Acceptance Criteria
+
+1. Wave 1 calls (dossier without narrative, MEDDIC,
+   pipelines) fire immediately on mount
+2. Wave 2 calls (coaching, activity signals, score
+   history) fire after Wave 1 resolves
+3. Wave 3 calls (scopes, actions) fire after Wave 2
+4. Narrative fetch is a separate deferred call that
+   does not block Wave 1 rendering
+5. Deal page renders structural content (deal name,
+   stage, amount, MEDDIC) within ~500ms of navigation
+6. Narrative section shows a loading skeleton while
+   the narrative fetch is in-flight
+7. Narrative renders when the deferred call resolves
+8. ?narrative=false (or equivalent) is supported on
+   the dossier endpoint — returns immediately without
+   triggering LLM
+9. All 8 data points still load — nothing is dropped,
+   only reordered
+10. No race conditions — Wave 2 never starts before
+    Wave 1 data is available to components that need it
+11. No TypeScript errors
+12. Existing deal page functionality unchanged
