@@ -108,6 +108,8 @@ export async function getUnmappedStages(
        WHERE workspace_id = $1
          AND stage IS NOT NULL
          AND stage <> ''
+         AND stage_normalized IS NOT NULL
+         AND stage_normalized <> ''
        GROUP BY stage, stage_normalized
        HAVING COUNT(*) > 0
        ORDER BY COUNT(*) DESC`,
@@ -153,6 +155,19 @@ export async function confirmStageMapping(
   funnelPosition: NormalizedStage,
   importNormalizedStage: string
 ): Promise<void> {
+  // If the caller couldn't supply the import-level normalized stage (e.g. the
+  // stage was not in the current unmappedStages list), re-derive it from deals.
+  let resolvedImportNormalized = importNormalizedStage;
+  if (!resolvedImportNormalized) {
+    const fallback = await query(
+      `SELECT stage_normalized FROM deals
+       WHERE workspace_id = $1 AND stage = $2 AND stage_normalized IS NOT NULL AND stage_normalized <> ''
+       LIMIT 1`,
+      [workspaceId, rawStageName]
+    );
+    resolvedImportNormalized = fallback.rows[0]?.stage_normalized ?? rawStageName;
+  }
+
   // 1. Write to workspace_config.calibration.stage_mappings (raw CRM name → funnel position)
   //    Used for completion summary and re-checking what's already confirmed.
   const configResult = await query(
@@ -187,7 +202,7 @@ export async function confirmStageMapping(
        is_open          = EXCLUDED.is_open,
        display_order    = EXCLUDED.display_order,
        updated_at       = now()`,
-    [workspaceId, rawStageName, importNormalizedStage, isOpen, displayOrder]
+    [workspaceId, rawStageName, resolvedImportNormalized, isOpen, displayOrder]
   );
 }
 
