@@ -18,6 +18,25 @@ export interface RenderConfig {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
+// Markdown stripper — removes markup symbols stored in DB content
+// ══════════════════════════════════════════════════════════════════════════════
+
+function stripMarkdown(text: string): string {
+  return text
+    .replace(/\*\*\*(.*?)\*\*\*/g, '$1')          // ***bold italic***
+    .replace(/\*\*(.*?)\*\*/g, '$1')               // **bold**
+    .replace(/\*(.*?)\*/g, '$1')                   // *italic*
+    .replace(/^#{1,6}\s+/gm, '')                  // # headings at line start
+    .replace(/^-{3,}\s*$/gm, '')                  // --- horizontal rules
+    .replace(/```[\s\S]*?```/g, '')               // fenced code blocks
+    .replace(/`([^`]+)`/g, '$1')                  // inline code
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')      // [text](url) links
+    .replace(/[🚨🔴🟡🟢⚠️📊📈📉💡🎯⚠]/g, '')    // common status emojis
+    .replace(/\n{3,}/g, '\n\n')                   // collapse 3+ blank lines
+    .trim();
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 // DOCX Renderer v2 — Professional output with proper typography
 // ══════════════════════════════════════════════════════════════════════════════
 
@@ -35,65 +54,65 @@ export async function renderDocx(
   const children: (Paragraph | Table)[] = [];
 
   // ── Cover page — teal band ──────────────────────────
+  // Implemented as shaded Paragraphs rather than a Table so that the teal
+  // background reliably spans the full text width regardless of how the docx
+  // library resolves WidthType.PERCENTAGE (which collapsed to a 1-char sliver).
 
-  // Teal band as a full-width table with shaded cell
-  const coverBandRow = new TableRow({
-    children: [new TableCell({
-      children: [
-        // "PREPARED BY" label — small, tinted white
-        new Paragraph({
-          children: [new TextRun({
-            text: `PREPARED BY ${(prepared_by || 'RevOps Impact').toUpperCase()}`,
-            size: 16,   // 8pt
-            color: 'A7F3D0',
-            font: 'Calibri',
-            characterSpacing: 50,
-          })],
-          spacing: { before: 200, after: 120 },
-        }),
-        // Company name — large, white
-        new Paragraph({
-          children: [new TextRun({
-            text: for_company || doc.week_label || '',
-            bold: true,
-            size: 56,   // 28pt
-            color: 'FFFFFF',
-            font: 'Calibri',
-          })],
-          spacing: { before: 0, after: 120 },
-        }),
-        // Document type — medium, light teal
-        new Paragraph({
-          children: [new TextRun({
-            text: getReportTitle(doc.document_type),
-            size: 28,   // 14pt
-            color: 'A7F3D0',
-            font: 'Calibri',
-          })],
-          spacing: { after: 200 },
-        }),
-      ],
-      shading: { fill: '0D9488', type: ShadingType.CLEAR, color: 'auto' },
-      margins: {
-        top: convertInchesToTwip(0.4),
-        bottom: convertInchesToTwip(0.4),
-        left: convertInchesToTwip(0.5),
-        right: convertInchesToTwip(0.5),
-      },
+  const bandShading = { type: ShadingType.SOLID, fill: '0D9488', color: 'auto' };
+
+  // Top spacer inside the band
+  children.push(new Paragraph({
+    children: [new TextRun({ text: '' })],
+    shading: bandShading,
+    spacing: { before: 0, after: 0, line: 240 },
+  }));
+
+  // "PREPARED BY …" label — small, light teal
+  children.push(new Paragraph({
+    children: [new TextRun({
+      text: `PREPARED BY ${(prepared_by || 'RevOps Impact').toUpperCase()}`,
+      size: 16,   // 8pt
+      color: 'A7F3D0',
+      font: 'Calibri',
+      characterSpacing: 50,
     })],
-  });
+    shading: bandShading,
+    spacing: { before: 160, after: 80 },
+    indent: { left: convertInchesToTwip(0.5) },
+  }));
 
-  children.push(new Table({
-    rows: [coverBandRow],
-    width: { size: 100, type: WidthType.PERCENTAGE },
-    borders: {
-      top:              { style: BorderStyle.NONE, size: 0, color: 'auto' },
-      bottom:           { style: BorderStyle.NONE, size: 0, color: 'auto' },
-      left:             { style: BorderStyle.NONE, size: 0, color: 'auto' },
-      right:            { style: BorderStyle.NONE, size: 0, color: 'auto' },
-      insideHorizontal: { style: BorderStyle.NONE, size: 0, color: 'auto' },
-      insideVertical:   { style: BorderStyle.NONE, size: 0, color: 'auto' },
-    },
+  // Company name — large, white bold
+  children.push(new Paragraph({
+    children: [new TextRun({
+      text: for_company || doc.week_label || '',
+      bold: true,
+      size: 56,   // 28pt
+      color: 'FFFFFF',
+      font: 'Calibri',
+    })],
+    shading: bandShading,
+    spacing: { before: 0, after: 80 },
+    indent: { left: convertInchesToTwip(0.5) },
+  }));
+
+  // Document type — medium, light teal
+  children.push(new Paragraph({
+    children: [new TextRun({
+      text: getReportTitle(doc.document_type),
+      size: 28,   // 14pt
+      color: 'A7F3D0',
+      font: 'Calibri',
+    })],
+    shading: bandShading,
+    spacing: { before: 0, after: 0 },
+    indent: { left: convertInchesToTwip(0.5) },
+  }));
+
+  // Bottom spacer inside the band
+  children.push(new Paragraph({
+    children: [new TextRun({ text: '' })],
+    shading: bandShading,
+    spacing: { before: 0, after: 0, line: 240 },
   }));
 
   // Week label below the band — appears ONCE
@@ -136,7 +155,7 @@ export async function renderDocx(
 
   children.push(new Paragraph({
     children: [new TextRun({
-      text: doc.headline,
+      text: stripMarkdown(doc.headline || ''),
       bold: true,
       size: 28,         // 14pt
       color: '1E293B',
@@ -180,7 +199,9 @@ export async function renderDocx(
 
     // Split content into paragraphs.
     // Newer WBR sections may store body text in `narrative`; fall back gracefully.
-    const bodyText: string = section.content || (section as any).narrative || '';
+    // Strip markdown symbols (**, #, ---, etc.) stored in the DB content.
+    const rawBody: string = section.content || (section as any).narrative || '';
+    const bodyText = stripMarkdown(rawBody);
     const paragraphs = bodyText
       .split(/\n\n+/)
       .filter(p => p.trim().length > 0);
