@@ -980,7 +980,7 @@ agentsWorkspaceRouter.delete('/:workspaceId/reports/documents/:reportId', requir
   const reportId = req.params.reportId as string;
   const userId = req.user?.user_id;
 
-  if (!userId && req.authMethod !== 'api_key') {
+  if (!userId) {
     return res.status(401).json({ error: 'Authentication required' });
   }
 
@@ -995,8 +995,8 @@ agentsWorkspaceRouter.delete('/:workspaceId/reports/documents/:reportId', requir
     }
 
     const createdBy = docResult.rows[0].created_by;
-    const isAdmin = req.userWorkspaceRole === 'admin' || req.authMethod === 'api_key';
-    const isCreator = userId && createdBy && userId === createdBy;
+    const isAdmin = req.userWorkspaceRole === 'admin';
+    const isCreator = createdBy && userId === createdBy;
 
     if (!isAdmin && !isCreator) {
       return res.status(403).json({ error: 'Only the report creator or a workspace admin can delete this report' });

@@ -203,6 +203,7 @@ export async function getAllReportsForWorkspace(
       tokens_used: row.tokens_used,
       orchestrator_run_id: row.orchestrator_run_id,
       tiptap_content: row.tiptap_content ?? null,
+      created_by: row.created_by ?? undefined,
     };
   }));
 }
@@ -242,5 +243,6 @@ export async function getReportDocumentById(
     tokens_used: row.tokens_used,
     orchestrator_run_id: row.orchestrator_run_id,
     tiptap_content: row.tiptap_content ?? null,
+    created_by: row.created_by ?? undefined,
   };
 }
