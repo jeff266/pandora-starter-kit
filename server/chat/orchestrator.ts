@@ -349,62 +349,105 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
   }
 
   // ── Calibration Interview Routing ────────────────────────────────────────────
-  // Intercept calibration-intent messages before the heuristic router.
-  // Runs the stage mapping interview first, then the 6-step dimension interview.
-  if (!answer && CALIBRATION_TRIGGERS.test(message)) {
-    console.log('[Calibration] Branch entered');
+  // The state machine owns the question sequence. The LLM never decides what to
+  // ask next — it only receives the structured output as the answer string.
+  //
+  // Two entry conditions:
+  //   1. Explicit calibration-intent phrase (CALIBRATION_TRIGGERS)
+  //   2. User is mid-interview (last assistant message was a calibration question)
+  //      — any reply in this case advances the state and returns the next question.
+
+  // Detect active calibration session from conversation history
+  const lastAssistantContent = (state.messages || [])
+    .filter(m => m.role === 'assistant')
+    .pop()?.content ?? '';
+  const inCalibrationSession = (
+    /\*\*Step \d+ of 6/i.test(lastAssistantContent) ||
+    /stage.*map|map.*stage|unmapped stage/i.test(lastAssistantContent) ||
+    /does this match.*pipeline|how do you define|how do you map/i.test(lastAssistantContent)
+  );
+
+  if (!answer && (CALIBRATION_TRIGGERS.test(message) || inCalibrationSession)) {
+    console.log('[Calibration] Branch entered — trigger:', CALIBRATION_TRIGGERS.test(message), '| inSession:', inCalibrationSession);
     try {
       const calStatus = await getCalibrationStatus(workspaceId);
       console.log('[Calibration] status:', JSON.stringify(calStatus));
 
-      // Stage mapping must be done before dimension calibration
+      // Stage mapping must be complete before dimension calibration
       const unmappedStages = await getUnmappedStages(workspaceId);
       console.log('[Calibration] unmappedStages count:', unmappedStages.length, '— first:', unmappedStages[0]?.crm_stage_name ?? 'none');
-      if (unmappedStages.length > 0) {
-        const top = unmappedStages[0];
-        const stageMappingText = buildStageMappingResponse(top, unmappedStages.length);
 
-        // Try to detect a direct reply like "Qualification" or "yes, Proposal"
-        const normalizedStages = [
+      if (unmappedStages.length > 0) {
+        // ── STAGE MAPPING PHASE ──────────────────────────────────────────────
+        const top = unmappedStages[0];
+
+        // Detect a normalized stage name in the user's reply
+        const normalizedStages: NormalizedStage[] = [
           'prospecting', 'qualification', 'evaluation', 'demo', 'proposal',
           'negotiation', 'closed_won', 'closed_lost',
         ];
+        const msgLower = message.toLowerCase().replace(/_/g, ' ');
         const suggested = normalizedStages.find(s =>
-          message.toLowerCase().includes(s.replace('_', ' ')) || message.toLowerCase().includes(s)
+          msgLower.includes(s.replace(/_/g, ' '))
         );
-        const skipMatch = /\b(skip|ignore|exclude|don't count|dont count)\b/i.test(message);
+        const skipMatch = /\b(skip|ignore|exclude|don't count|dont count|not applicable|n\/a)\b/i.test(message);
 
-        if (suggested && unmappedStages.length < (await getUnmappedStages(workspaceId)).length) {
-          await confirmStageMapping(workspaceId, top.crm_stage_name, suggested as NormalizedStage);
+        if (inCalibrationSession && (suggested || skipMatch)) {
+          // Save the user's answer and immediately ask about the next stage
+          const mapping = suggested ?? 'closed_lost';
+          await confirmStageMapping(workspaceId, top.crm_stage_name, mapping);
           const remaining = await getUnmappedStages(workspaceId);
-          answer = remaining.length > 0
-            ? buildStageMappingResponse(remaining[0], remaining.length)
-            : 'All stages mapped! Let\'s continue to calibrate your pipeline definitions.';
-        } else if (skipMatch) {
-          await confirmStageMapping(workspaceId, top.crm_stage_name, 'closed_lost');
-          const remaining = await getUnmappedStages(workspaceId);
-          answer = remaining.length > 0
-            ? buildStageMappingResponse(remaining[0], remaining.length)
-            : 'Stages marked. Moving on to pipeline definition calibration.';
+
+          if (remaining.length > 0) {
+            // More stages to map — ask immediately
+            answer = buildStageMappingResponse(remaining[0], remaining.length);
+          } else {
+            // All stages mapped — advance interview state to active_pipeline
+            const interviewState = await getInterviewState(workspaceId);
+            const nextStep = interviewState.current_step === 'stage_mapping'
+              ? await advanceInterview(workspaceId, 'stage_mapping')
+              : interviewState.current_step;
+
+            if (nextStep === 'complete') {
+              answer = 'All stages mapped and calibration is complete!';
+            } else {
+              const nextQuestion = await buildInterviewPrompt(workspaceId, nextStep);
+              answer = `All stages mapped.\n\n${nextQuestion}`;
+            }
+          }
         } else {
-          answer = stageMappingText;
+          // First trigger or unrecognized reply — show current stage question
+          answer = buildStageMappingResponse(top, unmappedStages.length);
         }
 
         routerDecision = 'calibration_stage_mapping';
         dataStrategy = 'calibration';
+
       } else {
-        // Stage mapping done — run dimension interview
+        // ── DIMENSION INTERVIEW PHASE ────────────────────────────────────────
         const interviewState = await getInterviewState(workspaceId);
         const step = interviewState.current_step;
-        console.log('[Calibration] interviewState step:', step, '| confirmed:', interviewState.confirmed_steps?.join(',') ?? 'none');
+        console.log('[Calibration] interviewState step:', step, '| completed:', interviewState.completed_steps?.join(',') ?? 'none');
 
         if (step === 'complete') {
           answer = 'Calibration is already complete! All definitions are confirmed. You can re-run calibration any time from Settings → Calibration.';
+
+        } else if (inCalibrationSession && step !== 'stage_mapping') {
+          // User answered the current interview step — advance to next question immediately
+          const nextStep = await advanceInterview(workspaceId, step);
+          console.log('[Calibration] Advanced:', step, '→', nextStep);
+
+          if (nextStep === 'complete') {
+            answer = `Calibration complete! All 6 definitions are now confirmed.\n\nPandora will use your definitions for all pipeline, coverage, win rate, and forecast calculations going forward. You can re-run calibration any time from Settings → Calibration.`;
+          } else {
+            answer = await buildInterviewPrompt(workspaceId, nextStep);
+          }
         } else {
+          // Fresh calibration trigger — show current step question
           answer = await buildInterviewPrompt(workspaceId, step);
         }
-        console.log('[Calibration] answer built:', answer ? 'YES (' + answer.length + ' chars)' : 'NULL');
 
+        console.log('[Calibration] answer built:', answer ? 'YES (' + answer.length + ' chars)' : 'NULL');
         routerDecision = 'calibration_interview';
         dataStrategy = 'calibration';
       }
@@ -413,10 +456,8 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
     } catch (calErr) {
       const msg = (calErr as Error).message ?? '';
 
-      // Schema errors, connection errors, and missing
-      // columns are infrastructure failures — re-throw
-      // so they surface in logs as actual errors, not
-      // silent warnings that mask broken features.
+      // Schema errors are infrastructure failures — log as error so they
+      // surface in monitoring. Answer remains null → falls through to LLM.
       const isFatal =
         msg.includes('column') ||
         msg.includes('does not exist') ||
@@ -425,23 +466,9 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
         msg.includes('connect ETIMEDOUT');
 
       if (isFatal) {
-        console.error(
-          '[orchestrator] Calibration routing FATAL error:',
-          msg
-        );
-        // Still fall through to LLM — don't break the
-        // user's chat — but log as error not warn so it
-        // shows up in error monitoring
-        // answer remains null → falls through to PandoraAgent
+        console.error('[orchestrator] Calibration routing FATAL error:', msg);
       } else {
-        // Expected runtime errors (workspace not found,
-        // no deals, empty results) — silent fallthrough
-        // is acceptable
-        console.warn(
-          '[orchestrator] Calibration routing failed,',
-          'falling through to LLM:',
-          msg
-        );
+        console.warn('[orchestrator] Calibration routing failed, falling through to LLM:', msg);
       }
     }
   }
