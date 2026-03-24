@@ -443,7 +443,7 @@ router.put('/:workspaceId/skills/:skillId/schedule', requirePermission('skills.c
         'manual',
         'skill_schedule',
         cronExpr ? 'Schedule updated via UI' : 'Schedule set to on-demand',
-        JSON.stringify({ skill_id: skillId, cron: cronExpr ?? null }),
+        JSON.stringify({ skill_id: skillId, cron: cronExpr ?? null, enabled: false }),
         previousSnapshot ? JSON.stringify(previousSnapshot) : null,
         'deployed',
         (req as any).user?.user_id ?? 'admin',
