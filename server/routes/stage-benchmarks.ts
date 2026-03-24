@@ -12,6 +12,7 @@ import { query } from '../db.js';
 import {
   computeAndStoreStageBenchmarks,
   lookupBenchmark,
+  batchLookupBenchmarks,
   computeVelocitySignal,
   computeCompositeLabel,
   autoDetectSegmentBoundaries,
@@ -480,55 +481,113 @@ router.get('/:workspaceId/deals/:dealId/coaching', async (req: Request, res: Res
         ? Math.floor((Date.now() - new Date(deal.stage_changed_at).getTime()) / 86400000)
         : null);
 
-    // Build stage journey
-    const stageJourney = await Promise.all(
-      historyResult.rows.map(async (h, i) => {
-        const isCurrentStage = !h.exited_at || i === historyResult.rows.length - 1;
-        const daysInStage = isCurrentStage
-          ? (currentDaysInStage ?? h.duration_days ?? 0)
-          : (h.duration_days ?? 0);
-        const benchmark = await lookupBenchmark(workspaceId, h.stage_normalized, segment, deal.pipeline ?? 'all');
-        const velocitySignal = computeVelocitySignal(daysInStage, h.stage, benchmark, undefined);
-        return {
-          stage: h.stage,
-          stage_normalized: h.stage_normalized,
-          entered_at: h.entered_at,
-          exited_at: h.exited_at,
-          duration_days: daysInStage,
-          is_current: isCurrentStage,
-          benchmark: benchmark ? {
-            won_median: benchmark.won?.median_days ?? null,
-            won_p75: benchmark.won?.p75_days ?? null,
-            lost_median: benchmark.lost?.median_days ?? null,
-            confidence_tier: benchmark.confidence_tier,
-            is_inverted: benchmark.is_inverted,
-            inversion_note: benchmark.inversion_note,
-            won_sample_size: benchmark.won?.sample_size ?? 0,
-          } : null,
-          signal: velocitySignal.signal,
-          ratio: velocitySignal.ratio,
-          explanation: velocitySignal.explanation,
-          countdown_days: velocitySignal.countdown_days,
-        };
-      })
-    );
+    // Batch fetch all benchmarks to avoid N+1 queries
+    const lookups = historyResult.rows.map(h => ({
+      stageNormalized: h.stage_normalized,
+      segment,
+      pipeline: deal.pipeline ?? 'all'
+    }));
+    const benchmarkMap = await batchLookupBenchmarks(workspaceId, lookups);
 
-    // Current velocity (current stage)
+    // Build stage journey using cached benchmarks
+    const stageJourney = historyResult.rows.map((h, i) => {
+      const isCurrentStage = !h.exited_at || i === historyResult.rows.length - 1;
+      const daysInStage = isCurrentStage
+        ? (currentDaysInStage ?? h.duration_days ?? 0)
+        : (h.duration_days ?? 0);
+      const benchmarkKey = `${h.stage_normalized}:${segment}:${deal.pipeline ?? 'all'}`;
+      const benchmark = benchmarkMap.get(benchmarkKey) ?? null;
+      const velocitySignal = computeVelocitySignal(daysInStage, h.stage, benchmark, undefined);
+      return {
+        stage: h.stage,
+        stage_normalized: h.stage_normalized,
+        entered_at: h.entered_at,
+        exited_at: h.exited_at,
+        duration_days: daysInStage,
+        is_current: isCurrentStage,
+        benchmark: benchmark ? {
+          won_median: benchmark.won?.median_days ?? null,
+          won_p75: benchmark.won?.p75_days ?? null,
+          lost_median: benchmark.lost?.median_days ?? null,
+          confidence_tier: benchmark.confidence_tier,
+          is_inverted: benchmark.is_inverted,
+          inversion_note: benchmark.inversion_note,
+          won_sample_size: benchmark.won?.sample_size ?? 0,
+        } : null,
+        signal: velocitySignal.signal,
+        ratio: velocitySignal.ratio,
+        explanation: velocitySignal.explanation,
+        countdown_days: velocitySignal.countdown_days,
+      };
+    });
+
+    // Current velocity (current stage) - use cached benchmark
     const currentStageHistory = historyResult.rows[historyResult.rows.length - 1];
     const currentBenchmark = currentStageHistory
-      ? await lookupBenchmark(workspaceId, currentStageHistory.stage_normalized, segment, deal.pipeline ?? 'all')
+      ? (benchmarkMap.get(`${currentStageHistory.stage_normalized}:${segment}:${deal.pipeline ?? 'all'}`) ?? null)
       : null;
     const currentVelocity = currentBenchmark && currentDaysInStage !== null
       ? computeVelocitySignal(currentDaysInStage, deal.stage, currentBenchmark)
       : { signal: 'watch' as const, ratio: null, explanation: 'No benchmark data for current stage.', countdown_days: null };
 
-    // Engagement signals
-    const lastCallResult = await query<{ call_date: string }>(
-      `SELECT call_date FROM conversations
-       WHERE deal_id = $1 AND workspace_id = $2 AND is_internal = FALSE AND call_date IS NOT NULL
-       ORDER BY call_date DESC LIMIT 1`,
-      [dealId, workspaceId]
-    );
+    // Parallelize independent data fetches
+    const [lastCallResult, participantsResult, missingResult, recentConvsResult, actionItemsResult] = await Promise.all([
+      // Engagement signals - last call
+      query<{ call_date: string }>(
+        `SELECT call_date FROM conversations
+         WHERE deal_id = $1 AND workspace_id = $2 AND is_internal = FALSE AND call_date IS NOT NULL
+         ORDER BY call_date DESC LIMIT 1`,
+        [dealId, workspaceId]
+      ),
+      // Multi-threading: unique external participants from last 60 days
+      query<{ cnt: string }>(
+        `SELECT COUNT(DISTINCT part->>'email') AS cnt
+         FROM conversations c,
+              jsonb_array_elements(
+                CASE jsonb_typeof(c.participants) WHEN 'array' THEN c.participants ELSE '[]'::jsonb END
+              ) AS part
+         WHERE c.deal_id = $1 AND c.workspace_id = $2
+           AND c.call_date > NOW() - INTERVAL '60 days'
+           AND COALESCE(part->>'affiliation', 'External') != 'Internal'`,
+        [dealId, workspaceId]
+      ),
+      // Missing stakeholders
+      query<{ contact_name: string; title: string | null; role: string | null }>(
+        `SELECT TRIM(CONCAT(c.first_name, ' ', c.last_name)) AS contact_name, c.title, COALESCE(dc.buying_role, 'unknown') AS role
+         FROM contacts c
+         JOIN deal_contacts dc ON dc.contact_id = c.id AND dc.deal_id = $1
+         WHERE c.workspace_id = $2
+           AND c.email IS NOT NULL
+           AND c.email NOT IN (
+             SELECT DISTINCT part->>'email'
+             FROM conversations conv,
+                  jsonb_array_elements(
+                    CASE jsonb_typeof(conv.participants) WHEN 'array' THEN conv.participants ELSE '[]'::jsonb END
+                  ) AS part
+             WHERE conv.deal_id = $1 AND conv.workspace_id = $2
+           )`,
+        [dealId, workspaceId]
+      ),
+      // Recent conversations
+      query<{ id: string; title: string; call_date: string | null; duration: number | null }>(
+        `SELECT id, title, call_date, duration_seconds / 60.0 AS duration
+         FROM conversations
+         WHERE deal_id = $1 AND workspace_id = $2 AND is_internal = FALSE AND call_date IS NOT NULL
+         ORDER BY call_date DESC LIMIT 3`,
+        [dealId, workspaceId]
+      ),
+      // Action items from Fireflies
+      query<{ source_title: string; source_date: string | null; item: unknown }>(
+        `SELECT c.title AS source_title, c.call_date AS source_date,
+                jsonb_array_elements(c.action_items) AS item
+         FROM conversations c
+         WHERE c.deal_id = $1 AND c.workspace_id = $2
+           AND c.action_items IS NOT NULL AND jsonb_typeof(c.action_items) = 'array'
+         ORDER BY c.call_date DESC`,
+        [dealId, workspaceId]
+      ),
+    ]);
+
     const lastCallAt = lastCallResult.rows[0]?.call_date ?? null;
     const daysSinceCall = lastCallAt
       ? Math.floor((Date.now() - new Date(lastCallAt).getTime()) / 86400000)
@@ -540,63 +599,14 @@ router.get('/:workspaceId/deals/:dealId/coaching', async (req: Request, res: Res
           : daysSinceCall <= 30 ? 'cooling'
             : 'dark';
 
-    // Multi-threading: unique external participants from last 60 days
-    const participantsResult = await query<{ cnt: string }>(
-      `SELECT COUNT(DISTINCT part->>'email') AS cnt
-       FROM conversations c,
-            jsonb_array_elements(
-              CASE jsonb_typeof(c.participants) WHEN 'array' THEN c.participants ELSE '[]'::jsonb END
-            ) AS part
-       WHERE c.deal_id = $1 AND c.workspace_id = $2
-         AND c.call_date > NOW() - INTERVAL '60 days'
-         AND COALESCE(part->>'affiliation', 'External') != 'Internal'`,
-      [dealId, workspaceId]
-    );
     const contactCount = parseInt(participantsResult.rows[0]?.cnt ?? '0', 10);
 
-    // Missing stakeholders
-    const missingResult = await query<{ contact_name: string; title: string | null; role: string | null }>(
-      `SELECT TRIM(CONCAT(c.first_name, ' ', c.last_name)) AS contact_name, c.title, COALESCE(dc.buying_role, 'unknown') AS role
-       FROM contacts c
-       JOIN deal_contacts dc ON dc.contact_id = c.id AND dc.deal_id = $1
-       WHERE c.workspace_id = $2
-         AND c.email IS NOT NULL
-         AND c.email NOT IN (
-           SELECT DISTINCT part->>'email'
-           FROM conversations conv,
-                jsonb_array_elements(
-                  CASE jsonb_typeof(conv.participants) WHEN 'array' THEN conv.participants ELSE '[]'::jsonb END
-                ) AS part
-           WHERE conv.deal_id = $1 AND conv.workspace_id = $2
-         )`,
-      [dealId, workspaceId]
-    );
     const missingStakeholders = missingResult.rows.map(r => ({
       name: r.contact_name,
       title: r.title,
       role: r.role ?? 'unknown',
       is_critical: ['decision_maker', 'executive_sponsor'].includes(r.role ?? ''),
     }));
-
-    // Recent conversations
-    const recentConvsResult = await query<{ id: string; title: string; call_date: string | null; duration: number | null }>(
-      `SELECT id, title, call_date, duration_seconds / 60.0 AS duration
-       FROM conversations
-       WHERE deal_id = $1 AND workspace_id = $2 AND is_internal = FALSE AND call_date IS NOT NULL
-       ORDER BY call_date DESC LIMIT 3`,
-      [dealId, workspaceId]
-    );
-
-    // Action items from Fireflies
-    const actionItemsResult = await query<{ source_title: string; source_date: string | null; item: unknown }>(
-      `SELECT c.title AS source_title, c.call_date AS source_date,
-              jsonb_array_elements(c.action_items) AS item
-       FROM conversations c
-       WHERE c.deal_id = $1 AND c.workspace_id = $2
-         AND c.action_items IS NOT NULL AND jsonb_typeof(c.action_items) = 'array'
-       ORDER BY c.call_date DESC`,
-      [dealId, workspaceId]
-    );
 
     const actionItems = actionItemsResult.rows.map(r => {
       const item = r.item as Record<string, unknown>;

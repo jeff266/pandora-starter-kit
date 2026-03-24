@@ -2,10 +2,17 @@ import React from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   LineChart, Line, ReferenceLine, PieChart, Pie, Cell, Legend,
-  ComposedChart, ScatterChart, Scatter,
+  ComposedChart, ScatterChart, Scatter, LabelList,
 } from 'recharts';
 import { colors } from '../../styles/theme';
 import type { ChartSpec, ChartDataPoint } from '../../types/chart-types';
+
+// Multi-series data format from Live Query endpoint
+interface MultiSeriesData {
+  type: 'multi';
+  x_values: any[];
+  series: Array<{ name: any; values: number[] }>;
+}
 
 interface ChartRendererProps {
   spec: ChartSpec;
@@ -18,15 +25,28 @@ function sortData(data: ChartSpec['data'], sort?: ChartSpec['sort']): ChartSpec[
   return data;
 }
 
-function formatCurrency(val: number): string {
-  if (Math.abs(val) >= 1_000_000) return `$${(val / 1_000_000).toFixed(1)}M`;
-  if (Math.abs(val) >= 1_000) return `$${Math.round(val / 1_000)}K`;
-  return `$${val}`;
+function formatCurrency(val: number, decimalPlaces?: number): string {
+  const dp = decimalPlaces ?? 1;
+  if (Math.abs(val) >= 1_000_000) return `$${(val / 1_000_000).toFixed(dp)}M`;
+  if (Math.abs(val) >= 1_000) return `$${(val / 1_000).toFixed(dp)}K`;
+  return `$${val.toFixed(dp)}`;
 }
 
-function formatValue(val: number, fmt?: 'currency' | 'number' | 'percent'): string {
-  if (fmt === 'currency') return formatCurrency(val);
-  if (fmt === 'percent') return `${val.toFixed(1)}%`;
+function formatValue(
+  val: number,
+  fmt?: 'currency' | 'number' | 'percent' | 'raw' | 'km',
+  decimalPlaces?: number
+): string {
+  const dp = decimalPlaces ?? (fmt === 'currency' ? 1 : fmt === 'percent' ? 1 : 0);
+
+  if (fmt === 'currency') return formatCurrency(val, dp);
+  if (fmt === 'percent') return `${val.toFixed(dp)}%`;
+  if (fmt === 'km') {
+    if (Math.abs(val) >= 1_000_000) return `${(val / 1_000_000).toFixed(dp)}M`;
+    if (Math.abs(val) >= 1_000) return `${(val / 1_000).toFixed(dp)}K`;
+    return val.toFixed(dp);
+  }
+  if (fmt === 'raw') return val.toFixed(dp);
   return val.toLocaleString();
 }
 
@@ -46,7 +66,44 @@ const CHART_COLORS = [
   'var(--color-orange)',
 ];
 
-function BarTooltip({ active, payload, label, yFormat }: any) {
+function getSeriesColor(
+  seriesName: string,
+  index: number,
+  colorMode?: 'semantic' | 'uniform' | 'categorical',
+  colorMap?: Record<string, string>
+): string {
+  // Check explicit colorMap first
+  if (colorMap && colorMap[seriesName]) return colorMap[seriesName];
+
+  // Semantic mode: interpret series names as semantic categories
+  if (colorMode === 'semantic') {
+    if (seriesName === 'positive' || seriesName === 'good' || seriesName === 'won') return 'var(--color-accent)';
+    if (seriesName === 'negative' || seriesName === 'risk' || seriesName === 'lost') return 'var(--color-coral)';
+  }
+
+  // Uniform mode: use primary color for all series
+  if (colorMode === 'uniform') return 'var(--color-accent)';
+
+  // Categorical mode (default): cycle through palette
+  return CHART_COLORS[index % CHART_COLORS.length];
+}
+
+/**
+ * Transform multi-series format to Recharts stacked format
+ * Input: { x_values: ['Q1', 'Q2'], series: [{ name: 'Enterprise', values: [100, 200] }, ...] }
+ * Output: [{ label: 'Q1', Enterprise: 100, SMB: 50 }, { label: 'Q2', Enterprise: 200, SMB: 75 }]
+ */
+function toStackedFormat(multiData: MultiSeriesData): Array<Record<string, any>> {
+  return multiData.x_values.map((xVal, xIdx) => {
+    const row: Record<string, any> = { label: xVal };
+    multiData.series.forEach(s => {
+      row[String(s.name)] = s.values[xIdx] ?? 0;
+    });
+    return row;
+  });
+}
+
+function BarTooltip({ active, payload, label, yFormat, decimalPlaces }: any) {
   if (!active || !payload?.length) return null;
   return (
     <div style={{
@@ -58,7 +115,8 @@ function BarTooltip({ active, payload, label, yFormat }: any) {
       <div style={{ fontWeight: 600, marginBottom: 4 }}>{label}</div>
       {payload.map((p: any, i: number) => (
         <div key={i} style={{ color: p.color }}>
-          {formatValue(p.value, yFormat)}
+          {p.name && <span style={{ marginRight: 4 }}>{p.name}:</span>}
+          {formatValue(p.value, yFormat, decimalPlaces)}
         </div>
       ))}
     </div>
@@ -66,7 +124,13 @@ function BarTooltip({ active, payload, label, yFormat }: any) {
 }
 
 function BarChartRenderer({ spec, height, compact }: { spec: ChartSpec; height: number; compact: boolean }) {
-  const yFmt = spec.yAxis?.format || 'currency';
+  const yFmt = spec.axis_format?.number_format || spec.yAxis?.format || 'currency';
+  const decimalPlaces = spec.axis_format?.decimal_places;
+  const dataLabelsEnabled = spec.data_labels?.enabled ?? false;
+  const dataLabelsPosition = spec.data_labels?.position || 'outside_end';
+  const dataLabelsFmt = spec.data_labels?.number_format || yFmt;
+  const dataLabelsDP = spec.data_labels?.decimal_places ?? decimalPlaces;
+
   return (
     <ResponsiveContainer width="100%" height={height}>
       <BarChart data={spec.data} margin={{ top: 20, right: 8, bottom: 0, left: 0 }}>
@@ -78,13 +142,17 @@ function BarChartRenderer({ spec, height, compact }: { spec: ChartSpec; height: 
           tickLine={false}
         />
         <YAxis
-          tickFormatter={(v) => formatValue(v, yFmt)}
+          tickFormatter={(v) => formatValue(v, yFmt, decimalPlaces)}
           tick={{ fontSize: 11, fill: 'var(--color-textMuted)' }}
           axisLine={false}
           tickLine={false}
           width={55}
+          domain={spec.axis_format?.y_min != null || spec.axis_format?.y_max != null
+            ? [spec.axis_format?.y_min ?? 'auto', spec.axis_format?.y_max ?? 'auto']
+            : undefined}
+          label={spec.axis_format?.axis_title ? { value: spec.axis_format.axis_title, angle: -90, position: 'insideLeft' } : undefined}
         />
-        <Tooltip content={<BarTooltip yFormat={yFmt} />} />
+        <Tooltip content={<BarTooltip yFormat={yFmt} decimalPlaces={decimalPlaces} />} />
         <Bar dataKey="value" radius={[3, 3, 0, 0]}>
           {spec.data.map((entry, index) => (
             <Cell
@@ -92,6 +160,14 @@ function BarChartRenderer({ spec, height, compact }: { spec: ChartSpec; height: 
               fill={getSegmentColor(entry.segment, spec.colorMap)}
             />
           ))}
+          {dataLabelsEnabled && (
+            <LabelList
+              dataKey="value"
+              position={dataLabelsPosition as any}
+              formatter={(v: number) => formatValue(v, dataLabelsFmt, dataLabelsDP)}
+              style={{ fontSize: 10, fill: 'var(--color-text)' }}
+            />
+          )}
         </Bar>
         {spec.referenceValue != null && (
           <ReferenceLine y={spec.referenceValue} stroke="var(--color-yellow)" strokeDasharray="4 4" />
@@ -102,17 +178,26 @@ function BarChartRenderer({ spec, height, compact }: { spec: ChartSpec; height: 
 }
 
 function HorizontalBarChartRenderer({ spec, height }: { spec: ChartSpec; height: number }) {
-  const yFmt = spec.yAxis?.format || 'currency';
+  const yFmt = spec.axis_format?.number_format || spec.yAxis?.format || 'currency';
+  const decimalPlaces = spec.axis_format?.decimal_places;
+  const dataLabelsEnabled = spec.data_labels?.enabled ?? false;
+  const dataLabelsPosition = spec.data_labels?.position || 'outside_end';
+  const dataLabelsFmt = spec.data_labels?.number_format || yFmt;
+  const dataLabelsDP = spec.data_labels?.decimal_places ?? decimalPlaces;
+
   return (
     <ResponsiveContainer width="100%" height={height}>
       <BarChart layout="vertical" data={spec.data} margin={{ top: 4, right: 60, bottom: 4, left: 8 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" horizontal={false} />
         <XAxis
           type="number"
-          tickFormatter={(v) => formatValue(v, yFmt)}
+          tickFormatter={(v) => formatValue(v, yFmt, decimalPlaces)}
           tick={{ fontSize: 11, fill: 'var(--color-textMuted)' }}
           axisLine={false}
           tickLine={false}
+          domain={spec.axis_format?.y_min != null || spec.axis_format?.y_max != null
+            ? [spec.axis_format?.y_min ?? 'auto', spec.axis_format?.y_max ?? 'auto']
+            : undefined}
         />
         <YAxis
           type="category"
@@ -122,7 +207,7 @@ function HorizontalBarChartRenderer({ spec, height }: { spec: ChartSpec; height:
           tickLine={false}
           width={90}
         />
-        <Tooltip content={<BarTooltip yFormat={yFmt} />} />
+        <Tooltip content={<BarTooltip yFormat={yFmt} decimalPlaces={decimalPlaces} />} />
         {spec.referenceValue != null && (
           <ReferenceLine x={spec.referenceValue} stroke="var(--color-yellow)" strokeDasharray="4 4" />
         )}
@@ -133,6 +218,14 @@ function HorizontalBarChartRenderer({ spec, height }: { spec: ChartSpec; height:
               fill={entry.annotation ? 'var(--color-coral)' : getSegmentColor(entry.segment, spec.colorMap)}
             />
           ))}
+          {dataLabelsEnabled && (
+            <LabelList
+              dataKey="value"
+              position={dataLabelsPosition as any}
+              formatter={(v: number) => formatValue(v, dataLabelsFmt, dataLabelsDP)}
+              style={{ fontSize: 10, fill: 'var(--color-text)' }}
+            />
+          )}
         </Bar>
       </BarChart>
     </ResponsiveContainer>
@@ -140,7 +233,13 @@ function HorizontalBarChartRenderer({ spec, height }: { spec: ChartSpec; height:
 }
 
 function LineChartRenderer({ spec, height }: { spec: ChartSpec; height: number }) {
-  const yFmt = spec.yAxis?.format || 'currency';
+  const yFmt = spec.axis_format?.number_format || spec.yAxis?.format || 'currency';
+  const decimalPlaces = spec.axis_format?.decimal_places;
+  const dataLabelsEnabled = spec.data_labels?.enabled ?? false;
+  const dataLabelsPosition = spec.data_labels?.position || 'outside_end';
+  const dataLabelsFmt = spec.data_labels?.number_format || yFmt;
+  const dataLabelsDP = spec.data_labels?.decimal_places ?? decimalPlaces;
+
   return (
     <ResponsiveContainer width="100%" height={height}>
       <LineChart data={spec.data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
@@ -152,13 +251,17 @@ function LineChartRenderer({ spec, height }: { spec: ChartSpec; height: number }
           tickLine={false}
         />
         <YAxis
-          tickFormatter={(v) => formatValue(v, yFmt)}
+          tickFormatter={(v) => formatValue(v, yFmt, decimalPlaces)}
           tick={{ fontSize: 11, fill: 'var(--color-textMuted)' }}
           axisLine={false}
           tickLine={false}
           width={55}
+          domain={spec.axis_format?.y_min != null || spec.axis_format?.y_max != null
+            ? [spec.axis_format?.y_min ?? 'auto', spec.axis_format?.y_max ?? 'auto']
+            : undefined}
+          label={spec.axis_format?.axis_title ? { value: spec.axis_format.axis_title, angle: -90, position: 'insideLeft' } : undefined}
         />
-        <Tooltip content={<BarTooltip yFormat={yFmt} />} />
+        <Tooltip content={<BarTooltip yFormat={yFmt} decimalPlaces={decimalPlaces} />} />
         {spec.referenceValue != null && (
           <ReferenceLine y={spec.referenceValue} stroke="var(--color-yellow)" strokeDasharray="4 4" label={{ value: 'Target', fill: 'var(--color-yellow)', fontSize: 10 }} />
         )}
@@ -169,14 +272,83 @@ function LineChartRenderer({ spec, height }: { spec: ChartSpec; height: number }
           strokeWidth={2}
           dot={{ fill: 'var(--color-accent)', r: 3 }}
           activeDot={{ r: 5 }}
-        />
+        >
+          {dataLabelsEnabled && (
+            <LabelList
+              dataKey="value"
+              position={dataLabelsPosition as any}
+              formatter={(v: number) => formatValue(v, dataLabelsFmt, dataLabelsDP)}
+              style={{ fontSize: 10, fill: 'var(--color-text)' }}
+            />
+          )}
+        </Line>
       </LineChart>
     </ResponsiveContainer>
   );
 }
 
-function StackedBarChartRenderer({ spec, height }: { spec: ChartSpec; height: number }) {
-  const yFmt = spec.yAxis?.format || 'currency';
+function StackedBarChartRenderer({ spec, height, multiData }: { spec: ChartSpec; height: number; multiData?: MultiSeriesData }) {
+  const yFmt = spec.axis_format?.number_format || spec.yAxis?.format || 'currency';
+  const decimalPlaces = spec.axis_format?.decimal_places;
+  const dataLabelsEnabled = spec.data_labels?.enabled ?? false;
+  const dataLabelsPosition = spec.data_labels?.position || 'outside_end';
+  const dataLabelsFmt = spec.data_labels?.number_format || yFmt;
+  const dataLabelsDP = spec.data_labels?.decimal_places ?? decimalPlaces;
+
+  // Multi-series format (from Live Query with series_field)
+  if (multiData) {
+    const chartData = toStackedFormat(multiData);
+    const seriesNames = multiData.series.map(s => String(s.name));
+
+    return (
+      <ResponsiveContainer width="100%" height={height}>
+        <BarChart data={chartData} margin={{ top: 20, right: 8, bottom: 0, left: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" vertical={false} />
+          <XAxis
+            dataKey="label"
+            tick={{ fontSize: 11, fill: 'var(--color-textMuted)' }}
+            axisLine={false}
+            tickLine={false}
+          />
+          <YAxis
+            tickFormatter={(v) => formatValue(v, yFmt, decimalPlaces)}
+            tick={{ fontSize: 11, fill: 'var(--color-textMuted)' }}
+            axisLine={false}
+            tickLine={false}
+            width={55}
+            domain={spec.axis_format?.y_min != null || spec.axis_format?.y_max != null
+              ? [spec.axis_format?.y_min ?? 'auto', spec.axis_format?.y_max ?? 'auto']
+              : undefined}
+            label={spec.axis_format?.axis_title ? { value: spec.axis_format.axis_title, angle: -90, position: 'insideLeft' } : undefined}
+          />
+          <Tooltip content={<BarTooltip yFormat={yFmt} decimalPlaces={decimalPlaces} />} />
+          {spec.legend?.enabled !== false && (
+            <Legend wrapperStyle={{ fontSize: 11 }} verticalAlign={spec.legend?.position === 'top' ? 'top' : spec.legend?.position === 'bottom' ? 'bottom' : undefined} />
+          )}
+          {seriesNames.map((name, i) => (
+            <Bar
+              key={name}
+              dataKey={name}
+              stackId="a"
+              fill={getSeriesColor(name, i, spec.color_mode, spec.colorMap)}
+              radius={i === seriesNames.length - 1 ? [3, 3, 0, 0] : [0, 0, 0, 0]}
+            >
+              {dataLabelsEnabled && (
+                <LabelList
+                  dataKey={name}
+                  position={dataLabelsPosition as any}
+                  formatter={(v: number) => formatValue(v, dataLabelsFmt, dataLabelsDP)}
+                  style={{ fontSize: 10, fill: 'var(--color-text)' }}
+                />
+              )}
+            </Bar>
+          ))}
+        </BarChart>
+      </ResponsiveContainer>
+    );
+  }
+
+  // Legacy segment-based format (backward compatible)
   const segments = Array.from(new Set(spec.data.map(d => d.segment).filter(Boolean))) as string[];
   const groupedByLabel = spec.data.reduce((acc, d) => {
     if (!acc[d.label]) acc[d.label] = { label: d.label };
@@ -196,13 +368,13 @@ function StackedBarChartRenderer({ spec, height }: { spec: ChartSpec; height: nu
           tickLine={false}
         />
         <YAxis
-          tickFormatter={(v) => formatValue(v, yFmt)}
+          tickFormatter={(v) => formatValue(v, yFmt, decimalPlaces)}
           tick={{ fontSize: 11, fill: 'var(--color-textMuted)' }}
           axisLine={false}
           tickLine={false}
           width={55}
         />
-        <Tooltip content={<BarTooltip yFormat={yFmt} />} />
+        <Tooltip content={<BarTooltip yFormat={yFmt} decimalPlaces={decimalPlaces} />} />
         <Legend wrapperStyle={{ fontSize: 11 }} />
         {segments.length > 0 ? segments.map((seg, i) => (
           <Bar key={seg} dataKey={seg} stackId="a" fill={spec.colorMap?.[seg] || CHART_COLORS[i % CHART_COLORS.length]} radius={i === segments.length - 1 ? [3, 3, 0, 0] : [0, 0, 0, 0]} />
@@ -601,10 +773,19 @@ function ScatterChartRenderer({ spec, height }: { spec: ChartSpec; height: numbe
   );
 }
 
-export default function ChartRenderer({ spec, compact = false }: ChartRendererProps) {
+interface ChartRendererPropsExtended extends ChartRendererProps {
+  chartData?: MultiSeriesData;  // Multi-series format from Live Query
+}
+
+export default function ChartRenderer({ spec, compact = false, chartData }: ChartRendererPropsExtended) {
   const fullHeight = 220;
   const height = compact ? Math.round(fullHeight * 0.7) : fullHeight;
   const sortedSpec = { ...spec, data: sortData(spec.data, spec.sort) };
+
+  // TODO: Outlier mode broken axis rendering
+  // When spec.outlier_mode?.enabled === true, detect outliers using threshold_multiple
+  // and render a broken axis visual indicator. This requires custom axis rendering
+  // or post-processing the chart SVG to add break symbols.
 
   const renderChart = () => {
     switch (spec.chartType) {
@@ -615,7 +796,7 @@ export default function ChartRenderer({ spec, compact = false }: ChartRendererPr
       case 'line':
         return <LineChartRenderer spec={sortedSpec} height={height} />;
       case 'stacked_bar':
-        return <StackedBarChartRenderer spec={sortedSpec} height={height} />;
+        return <StackedBarChartRenderer spec={sortedSpec} height={height} multiData={chartData} />;
       case 'waterfall':
         return <WaterfallChartRenderer spec={sortedSpec} height={height} />;
       case 'donut':

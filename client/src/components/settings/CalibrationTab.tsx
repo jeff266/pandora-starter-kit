@@ -113,23 +113,19 @@ export default function CalibrationTab() {
   useEffect(() => { load(); }, [load]);
 
   const handleStartCalibration = () => {
-    navigate('/');
-    setTimeout(() => {
-      const event = new CustomEvent('pandora:open-ask', {
-        detail: { initialMessage: 'Let\'s calibrate my pipeline definitions' },
-      });
-      window.dispatchEvent(event);
-    }, 200);
+    navigate('/', {
+      state: {
+        openChatWithMessage: "Let's calibrate my pipeline definitions"
+      }
+    });
   };
 
   const handleRerunCalibration = () => {
-    navigate('/');
-    setTimeout(() => {
-      const event = new CustomEvent('pandora:open-ask', {
-        detail: { initialMessage: 'Let\'s recalibrate my pipeline definitions' },
-      });
-      window.dispatchEvent(event);
-    }, 200);
+    navigate('/', {
+      state: {
+        openChatWithMessage: "Let's review and update my calibration definitions"
+      }
+    });
   };
 
   if (loading) {

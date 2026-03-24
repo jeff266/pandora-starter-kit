@@ -49,6 +49,43 @@ export interface ChartSpec {
   }>;
   targetValue?: number;       // for bullet: target line (distinct from referenceValue)
   comboSeriesLabel?: string;  // for combo: label for line series (secondary axis)
+
+  // Multi-dimension support
+  series_field?: string;
+  second_y_field?: string;
+  second_y_aggregate?: 'COUNT' | 'SUM' | 'AVG' | 'MAX' | 'MIN';
+
+  // Axis formatting
+  axis_format?: {
+    number_format: 'raw' | 'currency' | 'km' | 'percent';
+    decimal_places: 0 | 1 | 2;
+    y_min?: number;
+    y_max?: number;
+    axis_title?: string;
+  };
+
+  // Data labels
+  data_labels?: {
+    enabled: boolean;
+    position: 'outside_end' | 'inside_end' | 'center' | 'base';
+    number_format: 'raw' | 'currency' | 'km' | 'percent';
+    decimal_places: 0 | 1 | 2;
+  };
+
+  // Outlier / broken axis
+  outlier_mode?: {
+    enabled: boolean;
+    threshold_multiple: number;
+  };
+
+  // Legend
+  legend?: {
+    enabled: boolean;
+    position: 'top' | 'bottom' | 'left' | 'right' | 'none';
+  };
+
+  // Color mode
+  color_mode?: 'semantic' | 'uniform' | 'categorical';
 }
 
 export interface ChartBlock {

@@ -113,6 +113,29 @@ const AGGREGATES = ['COUNT', 'SUM', 'AVG', 'MIN', 'MAX'];
 const MAX_LIMIT = 1000;
 const DEFAULT_LIMIT = 100;
 
+const NUMERIC_ONLY_AGGREGATES = ['SUM', 'AVG', 'MAX', 'MIN'];
+
+/**
+ * Transform flat GROUP BY rows into multi-series format for stacked charts.
+ */
+function transformToMultiSeries(
+  rows: Array<{ x_value: any; series_value: any; y_value: number }>,
+  limit: number
+): { type: 'multi'; x_values: any[]; series: Array<{ name: any; values: number[] }> } {
+  const xValues = [...new Set(rows.map(r => r.x_value))];
+  const seriesNames = [...new Set(rows.map(r => r.series_value))].slice(0, limit);
+
+  const series = seriesNames.map(name => ({
+    name,
+    values: xValues.map(x => {
+      const row = rows.find(r => r.x_value === x && r.series_value === name);
+      return row?.y_value ?? 0;
+    }),
+  }));
+
+  return { type: 'multi', x_values: xValues, series };
+}
+
 /**
  * Resolve the rep name from sales_reps for a given user email + workspace.
  * Returns null if the user is not found or has no rep record.
@@ -369,7 +392,17 @@ router.get('/:workspaceId/chart-data/:skillId', requirePermission('agents.view')
 router.post('/:workspaceId/chart-data/query', requirePermission('agents.view'), async (req: Request, res: Response) => {
   try {
     const { workspaceId } = req.params as Record<string, string>;
-    const { entity_type, filters = [], group_by, aggregate, render_chart, limit: rawLimit } = req.body;
+    const {
+      entity_type,
+      filters = [],
+      group_by,
+      aggregate,
+      series_field,
+      second_y_field,
+      second_y_aggregate,
+      render_chart,
+      limit: rawLimit,
+    } = req.body;
 
     // Clamp limit
     const queryLimit = Math.min(Math.max(1, parseInt(rawLimit) || DEFAULT_LIMIT), MAX_LIMIT);
@@ -490,9 +523,36 @@ router.post('/:workspaceId/chart-data/query', requirePermission('agents.view'), 
         return;
       }
 
-      selectClause = `${table}.${group_by} as label, ${aggUpper}(${aggField === '*' ? '*' : `${table}.${aggField}`}) as value`;
-      groupByClause = `GROUP BY ${table}.${group_by}`;
-      orderByClause = `ORDER BY value DESC LIMIT ${queryLimit}`;
+      // Field type validation for numeric-only aggregates
+      if (aggField !== '*' && NUMERIC_ONLY_AGGREGATES.includes(aggUpper)) {
+        const fieldMeta = fieldDefs.find(f => f.name === aggField);
+        if (fieldMeta && (fieldMeta.field_type === 'text' || fieldMeta.field_type === 'categorical')) {
+          res.status(400).json({
+            error: `Cannot apply ${aggUpper} to ${fieldMeta.field_type} field "${aggField}". Use COUNT instead, or choose a numeric field.`
+          });
+          return;
+        }
+      }
+
+      // Multi-dimension: series_field adds second GROUP BY
+      if (series_field) {
+        // Validate series_field
+        if (!allowedFieldNames.includes(series_field)) {
+          res.status(400).json({
+            error: `Series field '${series_field}' not allowed`,
+            allowed_fields: allowedFieldNames
+          });
+          return;
+        }
+
+        selectClause = `${table}.${group_by} as x_value, ${table}.${series_field} as series_value, ${aggUpper}(${aggField === '*' ? '*' : `${table}.${aggField}`}) as y_value`;
+        groupByClause = `GROUP BY ${table}.${group_by}, ${table}.${series_field}`;
+        orderByClause = `ORDER BY ${table}.${group_by}, y_value DESC LIMIT ${queryLimit * 10}`;
+      } else {
+        selectClause = `${table}.${group_by} as x_value, ${aggUpper}(${aggField === '*' ? '*' : `${table}.${aggField}`}) as y_value`;
+        groupByClause = `GROUP BY ${table}.${group_by}`;
+        orderByClause = `ORDER BY y_value DESC LIMIT ${queryLimit}`;
+      }
     } else {
       selectClause = allowedFieldNames.map(f => `${table}.${f}`).join(', ');
       orderByClause = `ORDER BY ${table}.created_at DESC LIMIT ${queryLimit}`;
@@ -508,31 +568,80 @@ router.post('/:workspaceId/chart-data/query', requirePermission('agents.view'), 
 
     const result = await query(sql, values);
 
-    // Optional inline chart render
-    if (render_chart && aggregate && group_by) {
-      const chartSpec = {
-        chart_type: render_chart.chart_type || 'bar',
-        data_points: result.rows.map((row: any) => ({
-          label: String(row.label || 'Unknown'),
-          value: parseFloat(row.value) || 0,
+    // Handle multi-dimension response
+    if (aggregate && group_by) {
+      if (series_field) {
+        // Multi-series format
+        const multiResult = transformToMultiSeries(result.rows as any, queryLimit);
+        return res.json(multiResult);
+      }
+
+      // Handle second_y_field for combo charts
+      if (second_y_field && second_y_aggregate) {
+        // Validate second_y_field
+        if (!allowedFieldNames.includes(second_y_field)) {
+          res.status(400).json({
+            error: `Second Y field '${second_y_field}' not allowed`,
+            allowed_fields: allowedFieldNames
+          });
+          return;
+        }
+
+        // Validate second_y_aggregate
+        const secondAggUpper = second_y_aggregate.toUpperCase();
+        if (!AGGREGATES.includes(secondAggUpper)) {
+          res.status(400).json({
+            error: `Second Y aggregate '${second_y_aggregate}' not allowed`,
+            allowed_aggregates: AGGREGATES
+          });
+          return;
+        }
+
+        // Field type validation
+        if (NUMERIC_ONLY_AGGREGATES.includes(secondAggUpper)) {
+          const fieldMeta = fieldDefs.find(f => f.name === second_y_field);
+          if (fieldMeta && (fieldMeta.field_type === 'text' || fieldMeta.field_type === 'categorical')) {
+            res.status(400).json({
+              error: `Cannot apply ${secondAggUpper} to ${fieldMeta.field_type} field "${second_y_field}". Use COUNT instead, or choose a numeric field.`
+            });
+            return;
+          }
+        }
+
+        // Run second query
+        const secondSql = `
+          SELECT ${table}.${group_by} as x_value, ${secondAggUpper}(${table}.${second_y_field}) as y2_value
+          FROM ${table}
+          WHERE ${conditions.join(' AND ')}
+          GROUP BY ${table}.${group_by}
+        `;
+
+        const secondResult = await query(secondSql, values);
+
+        // Merge results
+        const merged = result.rows.map((row: any) => {
+          const second = secondResult.rows.find((r: any) => r.x_value === row.x_value);
+          return {
+            x_value: row.x_value,
+            y_value: row.y_value,
+            y2_value: second?.y2_value ?? 0,
+          };
+        });
+
+        return res.json({ type: 'combo', rows: merged });
+      }
+
+      // Single dimension format (backward compatible)
+      return res.json({
+        type: 'single',
+        rows: result.rows.map((row: any) => ({
+          x_value: row.x_value,
+          y_value: row.y_value,
         })),
-        color_scheme: render_chart.color_scheme || 'uniform',
-      };
-
-      const chartBuffer = await renderChartFromSpec(
-        chartSpec as any,
-        render_chart.width || 560,
-        render_chart.height || 220
-      );
-
-      const base64Chart = chartBuffer.toString('base64');
-      res.json({
-        data: result.rows,
-        chart: `data:image/png;base64,${base64Chart}`,
       });
-      return;
     }
 
+    // Non-aggregate query
     res.json({ data: result.rows });
   } catch (err: any) {
     console.error('[ChartData] Query failed:', err);

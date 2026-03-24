@@ -32,21 +32,33 @@ router.get('/:workspaceId/deals/:dealId/dossier', async (req, res) => {
     const dossier = await assembleDealDossier(workspaceId, dealId, { includeNarrative });
 
     if (includeNarrative) {
-      try {
-        const { narrative, recommended_actions } = await synthesizeDealNarrative(workspaceId, dossier);
-        (dossier as any).narrative = narrative;
-        (dossier as any).recommended_actions = recommended_actions;
-        (dossier as any).narrative_generated_at = new Date().toISOString();
+      // Check if narrative is fresh (< 1 hour old) to avoid unconditional LLM call
+      const narrativeGeneratedAt = (dossier as any).narrative_generated_at;
+      const narrativeAge = narrativeGeneratedAt
+        ? Date.now() - new Date(narrativeGeneratedAt).getTime()
+        : Infinity;
+      const ONE_HOUR_MS = 60 * 60 * 1000;
+      const hasFreshNarrative = (dossier as any).narrative && narrativeAge < ONE_HOUR_MS;
 
-        query(
-          `UPDATE deals SET narrative = $1, narrative_actions = $2, narrative_generated_at = NOW()
-           WHERE id = $3 AND workspace_id = $4`,
-          [narrative, JSON.stringify(recommended_actions || []), dealId, workspaceId]
-        ).catch(err => console.warn('[Deal Dossier] Failed to persist narrative:', err.message));
-      } catch (err) {
-        console.error('[Deal Dossier] Narrative synthesis failed:', (err as Error).message);
-        (dossier as any).narrative = null;
-        (dossier as any).recommended_actions = [];
+      if (hasFreshNarrative) {
+        console.log(`[Deal Dossier] Using cached narrative (${Math.round(narrativeAge / 60000)}m old)`);
+      } else {
+        try {
+          const { narrative, recommended_actions } = await synthesizeDealNarrative(workspaceId, dossier);
+          (dossier as any).narrative = narrative;
+          (dossier as any).recommended_actions = recommended_actions;
+          (dossier as any).narrative_generated_at = new Date().toISOString();
+
+          query(
+            `UPDATE deals SET narrative = $1, narrative_actions = $2, narrative_generated_at = NOW()
+             WHERE id = $3 AND workspace_id = $4`,
+            [narrative, JSON.stringify(recommended_actions || []), dealId, workspaceId]
+          ).catch(err => console.warn('[Deal Dossier] Failed to persist narrative:', err.message));
+        } catch (err) {
+          console.error('[Deal Dossier] Narrative synthesis failed:', (err as Error).message);
+          (dossier as any).narrative = null;
+          (dossier as any).recommended_actions = [];
+        }
       }
     }
 

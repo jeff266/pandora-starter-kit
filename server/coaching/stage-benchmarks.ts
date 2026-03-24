@@ -287,6 +287,114 @@ export async function lookupBenchmark(
 }
 
 /**
+ * Batch lookup benchmarks for multiple stages.
+ * Fetches all needed benchmarks in one query to avoid N+1 problem.
+ * Returns a Map keyed by "stage_normalized:segment:pipeline".
+ */
+export async function batchLookupBenchmarks(
+  workspaceId: string,
+  lookups: Array<{ stageNormalized: string; segment: string; pipeline: string }>
+): Promise<Map<string, StageBenchmark | null>> {
+  if (lookups.length === 0) return new Map();
+
+  // Build WHERE clause for all lookups
+  const conditions: string[] = [];
+  const params: any[] = [workspaceId];
+  let paramIdx = 2;
+
+  for (const lookup of lookups) {
+    conditions.push(
+      `(stage_normalized = $${paramIdx} AND segment IN ($${paramIdx + 1}, 'all') AND pipeline IN ($${paramIdx + 2}, 'all'))`
+    );
+    params.push(lookup.stageNormalized, lookup.segment, lookup.pipeline);
+    paramIdx += 3;
+  }
+
+  const result = await query<{
+    pipeline: string;
+    stage_normalized: string;
+    segment: string;
+    outcome: string;
+    median_days: string;
+    p75_days: string;
+    p90_days: string;
+    sample_size: string;
+    confidence_tier: string;
+    is_inverted: boolean;
+  }>(
+    `SELECT pipeline, stage_normalized, segment, outcome,
+            median_days, p75_days, p90_days, sample_size, confidence_tier, is_inverted
+     FROM stage_velocity_benchmarks
+     WHERE workspace_id = $1 AND (${conditions.join(' OR ')})
+     ORDER BY stage_normalized, segment, pipeline, outcome`,
+    params
+  );
+
+  // Group rows by key
+  const grouped = new Map<string, Array<typeof result.rows[0]>>();
+  for (const row of result.rows) {
+    const key = `${row.stage_normalized}:${row.segment}:${row.pipeline}`;
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key)!.push(row);
+  }
+
+  // Build benchmark map
+  const benchmarks = new Map<string, StageBenchmark | null>();
+  for (const lookup of lookups) {
+    const key = `${lookup.stageNormalized}:${lookup.segment}:${lookup.pipeline}`;
+    const rows = grouped.get(key) ?? [];
+
+    if (rows.length === 0) {
+      benchmarks.set(key, null);
+      continue;
+    }
+
+    const wonRow = rows.find(r => r.outcome === 'won');
+    const lostRow = rows.find(r => r.outcome === 'lost');
+    const anyRow = wonRow ?? lostRow;
+    if (!anyRow) {
+      benchmarks.set(key, null);
+      continue;
+    }
+
+    const benchmark: StageBenchmark = {
+      stage_normalized: anyRow.stage_normalized,
+      pipeline: anyRow.pipeline,
+      segment: anyRow.segment,
+      confidence_tier: anyRow.confidence_tier as 'high' | 'directional' | 'insufficient',
+      is_inverted: anyRow.is_inverted,
+      won: null,
+      lost: null,
+    };
+
+    if (wonRow) {
+      benchmark.won = {
+        median_days: parseFloat(wonRow.median_days),
+        p75_days: parseFloat(wonRow.p75_days),
+        p90_days: parseFloat(wonRow.p90_days),
+        sample_size: parseInt(wonRow.sample_size, 10),
+      };
+    }
+    if (lostRow) {
+      benchmark.lost = {
+        median_days: parseFloat(lostRow.median_days),
+        p75_days: parseFloat(lostRow.p75_days),
+        p90_days: parseFloat(lostRow.p90_days),
+        sample_size: parseInt(lostRow.sample_size, 10),
+      };
+    }
+
+    if (benchmark.is_inverted) {
+      benchmark.inversion_note = `Winning deals spend longer here — fast exits correlate with losses`;
+    }
+
+    benchmarks.set(key, benchmark);
+  }
+
+  return benchmarks;
+}
+
+/**
  * Compute a velocity signal for a deal in a given stage.
  * Returns the signal category and plain-English explanation.
  */
