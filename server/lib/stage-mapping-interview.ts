@@ -28,6 +28,7 @@ export const FUNNEL_ORDER: NormalizedStage[] = [
 
 export interface StageMappingQuestion {
   crm_stage_name: string;
+  normalized_stage_current: string;
   deal_count: number;
   total_value: number;
   suggested_mapping: NormalizedStage | null;
@@ -73,6 +74,9 @@ function suggestMapping(stageName: string): { mapping: NormalizedStage | null; c
   if (lower.includes('qualif'))     return { mapping: 'qualification', confidence: 'medium' };
   if (lower.includes('prospect') || lower.includes('lead') || lower.includes('discover'))
     return { mapping: 'prospecting', confidence: 'medium' };
+  if (lower.includes('pilot'))      return { mapping: 'evaluation',   confidence: 'medium' };
+  if (lower.includes('verbal') || lower.includes('commit') || lower.includes('contract'))
+    return { mapping: 'negotiation', confidence: 'medium' };
 
   return { mapping: null, confidence: 'low' };
 }
@@ -80,30 +84,31 @@ function suggestMapping(stageName: string): { mapping: NormalizedStage | null; c
 export async function getUnmappedStages(
   workspaceId: string
 ): Promise<StageMappingQuestion[]> {
-  // Check if Setup Interview already classified stages
-  // via stage_mappings table. If so, skip stage mapping.
+  // Check if Setup Interview already classified stages via stage_mappings table
+  // (non-calibration source = Setup Interview ran). If so, skip stage mapping.
   const mapped = await query(
     `SELECT COUNT(*) AS count
      FROM stage_mappings
      WHERE workspace_id = $1
-       AND normalized_stage IS NOT NULL`,
+       AND normalized_stage IS NOT NULL
+       AND source <> 'calibration'`,
     [workspaceId]
   );
   if (parseInt(mapped.rows[0].count) > 0) {
     return [];
   }
-  // else: continue with existing logic below
 
   const [stagesResult, configResult] = await Promise.all([
     query(
-      `SELECT stage_normalized AS crm_stage_name,
-              COUNT(*)::int        AS deal_count,
+      `SELECT stage              AS crm_stage_name,
+              stage_normalized   AS import_normalized,
+              COUNT(*)::int      AS deal_count,
               COALESCE(SUM(amount), 0) AS total_value
        FROM deals
        WHERE workspace_id = $1
-         AND stage_normalized IS NOT NULL
-         AND stage_normalized <> ''
-       GROUP BY stage_normalized
+         AND stage IS NOT NULL
+         AND stage <> ''
+       GROUP BY stage, stage_normalized
        HAVING COUNT(*) > 0
        ORDER BY COUNT(*) DESC`,
       [workspaceId]
@@ -130,10 +135,11 @@ export async function getUnmappedStages(
 
     const { mapping, confidence } = suggestMapping(crmName);
     unmapped.push({
-      crm_stage_name:    crmName,
-      deal_count:        Number(row.deal_count),
-      total_value:       Number(row.total_value),
-      suggested_mapping: mapping,
+      crm_stage_name:          crmName,
+      normalized_stage_current: row.import_normalized as string ?? '',
+      deal_count:              Number(row.deal_count),
+      total_value:             Number(row.total_value),
+      suggested_mapping:       mapping,
       confidence,
     });
   }
@@ -143,9 +149,12 @@ export async function getUnmappedStages(
 
 export async function confirmStageMapping(
   workspaceId: string,
-  crmStageName: string,
-  normalizedStage: NormalizedStage
+  rawStageName: string,
+  funnelPosition: NormalizedStage,
+  importNormalizedStage: string
 ): Promise<void> {
+  // 1. Write to workspace_config.calibration.stage_mappings (raw CRM name → funnel position)
+  //    Used for completion summary and re-checking what's already confirmed.
   const configResult = await query(
     `SELECT workspace_config->'calibration'->'stage_mappings' AS stage_mappings
      FROM workspaces WHERE id = $1`,
@@ -159,8 +168,27 @@ export async function confirmStageMapping(
           : configResult.rows[0].stage_mappings)
       : {};
 
-  existing[crmStageName] = normalizedStage;
+  existing[rawStageName] = funnelPosition;
   await saveStageMappings(workspaceId, existing);
+
+  // 2. Upsert into stage_mappings table (raw stage → import-level normalized name, source='calibration')
+  //    normalized_stage stays as the import-level value (e.g. 'evaluation') so analytics JOINs
+  //    (sm.normalized_stage = dsh.stage_normalized) continue to work.
+  //    display_order reflects the user-confirmed funnel position for correct stage ordering.
+  const isOpen = funnelPosition !== 'closed_won' && funnelPosition !== 'closed_lost';
+  const displayOrder = FUNNEL_ORDER.indexOf(funnelPosition);
+
+  await query(
+    `INSERT INTO stage_mappings (workspace_id, source, raw_stage, normalized_stage, is_open, display_order)
+     VALUES ($1, 'calibration', $2, $3, $4, $5)
+     ON CONFLICT (workspace_id, source, raw_stage)
+     DO UPDATE SET
+       normalized_stage = EXCLUDED.normalized_stage,
+       is_open          = EXCLUDED.is_open,
+       display_order    = EXCLUDED.display_order,
+       updated_at       = now()`,
+    [workspaceId, rawStageName, importNormalizedStage, isOpen, displayOrder]
+  );
 }
 
 export async function isStageMappingComplete(
@@ -211,5 +239,5 @@ ${rows}
 
 Funnel order: ${funnel}
 
-Correct anything that looks wrong (e.g. "closed_won is actually Evaluation"), or say **"looks right"** to confirm all mappings as-is.`;
+Correct anything that looks wrong (e.g. "Pilot is actually Evaluation"), or say **"looks right"** to confirm all mappings as-is.`;
 }

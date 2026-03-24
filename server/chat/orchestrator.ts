@@ -432,7 +432,7 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
           // Confirm all staged mappings at once (use suggested_mapping or closed_lost as fallback)
           for (const stage of unmappedStages) {
             const mapping: NormalizedStage = stage.suggested_mapping ?? 'closed_lost';
-            await confirmStageMapping(workspaceId, stage.crm_stage_name, mapping);
+            await confirmStageMapping(workspaceId, stage.crm_stage_name, mapping, stage.normalized_stage_current);
           }
           // All stages mapped — advance interview state to active_pipeline
           const interviewState = await getInterviewState(workspaceId);
@@ -449,7 +449,9 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
 
         } else if (inCalibrationSession && correctedCrmStage && correctedMapping) {
           // Apply the single correction and re-show the updated table
-          await confirmStageMapping(workspaceId, correctedCrmStage, correctedMapping);
+          const correctedStageInfo = unmappedStages.find(s => s.crm_stage_name === correctedCrmStage);
+          const correctedImportNormalized = correctedStageInfo?.normalized_stage_current ?? '';
+          await confirmStageMapping(workspaceId, correctedCrmStage, correctedMapping, correctedImportNormalized);
           const remaining = await getUnmappedStages(workspaceId);
 
           if (remaining.length > 0) {
@@ -471,7 +473,8 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
 
         } else if (inCalibrationSession && skipMatch) {
           // Skip the first unmapped stage
-          await confirmStageMapping(workspaceId, unmappedStages[0].crm_stage_name, 'closed_lost');
+          const skipStage = unmappedStages[0];
+          await confirmStageMapping(workspaceId, skipStage.crm_stage_name, 'closed_lost', skipStage.normalized_stage_current);
           const remaining = await getUnmappedStages(workspaceId);
 
           if (remaining.length > 0) {

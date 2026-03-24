@@ -2,6 +2,7 @@ import { query } from '../db.js';
 import { previewFilter } from './dimension-executor.js';
 import { confirmDimension, updateCalibrationStatus } from './data-dictionary.js';
 import type { DimensionFilter } from './data-dictionary.js';
+import { NORMALIZED_STAGE_LABELS } from './stage-mapping-interview.js';
 
 export type InterviewStep =
   | 'stage_mapping'
@@ -309,8 +310,9 @@ export async function buildCompletionSummary(workspaceId: string): Promise<strin
 
   if (Object.keys(stageMappings).length > 0) {
     lines.push(`**Stage Mappings**`);
-    for (const [crm, normalized] of Object.entries(stageMappings)) {
-      lines.push(`- ${crm} → ${normalized}`);
+    for (const [rawStage, funnelPosition] of Object.entries(stageMappings)) {
+      const label = NORMALIZED_STAGE_LABELS[funnelPosition as keyof typeof NORMALIZED_STAGE_LABELS] ?? funnelPosition;
+      lines.push(`- ${rawStage} → ${label}`);
     }
     lines.push('');
   }
