@@ -69,16 +69,6 @@ const NAV_SECTIONS: NavSection[] = [
   },
 ];
 
-const SECTION_LABEL_STYLE: React.CSSProperties = {
-  padding: '0 16px',
-  fontSize: 10,
-  fontWeight: 700,
-  letterSpacing: '0.08em',
-  color: colors.textDim,
-  textTransform: 'uppercase',
-  marginBottom: 4,
-};
-
 function NavButton({
   item, isActive, onClick, badge,
 }: {
@@ -125,6 +115,9 @@ export default function SettingsNav({ activeTab, onTabChange, isAdmin = false }:
   const { currentWorkspace, token } = useWorkspace();
   const [calibrationComplete, setCalibrationComplete] = useState<boolean | null>(null);
 
+  // Track which sections are collapsed; default all open
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+
   useEffect(() => {
     if (!currentWorkspace?.id || !token) return;
     fetch(`/api/workspaces/${currentWorkspace.id}/calibration-status`, {
@@ -137,21 +130,31 @@ export default function SettingsNav({ activeTab, onTabChange, isAdmin = false }:
       .catch(() => {});
   }, [currentWorkspace?.id, token]);
 
+  // Auto-expand the section containing the active tab
+  useEffect(() => {
+    for (const section of NAV_SECTIONS) {
+      const match = section.items.some(
+        item => item.key === activeTab || (item.key === 'segments' && activeTab === 'dimensions')
+      );
+      if (match && collapsed[section.label]) {
+        setCollapsed(prev => ({ ...prev, [section.label]: false }));
+      }
+    }
+  }, [activeTab]);
+
+  const toggleSection = (label: string) => {
+    setCollapsed(prev => ({ ...prev, [label]: !prev[label] }));
+  };
+
   function getSetupBadge() {
     if (calibrationComplete === null) return null;
     if (calibrationComplete) {
       return (
-        <span style={{
-          fontSize: 10, color: colors.green, fontWeight: 700,
-          flexShrink: 0, lineHeight: 1,
-        }}>✓</span>
+        <span style={{ fontSize: 10, color: colors.green, fontWeight: 700, flexShrink: 0, lineHeight: 1 }}>✓</span>
       );
     }
     return (
-      <span style={{
-        width: 7, height: 7, borderRadius: '50%',
-        background: '#F59E0B', display: 'inline-block', flexShrink: 0,
-      }} />
+      <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#F59E0B', display: 'inline-block', flexShrink: 0 }} />
     );
   }
 
@@ -159,20 +162,65 @@ export default function SettingsNav({ activeTab, onTabChange, isAdmin = false }:
     const visibleItems = section.items.filter(item => !item.adminOnly || isAdmin);
     if (visibleItems.length === 0) return null;
 
+    const isCollapsed = !!collapsed[section.label];
+    const hasActiveItem = visibleItems.some(
+      item => item.key === activeTab || (item.key === 'segments' && activeTab === 'dimensions')
+    );
+
     return (
-      <div key={section.label} style={{ marginTop: sectionIndex === 0 ? 8 : 20 }}>
-        <div style={{ ...SECTION_LABEL_STYLE, marginTop: 0, marginBottom: 6 }}>
-          {section.label}
+      <div key={section.label} style={{ marginTop: sectionIndex === 0 ? 8 : 4 }}>
+        {/* Section header — clickable */}
+        <button
+          onClick={() => toggleSection(section.label)}
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            width: '100%', padding: '6px 14px 6px 16px',
+            background: 'none', border: 'none', cursor: 'pointer',
+            borderLeft: '3px solid transparent',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.background = colors.surfaceHover; }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}
+        >
+          <span style={{
+            fontSize: 10, fontWeight: 700, letterSpacing: '0.08em',
+            color: hasActiveItem && isCollapsed ? colors.accent : colors.textDim,
+            textTransform: 'uppercase', fontFamily: fonts.sans,
+            transition: 'color 0.15s',
+          }}>
+            {section.label}
+            {hasActiveItem && isCollapsed && (
+              <span style={{
+                display: 'inline-block', width: 5, height: 5, borderRadius: '50%',
+                background: colors.accent, marginLeft: 6, verticalAlign: 'middle',
+              }} />
+            )}
+          </span>
+          <span style={{
+            fontSize: 9, color: colors.textDim, lineHeight: 1,
+            transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
+            transition: 'transform 0.18s ease',
+            display: 'inline-block',
+          }}>
+            ▾
+          </span>
+        </button>
+
+        {/* Items — slide open/closed */}
+        <div style={{
+          overflow: 'hidden',
+          maxHeight: isCollapsed ? 0 : 600,
+          transition: 'max-height 0.2s ease',
+        }}>
+          {visibleItems.map(item => (
+            <NavButton
+              key={item.key}
+              item={item}
+              isActive={activeTab === item.key || (item.key === 'segments' && activeTab === 'dimensions')}
+              onClick={() => onTabChange(item.key)}
+              badge={item.key === 'setup' ? getSetupBadge() : undefined}
+            />
+          ))}
         </div>
-        {visibleItems.map(item => (
-          <NavButton
-            key={item.key}
-            item={item}
-            isActive={activeTab === item.key || (item.key === 'segments' && activeTab === 'dimensions')}
-            onClick={() => onTabChange(item.key)}
-            badge={item.key === 'setup' ? getSetupBadge() : undefined}
-          />
-        ))}
       </div>
     );
   };
