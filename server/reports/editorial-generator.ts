@@ -219,6 +219,7 @@ export async function generateEditorialReport(
     branding,
     triggered_by,
     preview_only,
+    opening_narrative: editorial.opening_narrative,
   };
 
   const formatsGenerated: Record<string, any> = {};
@@ -277,10 +278,10 @@ export async function generateEditorialReport(
     const genResult = await query<{ id: string }>(
       `INSERT INTO report_generations (
         report_template_id, workspace_id, agent_id, formats_generated, delivery_status,
-        sections_snapshot, editorial_decisions, opening_narrative,
+        sections_snapshot, sections_content, editorial_decisions, opening_narrative,
         skills_run, total_tokens, generation_duration_ms,
         render_duration_ms, triggered_by, data_as_of
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
       RETURNING id`,
       [
         report_template_id,
@@ -288,6 +289,7 @@ export async function generateEditorialReport(
         agent.id,
         JSON.stringify(formatsGenerated),
         JSON.stringify({}),
+        JSON.stringify(editorial.sections),
         JSON.stringify(editorial.sections),
         JSON.stringify(editorial.editorial_decisions),
         editorial.opening_narrative,

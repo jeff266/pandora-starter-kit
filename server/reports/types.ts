@@ -269,4 +269,5 @@ export interface ReportGenerationContext {
   annotated_at?: string;
   annotated_by?: string;
   version?: number;
+  opening_narrative?: string;
 }

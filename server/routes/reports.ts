@@ -847,7 +847,7 @@ router.get('/:workspaceId/reports/:reportId/generations/:generationId/export/:fo
         name: templateName,
         description: (gen.template_description || '') as string,
       } as any,
-      sections_content: gen.sections_content || [],
+      sections_content: gen.sections_content || gen.sections_snapshot || [],
       branding: gen.branding || {},
       triggered_by: 'manual' as const,
       preview_only: false,
@@ -855,6 +855,7 @@ router.get('/:workspaceId/reports/:reportId/generations/:generationId/export/:fo
       annotated_at: gen.annotated_at as string | undefined,
       annotated_by: gen.annotated_by as string | undefined,
       version: (gen.version || 1) as number,
+      opening_narrative: gen.opening_narrative as string | undefined,
     };
 
     let filepath: string;

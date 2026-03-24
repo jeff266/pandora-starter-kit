@@ -77,7 +77,7 @@ function annotationMap(annotations: HumanAnnotation[]): Map<string, HumanAnnotat
 }
 
 export async function renderDOCX(context: ReportGenerationContext): Promise<DOCXRenderResult> {
-  const { workspace_id, template, sections_content, branding, human_annotations, annotated_at, annotated_by, version } = context;
+  const { workspace_id, template, sections_content, branding, human_annotations, annotated_at, annotated_by, version, opening_narrative } = context;
 
   const accentColor = branding?.primary_color?.replace('#', '') || C.blue;
   const annMap = annotationMap(human_annotations || []);
@@ -128,6 +128,30 @@ export async function renderDOCX(context: ReportGenerationContext): Promise<DOCX
       ] : []),
     ],
   });
+
+  // ── OPENING NARRATIVE / EXECUTIVE SUMMARY ──
+  if (opening_narrative) {
+    const cleaned = stripMarkdown(opening_narrative);
+    const paras = cleaned.split('\n\n').filter(p => p.trim());
+    const narrativeChildren: any[] = [
+      new Paragraph({
+        children: [new TextRun({ text: 'Executive Summary', bold: true, size: 32, color: C.navy, font: 'Calibri' })],
+        spacing: { before: 0, after: 240 },
+        pageBreakBefore: true,
+        border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: accentColor } },
+      }),
+    ];
+    for (const para of paras.slice(0, 20)) {
+      const lines = para.split('\n').map(l => l.trim()).filter(Boolean);
+      for (const line of lines) {
+        narrativeChildren.push(new Paragraph({
+          children: [new TextRun({ text: line, size: 20, color: C.darkSlate, font: 'Calibri' })],
+          spacing: { after: 120 },
+        }));
+      }
+    }
+    docSections.push({ properties: {}, children: narrativeChildren });
+  }
 
   // ── CONTENT SECTIONS ──
   for (const section of sections_content) {
@@ -410,11 +434,13 @@ function buildMetricsTable(metrics: MetricCard[], accent: string): Table {
 function buildDealTable(deals: DealCard[], accent: string): Table {
   const rows: TableRow[] = [];
 
+  const dealColWidths = [28, 15, 18, 24, 15];
   rows.push(new TableRow({
-    children: ['Deal', 'Amount', 'Stage', 'Signal', 'Action'].map(h =>
+    children: ['Deal', 'Amount', 'Stage', 'Signal', 'Action'].map((h, i) =>
       new TableCell({
         children: [new Paragraph({ children: [new TextRun({ text: h, bold: true, size: 16, color: 'FFFFFF' })] })],
         shading: { fill: accent, type: ShadingType.CLEAR, color: 'auto' },
+        width: { size: dealColWidths[i], type: WidthType.PERCENTAGE },
       })
     ),
     tableHeader: true,
@@ -469,11 +495,17 @@ function buildDealTable(deals: DealCard[], accent: string): Table {
 function buildDataTable(table: { headers: string[]; rows: Record<string, any>[] }): Table {
   const rows: TableRow[] = [];
 
+  const colCount = table.headers.length || 1;
+  const baseWidth = Math.floor(100 / colCount);
+  const remainder = 100 - baseWidth * colCount;
+  const colWidths = table.headers.map((_, i) => baseWidth + (i === 0 ? remainder : 0));
+
   rows.push(new TableRow({
-    children: table.headers.map(h =>
+    children: table.headers.map((h, i) =>
       new TableCell({
         children: [new Paragraph({ children: [new TextRun({ text: h, bold: true, size: 16, color: 'FFFFFF' })] })],
         shading: { fill: C.navy, type: ShadingType.CLEAR, color: 'auto' },
+        width: { size: colWidths[i], type: WidthType.PERCENTAGE },
       })
     ),
     tableHeader: true,
