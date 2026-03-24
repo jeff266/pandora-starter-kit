@@ -406,7 +406,38 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
 
       tokensUsed = 0;
     } catch (calErr) {
-      console.warn('[orchestrator] Calibration routing failed, falling through to LLM:', calErr instanceof Error ? calErr.message : calErr);
+      const msg = (calErr as Error).message ?? '';
+
+      // Schema errors, connection errors, and missing
+      // columns are infrastructure failures — re-throw
+      // so they surface in logs as actual errors, not
+      // silent warnings that mask broken features.
+      const isFatal =
+        msg.includes('column') ||
+        msg.includes('does not exist') ||
+        msg.includes('relation') ||
+        msg.includes('ECONNREFUSED') ||
+        msg.includes('connect ETIMEDOUT');
+
+      if (isFatal) {
+        console.error(
+          '[orchestrator] Calibration routing FATAL error:',
+          msg
+        );
+        // Still fall through to LLM — don't break the
+        // user's chat — but log as error not warn so it
+        // shows up in error monitoring
+        // answer remains null → falls through to PandoraAgent
+      } else {
+        // Expected runtime errors (workspace not found,
+        // no deals, empty results) — silent fallthrough
+        // is acceptable
+        console.warn(
+          '[orchestrator] Calibration routing failed,',
+          'falling through to LLM:',
+          msg
+        );
+      }
     }
   }
 

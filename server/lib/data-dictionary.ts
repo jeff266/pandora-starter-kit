@@ -355,7 +355,7 @@ export async function getCalibrationStatus(
 
   try {
     const result = await query(
-      `SELECT calibration_status, workspace_config FROM workspaces WHERE id = $1 LIMIT 1`,
+      `SELECT workspace_config FROM workspaces WHERE id = $1 LIMIT 1`,
       [workspaceId]
     );
     if (result.rows.length === 0) return defaultStatus;
@@ -367,9 +367,7 @@ export async function getCalibrationStatus(
       : {};
     const cal = parsed?.calibration ?? {};
 
-    const columnStatus = row.calibration_status as string | null;
-    const configStatus = cal.status as string | null;
-    const resolvedStatus = (columnStatus ?? configStatus ?? 'not_started') as CalibrationStatus['status'];
+    const resolvedStatus = (cal.status ?? 'not_started') as CalibrationStatus['status'];
 
     return {
       status:               resolvedStatus,
