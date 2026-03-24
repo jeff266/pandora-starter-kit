@@ -954,6 +954,13 @@ agentsWorkspaceRouter.post('/:workspaceId/reports/documents/:reportId/mark-read'
   }
 
   try {
+    const exists = await query(
+      `SELECT 1 FROM report_documents WHERE id = $1 AND workspace_id = $2`,
+      [reportId, workspaceId]
+    );
+    if (exists.rows.length === 0) {
+      return res.status(404).json({ error: 'Report not found' });
+    }
     await query(
       `INSERT INTO report_document_reads (user_id, report_document_id, workspace_id)
        VALUES ($1, $2, $3)

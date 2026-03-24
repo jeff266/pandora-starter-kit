@@ -32,7 +32,6 @@ export default function ReportsBell({ workspaceId }: ReportsBellProps) {
   }, [fetchUnreadCount]);
 
   function handleClick() {
-    setUnreadCount(0);
     navigate('/reports');
   }
 

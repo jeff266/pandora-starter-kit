@@ -223,11 +223,8 @@ export default function ReportViewer() {
     const wid = currentWorkspace?.id;
     if (!reportDocument?.id || !wid) return;
     const token = localStorage.getItem('pandora_session');
-    // Mark report as read
-    fetch(`/api/workspaces/${wid}/reports/documents/${reportDocument.id}/mark-read`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    }).catch(() => {});
+    // Mark report as read using api client
+    api.post(`/reports/documents/${reportDocument.id}/mark-read`, {}).catch(() => {});
     // Load annotations
     fetch(`/api/workspaces/${wid}/reports/${reportDocument.id}/annotations`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -665,23 +662,12 @@ export default function ReportViewer() {
 
   async function handleDeleteDoc() {
     if (!reportDocument?.id) return;
-    const wid = currentWorkspace?.id || workspaceId;
-    if (!wid) return;
     setDeletingDoc(true);
     try {
-      const token = localStorage.getItem('pandora_session');
-      const res = await fetch(
-        `/api/workspaces/${wid}/reports/documents/${reportDocument.id}`,
-        { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } }
-      );
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        alert(data.error || 'Delete failed');
-        return;
-      }
+      await api.delete(`/reports/documents/${reportDocument.id}`);
       navigate('/reports');
-    } catch {
-      alert('Delete failed. Please try again.');
+    } catch (err: any) {
+      alert(err?.message || 'Delete failed. Please try again.');
     } finally {
       setDeletingDoc(false);
       setConfirmDeleteDoc(false);

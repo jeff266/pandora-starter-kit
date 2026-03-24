@@ -458,7 +458,7 @@ export default function ReportsPage() {
   const [qbrModal, setQbrModal] = useState(false);
   const [seededTemplates, setSeededTemplates] = useState<SeededTemplate[]>([]);
 
-  const workspaceId = window.location.pathname.split('/')[2] || 'default';
+  const workspaceId = currentWorkspace?.id ?? '';
   const isAdmin = currentWorkspace?.role === 'admin';
   const currentUserId = user?.id;
 
