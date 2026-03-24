@@ -1,0 +1,216 @@
+Two separate bugs. Let me log them then write the fix prompt.Logged. Here's the Claude Code investigation + fix prompt:
+
+```
+# WBR DOCX Export Bug — Investigation and Fix
+
+## What's broken
+
+A user downloaded a WBR DOCX from the Report Viewer.
+The file contains only the executive summary. All other
+sections are missing. The header table is squished into
+a single column.
+
+## Before touching anything
+
+Read these files in order:
+
+1. server/renderers/ — list every file. Which renderer
+   handles DOCX for reports?
+
+2. Read the full DOCX renderer file. Show:
+   - How it receives the report document data
+   - How sections[] is iterated (or not)
+   - How tables are constructed — specifically whether
+     columnWidths and cell width are both set in DXA
+
+3. server/routes/reports.ts — find the DOCX download
+   route. What data does it pass to the renderer?
+   Does it pass the full report_documents row including
+   sections[], or just headline/metadata?
+
+4. Run this query against the Imubit workspace to confirm
+   what's in the document:
+
+   SELECT
+     id,
+     headline,
+     week_label,
+     jsonb_array_length(sections) AS section_count,
+     jsonb_array_element(sections, 0)->>'title' AS section_0_title,
+     jsonb_array_element(sections, 1)->>'title' AS section_1_title,
+     jsonb_array_element(sections, 2)->>'title' AS section_2_title
+   FROM report_documents
+   WHERE workspace_id = (
+     SELECT id FROM workspaces WHERE name ILIKE '%imubit%' LIMIT 1
+   )
+   ORDER BY generated_at DESC
+   LIMIT 1;
+
+   This confirms whether sections exist in the database
+   or were lost upstream.
+
+Report what you find. I need to know:
+A. Is the DOCX renderer a stub, partial, or complete?
+B. Is sections[] being passed to the renderer at all?
+C. Are there sections in the database for this document?
+D. What is the table construction pattern — does it set
+   both columnWidths on the table AND width on each cell?
+
+---
+
+## Fix A — Section rendering
+
+If the renderer only renders section[0] or only the
+headline: iterate all sections[] and render each one.
+
+Each section in the WBR gets:
+1. A bold section heading (Heading 2 style)
+2. The section narrative as body text paragraphs
+3. Metrics as a table if section.metrics[] exists
+4. A horizontal rule between sections
+
+```typescript
+// For each section in report_document.sections:
+for (const section of sections) {
+  // Section heading
+  children.push(new Paragraph({
+    heading: HeadingLevel.HEADING_2,
+    spacing: { before: 360, after: 160 },
+    children: [new TextRun({
+      text: section.title ?? section.label ?? '',
+      bold: true, size: 28, font: 'Arial'
+    })]
+  }))
+
+  // Narrative paragraphs
+  // Split on double newline for paragraph breaks
+  const paragraphs = (section.narrative ?? '')
+    .split('\n\n')
+    .filter(p => p.trim())
+
+  for (const para of paragraphs) {
+    children.push(new Paragraph({
+      spacing: { before: 60, after: 120 },
+      children: [new TextRun({
+        text: para.replace(/\*\*/g, '').trim(),
+        size: 22, font: 'Arial'
+      })]
+    }))
+  }
+
+  // Metrics table if present
+  if (section.metrics?.length) {
+    children.push(buildMetricsTable(section.metrics))
+  }
+
+  // Section divider
+  children.push(new Paragraph({
+    spacing: { before: 200, after: 200 },
+    border: { bottom: {
+      style: BorderStyle.SINGLE, size: 2, color: 'D1D5DB'
+    }},
+    children: []
+  }))
+}
+```
+
+---
+
+## Fix B — Table column width bug
+
+Per the docx skill rules — tables REQUIRE dual widths:
+1. columnWidths array on the Table object
+2. width on EVERY TableCell individually
+Both must be set in DXA. Without both, tables render
+incorrectly.
+
+US Letter with 1 inch margins = 9360 DXA content width.
+
+```typescript
+// WRONG — missing cell widths:
+new Table({
+  columnWidths: [3120, 3120, 3120],
+  rows: [...]
+})
+
+// CORRECT — both table AND cell widths in DXA:
+new Table({
+  width: { size: 9360, type: WidthType.DXA },
+  columnWidths: [3120, 3120, 3120],
+  rows: [new TableRow({
+    children: [
+      new TableCell({
+        width: { size: 3120, type: WidthType.DXA },
+        // ... content
+      }),
+      new TableCell({
+        width: { size: 3120, type: WidthType.DXA },
+        // ... content
+      }),
+      new TableCell({
+        width: { size: 3120, type: WidthType.DXA },
+        // ... content
+      }),
+    ]
+  })]
+})
+```
+
+Find every table in the DOCX renderer and fix the
+column widths. The header table specifically: the
+WBR title + week + prepared by table should be a
+3-column table at 9360 total DXA:
+- Column 1 (WBR badge + title): 5040 DXA
+- Column 2 (week label): 2520 DXA
+- Column 3 (prepared by): 1800 DXA
+
+Metrics table if present: 4 columns per metric row:
+- Label: 2880 DXA
+- Value: 1680 DXA
+- Delta: 1680 DXA
+- Severity: 1120 DXA (badge)
+Total: 7360 DXA (narrower — leave margin)
+
+---
+
+## Fix C — Page size
+
+Per the docx skill rules — docx-js defaults to A4.
+Must explicitly set US Letter:
+
+```typescript
+sections: [{
+  properties: {
+    page: {
+      size: {
+        width: 12240,   // 8.5 inches in DXA
+        height: 15840   // 11 inches in DXA
+      },
+      margin: {
+        top: 1440, right: 1440,
+        bottom: 1440, left: 1440
+      }
+    }
+  },
+  children: [/* all content */]
+}]
+```
+
+If the page size is missing or set to A4, add this.
+
+---
+
+## Acceptance Criteria
+
+1. Downloaded DOCX contains all 8 WBR sections for the
+   Imubit Week of March 23, 2026 document
+2. Each section has its heading and narrative text
+3. Header table has 3 columns — not squished
+4. Column widths correct: table width + all cell widths
+   set in DXA, summing correctly
+5. Metrics tables render correctly where sections have
+   metrics[]
+6. Page size is US Letter (12240 x 15840 DXA)
+7. File opens cleanly in Word and Google Docs
+8. No other sections or renderers broken by the change
+```

@@ -1039,9 +1039,19 @@ agentsWorkspaceRouter.post('/:workspaceId/reports/:reportId/export', requirePerm
     const { mergeAnnotationsForExport } = await import('../orchestrator/annotation-merge.js');
     let finalDoc = await mergeAnnotationsForExport(reportDoc, workspaceId);
 
-    // Filter sections
+    // Filter sections.
+    // Sections without an id (older WBR docs where the LLM omitted the id field) must
+    // always be included — their id arrives from the client as null (JSON-serialised
+    // undefined), so a strict .includes(s.id) check would silently drop every section.
     if (config.included_sections && config.included_sections.length > 0) {
-      finalDoc = { ...finalDoc, sections: finalDoc.sections.filter(s => config.included_sections!.includes(s.id)) };
+      finalDoc = {
+        ...finalDoc,
+        sections: finalDoc.sections.filter(s =>
+          !s.id ||                                       // no id → always keep
+          config.included_sections!.includes(s.id) ||   // strict match
+          config.included_sections!.includes(null as any) // frontend sent null for missing id
+        ),
+      };
     }
 
     // Strip actions if not included

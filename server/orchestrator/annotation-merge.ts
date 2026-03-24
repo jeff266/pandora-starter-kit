@@ -59,8 +59,10 @@ export async function mergeAnnotationsForExport(
     const sectionAnnotations = bySection.get(section.id);
     if (!sectionAnnotations?.length) continue;
 
-    // Split content into paragraphs (same logic as frontend)
-    const paragraphs = section.content
+    // Split content into paragraphs (same logic as frontend).
+    // Guard against sections that store body in `narrative` rather than `content`.
+    const rawContent = section.content || (section as any).narrative || '';
+    const paragraphs = rawContent
       .split(/\n\n+/)
       .filter(p => p.trim().length > 0);
 

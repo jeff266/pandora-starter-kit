@@ -178,8 +178,10 @@ export async function renderDocx(
       },
     }));
 
-    // Split content into paragraphs
-    const paragraphs = section.content
+    // Split content into paragraphs.
+    // Newer WBR sections may store body text in `narrative`; fall back gracefully.
+    const bodyText: string = section.content || (section as any).narrative || '';
+    const paragraphs = bodyText
       .split(/\n\n+/)
       .filter(p => p.trim().length > 0);
 
