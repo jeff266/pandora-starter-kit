@@ -364,8 +364,8 @@ export async function generateReport(request: GenerateReportRequest): Promise<Re
       `INSERT INTO report_documents
          (workspace_id, document_type, week_label, headline, sections,
           actions, skills_included, skills_omitted, tokens_used,
-          orchestrator_run_id, generated_at, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, gen_random_uuid(), NOW(), NOW())
+          orchestrator_run_id, generated_at, created_at, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, gen_random_uuid(), NOW(), NOW(), $10)
        RETURNING id`,
       [
         workspace_id,
@@ -377,6 +377,7 @@ export async function generateReport(request: GenerateReportRequest): Promise<Re
         Array.from(new Set(skillsIncluded)),
         Array.from(new Set(skillsOmitted)),
         0,
+        request.created_by_user_id || null,
       ]
     ).catch(err => {
       logger.error('Failed to insert report_documents', err instanceof Error ? err : undefined);

@@ -42,7 +42,7 @@ router.get('/:workspaceId/reports', async (req: Request, res: Response) => {
 
     const result = await query(
       `SELECT id, document_type, week_label, headline, generated_at,
-              sections, actions, skills_included, agent_id, config
+              sections, actions, skills_included, agent_id, config, created_by
        FROM report_documents
        WHERE workspace_id = $1
        ORDER BY generated_at DESC
@@ -382,6 +382,7 @@ router.post('/:workspaceId/reports/:reportId/generate', async (req: Request, res
       preview_only: preview,
       period_label: periodLabel,
       document_type: docType,
+      created_by_user_id: req.user?.user_id,
     };
 
     const generation = await generateReport(request);

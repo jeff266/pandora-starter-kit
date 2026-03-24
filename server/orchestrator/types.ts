@@ -215,6 +215,7 @@ export interface ReportDocument {
   tokens_used: number;
   orchestrator_run_id: string;
   tiptap_content?: Record<string, any> | null;
+  created_by?: string;       // user_id of the user who triggered generation
 }
 
 export interface PriorContext {

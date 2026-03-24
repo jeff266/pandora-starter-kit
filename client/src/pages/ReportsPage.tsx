@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, FileText, Clock, X, CheckCircle, AlertTriangle, AlertCircle, Loader2, Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, FileText, Clock, X, CheckCircle, AlertTriangle, AlertCircle, Loader2, Calendar, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
 import { colors, fonts } from '../styles/theme';
 import { api } from '../lib/api';
 import AvatarDisplay from '../components/avatars/AvatarDisplay';
 import IntelligenceNav from '../components/IntelligenceNav';
+import { useWorkspace } from '../context/WorkspaceContext';
 
 interface ReportDocSection {
   id: string;
@@ -25,6 +26,7 @@ interface ReportDocument {
   skills_included?: string[];
   agent_id?: string;
   config?: { agent_name?: string; agent_goal?: string; run_id?: string };
+  created_by?: string;
 }
 
 const DOC_TYPE_META: Record<string, { label: string; bg: string; color: string }> = {
@@ -447,6 +449,7 @@ interface SeededTemplate {
 
 export default function ReportsPage() {
   const navigate = useNavigate();
+  const { user, currentWorkspace } = useWorkspace();
   const [reports, setReports] = useState<ReportDocument[]>([]);
   const [loading, setLoading] = useState(true);
   const [showTemplateGallery, setShowTemplateGallery] = useState(false);
@@ -456,6 +459,8 @@ export default function ReportsPage() {
   const [seededTemplates, setSeededTemplates] = useState<SeededTemplate[]>([]);
 
   const workspaceId = window.location.pathname.split('/')[2] || 'default';
+  const isAdmin = currentWorkspace?.role === 'admin';
+  const currentUserId = user?.id;
 
   useEffect(() => {
     loadReports();
@@ -503,6 +508,21 @@ export default function ReportsPage() {
       console.error('Failed to load reports:', err);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleViewReport(report: ReportDocument) {
+    api.post(`/reports/documents/${report.id}/mark-read`, {}).catch(() => {});
+    navigate(`/workspace/${workspaceId}/briefing/${report.id}`);
+  }
+
+  async function handleDeleteReport(reportId: string) {
+    try {
+      await api.delete(`/reports/documents/${reportId}`);
+      setReports(prev => prev.filter(r => r.id !== reportId));
+    } catch (err: any) {
+      const msg = err?.message || 'Delete failed';
+      alert(msg);
     }
   }
 
@@ -656,7 +676,8 @@ export default function ReportsPage() {
               key={report.id}
               report={report}
               workspaceId={workspaceId}
-              onView={() => navigate(`/workspace/${workspaceId}/briefing/${report.id}`)}
+              onView={() => handleViewReport(report)}
+              onDelete={isAdmin || report.created_by === currentUserId ? () => handleDeleteReport(report.id) : undefined}
             />
           ))}
         </div>
@@ -689,11 +710,15 @@ export default function ReportsPage() {
   );
 }
 
-function ReportDocumentCard({ report, onView }: {
+function ReportDocumentCard({ report, onView, onDelete }: {
   report: ReportDocument;
   workspaceId: string;
   onView: () => void;
+  onDelete?: () => void;
 }) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
   const meta = DOC_TYPE_META[report.document_type] || {
     label: report.document_type,
     bg: colors.surfaceRaised,
@@ -702,6 +727,17 @@ function ReportDocumentCard({ report, onView }: {
   const displayLabel = report.document_type === 'agent_run' && report.config?.agent_name
     ? report.config.agent_name
     : meta.label;
+
+  async function handleConfirmDelete() {
+    if (!onDelete) return;
+    setDeleting(true);
+    try {
+      await onDelete();
+    } finally {
+      setDeleting(false);
+      setConfirmDelete(false);
+    }
+  }
 
   return (
     <div style={{
@@ -756,6 +792,76 @@ function ReportDocumentCard({ report, onView }: {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 16 }}>
+          {onDelete && !confirmDelete && (
+            <button
+              onClick={(e) => { e.stopPropagation(); setConfirmDelete(true); }}
+              title="Delete report"
+              style={{
+                width: 34,
+                height: 34,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: 'transparent',
+                border: `1px solid ${colors.border}`,
+                borderRadius: 6,
+                cursor: 'pointer',
+                color: colors.textMuted,
+                transition: 'border-color 0.15s, color 0.15s',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = '#ef4444';
+                e.currentTarget.style.color = '#ef4444';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = colors.border;
+                e.currentTarget.style.color = colors.textMuted;
+              }}
+            >
+              <Trash2 style={{ width: 15, height: 15 }} />
+            </button>
+          )}
+
+          {onDelete && confirmDelete && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 12, color: colors.textMuted, fontFamily: fonts.sans }}>Delete?</span>
+              <button
+                onClick={handleConfirmDelete}
+                disabled={deleting}
+                style={{
+                  padding: '5px 10px',
+                  fontSize: 12,
+                  fontFamily: fonts.sans,
+                  fontWeight: 600,
+                  background: '#ef4444',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: 5,
+                  cursor: deleting ? 'not-allowed' : 'pointer',
+                  opacity: deleting ? 0.7 : 1,
+                }}
+              >
+                {deleting ? '…' : 'Yes'}
+              </button>
+              <button
+                onClick={() => setConfirmDelete(false)}
+                disabled={deleting}
+                style={{
+                  padding: '5px 10px',
+                  fontSize: 12,
+                  fontFamily: fonts.sans,
+                  background: 'transparent',
+                  color: colors.textSecondary,
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: 5,
+                  cursor: 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+
           <button
             onClick={onView}
             style={{

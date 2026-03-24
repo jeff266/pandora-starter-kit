@@ -41,8 +41,8 @@ export async function persistReportDocument(
       headline, sections, actions, recommended_next_steps,
       skills_included, skills_omitted, total_word_count,
       tokens_used, orchestrator_run_id, generated_at,
-      hypothesis_updates
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+      hypothesis_updates, created_by
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
     RETURNING id
   `, [
     doc.workspace_id,
@@ -60,6 +60,7 @@ export async function persistReportDocument(
     doc.orchestrator_run_id,
     doc.generated_at,
     JSON.stringify(doc.hypothesis_updates || []),
+    doc.created_by || null,
   ]);
 
   const reportDocumentId = result.rows[0].id;

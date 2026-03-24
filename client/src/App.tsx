@@ -10,6 +10,7 @@ import Sidebar from './components/Sidebar';
 import CommandPalette from './components/CommandPalette';
 import TopBar from './components/TopBar';
 import NotificationBell from './components/notifications/NotificationBell';
+import ReportsBell from './components/reports/ReportsBell';
 import Placeholder from './components/Placeholder';
 import ChatPanel from './components/ChatPanel';
 import LoginPage from './pages/LoginPage';
@@ -389,7 +390,12 @@ export default function App() {
       <main style={{ marginLeft: isMobile ? 0 : (sidebarCollapsed ? 48 : 200), flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', transition: 'margin-left 0.15s ease' }}>
         <ImpersonationBanner />
         <DemoModeBanner />
-        <TopBar title={title} lastRefreshed={lastRefreshed} onRefresh={fetchBadges} onMenuToggle={isMobile ? () => setMobileMenuOpen(true) : undefined} governancePending={governancePending} actions={currentWorkspace?.id ? <NotificationBell workspaceId={currentWorkspace.id} /> : undefined} />
+        <TopBar title={title} lastRefreshed={lastRefreshed} onRefresh={fetchBadges} onMenuToggle={isMobile ? () => setMobileMenuOpen(true) : undefined} governancePending={governancePending} actions={currentWorkspace?.id ? (
+          <>
+            <ReportsBell workspaceId={currentWorkspace.id} />
+            <NotificationBell workspaceId={currentWorkspace.id} />
+          </>
+        ) : undefined} />
         <div style={{ flex: 1, overflow: 'auto', padding: isMobile ? '16px 12px' : '24px 28px' }}>
           <Routes>
             <Route path="/" element={activeView === 'assistant' ? <AssistantView /> : <CommandCenter />} />

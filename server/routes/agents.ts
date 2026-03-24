@@ -915,6 +915,97 @@ agentsWorkspaceRouter.get('/:workspaceId/reports/:reportId/charts-data.xlsx', re
   }
 });
 
+// ── Report Document Read Tracking ────────────────────────────────────────────
+
+agentsWorkspaceRouter.get('/:workspaceId/reports/documents/unread-count', requirePermission('agents.view'), async (req: Request, res: Response) => {
+  const workspaceId = req.params.workspaceId as string;
+  const userId = req.user?.user_id;
+
+  if (!userId) {
+    return res.json({ count: 0 });
+  }
+
+  try {
+    const result = await query(
+      `SELECT COUNT(*) AS count
+       FROM report_documents
+       WHERE workspace_id = $1
+         AND id NOT IN (
+           SELECT report_document_id
+           FROM report_document_reads
+           WHERE user_id = $2
+         )`,
+      [workspaceId, userId]
+    );
+    return res.json({ count: parseInt(result.rows[0]?.count ?? '0', 10) });
+  } catch (err: any) {
+    console.error('[Reports] Failed to get unread count:', err.message);
+    return res.json({ count: 0 });
+  }
+});
+
+agentsWorkspaceRouter.post('/:workspaceId/reports/documents/:reportId/mark-read', requirePermission('agents.view'), async (req: Request, res: Response) => {
+  const workspaceId = req.params.workspaceId as string;
+  const reportId = req.params.reportId as string;
+  const userId = req.user?.user_id;
+
+  if (!userId) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+
+  try {
+    await query(
+      `INSERT INTO report_document_reads (user_id, report_document_id, workspace_id)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (user_id, report_document_id) DO NOTHING`,
+      [userId, reportId, workspaceId]
+    );
+    return res.json({ ok: true });
+  } catch (err: any) {
+    console.error('[Reports] Failed to mark read:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+agentsWorkspaceRouter.delete('/:workspaceId/reports/documents/:reportId', requirePermission('agents.view'), async (req: Request, res: Response) => {
+  const workspaceId = req.params.workspaceId as string;
+  const reportId = req.params.reportId as string;
+  const userId = req.user?.user_id;
+
+  if (!userId && req.authMethod !== 'api_key') {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+
+  try {
+    const docResult = await query(
+      `SELECT created_by FROM report_documents WHERE id = $1 AND workspace_id = $2`,
+      [reportId, workspaceId]
+    );
+
+    if (docResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Report not found' });
+    }
+
+    const createdBy = docResult.rows[0].created_by;
+    const isAdmin = req.userWorkspaceRole === 'admin' || req.authMethod === 'api_key';
+    const isCreator = userId && createdBy && userId === createdBy;
+
+    if (!isAdmin && !isCreator) {
+      return res.status(403).json({ error: 'Only the report creator or a workspace admin can delete this report' });
+    }
+
+    await query(
+      `DELETE FROM report_documents WHERE id = $1 AND workspace_id = $2`,
+      [reportId, workspaceId]
+    );
+
+    return res.json({ ok: true });
+  } catch (err: any) {
+    console.error('[Reports] Failed to delete report document:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Report Export Endpoint (Phase 3b) ────────────────────────────────────────
 
 agentsWorkspaceRouter.post('/:workspaceId/reports/:reportId/export', requirePermission('agents.view'), async (req: Request, res: Response) => {

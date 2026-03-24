@@ -245,6 +245,7 @@ export interface GenerateReportRequest {
   skip_delivery?: boolean;             // Skip Slack/email delivery (for testing)
   period_label?: string;               // e.g. "Week of March 17, 2026" or "Q1 2026"
   document_type?: string;              // 'wbr' | 'qbr' — overrides template default
+  created_by_user_id?: string;         // user_id who triggered generation (for unread tracking)
 }
 
 export interface HumanAnnotation {

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { Download, Share2, Settings, ChevronLeft, ChevronRight, Eye, Edit3, X, Clock, Plus, MoreHorizontal, ExternalLink } from 'lucide-react';
+import { Download, Share2, Settings, ChevronLeft, ChevronRight, Eye, Edit3, X, Clock, Plus, MoreHorizontal, ExternalLink, Trash2 } from 'lucide-react';
 import PandoraRail from '../components/report/PandoraRail';
 import type { SectionContent, MetricCard, DealCard, ActionItem, SankeyChartData } from '../components/reports/types';
 import { api } from '../lib/api';
@@ -162,6 +162,8 @@ export default function ReportViewer() {
   const [googleDocsUrl, setGoogleDocsUrl] = useState<string | null>(null);
   const [googleDocsError, setGoogleDocsError] = useState<string | null>(null);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
+  const [confirmDeleteDoc, setConfirmDeleteDoc] = useState(false);
+  const [deletingDoc, setDeletingDoc] = useState(false);
   const [editingChart, setEditingChart] = useState<any>(null);
   const [sectionCharts, setSectionCharts] = useState<Record<string, any[]>>({});
   const [hoveredSection, setHoveredSection] = useState<string | null>(null);
@@ -221,6 +223,12 @@ export default function ReportViewer() {
     const wid = currentWorkspace?.id;
     if (!reportDocument?.id || !wid) return;
     const token = localStorage.getItem('pandora_session');
+    // Mark report as read
+    fetch(`/api/workspaces/${wid}/reports/documents/${reportDocument.id}/mark-read`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    }).catch(() => {});
+    // Load annotations
     fetch(`/api/workspaces/${wid}/reports/${reportDocument.id}/annotations`, {
       headers: { Authorization: `Bearer ${token}` },
     })
@@ -652,6 +660,31 @@ export default function ReportViewer() {
       // silently fail — user can retry
     } finally {
       setDownloadingPdf(false);
+    }
+  }
+
+  async function handleDeleteDoc() {
+    if (!reportDocument?.id) return;
+    const wid = currentWorkspace?.id || workspaceId;
+    if (!wid) return;
+    setDeletingDoc(true);
+    try {
+      const token = localStorage.getItem('pandora_session');
+      const res = await fetch(
+        `/api/workspaces/${wid}/reports/documents/${reportDocument.id}`,
+        { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        alert(data.error || 'Delete failed');
+        return;
+      }
+      navigate('/reports');
+    } catch {
+      alert('Delete failed. Please try again.');
+    } finally {
+      setDeletingDoc(false);
+      setConfirmDeleteDoc(false);
     }
   }
 
@@ -1362,6 +1395,43 @@ export default function ReportViewer() {
                         <Settings style={{ width: 13, height: 13 }} /> Template settings
                       </Link>
                     )}
+                    {reportDocument && !confirmDeleteDoc && (
+                      <>
+                        <div style={{ height: 1, background: colors.border, margin: '4px 0' }} />
+                        <button
+                          onClick={() => { setConfirmDeleteDoc(true); setOverflowMenuOpen(false); }}
+                          style={{ ...dropdownItemStyle, color: '#ef4444' }}
+                        >
+                          <Trash2 style={{ width: 13, height: 13 }} /> Delete report
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
+                {confirmDeleteDoc && reportDocument && (
+                  <div style={{
+                    position: 'absolute', right: 0, top: '110%', zIndex: 200,
+                    background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 8,
+                    padding: 16, minWidth: 240, boxShadow: '0 4px 16px rgba(0,0,0,0.18)',
+                  }}>
+                    <p style={{ fontSize: 13, color: colors.text, fontFamily: fonts.sans, margin: '0 0 12px' }}>
+                      Permanently delete this report?
+                    </p>
+                    <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                      <button
+                        onClick={() => setConfirmDeleteDoc(false)}
+                        style={{ padding: '6px 12px', fontSize: 13, fontFamily: fonts.sans, background: 'transparent', border: `1px solid ${colors.border}`, borderRadius: 6, cursor: 'pointer', color: colors.textSecondary }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleDeleteDoc}
+                        disabled={deletingDoc}
+                        style={{ padding: '6px 12px', fontSize: 13, fontFamily: fonts.sans, fontWeight: 600, background: '#ef4444', color: '#fff', border: 'none', borderRadius: 6, cursor: deletingDoc ? 'not-allowed' : 'pointer', opacity: deletingDoc ? 0.7 : 1 }}
+                      >
+                        {deletingDoc ? 'Deleting…' : 'Delete'}
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
