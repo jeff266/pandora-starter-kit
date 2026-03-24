@@ -41,8 +41,8 @@ import { extractSkillContext, formatMethodologyComparisons } from './context-ass
 import { buildConversationContext } from '../context/build-conversation-context.js';
 import { PandoraResponseBuilder } from '../lib/pandora-response-builder.js';
 import { getCalibrationStatus } from '../lib/data-dictionary.js';
-import { getInterviewState, buildInterviewPrompt, advanceInterview } from '../lib/calibration-interview.js';
-import { getUnmappedStages, buildStageMappingResponse, confirmStageMapping, isStageMappingComplete } from '../lib/stage-mapping-interview.js';
+import { getInterviewState, buildInterviewPrompt, advanceInterview, buildCompletionSummary } from '../lib/calibration-interview.js';
+import { getUnmappedStages, buildStageMappingResponse, buildStageMappingTablePrompt, confirmStageMapping, isStageMappingComplete } from '../lib/stage-mapping-interview.js';
 import type { NormalizedStage } from '../lib/stage-mapping-interview.js';
 
 const CALIBRATION_TRIGGERS = /\b(calibrat|calibrate|calibration|map.*stage|stage.*map|set up pipeline|define pipeline|what counts as pipeline|define.*at.?risk|define.*commit|define.*win.?rate|setup calibration|start calibration|pipeline definition|interview)\b/i;
@@ -281,7 +281,17 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
   let tokensUsed = 0;
   let answer: string | undefined;
 
-  if (feedback && feedback.type !== 'correct') {
+  const lastAssistantContent = (state.messages || [])
+    .filter(m => m.role === 'assistant')
+    .pop()?.content ?? '';
+  const inCalibrationSession = (
+    /\*\*Step \d+ of 6/i.test(lastAssistantContent) ||
+    /stage.*map|map.*stage|unmapped stage/i.test(lastAssistantContent) ||
+    /does this match.*pipeline|how do you define|how do you map/i.test(lastAssistantContent) ||
+    /looks right.*to confirm all|correct anything that looks wrong/i.test(lastAssistantContent)
+  );
+
+  if (feedback && feedback.type !== 'correct' && !inCalibrationSession) {
     try {
       const lastAssistantMsg = (state.messages || []).filter(m => m.role === 'assistant').pop();
       const targetId = lastAssistantMsg?.timestamp || threadId;
@@ -357,16 +367,6 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
   //   2. User is mid-interview (last assistant message was a calibration question)
   //      — any reply in this case advances the state and returns the next question.
 
-  // Detect active calibration session from conversation history
-  const lastAssistantContent = (state.messages || [])
-    .filter(m => m.role === 'assistant')
-    .pop()?.content ?? '';
-  const inCalibrationSession = (
-    /\*\*Step \d+ of 6/i.test(lastAssistantContent) ||
-    /stage.*map|map.*stage|unmapped stage/i.test(lastAssistantContent) ||
-    /does this match.*pipeline|how do you define|how do you map/i.test(lastAssistantContent)
-  );
-
   if (!answer && (CALIBRATION_TRIGGERS.test(message) || inCalibrationSession)) {
     console.log('[Calibration] Branch entered — trigger:', CALIBRATION_TRIGGERS.test(message), '| inSession:', inCalibrationSession);
     try {
@@ -378,46 +378,121 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
       console.log('[Calibration] unmappedStages count:', unmappedStages.length, '— first:', unmappedStages[0]?.crm_stage_name ?? 'none');
 
       if (unmappedStages.length > 0) {
-        // ── STAGE MAPPING PHASE ──────────────────────────────────────────────
-        const top = unmappedStages[0];
+        // ── STAGE MAPPING PHASE (table-based) ────────────────────────────────
+        const msgLower = message.toLowerCase().replace(/_/g, ' ');
 
-        // Detect a normalized stage name in the user's reply
+        // Detect affirmative: "looks right", "all correct", "that's right", "yes", etc.
+        const isAffirmative = /\b(looks? right|all correct|that'?s? right|yes|yeah|yep|correct|confirmed|good|ok(ay)?|sounds good|perfect|exactly)\b/i.test(message);
+
+        // Detect a correction: e.g. "closed_won is actually Evaluation" or "evaluation is Demo"
         const normalizedStages: NormalizedStage[] = [
           'prospecting', 'qualification', 'evaluation', 'demo', 'proposal',
           'negotiation', 'closed_won', 'closed_lost',
         ];
-        const msgLower = message.toLowerCase().replace(/_/g, ' ');
-        const suggested = normalizedStages.find(s =>
-          msgLower.includes(s.replace(/_/g, ' '))
-        );
+
+        // Find any mentioned CRM stage name in the user's message
+        let correctedCrmStage: string | null = null;
+        let correctedMapping: NormalizedStage | null = null;
+
+        if (inCalibrationSession && !isAffirmative) {
+          // Try to parse a correction like "X is actually Y" or "X should be Y"
+          // Extract the right-hand side (after "is", "should be", "actually", "→", "=")
+          // to determine the target mapping — prevents "Evaluation is actually Demo"
+          // from being mis-classified as 'evaluation' (the first token found).
+          const correctionRhs = msgLower
+            .replace(/.*?\b(?:is actually|should be|is really|maps to|→|=)\s*/i, '')
+            .trim();
+
+          for (const stage of unmappedStages) {
+            const stageLower = stage.crm_stage_name.toLowerCase().replace(/_/g, ' ');
+            if (msgLower.includes(stageLower)) {
+              correctedCrmStage = stage.crm_stage_name;
+              // Look for the target mapping in the right-hand side first; fall back to whole message
+              correctedMapping = normalizedStages.find(s =>
+                correctionRhs.includes(s.replace(/_/g, ' '))
+              ) ?? normalizedStages.find(s =>
+                msgLower.includes(s.replace(/_/g, ' ')) && s.replace(/_/g, ' ') !== stageLower
+              ) ?? null;
+              break;
+            }
+          }
+          // Fallback: maybe user just typed the normalized name without the CRM name
+          if (!correctedCrmStage) {
+            correctedMapping = normalizedStages.find(s =>
+              correctionRhs.includes(s.replace(/_/g, ' '))
+            ) ?? normalizedStages.find(s =>
+              msgLower.includes(s.replace(/_/g, ' '))
+            ) ?? null;
+          }
+        }
+
         const skipMatch = /\b(skip|ignore|exclude|don't count|dont count|not applicable|n\/a)\b/i.test(message);
 
-        if (inCalibrationSession && (suggested || skipMatch)) {
-          // Save the user's answer and immediately ask about the next stage
-          const mapping = suggested ?? 'closed_lost';
-          await confirmStageMapping(workspaceId, top.crm_stage_name, mapping);
+        if (inCalibrationSession && isAffirmative) {
+          // Confirm all staged mappings at once (use suggested_mapping or closed_lost as fallback)
+          for (const stage of unmappedStages) {
+            const mapping: NormalizedStage = stage.suggested_mapping ?? 'closed_lost';
+            await confirmStageMapping(workspaceId, stage.crm_stage_name, mapping);
+          }
+          // All stages mapped — advance interview state to active_pipeline
+          const interviewState = await getInterviewState(workspaceId);
+          const nextStep = interviewState.current_step === 'stage_mapping'
+            ? await advanceInterview(workspaceId, 'stage_mapping')
+            : interviewState.current_step;
+
+          if (nextStep === 'complete') {
+            answer = await buildCompletionSummary(workspaceId);
+          } else {
+            const nextQuestion = await buildInterviewPrompt(workspaceId, nextStep);
+            answer = `All stages mapped. ✓\n\n${nextQuestion}`;
+          }
+
+        } else if (inCalibrationSession && correctedCrmStage && correctedMapping) {
+          // Apply the single correction and re-show the updated table
+          await confirmStageMapping(workspaceId, correctedCrmStage, correctedMapping);
           const remaining = await getUnmappedStages(workspaceId);
 
           if (remaining.length > 0) {
-            // More stages to map — ask immediately
-            answer = buildStageMappingResponse(remaining[0], remaining.length);
+            answer = `Updated **${correctedCrmStage}** → **${correctedMapping}**. Here's the revised table:\n\n${buildStageMappingTablePrompt(remaining)}`;
           } else {
-            // All stages mapped — advance interview state to active_pipeline
+            // That correction cleared the last unmapped stage
             const interviewState = await getInterviewState(workspaceId);
             const nextStep = interviewState.current_step === 'stage_mapping'
               ? await advanceInterview(workspaceId, 'stage_mapping')
               : interviewState.current_step;
 
             if (nextStep === 'complete') {
-              answer = 'All stages mapped and calibration is complete!';
+              answer = await buildCompletionSummary(workspaceId);
             } else {
               const nextQuestion = await buildInterviewPrompt(workspaceId, nextStep);
-              answer = `All stages mapped.\n\n${nextQuestion}`;
+              answer = `All stages mapped. ✓\n\n${nextQuestion}`;
             }
           }
+
+        } else if (inCalibrationSession && skipMatch) {
+          // Skip the first unmapped stage
+          await confirmStageMapping(workspaceId, unmappedStages[0].crm_stage_name, 'closed_lost');
+          const remaining = await getUnmappedStages(workspaceId);
+
+          if (remaining.length > 0) {
+            answer = buildStageMappingTablePrompt(remaining);
+          } else {
+            const interviewState = await getInterviewState(workspaceId);
+            const nextStep = interviewState.current_step === 'stage_mapping'
+              ? await advanceInterview(workspaceId, 'stage_mapping')
+              : interviewState.current_step;
+
+            if (nextStep === 'complete') {
+              answer = await buildCompletionSummary(workspaceId);
+            } else {
+              const nextQuestion = await buildInterviewPrompt(workspaceId, nextStep);
+              answer = `All stages mapped. ✓\n\n${nextQuestion}`;
+            }
+          }
+
         } else {
-          // First trigger or unrecognized reply — show current stage question
-          answer = buildStageMappingResponse(top, unmappedStages.length);
+          // First trigger or unrecognized reply — show the full table
+          answer = buildStageMappingTablePrompt(unmappedStages);
         }
 
         routerDecision = 'calibration_stage_mapping';
@@ -430,7 +505,7 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
         console.log('[Calibration] interviewState step:', step, '| completed:', interviewState.completed_steps?.join(',') ?? 'none');
 
         if (step === 'complete') {
-          answer = 'Calibration is already complete! All definitions are confirmed. You can re-run calibration any time from Settings → Calibration.';
+          answer = await buildCompletionSummary(workspaceId);
 
         } else if (inCalibrationSession && step !== 'stage_mapping') {
           // User answered the current interview step — advance to next question immediately
@@ -438,7 +513,7 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
           console.log('[Calibration] Advanced:', step, '→', nextStep);
 
           if (nextStep === 'complete') {
-            answer = `Calibration complete! All 6 definitions are now confirmed.\n\nPandora will use your definitions for all pipeline, coverage, win rate, and forecast calculations going forward. You can re-run calibration any time from Settings → Calibration.`;
+            answer = await buildCompletionSummary(workspaceId);
           } else {
             answer = await buildInterviewPrompt(workspaceId, nextStep);
           }

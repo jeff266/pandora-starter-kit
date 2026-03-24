@@ -192,3 +192,24 @@ Your funnel positions: ${funnel}
 
 Which position does **${stage.crm_stage_name}** belong to? (Or tell me to skip it if it shouldn't count as pipeline.)`;
 }
+
+export function buildStageMappingTablePrompt(stages: StageMappingQuestion[]): string {
+  const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+  const funnel = FUNNEL_ORDER.map(s => NORMALIZED_STAGE_LABELS[s]).join(' → ');
+
+  const rows = stages.map(s => {
+    const guess = s.suggested_mapping ? NORMALIZED_STAGE_LABELS[s.suggested_mapping] : '❓ Unknown';
+    const value = currency.format(s.total_value);
+    return `| ${s.crm_stage_name} | ${guess} | ${s.deal_count} | ${value} |`;
+  }).join('\n');
+
+  return `I found **${stages.length} stage${stages.length !== 1 ? 's' : ''}** in your CRM that I need to map to my funnel positions. Here's my best guess for each:
+
+| Stage | My Guess | Deals | Value |
+|-------|----------|-------|-------|
+${rows}
+
+Funnel order: ${funnel}
+
+Correct anything that looks wrong (e.g. "closed_won is actually Evaluation"), or say **"looks right"** to confirm all mappings as-is.`;
+}

@@ -271,10 +271,82 @@ export async function buildInterviewPrompt(
     case 'commit':            return buildCommitQuestion(workspaceId);
     case 'forecast_rollup':   return buildForecastRollupQuestion(workspaceId);
     case 'complete':
-      return `Calibration is complete! All 6 definitions are confirmed. Pandora will now use your confirmed definitions for all pipeline, coverage, win rate, and forecast calculations.`;
+      return buildCompletionSummary(workspaceId);
     default:
       return `Let's continue calibrating your pipeline definitions.`;
   }
+}
+
+export async function buildCompletionSummary(workspaceId: string): Promise<string> {
+  const [stateResult, dimensionsResult] = await Promise.all([
+    getInterviewState(workspaceId),
+    query(
+      `SELECT workspace_config->'calibration'->'dimensions' AS dimensions,
+              workspace_config->'calibration'->'stage_mappings' AS stage_mappings
+       FROM workspaces WHERE id = $1`,
+      [workspaceId]
+    ),
+  ]);
+
+  const dimensions = dimensionsResult.rows[0]?.dimensions
+    ? (typeof dimensionsResult.rows[0].dimensions === 'string'
+        ? JSON.parse(dimensionsResult.rows[0].dimensions)
+        : dimensionsResult.rows[0].dimensions)
+    : {};
+
+  const stageMappings = dimensionsResult.rows[0]?.stage_mappings
+    ? (typeof dimensionsResult.rows[0].stage_mappings === 'string'
+        ? JSON.parse(dimensionsResult.rows[0].stage_mappings)
+        : dimensionsResult.rows[0].stage_mappings)
+    : {};
+
+  const lines: string[] = [
+    `**Calibration Complete! All 6 definitions are now confirmed.**`,
+    ``,
+    `Here's a summary of what Pandora will use going forward:`,
+    ``,
+  ];
+
+  if (Object.keys(stageMappings).length > 0) {
+    lines.push(`**Stage Mappings**`);
+    for (const [crm, normalized] of Object.entries(stageMappings)) {
+      lines.push(`- ${crm} → ${normalized}`);
+    }
+    lines.push('');
+  }
+
+  const stepLabels: Partial<Record<string, string>> = {
+    active_pipeline:   'Active Pipeline',
+    pipeline_coverage: 'Pipeline Coverage',
+    win_rate:          'Win Rate',
+    at_risk:           'At-Risk Deals',
+    commit:            'Commit / Forecast',
+    forecast_rollup:   'Forecast Rollup',
+  };
+
+  const completed = stateResult.completed_steps.filter(s => s !== 'stage_mapping' && s !== 'complete');
+  if (completed.length > 0) {
+    lines.push(`**Confirmed Definitions**`);
+    for (const step of completed) {
+      const label = stepLabels[step] ?? step;
+      const dim = dimensions[step];
+      if (dim?.confirmed_value !== undefined) {
+        const val = dim.confirmed_value >= 1_000_000
+          ? `$${(dim.confirmed_value / 1_000_000).toFixed(1)}M`
+          : dim.confirmed_value >= 1_000
+            ? `$${Math.round(dim.confirmed_value / 1_000)}K`
+            : `$${Math.round(dim.confirmed_value)}`;
+        lines.push(`- **${label}**: ${val} across ${dim.confirmed_count ?? '?'} deals (confirmed via interview)`);
+      } else {
+        lines.push(`- **${label}**: confirmed via interview`);
+      }
+    }
+    lines.push('');
+  }
+
+  lines.push(`Pandora will use these definitions for all pipeline, coverage, win rate, and forecast calculations. You can re-run calibration any time from Settings → Calibration.`);
+
+  return lines.join('\n');
 }
 
 export async function confirmInterviewStep(
