@@ -29,6 +29,59 @@ const scheduledSkills: ScheduledSkill[] = [];
 
 const customSkillCrons = new Map<string, cron.ScheduledTask>();
 
+// Workspace-level cron overrides for built-in skills: key = `${workspaceId}::${skillId}`
+const workspaceCronJobs = new Map<string, cron.ScheduledTask>();
+
+/**
+ * Register (or replace) a workspace-specific cron job for a built-in skill.
+ * Pass cronExpr=null to remove any existing job (on-demand only / reset).
+ */
+export function updateWorkspaceSkillCron(
+  workspaceId: string,
+  skillId: string,
+  cronExpr: string | null
+): void {
+  const key = `${workspaceId}::${skillId}`;
+  const existing = workspaceCronJobs.get(key);
+  if (existing) {
+    existing.stop();
+    workspaceCronJobs.delete(key);
+  }
+  if (!cronExpr) return;
+
+  const task = cron.schedule(
+    cronExpr,
+    async () => {
+      console.log(`[WS Cron] Workspace ${workspaceId} skill ${skillId} triggered by custom schedule`);
+      try {
+        const { runScheduledSkills } = await import('./skill-scheduler.js');
+        await runScheduledSkills(workspaceId, [skillId], 'scheduled');
+      } catch (err: any) {
+        console.error(`[WS Cron] Error running ${skillId} for workspace ${workspaceId}:`, err.message);
+      }
+    },
+    { timezone: 'UTC' }
+  );
+  workspaceCronJobs.set(key, task);
+  console.log(`[WS Cron] Registered skill ${skillId} for workspace ${workspaceId} on "${cronExpr}"`);
+}
+
+async function loadWorkspaceCronOverrides(): Promise<void> {
+  try {
+    const rows = await query<{ workspace_id: string; skill_id: string; cron: string }>(
+      `SELECT workspace_id, skill_id, cron FROM skill_schedules WHERE cron IS NOT NULL AND enabled = false`
+    );
+    for (const row of rows.rows) {
+      updateWorkspaceSkillCron(row.workspace_id, row.skill_id, row.cron);
+    }
+    if (rows.rows.length > 0) {
+      console.log(`[WS Cron] Loaded ${rows.rows.length} workspace cron override(s) at startup`);
+    }
+  } catch (err: any) {
+    console.error('[WS Cron] Failed to load workspace cron overrides:', err.message);
+  }
+}
+
 export interface CustomSkillCronRow {
   skill_id: string;
   workspace_id: string;
@@ -112,14 +165,23 @@ async function executeSkill(
   const startTime = Date.now();
 
   try {
-    // Check per-workspace schedule override — skip if disabled
-    const overrideResult = await query<{ enabled: boolean }>(
-      `SELECT enabled FROM skill_schedules WHERE workspace_id = $1 AND skill_id = $2`,
+    // Check per-workspace schedule override — skip if disabled or has custom cron
+    const overrideResult = await query<{ enabled: boolean; cron: string | null }>(
+      `SELECT enabled, cron FROM skill_schedules WHERE workspace_id = $1 AND skill_id = $2`,
       [workspaceId, skill.id]
-    ).catch(() => ({ rows: [] as { enabled: boolean }[] }));
-    if (overrideResult.rows.length > 0 && overrideResult.rows[0].enabled === false) {
-      console.log(`[Skill Scheduler] Skipping ${skill.id} for workspace ${workspaceId} (disabled by workspace override)`);
-      return { success: false, error: 'Skill disabled for this workspace' };
+    ).catch(() => ({ rows: [] as { enabled: boolean; cron: string | null }[] }));
+    if (overrideResult.rows.length > 0) {
+      const override = overrideResult.rows[0];
+      if (override.enabled === false && override.cron === null) {
+        // On-demand only: no automatic runs for this workspace
+        console.log(`[Skill Scheduler] Skipping ${skill.id} for workspace ${workspaceId} (on-demand only override)`);
+        return { success: false, error: 'Skill set to on-demand for this workspace' };
+      }
+      if (override.enabled === false && override.cron !== null) {
+        // Custom cron: workspace-specific job handles execution
+        console.log(`[Skill Scheduler] Skipping ${skill.id} for workspace ${workspaceId} (handled by workspace cron)`);
+        return { success: false, error: 'Handled by workspace-specific cron schedule' };
+      }
     }
 
     // Check for duplicate run
@@ -990,6 +1052,9 @@ export function startSkillScheduler(): void {
 
   // Load and schedule custom skills from DB
   loadAndScheduleCustomSkills();
+
+  // Load workspace-specific cron overrides for built-in skills
+  loadWorkspaceCronOverrides();
 }
 
 // ── Account enrichment & scoring cron jobs ────────────────────────────────

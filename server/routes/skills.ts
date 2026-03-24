@@ -13,7 +13,7 @@ import { formatAsMarkdown } from '../skills/formatters/markdown-formatter.js';
 import { getSlackWebhook, postBlocks } from '../connectors/slack/client.js';
 import { getSlackAppClient } from '../connectors/slack/slack-app-client.js';
 import { query } from '../db.js';
-import { runScheduledSkills } from '../sync/skill-scheduler.js';
+import { runScheduledSkills, updateWorkspaceSkillCron } from '../sync/skill-scheduler.js';
 import { generateWorkbook } from '../delivery/workbook-generator.js';
 import type { SkillResult } from '../skills/types.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -270,7 +270,7 @@ router.get('/:workspaceId/skills/dashboard', async (req, res) => {
         schedule: {
           ...baseSchedule,
           cron: override?.cron ?? baseSchedule.cron ?? null,
-          enabled: override !== undefined ? override.enabled : false,
+          enabled: override !== undefined ? override.enabled : true,
         },
         lastRunAt: last?.at || null,
         lastRunStatus: last?.status || null,
@@ -379,7 +379,7 @@ router.get('/:workspaceId/skills', async (req, res) => {
         schedule: {
           ...baseSchedule,
           cron: override?.cron ?? baseSchedule.cron ?? null,
-          enabled: override !== undefined ? override.enabled : false,
+          enabled: override !== undefined ? override.enabled : true,
         },
         lastRunAt: last?.at || null,
         lastRunStatus: last?.status || null,
@@ -395,10 +395,10 @@ router.get('/:workspaceId/skills', async (req, res) => {
   }
 });
 
-router.patch('/:workspaceId/skills/:skillId/schedule', async (req, res) => {
+router.patch('/:workspaceId/skills/:skillId/schedule', requirePermission('skills.configure'), async (req, res) => {
   try {
     const { workspaceId, skillId } = req.params;
-    const { cron, enabled } = req.body || {};
+    const { cron: cronExpr, enabled } = req.body || {};
 
     const registry = getSkillRegistry();
     if (!registry.get(skillId)) {
@@ -411,15 +411,35 @@ router.patch('/:workspaceId/skills/:skillId/schedule', async (req, res) => {
     );
     const previousSnapshot = existing.rows[0] ?? null;
 
-    await query(
-      `INSERT INTO skill_schedules (workspace_id, skill_id, cron, enabled, updated_at)
-       VALUES ($1, $2, $3, $4, NOW())
-       ON CONFLICT (workspace_id, skill_id) DO UPDATE SET
-         cron = EXCLUDED.cron,
-         enabled = EXCLUDED.enabled,
-         updated_at = NOW()`,
-      [workspaceId, skillId, cron ?? null, enabled ?? true]
-    );
+    // Determine DB values
+    // - cron + enabled=false → workspace-specific schedule (global scheduler skips, ws cron fires)
+    // - cron=null + enabled=false → on-demand only (no automatic runs)
+    // - cron=null + enabled=true → reset to system default (delete override row)
+    const isReset = !cronExpr && enabled !== false;
+
+    if (isReset) {
+      await query(
+        `DELETE FROM skill_schedules WHERE workspace_id = $1 AND skill_id = $2`,
+        [workspaceId, skillId]
+      );
+      updateWorkspaceSkillCron(workspaceId, skillId, null);
+    } else {
+      const dbCron = cronExpr ?? null;
+      const dbEnabled = cronExpr ? false : (enabled ?? false);
+
+      await query(
+        `INSERT INTO skill_schedules (workspace_id, skill_id, cron, enabled, updated_at)
+         VALUES ($1, $2, $3, $4, NOW())
+         ON CONFLICT (workspace_id, skill_id) DO UPDATE SET
+           cron = EXCLUDED.cron,
+           enabled = EXCLUDED.enabled,
+           updated_at = NOW()`,
+        [workspaceId, skillId, dbCron, dbEnabled]
+      );
+
+      // Live-update the workspace cron job (register custom, or remove if on-demand)
+      updateWorkspaceSkillCron(workspaceId, skillId, dbCron);
+    }
 
     await query(
       `INSERT INTO skill_governance (
@@ -430,8 +450,8 @@ router.patch('/:workspaceId/skills/:skillId/schedule', async (req, res) => {
         workspaceId,
         'manual',
         'skill_schedule',
-        'Schedule updated via UI',
-        JSON.stringify({ skill_id: skillId, cron: cron ?? null, enabled: enabled ?? true }),
+        isReset ? 'Schedule reset to system default' : 'Schedule updated via UI',
+        JSON.stringify({ skill_id: skillId, cron: cronExpr ?? null, enabled }),
         previousSnapshot ? JSON.stringify(previousSnapshot) : null,
         'deployed',
         (req as any).user?.user_id ?? 'admin',

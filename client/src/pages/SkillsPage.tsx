@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
@@ -146,8 +146,19 @@ function MetricCard({ label, value, sub, color: c }: { label: string; value: str
   );
 }
 
+const SCHEDULE_PRESETS = [
+  { label: 'System default', value: '__default__' },
+  { label: 'On demand only', value: '__ondemand__' },
+  { label: 'Monday 8 AM UTC', value: '0 8 * * 1' },
+  { label: 'Wednesday 8 AM UTC', value: '0 8 * * 3' },
+  { label: 'Friday 4 PM UTC', value: '0 16 * * 5' },
+  { label: 'Daily 8 AM UTC', value: '0 8 * * *' },
+  { label: 'Custom…', value: '__custom__' },
+];
+
 export default function SkillsPage() {
-  const { canRunSkills } = usePermissions();
+  const { canRunSkills, hasPermission } = usePermissions();
+  const canConfigureSkills = hasPermission('skills.configure');
   const navigate = useNavigate();
   const [skills, setSkills] = useState<Skill[]>([]);
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
@@ -164,6 +175,11 @@ export default function SkillsPage() {
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [pendingCount, setPendingCount] = useState(0);
   const [usedFallback, setUsedFallback] = useState(false);
+  const [scheduleEditing, setScheduleEditing] = useState(false);
+  const [schedulePreset, setSchedulePreset] = useState<string>('__default__');
+  const [scheduleCustomCron, setScheduleCustomCron] = useState('');
+  const [savingSchedule, setSavingSchedule] = useState(false);
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const showToast = (message: string, type: 'success' | 'error') => {
     setToast({ message, type });
@@ -207,6 +223,45 @@ export default function SkillsPage() {
     loadDashboard();
   }, [loadDashboard]);
 
+  const quietRefreshSkill = useCallback(async (skillId: string) => {
+    try {
+      const [runsData, dashData] = await Promise.all([
+        api.get(`/skills/${skillId}/runs?limit=10`).catch(() => null),
+        api.get('/skills/dashboard').catch(() => null),
+      ]);
+      if (runsData) {
+        const runs = Array.isArray(runsData) ? runsData : (runsData?.runs || []);
+        setRunHistory(runs);
+      }
+      if (dashData?.skills) {
+        setSkills(dashData.skills);
+        setSummary(dashData.summary || null);
+        const updated = dashData.skills.find((s: Skill) => s.id === skillId);
+        if (updated) setSelectedSkill(updated);
+      }
+    } catch {
+    }
+  }, []);
+
+  useEffect(() => {
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+    if (drawerOpen && selectedSkill?.id) {
+      const skillId = selectedSkill.id;
+      pollIntervalRef.current = setInterval(() => {
+        quietRefreshSkill(skillId);
+      }, 15000);
+    }
+    return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+    };
+  }, [drawerOpen, selectedSkill?.id, quietRefreshSkill]);
+
   const fetchRunHistory = async (skillId: string) => {
     setLoadingRuns(true);
     try {
@@ -232,9 +287,35 @@ export default function SkillsPage() {
     }
   };
 
+  const saveSchedule = async () => {
+    if (!selectedSkill) return;
+    setSavingSchedule(true);
+    try {
+      const cronExpr = schedulePreset === '__custom__' ? scheduleCustomCron.trim() : schedulePreset;
+      if (cronExpr === '__default__') {
+        await api.patch(`/skills/${selectedSkill.id}/schedule`, { cron: null, enabled: true });
+      } else if (cronExpr === '__ondemand__') {
+        await api.patch(`/skills/${selectedSkill.id}/schedule`, { cron: null, enabled: false });
+      } else {
+        await api.patch(`/skills/${selectedSkill.id}/schedule`, { cron: cronExpr, enabled: false });
+      }
+      showToast('Schedule updated', 'success');
+      setScheduleEditing(false);
+      fetchConfigHistory(selectedSkill.id);
+      loadDashboard();
+    } catch (err: any) {
+      showToast(`Failed to save schedule: ${err.message}`, 'error');
+    } finally {
+      setSavingSchedule(false);
+    }
+  };
+
   const openDrawer = (skill: Skill) => {
     setSelectedSkill(skill);
     setDrawerOpen(true);
+    setScheduleEditing(false);
+    setSchedulePreset('__default__');
+    setScheduleCustomCron('');
     fetchRunHistory(skill.id);
     fetchConfigHistory(skill.id);
   };
@@ -244,6 +325,7 @@ export default function SkillsPage() {
     setSelectedSkill(null);
     setRunHistory([]);
     setConfigHistory([]);
+    setScheduleEditing(false);
   };
 
   const runSkill = async (skillId: string, skillName: string, e?: React.MouseEvent) => {
@@ -652,45 +734,123 @@ export default function SkillsPage() {
               <div style={{
                 background: colors.surface, border: `1px solid ${colors.border}`,
                 borderRadius: 8, padding: '12px 14px',
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
               }}>
-                <div>
-                  <div style={{ fontSize: 10, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
-                    Schedule
-                  </div>
-                  <div style={{ fontSize: 12, color: colors.text }}>
-                    {formatSchedule(selectedSkill.schedule)}
-                  </div>
-                  {selectedSkill.lastRunAt && (
-                    <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }}>
-                      Last run {formatTimeAgo(selectedSkill.lastRunAt)}
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                      <span style={{ fontSize: 10, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        Schedule
+                      </span>
+                      {canConfigureSkills && !scheduleEditing && (
+                        <button
+                          onClick={() => {
+                            const curCron = selectedSkill.schedule?.cron ?? null;
+                            const match = SCHEDULE_PRESETS.find(p => p.value === curCron);
+                            setSchedulePreset(match ? curCron! : curCron ? '__custom__' : '__default__');
+                            setScheduleCustomCron(curCron && !match ? curCron : '');
+                            setScheduleEditing(true);
+                          }}
+                          style={{
+                            fontSize: 10, fontWeight: 600, padding: '1px 7px',
+                            borderRadius: 4, background: 'transparent',
+                            border: `1px solid ${colors.border}`, color: colors.textMuted,
+                            cursor: 'pointer', lineHeight: 1.6,
+                          }}
+                        >Edit</button>
+                      )}
                     </div>
+                    {scheduleEditing ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
+                        <select
+                          value={schedulePreset}
+                          onChange={e => setSchedulePreset(e.target.value)}
+                          style={{
+                            fontSize: 12, padding: '6px 8px', borderRadius: 6,
+                            border: `1px solid ${colors.border}`,
+                            background: colors.surfaceRaised, color: colors.text,
+                            cursor: 'pointer', width: '100%',
+                          }}
+                        >
+                          {SCHEDULE_PRESETS.map(p => (
+                            <option key={p.value} value={p.value}>{p.label}</option>
+                          ))}
+                        </select>
+                        {schedulePreset === '__custom__' && (
+                          <input
+                            type="text"
+                            placeholder="e.g. 0 9 * * 2 (Tue 9 AM UTC)"
+                            value={scheduleCustomCron}
+                            onChange={e => setScheduleCustomCron(e.target.value)}
+                            style={{
+                              fontSize: 12, padding: '6px 8px', borderRadius: 6,
+                              border: `1px solid ${colors.border}`,
+                              background: colors.surfaceRaised, color: colors.text,
+                              fontFamily: fonts.mono, width: '100%', boxSizing: 'border-box',
+                            }}
+                          />
+                        )}
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <button
+                            onClick={saveSchedule}
+                            disabled={savingSchedule || (schedulePreset === '__custom__' && !scheduleCustomCron.trim())}
+                            style={{
+                              fontSize: 12, fontWeight: 600, padding: '5px 12px',
+                              borderRadius: 6, background: colors.accent, color: '#fff',
+                              border: 'none', cursor: savingSchedule ? 'not-allowed' : 'pointer',
+                              opacity: savingSchedule ? 0.6 : 1,
+                            }}
+                          >
+                            {savingSchedule ? 'Saving…' : 'Save'}
+                          </button>
+                          <button
+                            onClick={() => setScheduleEditing(false)}
+                            style={{
+                              fontSize: 12, padding: '5px 10px',
+                              borderRadius: 6, background: 'transparent',
+                              border: `1px solid ${colors.border}`, color: colors.textMuted,
+                              cursor: 'pointer',
+                            }}
+                          >Cancel</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <div style={{ fontSize: 12, color: colors.text }}>
+                          {formatSchedule(selectedSkill.schedule)}
+                        </div>
+                        {selectedSkill.lastRunAt && (
+                          <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }}>
+                            Last run {formatTimeAgo(selectedSkill.lastRunAt)}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                  {canRunSkills && !scheduleEditing && (
+                    <button
+                      onClick={e => runSkill(selectedSkill.id, selectedSkill.name, e)}
+                      disabled={runningSkills.has(selectedSkill.id)}
+                      style={{
+                        fontSize: 12, fontWeight: 600, padding: '8px 16px',
+                        borderRadius: 8, background: colors.accent, color: '#fff',
+                        border: 'none', cursor: 'pointer', flexShrink: 0,
+                        opacity: runningSkills.has(selectedSkill.id) ? 0.6 : 1,
+                        display: 'flex', alignItems: 'center', gap: 6,
+                      }}
+                    >
+                      {runningSkills.has(selectedSkill.id) && (
+                        <span style={{
+                          width: 12, height: 12,
+                          border: '2px solid rgba(255,255,255,0.3)',
+                          borderTopColor: '#fff', borderRadius: '50%',
+                          display: 'inline-block',
+                          animation: 'pandora-spin 0.8s linear infinite',
+                        }} />
+                      )}
+                      {runningSkills.has(selectedSkill.id) ? 'Running...' : 'Run Now ▶'}
+                    </button>
                   )}
                 </div>
-                {canRunSkills && (
-                  <button
-                    onClick={e => runSkill(selectedSkill.id, selectedSkill.name, e)}
-                    disabled={runningSkills.has(selectedSkill.id)}
-                    style={{
-                      fontSize: 12, fontWeight: 600, padding: '8px 16px',
-                      borderRadius: 8, background: colors.accent, color: '#fff',
-                      border: 'none', cursor: 'pointer', flexShrink: 0,
-                      opacity: runningSkills.has(selectedSkill.id) ? 0.6 : 1,
-                      display: 'flex', alignItems: 'center', gap: 6,
-                    }}
-                  >
-                    {runningSkills.has(selectedSkill.id) && (
-                      <span style={{
-                        width: 12, height: 12,
-                        border: '2px solid rgba(255,255,255,0.3)',
-                        borderTopColor: '#fff', borderRadius: '50%',
-                        display: 'inline-block',
-                        animation: 'pandora-spin 0.8s linear infinite',
-                      }} />
-                    )}
-                    {runningSkills.has(selectedSkill.id) ? 'Running...' : 'Run Now ▶'}
-                  </button>
-                )}
               </div>
 
               {/* Governance Callout */}

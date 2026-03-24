@@ -83,9 +83,9 @@ export function formatSchedule(schedule: any): string {
   }
   if (typeof schedule === 'object') {
     if (schedule.description) return schedule.description;
+    if (schedule.cron) return humanizeCron(schedule.cron);
     if (schedule.trigger === 'on_demand') return 'On demand';
     if (schedule.trigger === 'on_sync') return 'After each sync';
-    if (schedule.cron) return humanizeCron(schedule.cron);
     if (schedule.trigger) return String(schedule.trigger);
     return 'Scheduled';
   }
