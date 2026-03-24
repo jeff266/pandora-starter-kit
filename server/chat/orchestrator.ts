@@ -352,11 +352,14 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
   // Intercept calibration-intent messages before the heuristic router.
   // Runs the stage mapping interview first, then the 6-step dimension interview.
   if (!answer && CALIBRATION_TRIGGERS.test(message)) {
+    console.log('[Calibration] Branch entered');
     try {
       const calStatus = await getCalibrationStatus(workspaceId);
+      console.log('[Calibration] status:', JSON.stringify(calStatus));
 
       // Stage mapping must be done before dimension calibration
       const unmappedStages = await getUnmappedStages(workspaceId);
+      console.log('[Calibration] unmappedStages count:', unmappedStages.length, '— first:', unmappedStages[0]?.crm_stage_name ?? 'none');
       if (unmappedStages.length > 0) {
         const top = unmappedStages[0];
         const stageMappingText = buildStageMappingResponse(top, unmappedStages.length);
@@ -393,12 +396,14 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
         // Stage mapping done — run dimension interview
         const interviewState = await getInterviewState(workspaceId);
         const step = interviewState.current_step;
+        console.log('[Calibration] interviewState step:', step, '| confirmed:', interviewState.confirmed_steps?.join(',') ?? 'none');
 
         if (step === 'complete') {
           answer = 'Calibration is already complete! All definitions are confirmed. You can re-run calibration any time from Settings → Calibration.';
         } else {
           answer = await buildInterviewPrompt(workspaceId, step);
         }
+        console.log('[Calibration] answer built:', answer ? 'YES (' + answer.length + ' chars)' : 'NULL');
 
         routerDecision = 'calibration_interview';
         dataStrategy = 'calibration';

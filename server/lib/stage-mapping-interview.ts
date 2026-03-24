@@ -81,12 +81,12 @@ export async function getUnmappedStages(
   workspaceId: string
 ): Promise<StageMappingQuestion[]> {
   // Check if Setup Interview already classified stages
-  // via funnel_stages table. If so, skip stage mapping.
+  // via stage_mappings table. If so, skip stage mapping.
   const mapped = await query(
     `SELECT COUNT(*) AS count
-     FROM funnel_stages
+     FROM stage_mappings
      WHERE workspace_id = $1
-       AND (is_won = TRUE OR is_lost = TRUE)`,
+       AND normalized_stage IS NOT NULL`,
     [workspaceId]
   );
   if (parseInt(mapped.rows[0].count) > 0) {
