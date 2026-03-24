@@ -12,11 +12,12 @@ import SankeyChart from '../components/reports/SankeyChart';
 import ReportAnnotationEditor, { type Annotation } from '../components/reports/ReportAnnotationEditor';
 import AnnotatableSection, { type Annotation as DocAnnotation } from '../components/report/AnnotatableSection';
 import { ContextMenu as DocContextMenu } from '../components/report/ContextMenu';
-import ChartBuilder from '../components/report/ChartBuilder';
+import ChartBuilderPanel from '../components/report/ChartBuilderPanel';
 import SectionEditor from '../components/report/SectionEditor';
 import EvidenceDrawer from '../components/report/EvidenceDrawer';
 import ClaimEvidenceDrawer, { type TraceClaimResult, type ClaimAttrs } from '../components/report/ClaimEvidenceDrawer';
-import { getActiveSectionEditor } from '../lib/sectionEditorRegistry';
+import { getActiveSectionEditor, getSectionEditor } from '../lib/sectionEditorRegistry';
+import { insertChartIntoEditor } from '../lib/insertBlock';
 import PrepareForClientModal from '../components/report/PrepareForClientModal';
 import type { ExportConfig } from '../types/export';
 import ReportContextMenu, { type ReportContextTarget } from '../components/reports/ReportContextMenu';
@@ -160,14 +161,13 @@ export default function ReportViewer() {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; target: ReportContextTarget } | null>(null);
   const [summaryExpanded, setSummaryExpanded] = useState(false);
   const [docContextMenu, setDocContextMenu] = useState<{ x: number; y: number; sectionId: string; sectionTitle: string; paragraphIndex: number | null } | null>(null);
-  const [chartBuilderSection, setChartBuilderSection] = useState<{ sectionId: string; fromEditor?: boolean } | null>(null);
+  const [expandedChartSection, setExpandedChartSection] = useState<string | null>(null);
   const [exportingToGoogleDocs, setExportingToGoogleDocs] = useState(false);
   const [googleDocsUrl, setGoogleDocsUrl] = useState<string | null>(null);
   const [googleDocsError, setGoogleDocsError] = useState<string | null>(null);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [confirmDeleteDoc, setConfirmDeleteDoc] = useState(false);
   const [deletingDoc, setDeletingDoc] = useState(false);
-  const [editingChart, setEditingChart] = useState<any>(null);
   const [sectionCharts, setSectionCharts] = useState<Record<string, any[]>>({});
   const [hoveredSection, setHoveredSection] = useState<string | null>(null);
   const [hasUsedRightClick] = useState(
@@ -869,8 +869,7 @@ export default function ReportViewer() {
             setDocContextMenu(null);
           }}
           onChart={() => {
-            setEditingChart(null);
-            setChartBuilderSection({ sectionId: docContextMenu.sectionId });
+            setExpandedChartSection(docContextMenu.sectionId);
             setDocContextMenu(null);
           }}
           onFlag={() => setDocContextMenu(null)}
@@ -878,37 +877,6 @@ export default function ReportViewer() {
         />
       )}
 
-      {/* Chart Builder Panel */}
-      {chartBuilderSection && reportDocument && (
-        <ChartBuilder
-          workspaceId={currentWorkspace?.id || workspaceId || ''}
-          reportDocumentId={reportDocument.id}
-          sectionId={chartBuilderSection.sectionId}
-          token={localStorage.getItem('pandora_session') || ''}
-          existingChart={editingChart}
-          onInsert={(insertedChart) => {
-            const sid = chartBuilderSection.sectionId;
-            setSectionCharts(prev => {
-              const existing = prev[sid] || [];
-              const updated = editingChart
-                ? existing.map(c => c.id === editingChart.id ? insertedChart : c)
-                : [...existing, insertedChart];
-              return { ...prev, [sid]: updated };
-            });
-            if (chartBuilderSection.fromEditor) {
-              window.dispatchEvent(new CustomEvent('section-editor-chart-inserted', {
-                detail: { sectionId: sid, chart: insertedChart },
-              }));
-            }
-            setChartBuilderSection(null);
-            setEditingChart(null);
-          }}
-          onCancel={() => {
-            setChartBuilderSection(null);
-            setEditingChart(null);
-          }}
-        />
-      )}
 
       {/* Export Modal */}
       {showExportModal && reportDocument && (
@@ -1606,8 +1574,8 @@ export default function ReportViewer() {
                   const wid = currentWorkspace?.id || workspaceId || '';
                   const sectionChartList = sectionCharts[section.id] || [];
                   return (
+                    <React.Fragment key={section.id}>
                     <div
-                      key={section.id}
                       data-section-id={section.id}
                       ref={el => { if (el) sectionRefs.current.set(section.id, el); }}
                       style={{ background: colors.surface, borderRadius: 8, border: `1px solid ${colors.border}`, padding: 24 }}
@@ -1643,9 +1611,8 @@ export default function ReportViewer() {
                         workspaceId={wid}
                         documentId={reportDocument!.id}
                         token={localStorage.getItem('pandora_session') || ''}
-                        onOpenChartBuilder={(sectionId, fromEditor) => {
-                          setEditingChart(null);
-                          setChartBuilderSection({ sectionId, fromEditor });
+                        onOpenChartBuilder={(sectionId) => {
+                          setExpandedChartSection(sectionId);
                         }}
                         onChartInserted={(sectionId, chart) => {
                           setSectionCharts(prev => {
@@ -1706,8 +1673,7 @@ export default function ReportViewer() {
                             </div>
                             <button
                               onClick={() => {
-                                setEditingChart(chart);
-                                setChartBuilderSection({ sectionId: section.id });
+                                setExpandedChartSection(section.id);
                               }}
                               style={{ fontSize: 11, color: '#0D9488', background: 'none', border: '0.5px solid #0D9488', borderRadius: 5, padding: '4px 10px', cursor: 'pointer' }}
                             >
@@ -1733,8 +1699,9 @@ export default function ReportViewer() {
                         }}>
                           <button
                             onClick={() => {
-                              setEditingChart(null);
-                              setChartBuilderSection({ sectionId: section.id });
+                              setExpandedChartSection(
+                                expandedChartSection === section.id ? null : section.id
+                              );
                             }}
                             style={{
                               display: 'flex', alignItems: 'center', gap: 4,
@@ -1783,6 +1750,47 @@ export default function ReportViewer() {
                         </div>
                       )}
                     </div>
+
+                    {/* Inline Chart Builder — expands below the section card */}
+                    {expandedChartSection === section.id && (
+                      <div style={{
+                        background: 'white',
+                        border: '0.5px solid #0D9488',
+                        borderRadius: 10,
+                        overflow: 'hidden',
+                        boxShadow: '0 4px 20px rgba(13,148,136,0.08)',
+                      }}>
+                        <div style={{
+                          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                          padding: '10px 16px', borderBottom: '0.5px solid #E2E8F0',
+                          background: '#F0FDFA',
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <span style={{ fontSize: 13 }}>▤</span>
+                            <span style={{ fontSize: 12, fontWeight: 600, color: '#0D9488' }}>Add chart to "{section.title}"</span>
+                          </div>
+                          <button
+                            onClick={() => setExpandedChartSection(null)}
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94A3B8', fontSize: 16, lineHeight: 1, padding: '0 2px' }}
+                          >×</button>
+                        </div>
+                        <ChartBuilderPanel
+                          context="inline"
+                          workspaceId={wid}
+                          sectionId={section.id}
+                          documentId={reportDocument?.id}
+                          onInsert={(spec) => {
+                            const editor = getSectionEditor(section.id);
+                            if (editor && !editor.isDestroyed) {
+                              insertChartIntoEditor(editor, spec);
+                            }
+                            setExpandedChartSection(null);
+                          }}
+                          onCancel={() => setExpandedChartSection(null)}
+                        />
+                      </div>
+                    )}
+                    </React.Fragment>
                   );
                 })}
 

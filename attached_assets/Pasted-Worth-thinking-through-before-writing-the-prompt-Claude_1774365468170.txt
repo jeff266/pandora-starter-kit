@@ -1,0 +1,550 @@
+Worth thinking through before writing the prompt. Claude Code can absolutely do React/TypeScript — it's not limited to backend. The distinction is really about complexity and coordination. The chart builder redesign is a large multi-file React refactor that touches:
+
+- `ReportViewer.tsx` — inline expansion replacing the drawer
+- `ChartBuilder.tsx` — the entire builder component rebuilt with the three-zone model
+- Possibly new component files for the field picker, chart type grid, config panel sections
+- CSS/styles
+
+Claude Code handles this well when the spec is tight. The risk with complex UI builds in Claude Code is visual QA — it can't see what it's rendering. The mockup we built earlier helps significantly because Claude Code can reference the exact layout, colors, and interaction patterns without guessing.
+
+Here's the prompt:
+
+```
+# Chart Builder UI Redesign
+
+## Context
+
+The chart builder currently uses a two-drawer pattern:
+Insert chart opens a right drawer, Refine chart opens
+a second drawer inside it. This covers the document
+entirely and splits configuration across two steps.
+
+The redesign replaces this with:
+1. Inline expansion directly in the document section
+   (Report Viewer context)
+2. A single-surface builder with live preview — no
+   separate Refine step
+3. Three-zone field model: X Axis, Y Axis, Series
+4. Reactive chart type grid — types gray out when
+   data shape can't support them
+5. All formatting controls on one surface
+
+The ChartSpec backend is already updated (series_field,
+second_y_field, axis_format, data_labels, outlier_mode,
+legend, color_mode all exist as of the latest build).
+
+## Before Starting
+
+Read these files in order:
+
+1. client/src/components/charts/ChartBuilder.tsx (or
+   wherever the current chart builder lives — search
+   for "Insert chart" or "ChartBuilder" if the path
+   differs). Show the full component.
+
+2. client/src/pages/ReportViewer.tsx — find:
+   - Where the chart builder is currently triggered
+     (the button or slash command that opens it)
+   - How the drawer is currently opened (state, portal,
+     or inline)
+   - Where sections are rendered in the document flow
+   - The section data shape — does SectionContent have
+     an id field I can use to target a specific section?
+
+3. client/src/types/chart-types.ts — confirm the new
+   ChartSpec fields are present (series_field,
+   second_y_field, axis_format, data_labels, legend,
+   color_mode, outlier_mode).
+
+4. client/src/components/shared/ChartRenderer.tsx —
+   confirm getSeriesColor(), formatValue(), and
+   toStackedFormat() are present from the last build.
+
+5. Find where the field whitelist lives — the list of
+   allowed fields per entity type with their metadata
+   (name, type, fill_rate). This is what the field
+   picker displays. Could be in:
+   - server/lib/field-whitelist.ts
+   - client/src/lib/chartFields.ts
+   - Or fetched from an API endpoint
+
+Report findings:
+A. Current ChartBuilder component structure
+B. How the drawer is triggered and rendered today
+C. Whether field metadata (type, fill_rate) is
+   available on the client or requires an API call
+D. Exact path of every file that needs to change
+
+---
+
+## New Architecture
+
+Two contexts for the chart builder:
+
+CONTEXT A — Report Viewer (inline expansion)
+The builder expands inline within the section where
+the chart will be inserted. The document stays visible
+above and below. No overlay, no drawer.
+
+CONTEXT B — Standalone (GTM page, Ask Pandora)
+A centered modal, max-width 900px, two-column layout.
+Configure left (280px), preview right (remaining).
+
+Both contexts use the same ChartBuilderPanel component.
+The difference is just how it's mounted.
+
+---
+
+## Part 1 — ChartBuilderPanel Component
+
+File: client/src/components/charts/ChartBuilderPanel.tsx
+(replace or rename existing ChartBuilder)
+
+### Props
+
+```typescript
+interface ChartBuilderPanelProps {
+  // Context
+  context:       'inline' | 'modal'
+  workspaceId:   string
+  sectionId?:    string     // for inline — which section
+  documentId?:   string     // for inline — which document
+
+  // Callbacks
+  onInsert:  (spec: ChartSpec) => void
+  onCancel:  () => void
+}
+```
+
+### Layout — two column
+
+```
+┌─────────────────────────────────────────────────────┐
+│ [Skills] [Saved Queries] [Live Query]               │
+├──────────────────────┬──────────────────────────────┤
+│  CONFIG (280px)      │  PREVIEW                     │
+│                      │                              │
+│  Entity              │  Title input                 │
+│  X Axis field picker │                              │
+│  Y Axis (fn + field) │  Live chart                  │
+│  Series (optional)   │                              │
+│  Second Y (optional) │  Color radio group           │
+│                      │                              │
+│  ── divider ──       │                              │
+│                      │                              │
+│  Chart type grid     │                              │
+│  (reactive)          │                              │
+│                      │                              │
+│  ── divider ──       │                              │
+│                      │                              │
+│  Axis formatting     │                              │
+│  Data labels         │                              │
+│  Outlier handling    │                              │
+│  Legend              │                              │
+├──────────────────────┴──────────────────────────────┤
+│                          [Cancel]  [Insert chart →] │
+└─────────────────────────────────────────────────────┘
+```
+
+Config column scrolls independently. Preview column
+stays fixed. Both visible simultaneously.
+
+---
+
+## Part 2 — Field Picker
+
+The field picker replaces the current Group By list.
+
+Requirements:
+- Search input at top (filters in real time)
+- Fields sorted by fill_rate descending by default
+- Each field row shows: selection state, field name,
+  TYPE BADGE, fill rate percentage
+- Type badges:
+  - number → indigo pill (#EEF2FF / #4338CA text)
+  - text   → green pill (#F0FDF4 / #166534 text)
+  - date   → orange pill (#FFF7ED / #C2410C text)
+  - boolean → purple pill (#FDF4FF / #7E22CE text)
+  - email  → blue pill (#EFF6FF / #1D4ED8 text)
+- Single select (one field at a time)
+- "See more / See less" for lists > 5 fields
+
+```typescript
+interface FieldPickerProps {
+  fields: Array<{
+    name:       string
+    label:      string
+    field_type: 'number' | 'text' | 'date' | 'boolean' | 'email'
+    fill_rate:  number    // 0-100
+  }>
+  selected: string | null
+  onChange: (fieldName: string) => void
+}
+```
+
+If field metadata (type + fill_rate) is not currently
+available on the client, add an endpoint:
+
+```typescript
+// GET /api/workspaces/:id/chart-fields?entity=deals
+// Returns field list with name, label, type, fill_rate
+// Reads from the existing field whitelist
+// Cache for 5 minutes
+```
+
+---
+
+## Part 3 — Three-Zone Field Model
+
+Replace the single Group By + single Aggregate with:
+
+### X Axis
+FieldPicker for the grouping dimension.
+Label: "X axis — group by"
+
+### Y Axis
+Two selects side by side:
+- Aggregate function: COUNT, SUM, AVG, MAX, MIN
+- Field to aggregate: FieldPicker (numeric fields only
+  when SUM/AVG/MAX/MIN selected)
+
+### Series (optional)
+FieldPicker with an "+ Add series dimension" link.
+When not set: show the link + hint text
+  "Unlocks stacked bar & heatmap"
+When set: show a chip with the selected field + ×
+  remove button + "Stacked bar & heatmap unlocked ✓"
+
+### Second Y Axis (optional)
+Same pattern as Series but for a second measure.
+"+ Add second measure"
+"Unlocks combo & scatter"
+When set: show aggregate fn select + field select
+
+---
+
+## Part 4 — Reactive Chart Type Grid
+
+3-column grid of chart type buttons. Types that cannot
+be supported by the current field configuration are
+GRAYED with a tooltip explaining what to add.
+
+```typescript
+interface ChartTypeConfig {
+  type:       ChartType
+  label:      string
+  requires:   'none' | 'series' | 'second_y' | 'skill_data'
+  tooltip:    string   // shown when disabled
+}
+
+const CHART_TYPES: ChartTypeConfig[] = [
+  { type: 'bar',          label: 'Bar',        requires: 'none' },
+  { type: 'horizontal_bar', label: 'Horizontal', requires: 'none' },
+  { type: 'line',         label: 'Line',       requires: 'none' },
+  { type: 'donut',        label: 'Donut',      requires: 'none' },
+  { type: 'funnel',       label: 'Funnel',     requires: 'none' },
+  { type: 'stacked_bar',  label: 'Stacked',
+    requires: 'series',
+    tooltip: 'Add a series dimension above' },
+  { type: 'heatmap',      label: 'Heatmap',
+    requires: 'series',
+    tooltip: 'Add a series dimension above' },
+  { type: 'combo',        label: 'Combo',
+    requires: 'second_y',
+    tooltip: 'Add a second Y axis above' },
+  { type: 'scatter',      label: 'Scatter',
+    requires: 'second_y',
+    tooltip: 'Add a second Y axis above' },
+  { type: 'waterfall',    label: 'Waterfall',
+    requires: 'skill_data',
+    tooltip: 'Use Skills tab — requires computed data' },
+  { type: 'bullet',       label: 'Bullet',
+    requires: 'skill_data',
+    tooltip: 'Use Skills tab — requires target data' },
+]
+
+function isChartTypeEnabled(
+  type: ChartTypeConfig,
+  hasSeriesField: boolean,
+  hasSecondY: boolean
+): boolean {
+  if (type.requires === 'none') return true
+  if (type.requires === 'series') return hasSeriesField
+  if (type.requires === 'second_y') return hasSecondY
+  if (type.requires === 'skill_data') return false
+  return false
+}
+```
+
+Disabled buttons: opacity 0.4, cursor not-allowed.
+Show tooltip on hover of disabled button using
+title attribute.
+
+Active button: teal border + teal text +
+rgba(20,184,166,0.08) background.
+
+---
+
+## Part 5 — Formatting Controls
+
+Below the chart type grid, three collapsible sections.
+Each has a chevron toggle. Collapsed by default.
+
+### Axis formatting
+```
+Number format: [Raw ▾]    Decimals: [0 ▾]
+Y min: [Auto]    Y max: [Auto]
+Axis title: [optional text input]
+```
+
+### Data labels
+```
+[toggle] Show data labels
+
+Position: [Outside] [Inside] [Center] [Base]
+Format:   [Raw ▾]   Decimals: [0 ▾]
+```
+
+### Outlier handling
+```
+[toggle] Broken axis
+When a bar exceeds 3× the median, show a visual
+break instead of compressing all other bars.
+Threshold: [3×] the median bar height
+```
+
+### Legend
+```
+[toggle] Show legend
+Position: [Top] [Bottom] [Left] [Right]
+```
+
+---
+
+## Part 6 — Live Preview
+
+The preview column runs the chart query on every
+field change with a 500ms debounce. No "Run query"
+button needed.
+
+```typescript
+// Debounced query execution:
+useEffect(() => {
+  const timer = setTimeout(async () => {
+    if (!spec.x_field || !spec.y_aggregate) return
+    setPreviewLoading(true)
+    try {
+      const data = await fetchChartData(spec, workspaceId)
+      setPreviewData(data)
+    } catch (err) {
+      setPreviewError('Query failed')
+    } finally {
+      setPreviewLoading(false)
+    }
+  }, 500)
+  return () => clearTimeout(timer)
+}, [spec])
+```
+
+Preview loading state: skeleton bars animating in
+the chart area.
+
+Title input: above the chart preview. Placeholder:
+"State what this chart proves, not what it shows"
+
+Color mode radio group: below the chart preview.
+Three options: Semantic / Uniform (default) / Categorical
+Changing color mode updates the preview immediately
+without re-querying.
+
+---
+
+## Part 7 — Inline Expansion in Report Viewer
+
+File: client/src/pages/ReportViewer.tsx
+
+Replace the current drawer trigger with inline expansion.
+
+### The trigger
+
+Find where "/chart" or the existing insert chart button
+is handled. Replace the drawer open with an inline
+state update:
+
+```typescript
+const [expandedChartSection, setExpandedChartSection] =
+  useState<string | null>(null)
+
+// When user triggers chart insert in section X:
+setExpandedChartSection(sectionId)
+```
+
+### Inline rendering
+
+In the section render loop, after the section content
+and before the next section, check if this section
+has an active chart builder:
+
+```typescript
+{sections.map(section => (
+  <div key={section.section_id}>
+    {/* existing section content */}
+    <SectionContent section={section} />
+
+    {/* inline chart builder */}
+    {expandedChartSection === section.section_id ? (
+      <div style={{
+        margin: '12px 0',
+        border: '1px solid #14B8A6',
+        borderRadius: 8,
+        overflow: 'hidden',
+      }}>
+        <ChartBuilderPanel
+          context="inline"
+          workspaceId={workspaceId}
+          sectionId={section.section_id}
+          documentId={reportDocument.id}
+          onInsert={(spec) => {
+            handleInsertChart(section.section_id, spec)
+            setExpandedChartSection(null)
+          }}
+          onCancel={() => setExpandedChartSection(null)}
+        />
+      </div>
+    ) : (
+      <InsertChartTrigger
+        onClick={() => setExpandedChartSection(
+          section.section_id
+        )}
+        label={`+ Insert chart into ${section.title}`}
+      />
+    )}
+  </div>
+))}
+```
+
+### InsertChartTrigger
+
+A small dashed-border trigger that appears below each
+section. Invisible until hover, then shows teal dashed
+border and teal text.
+
+```typescript
+function InsertChartTrigger({
+  onClick, label
+}: { onClick: () => void, label: string }) {
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        margin: '8px 0 16px',
+        padding: '8px',
+        border: '1.5px dashed transparent',
+        borderRadius: 6,
+        textAlign: 'center',
+        fontSize: 12,
+        color: 'transparent',
+        cursor: 'pointer',
+        transition: 'all 150ms',
+      }}
+      onMouseEnter={e => {
+        const el = e.currentTarget
+        el.style.borderColor = '#14B8A6'
+        el.style.color = '#14B8A6'
+      }}
+      onMouseLeave={e => {
+        const el = e.currentTarget
+        el.style.borderColor = 'transparent'
+        el.style.color = 'transparent'
+      }}
+    >
+      {label}
+    </div>
+  )
+}
+```
+
+### Remove the old drawer
+
+Find and remove the existing Insert chart / Refine
+chart drawer implementation. The inline expansion
+replaces it entirely for the Report Viewer context.
+
+---
+
+## Part 8 — handleInsertChart
+
+When the user clicks "Insert chart →", build the
+TipTap pandoraChart node and insert it into the
+correct section:
+
+```typescript
+async function handleInsertChart(
+  sectionId: string,
+  spec: ChartSpec
+) {
+  // 1. Find the section's TipTap editor via
+  //    sectionEditorRegistry (already built)
+  const editor = sectionEditorRegistry.get(sectionId)
+  if (!editor) return
+
+  // 2. Insert the pandoraChart node
+  editor.chain().focus().insertContent({
+    type: 'pandoraChart',
+    attrs: { spec: JSON.stringify(spec) }
+  }).run()
+
+  // 3. Save the document
+  await saveReportSection(sectionId)
+}
+```
+
+Use the existing sectionEditorRegistry and
+insertChartIntoEditor() if they exist from the
+earlier Report Viewer build. Match that pattern.
+
+---
+
+## What NOT to Build
+
+- No modal context for standalone use yet — inline
+  only for this build. The modal mount is a follow-on.
+- No drag-and-drop for field zones
+- No saved queries tab content changes — tabs exist
+  but Live Query is the focus
+- No Skills tab content changes
+- No outlier visual rendering — store the spec field,
+  the visual treatment is a TODO (already confirmed
+  from the ChartSpec build)
+
+---
+
+## Acceptance Criteria
+
+1. Clicking "+ Insert chart into [section]" expands
+   the builder inline — document visible above and below
+2. The old Insert chart / Refine chart drawer is removed
+3. ChartBuilderPanel has config left column + preview
+   right column
+4. Field picker shows type badge + fill rate on every row
+5. Field picker search filters in real time
+6. X Axis, Y Axis, Series, Second Y Axis zones all work
+7. Adding a Series field enables Stacked and Heatmap
+   in the chart type grid
+8. Removing Series field disables Stacked and Heatmap
+9. Disabled chart types show tooltip on hover
+10. Active chart type has teal border + background
+11. Preview updates within 500ms of any field change
+    (debounced)
+12. Preview shows skeleton loading state while querying
+13. Color mode radio changes preview without re-querying
+14. Axis formatting, data labels, outlier, legend
+    controls all update the ChartSpec correctly
+15. "Insert chart →" inserts the pandoraChart TipTap
+    node into the correct section
+16. Cancel closes the inline expansion, no chart inserted
+17. InsertChartTrigger is invisible at rest, teal on hover
+18. Config column scrolls independently of preview
+19. Zero TypeScript errors
+20. Existing charts in reports render unchanged
+```
