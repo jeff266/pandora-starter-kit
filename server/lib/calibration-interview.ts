@@ -279,12 +279,20 @@ export async function buildInterviewPrompt(
 }
 
 export async function buildCompletionSummary(workspaceId: string): Promise<string> {
-  const [stateResult, dimensionsResult] = await Promise.all([
+  const [stateResult, dimensionsResult, confirmedStageMappingsResult] = await Promise.all([
     getInterviewState(workspaceId),
     query(
       `SELECT workspace_config->'calibration'->'dimensions' AS dimensions,
               workspace_config->'calibration'->'stage_mappings' AS stage_mappings
        FROM workspaces WHERE id = $1`,
+      [workspaceId]
+    ),
+    // Authoritative count: read confirmed stage entries from stage_mappings table
+    query(
+      `SELECT raw_stage, normalized_stage, display_order
+       FROM stage_mappings
+       WHERE workspace_id = $1 AND source = 'calibration'
+       ORDER BY display_order`,
       [workspaceId]
     ),
   ]);
@@ -295,11 +303,16 @@ export async function buildCompletionSummary(workspaceId: string): Promise<strin
         : dimensionsResult.rows[0].dimensions)
     : {};
 
-  const stageMappings = dimensionsResult.rows[0]?.stage_mappings
-    ? (typeof dimensionsResult.rows[0].stage_mappings === 'string'
-        ? JSON.parse(dimensionsResult.rows[0].stage_mappings)
-        : dimensionsResult.rows[0].stage_mappings)
-    : {};
+  // Workspace config holds raw CRM name → funnel position (for human-readable labels)
+  const stageMappings: Record<string, string> =
+    dimensionsResult.rows[0]?.stage_mappings
+      ? (typeof dimensionsResult.rows[0].stage_mappings === 'string'
+          ? JSON.parse(dimensionsResult.rows[0].stage_mappings)
+          : dimensionsResult.rows[0].stage_mappings)
+      : {};
+
+  // Authoritative count from stage_mappings table (source='calibration')
+  const confirmedTableCount = confirmedStageMappingsResult.rows.length;
 
   const lines: string[] = [
     `**Calibration Complete! All 6 definitions are now confirmed.**`,
@@ -308,11 +321,22 @@ export async function buildCompletionSummary(workspaceId: string): Promise<strin
     ``,
   ];
 
-  if (Object.keys(stageMappings).length > 0) {
-    lines.push(`**Stage Mappings**`);
-    for (const [rawStage, funnelPosition] of Object.entries(stageMappings)) {
-      const label = NORMALIZED_STAGE_LABELS[funnelPosition as keyof typeof NORMALIZED_STAGE_LABELS] ?? funnelPosition;
-      lines.push(`- ${rawStage} → ${label}`);
+  // Show stage mappings: prefer workspace_config (has funnel position labels),
+  // fall back to stage_mappings table entries if workspace_config is stale/empty.
+  const configEntries = Object.entries(stageMappings).filter(([, v]) => v);
+  if (configEntries.length > 0 || confirmedTableCount > 0) {
+    lines.push(`**Stage Mappings** (${confirmedTableCount} stage${confirmedTableCount !== 1 ? 's' : ''} confirmed)`);
+    if (configEntries.length > 0) {
+      for (const [rawStage, funnelPosition] of configEntries) {
+        const label = NORMALIZED_STAGE_LABELS[funnelPosition as keyof typeof NORMALIZED_STAGE_LABELS] ?? funnelPosition;
+        lines.push(`- ${rawStage} → ${label}`);
+      }
+    } else {
+      // Fallback: show raw_stage from table (funnel position not available here, use normalized)
+      for (const row of confirmedStageMappingsResult.rows) {
+        const label = NORMALIZED_STAGE_LABELS[row.normalized_stage as keyof typeof NORMALIZED_STAGE_LABELS] ?? row.normalized_stage;
+        lines.push(`- ${row.raw_stage} → ${label}`);
+      }
     }
     lines.push('');
   }
