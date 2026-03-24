@@ -667,7 +667,7 @@ export default function ChatPanel({ isOpen, onClose, scope, initialSessionId, pe
                 </span>
               </div>
               <div style={styles.messageContent}>
-                {formatMarkdown(anon.text(msg.content))}
+                {formatMarkdown(anon.text(msg.content), msg.role === 'assistant' ? (text) => sendMessage(text) : undefined)}
               </div>
               {msg.role === 'assistant' && msg.evidence && msg.evidence.tool_calls.length > 0 && (
                 <ChainOfThoughtPanel
@@ -1514,12 +1514,134 @@ function parseTableCells(line: string): string[] {
   return cleaned.split('|').map(c => c.trim());
 }
 
-function renderTable(tableLines: string[], keyBase: number): React.ReactElement {
+const STAGE_MAP_OPTIONS = [
+  { key: 'prospecting',  label: 'Prospecting' },
+  { key: 'qualification', label: 'Qualification' },
+  { key: 'evaluation',  label: 'Evaluation' },
+  { key: 'demo',        label: 'Demo' },
+  { key: 'proposal',    label: 'Proposal' },
+  { key: 'negotiation', label: 'Negotiation' },
+  { key: 'closed_won',  label: 'Closed Won' },
+  { key: 'closed_lost', label: 'Closed Lost' },
+];
+
+function renderStageMappingTable(
+  headers: string[],
+  rows: string[][],
+  keyBase: number,
+  onSend: (msg: string) => void
+): React.ReactElement {
+  const thStyle: React.CSSProperties = {
+    padding: '8px 12px', textAlign: 'left', fontWeight: 600, fontSize: 11,
+    textTransform: 'uppercase', letterSpacing: '0.05em',
+    color: '#94a3b8', background: 'rgba(30, 41, 59, 0.8)',
+    borderBottom: '1px solid rgba(148, 163, 184, 0.15)', whiteSpace: 'nowrap',
+  };
+  const tdStyle: React.CSSProperties = {
+    padding: '6px 12px', color: '#e2e8f0',
+    borderBottom: '1px solid rgba(148, 163, 184, 0.08)', whiteSpace: 'nowrap',
+  };
+
+  return (
+    <div key={`stgmap-${keyBase}`}>
+      <div style={{ overflowX: 'auto', margin: '8px 0', borderRadius: 8, border: '1px solid rgba(148, 163, 184, 0.15)' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, fontFamily: "'Inter', sans-serif" }}>
+          <thead>
+            <tr>
+              {headers.map((h, ci) => (
+                <th key={ci} style={thStyle}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((cells, ri) => {
+              const stageName  = cells[0] ?? '';
+              const pipeline   = cells[1] ?? '';
+              const guessLabel = cells[2] ?? '';
+              const deals      = cells[3] ?? '';
+              const value      = cells[4] ?? '';
+              const defaultKey = STAGE_MAP_OPTIONS.find(o => o.label === guessLabel)?.key ?? '';
+
+              return (
+                <tr key={ri} style={{ background: ri % 2 === 0 ? 'transparent' : 'rgba(30, 41, 59, 0.3)' }}>
+                  <td style={tdStyle}>{stageName}</td>
+                  <td style={{ ...tdStyle, color: '#94a3b8', fontSize: 12 }}>{pipeline}</td>
+                  <td style={tdStyle}>
+                    <select
+                      defaultValue={defaultKey}
+                      onChange={(e) => {
+                        const key = e.target.value;
+                        const label = STAGE_MAP_OPTIONS.find(o => o.key === key)?.label ?? key;
+                        onSend(`${stageName} is actually ${label}`);
+                      }}
+                      style={{
+                        background: 'rgba(30, 41, 59, 0.9)',
+                        color: '#e2e8f0',
+                        border: '1px solid rgba(148, 163, 184, 0.3)',
+                        borderRadius: 6,
+                        padding: '4px 8px',
+                        fontSize: 12,
+                        cursor: 'pointer',
+                        outline: 'none',
+                        appearance: 'auto',
+                      }}
+                    >
+                      {!defaultKey && (
+                        <option value="" disabled>— pick one —</option>
+                      )}
+                      {STAGE_MAP_OPTIONS.map(o => (
+                        <option key={o.key} value={o.key}>{o.label}</option>
+                      ))}
+                    </select>
+                  </td>
+                  <td style={{ ...tdStyle, color: '#94a3b8' }}>{deals}</td>
+                  <td style={tdStyle}>{value}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <button
+        onClick={() => onSend('looks right')}
+        style={{
+          marginTop: 8,
+          padding: '7px 16px',
+          background: 'rgba(99, 102, 241, 0.15)',
+          border: '1px solid rgba(99, 102, 241, 0.4)',
+          borderRadius: 8,
+          color: '#a5b4fc',
+          fontSize: 13,
+          fontWeight: 500,
+          cursor: 'pointer',
+          transition: 'background 0.15s',
+        }}
+        onMouseEnter={e => { (e.target as HTMLButtonElement).style.background = 'rgba(99, 102, 241, 0.28)'; }}
+        onMouseLeave={e => { (e.target as HTMLButtonElement).style.background = 'rgba(99, 102, 241, 0.15)'; }}
+      >
+        ✓ Looks right — confirm all
+      </button>
+    </div>
+  );
+}
+
+function renderTable(tableLines: string[], keyBase: number, onSend?: (msg: string) => void): React.ReactElement {
   const headerLine = tableLines[0];
   const hasSeparator = tableLines.length > 1 && isSeparatorRow(tableLines[1]);
   const dataStartIdx = hasSeparator ? 2 : 1;
   const headers = parseTableCells(headerLine);
   const rows = tableLines.slice(dataStartIdx).map(l => parseTableCells(l));
+
+  // Detect the stage mapping calibration table by its distinctive column headers
+  const isStageMappingTable =
+    onSend &&
+    headers.length >= 5 &&
+    headers[1]?.toLowerCase().trim() === 'pipeline' &&
+    headers[2]?.toLowerCase().trim() === "pandora's guess";
+
+  if (isStageMappingTable) {
+    return renderStageMappingTable(headers, rows, keyBase, onSend!);
+  }
 
   return (
     <div key={`table-${keyBase}`} style={{ overflowX: 'auto', margin: '8px 0', borderRadius: 8, border: '1px solid rgba(148, 163, 184, 0.15)' }}>
@@ -1553,7 +1675,7 @@ function renderTable(tableLines: string[], keyBase: number): React.ReactElement 
   );
 }
 
-function formatMarkdown(text: string): React.ReactElement[] {
+function formatMarkdown(text: string, onSend?: (msg: string) => void): React.ReactElement[] {
   const lines = text.split('\n');
   const elements: React.ReactElement[] = [];
   let i = 0;
@@ -1574,7 +1696,7 @@ function formatMarkdown(text: string): React.ReactElement[] {
       }
       i = j;
       if (tableLines.length >= 2) {
-        elements.push(renderTable(tableLines, i));
+        elements.push(renderTable(tableLines, i, onSend));
       } else {
         elements.push(<div key={i}>{formatInlineMarkdown(tableLines[0])}</div>);
       }

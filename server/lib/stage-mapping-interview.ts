@@ -28,6 +28,7 @@ export const FUNNEL_ORDER: NormalizedStage[] = [
 
 export interface StageMappingQuestion {
   crm_stage_name: string;
+  pipeline: string;
   normalized_stage_current: string;
   deal_count: number;
   total_value: number;
@@ -102,6 +103,10 @@ export async function getUnmappedStages(
     query(
       `SELECT stage              AS crm_stage_name,
               stage_normalized   AS import_normalized,
+              ARRAY_TO_STRING(
+                ARRAY_AGG(DISTINCT COALESCE(NULLIF(pipeline, ''), 'Default Pipeline')),
+                ', '
+              )                  AS pipeline_name,
               COUNT(*)::int      AS deal_count,
               COALESCE(SUM(amount), 0) AS total_value
        FROM deals
@@ -138,6 +143,7 @@ export async function getUnmappedStages(
     const { mapping, confidence } = suggestMapping(crmName);
     unmapped.push({
       crm_stage_name:          crmName,
+      pipeline:                (row.pipeline_name as string) || '',
       normalized_stage_current: row.import_normalized as string ?? '',
       deal_count:              Number(row.deal_count),
       total_value:             Number(row.total_value),
@@ -238,21 +244,21 @@ Which position does **${stage.crm_stage_name}** belong to? (Or tell me to skip i
 
 export function buildStageMappingTablePrompt(stages: StageMappingQuestion[]): string {
   const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
-  const funnel = FUNNEL_ORDER.map(s => NORMALIZED_STAGE_LABELS[s]).join(' → ');
 
   const rows = stages.map(s => {
-    const guess = s.suggested_mapping ? NORMALIZED_STAGE_LABELS[s.suggested_mapping] : '❓ Unknown';
+    const guess = s.suggested_mapping ? NORMALIZED_STAGE_LABELS[s.suggested_mapping] : 'Unknown';
     const value = currency.format(s.total_value);
-    return `| ${s.crm_stage_name} | ${guess} | ${s.deal_count} | ${value} |`;
+    const pipeline = s.pipeline || 'Default Pipeline';
+    return `| ${s.crm_stage_name} | ${pipeline} | ${guess} | ${s.deal_count} | ${value} |`;
   }).join('\n');
 
-  return `I found **${stages.length} stage${stages.length !== 1 ? 's' : ''}** in your CRM that I need to map to my funnel positions. Here's my best guess for each:
+  return `Your CRM has **${stages.length} stage${stages.length !== 1 ? 's' : ''}** I need to classify. Here's my best guess for each — use the dropdowns to correct anything that's wrong, then click **"Looks right"** to confirm.
 
-| Stage | My Guess | Deals | Value |
-|-------|----------|-------|-------|
+**Why does this matter?** Every CRM names stages differently. By mapping your stages to Pandora's standard funnel positions, I can accurately calculate win rates, pipeline coverage, and forecast accuracy across all your pipelines — not guesses.
+
+| Stage | Pipeline | Pandora's Guess | Deals | Value |
+|-------|----------|-----------------|-------|-------|
 ${rows}
 
-Funnel order: ${funnel}
-
-Correct anything that looks wrong (e.g. "Pilot is actually Evaluation"), or say **"looks right"** to confirm all mappings as-is.`;
+Use the dropdowns above to correct any mismatches, or say **"looks right"** to confirm all.`;
 }
