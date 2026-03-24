@@ -80,6 +80,20 @@ function suggestMapping(stageName: string): { mapping: NormalizedStage | null; c
 export async function getUnmappedStages(
   workspaceId: string
 ): Promise<StageMappingQuestion[]> {
+  // Check if Setup Interview already classified stages
+  // via funnel_stages table. If so, skip stage mapping.
+  const mapped = await query(
+    `SELECT COUNT(*) AS count
+     FROM funnel_stages
+     WHERE workspace_id = $1
+       AND (is_won = TRUE OR is_lost = TRUE)`,
+    [workspaceId]
+  );
+  if (parseInt(mapped.rows[0].count) > 0) {
+    return [];
+  }
+  // else: continue with existing logic below
+
   const [stagesResult, configResult] = await Promise.all([
     query(
       `SELECT stage_normalized AS crm_stage_name,
