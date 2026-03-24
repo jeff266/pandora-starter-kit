@@ -15,6 +15,8 @@ import { ContextMenu as DocContextMenu } from '../components/report/ContextMenu'
 import ChartBuilder from '../components/report/ChartBuilder';
 import SectionEditor from '../components/report/SectionEditor';
 import EvidenceDrawer from '../components/report/EvidenceDrawer';
+import ClaimEvidenceDrawer, { type TraceClaimResult, type ClaimAttrs } from '../components/report/ClaimEvidenceDrawer';
+import { getActiveSectionEditor } from '../lib/sectionEditorRegistry';
 import PrepareForClientModal from '../components/report/PrepareForClientModal';
 import type { ExportConfig } from '../types/export';
 import ReportContextMenu, { type ReportContextTarget } from '../components/reports/ReportContextMenu';
@@ -207,6 +209,15 @@ export default function ReportViewer() {
     sectionId: string;
   } | null>(null);
   const [rewriteInstruction, setRewriteInstruction] = useState('');
+
+  // Claim provenance drawer (Build 5 + Build 7)
+  const [claimDrawerOpen, setClaimDrawerOpen] = useState(false);
+  const [claimDrawerLoading, setClaimDrawerLoading] = useState(false);
+  const [claimDrawerData, setClaimDrawerData] = useState<TraceClaimResult | null>(null);
+  const [claimDrawerError, setClaimDrawerError] = useState<string | null>(null);
+  const [activeClaim, setActiveClaim] = useState<ClaimAttrs | null>(null);
+  const [showQuestionButton, setShowQuestionButton] = useState(false);
+
   const [injectedPrompt, setInjectedPrompt] = useState<{
     instruction: string;
     selectedText: string;
@@ -328,6 +339,29 @@ export default function ReportViewer() {
           selectedText,
           sectionId,
         });
+
+        // Detect pandoraClaim marks in the current TipTap selection
+        let foundClaim: ClaimAttrs | null = null;
+        const editor = getActiveSectionEditor(sectionId);
+        if (editor && !editor.state.selection.empty) {
+          const { from, to } = editor.state.selection;
+          editor.state.doc.nodesBetween(from, to, (node) => {
+            if (foundClaim) return false;
+            node.marks.forEach(mark => {
+              if (mark.type.name === 'pandoraClaim') {
+                foundClaim = {
+                  claim_id:     mark.attrs.claim_id,
+                  skill_id:     mark.attrs.skill_id,
+                  skill_run_id: mark.attrs.skill_run_id,
+                  metric_name:  mark.attrs.metric_name,
+                  severity:     mark.attrs.severity,
+                };
+              }
+            });
+          });
+        }
+        setActiveClaim(foundClaim);
+        setShowQuestionButton(!!foundClaim);
       }, 10);
     }
 
@@ -351,6 +385,87 @@ export default function ReportViewer() {
     // Clear toolbar
     setRewriteToolbar(null);
     setRewriteInstruction('');
+  }
+
+  function formatSkillNameForPrompt(id: string): string {
+    return id.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+  }
+
+  async function handleQuestionClaim(claim: ClaimAttrs) {
+    setClaimDrawerOpen(true);
+    setClaimDrawerLoading(true);
+    setClaimDrawerData(null);
+    setClaimDrawerError(null);
+
+    try {
+      const token = localStorage.getItem('pandora_session');
+      const res = await fetch(
+        `/api/workspaces/${workspaceId}/reports/trace-claim`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            claim_id:     claim.claim_id,
+            skill_run_id: claim.skill_run_id,
+            document_id:  reportDocument?.id,
+          }),
+        }
+      );
+      if (!res.ok) throw new Error('Failed to load evidence');
+      const data = await res.json();
+      setClaimDrawerData(data);
+    } catch {
+      setClaimDrawerError('Could not load evidence for this claim.');
+    } finally {
+      setClaimDrawerLoading(false);
+    }
+  }
+
+  function handleChallengeClaim(data: TraceClaimResult) {
+    const prompt =
+      `I want to challenge this claim: "${data.claim_text}". ` +
+      `The ${formatSkillNameForPrompt(data.skill_id)} skill reported ` +
+      `${data.metric_values?.[0]} ${data.metric_name}. ` +
+      `Challenge it from both sides — what supports it and what would make it wrong?`;
+
+    setPandoraOpen(true);
+    setPandoraMode('prosecutor_defense');
+    setInjectedPrompt({ instruction: prompt, selectedText: data.claim_text, sectionId: '' });
+    setClaimDrawerOpen(false);
+  }
+
+  function handleRecalibrateClaim(data: TraceClaimResult) {
+    const prompt =
+      `The definition behind this number might be wrong: "${data.claim_text}". ` +
+      `Current filter: ${data.dimension_summary ?? 'default definition'}. ` +
+      `Let's adjust the ${data.metric_name} definition.`;
+
+    setPandoraOpen(true);
+    setPandoraMode('calibration_interview');
+    setInjectedPrompt({ instruction: prompt, selectedText: data.claim_text, sectionId: '' });
+    setClaimDrawerOpen(false);
+  }
+
+  function handleEditorClick(event: React.MouseEvent) {
+    const target = event.target as HTMLElement;
+    if (target.classList.contains('pandora-claim--hyperlink')) {
+      const claimId    = target.dataset.claimId;
+      const skillRunId = target.dataset.skillRunId;
+      if (claimId && skillRunId) {
+        event.preventDefault();
+        event.stopPropagation();
+        handleQuestionClaim({
+          claim_id:     claimId,
+          skill_id:     target.dataset.skillId ?? '',
+          skill_run_id: skillRunId,
+          metric_name:  target.dataset.metricName ?? '',
+          severity:     target.dataset.severity ?? 'info',
+        });
+      }
+    }
   }
 
   async function loadDirectGeneration() {
@@ -1498,6 +1613,7 @@ export default function ReportViewer() {
                       style={{ background: colors.surface, borderRadius: 8, border: `1px solid ${colors.border}`, padding: 24 }}
                       onMouseEnter={() => { setHoveredSection(section.id); setActiveSectionId(section.id); }}
                       onMouseLeave={() => setHoveredSection(null)}
+                      onClick={handleEditorClick}
                       onContextMenu={(e) => {
                         e.preventDefault();
                         localStorage.setItem('pandora-rightclick-hint-dismissed', 'true');
@@ -2020,6 +2136,30 @@ export default function ReportViewer() {
           >
             →
           </button>
+          {showQuestionButton && activeClaim && (
+            <button
+              onClick={() => {
+                handleQuestionClaim(activeClaim);
+                setRewriteToolbar(null);
+              }}
+              style={{
+                background: 'rgba(245,158,11,0.1)',
+                border: '1px solid rgba(245,158,11,0.4)',
+                color: '#F59E0B',
+                borderRadius: 6,
+                padding: '4px 10px',
+                fontSize: 12,
+                cursor: 'pointer',
+                marginLeft: 2,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+                whiteSpace: 'nowrap',
+              }}
+            >
+              ❓ Question this →
+            </button>
+          )}
         </div>
       )}
 
@@ -2045,6 +2185,18 @@ export default function ReportViewer() {
           />
         </>
       )}
+
+      {/* Claim Provenance Drawer (Build 5 + Build 7) */}
+      <ClaimEvidenceDrawer
+        open={claimDrawerOpen}
+        loading={claimDrawerLoading}
+        error={claimDrawerError}
+        data={claimDrawerData}
+        onClose={() => setClaimDrawerOpen(false)}
+        onChallenge={handleChallengeClaim}
+        onRecalibrate={handleRecalibrateClaim}
+        workspaceId={workspaceId ?? ''}
+      />
 
     </div>
   );

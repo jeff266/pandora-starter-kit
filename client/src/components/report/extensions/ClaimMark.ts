@@ -2,7 +2,8 @@
  * Pandora Claim Mark
  *
  * TipTap Mark extension for claim provenance drill-through.
- * Invisible to readers until selected - then shows "Question this" button.
+ * Numeric values render as teal underlined hyperlinks.
+ * Non-numeric claim text is invisible until selected.
  */
 
 import { Mark, mergeAttributes } from '@tiptap/core';
@@ -13,16 +14,30 @@ export interface PandoraClaimAttrs {
   skill_run_id: string;
   metric_name:  string;
   severity:     string;
+  data_numeric: string;
+}
+
+const NUMERIC_PATTERNS = [
+  /^\$[\d,.]+[MKB]?$/,
+  /^\d[\d,]*\s+deals?$/i,
+  /^\d[\d,]*\s+accounts?$/i,
+  /^[\d.]+%$/,
+  /^[\d.]+x$/,
+  /^\d[\d,]*\s+reps?$/i,
+  /^\d+\s+days?$/i,
+  /^\d[\d,]*$/,
+];
+
+export function isNumericText(text: string): boolean {
+  const t = text.trim();
+  return NUMERIC_PATTERNS.some(p => p.test(t));
 }
 
 export const PandoraClaimMark = Mark.create({
   name: 'pandoraClaim',
 
-  // Marks can span across inline content
   spanning: false,
-  // Not inclusive — typing next to a claim does not extend it
   inclusive: false,
-  // Not excluded from any other marks
   excludes: '',
 
   addAttributes() {
@@ -67,6 +82,13 @@ export const PandoraClaimMark = Mark.create({
           return { 'data-severity': attributes.severity };
         },
       },
+      data_numeric: {
+        default: 'false',
+        parseHTML: element => element.getAttribute('data-numeric') ?? 'false',
+        renderHTML: attributes => {
+          return { 'data-numeric': attributes.data_numeric ?? 'false' };
+        },
+      },
     };
   },
 
@@ -79,12 +101,13 @@ export const PandoraClaimMark = Mark.create({
   },
 
   renderHTML({ HTMLAttributes }) {
-    // Rendered as a span with data attributes
-    // No visual styling — invisible to the reader
+    const isNumeric = HTMLAttributes['data-numeric'] === 'true';
     return [
       'span',
       mergeAttributes(HTMLAttributes, {
-        class: 'pandora-claim',
+        class: isNumeric
+          ? 'pandora-claim pandora-claim--hyperlink'
+          : 'pandora-claim',
       }),
       0,
     ];

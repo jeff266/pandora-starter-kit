@@ -1,0 +1,567 @@
+Logged. Now here's the Replit prompt for Build 5 + Build 7 together — no reason to split them since they touch the same files:
+
+```
+# Claim Provenance — Build 5 + Build 7 (Client-Side)
+
+## Context
+
+Backend is complete. These files exist and are ready:
+- ClaimMark.ts — TipTap mark extension (invisible pandoraClaim marks)
+- POST /api/workspaces/:id/reports/trace-claim — returns full
+  claim evidence (claim_text, metric, records, dimension_summary,
+  skill_id, ran_at, calibrated, severity, total_entity_count)
+
+Two things to build in this prompt:
+1. BUILD 5 — Selection handler + ClaimEvidenceDrawer
+2. BUILD 7 — Inline numeric hyperlinks
+
+These share the same Evidence Drawer and the same
+handleQuestionClaim() function. Build them together.
+
+## Before Starting
+
+Read these files:
+1. client/src/components/report/extensions/ChartNode.ts —
+   the existing TipTap custom node. Match the extension
+   registration pattern exactly.
+2. client/src/pages/ReportViewer.tsx — find:
+   - Where the TipTap editor is initialized (useEditor call)
+   - The existing floating toolbar (mouseup/selection handler
+     for the Rewrite feature)
+   - The existing EvidenceDrawer usage — how it's opened,
+     what state it uses
+   - Where section content is rendered (which component
+     renders tiptap_content)
+3. client/src/components/report/extensions/ClaimMark.ts —
+   confirm it exists. Show the full file. Note the attribute
+   names on the mark (claim_id, skill_id, skill_run_id,
+   metric_name, severity).
+
+---
+
+## Part 1 — Register PandoraClaimMark in the Editor
+
+File: wherever useEditor() is called in ReportViewer.tsx
+or the section editor component.
+
+Import and add to extensions array:
+
+```typescript
+import { PandoraClaimMark }
+  from './extensions/ClaimMark'
+
+const editor = useEditor({
+  extensions: [
+    // ... existing extensions
+    PandoraClaimMark,
+  ],
+  content: section.tiptap_content,
+})
+```
+
+---
+
+## Part 2 — Inline Numeric Hyperlinks (Build 7)
+
+This is the visual rendering of pandoraClaim marks on
+numeric values. Requires a CSS addition and a click
+handler. No new component needed.
+
+### CSS
+
+Add to the report viewer stylesheet (or inline styles
+on the editor container):
+
+```css
+/* Invisible by default — all pandoraClaim marks */
+.pandora-claim {
+  cursor: text;
+}
+
+/* Visible hyperlink — numeric values only */
+/* ClaimMark.ts renderHTML() applies this class when
+   the mark text matches a numeric pattern */
+.pandora-claim--hyperlink {
+  color: #14B8A6;
+  border-bottom: 1px solid rgba(20, 184, 166, 0.4);
+  cursor: pointer;
+  transition: all 150ms ease;
+  border-radius: 2px;
+}
+
+.pandora-claim--hyperlink:hover {
+  color: #0D9488;
+  border-bottom-color: #14B8A6;
+  background: rgba(20, 184, 166, 0.08);
+  padding: 0 2px;
+}
+```
+
+### ClaimMark.ts update
+
+In renderHTML(), add numeric detection to apply the
+hyperlink class. Find ClaimMark.ts and update
+renderHTML():
+
+```typescript
+renderHTML({ HTMLAttributes }) {
+  const NUMERIC_PATTERNS = [
+    /\$[\d,.]+[MKB]?/,
+    /\d[\d,]*\s+deals?/,
+    /\d[\d,]*\s+accounts?/,
+    /[\d.]+%/,
+    /[\d.]+x/,
+    /\d[\d,]*\s+reps?/,
+    /\d+\s+days?/,
+    /\d[\d,]*/,  // any standalone number
+  ]
+
+  // We can't access the text content in renderHTML,
+  // so add a data-numeric attribute in the post-processor
+  // instead (see note below)
+  const isNumeric = HTMLAttributes['data-numeric'] === 'true'
+
+  return [
+    'span',
+    mergeAttributes(HTMLAttributes, {
+      'data-claim-id':     HTMLAttributes.claim_id,
+      'data-skill-id':     HTMLAttributes.skill_id,
+      'data-skill-run-id': HTMLAttributes.skill_run_id,
+      'data-metric-name':  HTMLAttributes.metric_name,
+      'data-severity':     HTMLAttributes.severity,
+      'class': isNumeric
+        ? 'pandora-claim pandora-claim--hyperlink'
+        : 'pandora-claim',
+    }),
+    0
+  ]
+},
+```
+
+Add data-numeric to the mark's addAttributes():
+```typescript
+addAttributes() {
+  return {
+    claim_id:     { default: null },
+    skill_id:     { default: null },
+    skill_run_id: { default: null },
+    metric_name:  { default: null },
+    severity:     { default: null },
+    data_numeric: { default: 'false' },
+    // Set to 'true' by post-processor when text is numeric
+  }
+},
+```
+
+In claim-tag-processor.ts, when building TipTap marks,
+detect if the annotated text is numeric and set the
+attribute:
+
+```typescript
+const NUMERIC_PATTERNS = [
+  /\$[\d,.]+[MKB]?/,
+  /\d[\d,]*\s+deals?/i,
+  /[\d.]+%/,
+  /[\d.]+x/,
+  /\d[\d,]*\s+reps?/i,
+  /\d+\s+days?/i,
+]
+
+const isNumeric = NUMERIC_PATTERNS.some(p =>
+  p.test(ann.text.trim())
+)
+
+// In the mark attrs:
+marks: [{
+  type: 'pandoraClaim',
+  attrs: {
+    claim_id:     ann.claim_id,
+    skill_id:     ann.skill_id,
+    skill_run_id: skillRunId,
+    metric_name:  ann.metric_name,
+    severity:     ann.severity,
+    data_numeric: isNumeric ? 'true' : 'false',
+  }
+}]
+```
+
+### Click handler on editor content
+
+In ReportViewer.tsx, on the div that wraps the TipTap
+editor content, add an onClick handler:
+
+```typescript
+function handleEditorClick(event: React.MouseEvent) {
+  const target = event.target as HTMLElement
+  if (target.classList.contains('pandora-claim--hyperlink')) {
+    const claimId    = target.dataset.claimId
+    const skillRunId = target.dataset.skillRunId
+    if (claimId && skillRunId) {
+      event.preventDefault()
+      event.stopPropagation()
+      handleQuestionClaim({
+        claim_id:     claimId,
+        skill_id:     target.dataset.skillId ?? '',
+        skill_run_id: skillRunId,
+        metric_name:  target.dataset.metricName ?? '',
+        severity:     target.dataset.severity ?? 'info',
+      })
+    }
+  }
+}
+```
+
+Attach: `<div onClick={handleEditorClick}>` on the
+editor container div.
+
+---
+
+## Part 3 — Selection Handler (Build 5, Part A)
+
+Extend the existing floating toolbar (Rewrite feature)
+to detect pandoraClaim marks in the selection.
+
+Find the existing mouseup/selection handler. After it
+detects the selection and decides whether to show the
+toolbar, add claim detection:
+
+```typescript
+// After existing selection logic:
+
+let foundClaim: {
+  claim_id:     string
+  skill_id:     string
+  skill_run_id: string
+  metric_name:  string
+  severity:     string
+} | null = null
+
+if (editor && !editor.state.selection.empty) {
+  const { from, to } = editor.state.selection
+
+  editor.state.doc.nodesBetween(from, to, (node) => {
+    if (foundClaim) return false
+    node.marks.forEach(mark => {
+      if (mark.type.name === 'pandoraClaim') {
+        foundClaim = {
+          claim_id:     mark.attrs.claim_id,
+          skill_id:     mark.attrs.skill_id,
+          skill_run_id: mark.attrs.skill_run_id,
+          metric_name:  mark.attrs.metric_name,
+          severity:     mark.attrs.severity,
+        }
+      }
+    })
+  })
+}
+
+setActiveClaim(foundClaim)
+setShowQuestionButton(!!foundClaim)
+```
+
+State additions needed:
+```typescript
+const [activeClaim, setActiveClaim] = useState<ClaimAttrs | null>(null)
+const [showQuestionButton, setShowQuestionButton] = useState(false)
+```
+
+In the floating toolbar JSX, add alongside the
+existing Rewrite button:
+
+```typescript
+{showQuestionButton && activeClaim && (
+  <button
+    onClick={() => handleQuestionClaim(activeClaim)}
+    style={{
+      background: 'rgba(245, 158, 11, 0.1)',
+      border: '1px solid rgba(245, 158, 11, 0.4)',
+      color: '#F59E0B',
+      borderRadius: 6,
+      padding: '4px 10px',
+      fontSize: 12,
+      cursor: 'pointer',
+      marginLeft: 6,
+      display: 'flex',
+      alignItems: 'center',
+      gap: 4,
+    }}
+  >
+    ❓ Question this →
+  </button>
+)}
+```
+
+---
+
+## Part 4 — handleQuestionClaim function
+
+Shared by both the click handler (Build 7) and the
+selection handler (Build 5):
+
+```typescript
+async function handleQuestionClaim(claim: ClaimAttrs) {
+  setClaimDrawerOpen(true)
+  setClaimDrawerLoading(true)
+  setClaimDrawerData(null)
+  setClaimDrawerError(null)
+
+  try {
+    const res = await fetch(
+      `/api/workspaces/${workspaceId}/reports/trace-claim`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          claim_id:     claim.claim_id,
+          skill_run_id: claim.skill_run_id,
+          document_id:  reportDocument.id,
+        })
+      }
+    )
+    if (!res.ok) throw new Error('Failed to load evidence')
+    const data = await res.json()
+    setClaimDrawerData(data)
+  } catch (err) {
+    setClaimDrawerError('Could not load evidence for this claim.')
+  } finally {
+    setClaimDrawerLoading(false)
+  }
+}
+```
+
+State:
+```typescript
+const [claimDrawerOpen, setClaimDrawerOpen] = useState(false)
+const [claimDrawerLoading, setClaimDrawerLoading] = useState(false)
+const [claimDrawerData, setClaimDrawerData] = useState<TraceClaimResult | null>(null)
+const [claimDrawerError, setClaimDrawerError] = useState<string | null>(null)
+```
+
+---
+
+## Part 5 — ClaimEvidenceDrawer Component
+
+File: client/src/components/report/ClaimEvidenceDrawer.tsx
+(new)
+
+A 420px right-side drawer. 200ms slide-in from right.
+Same animation pattern as the existing EvidenceDrawer.
+
+### Props
+
+```typescript
+interface ClaimEvidenceDrawerProps {
+  open:       boolean
+  loading:    boolean
+  error:      string | null
+  data:       TraceClaimResult | null
+  onClose:    () => void
+  onChallenge: (data: TraceClaimResult) => void
+  onRecalibrate: (data: TraceClaimResult) => void
+  workspaceId: string
+}
+
+interface TraceClaimResult {
+  claim_id:         string
+  claim_text:       string
+  metric_name:      string
+  metric_values:    any[]
+  threshold:        string | null
+  severity:         string
+  skill_id:         string
+  skill_run_id:     string
+  ran_at:           string
+  calibrated:       boolean
+  dimension_key:    string | null
+  dimension_label:  string | null
+  dimension_summary: string | null
+  total_entity_count: number
+  records:          Array<{
+    id:                  string
+    name:                string
+    amount:              number
+    stage:               string
+    owner_email:         string
+    close_date:          string
+    days_since_activity: number
+  }>
+}
+```
+
+### Layout
+
+```
+┌─────────────────────────────────────────────┐
+│ ❓ Claim Provenance              [✕]         │
+├─────────────────────────────────────────────┤
+│                                             │
+│  SOURCE                                     │
+│  [skill name formatted]                     │
+│  Run: [timeAgo]  •  [calibration badge]     │
+│                                             │
+│  CLAIM                                      │
+│  [severity dot] "[claim_text]"              │
+│                                             │
+│  HOW IT WAS CALCULATED                      │
+│  Filter:    [dimension_summary or Default]  │
+│  Threshold: [threshold_applied]             │
+│  Matched:   [total_entity_count] records    │
+│  Value:     $[sum of record amounts]        │
+│                                             │
+│  SAMPLE DEALS ([total_entity_count] total)  │
+│  [dot] [name]   [amount]   [N days dark]    │
+│  [dot] [name]   [amount]   [N days dark]    │
+│  ...up to 10                                │
+│  [View all N deals →]                       │
+│                                             │
+│ ─────────────────────────────────────────── │
+│  Something wrong with this number?          │
+│  [Challenge this →]  [Recalibrate filter →] │
+└─────────────────────────────────────────────┘
+```
+
+### Section details
+
+**SOURCE section:**
+- Skill name: format "pipeline-hygiene" → "Pipeline Hygiene"
+  (replace hyphens with spaces, title case each word)
+- Run time: timeAgo() helper — "2 hours ago", "just now"
+- Calibration badge: if calibrated = true, show teal pill
+  "✓ [dimension_label]". If false, show amber pill
+  "⚠ Default definition"
+
+**CLAIM section:**
+- Severity dot colors: critical → coral #EF4444,
+  warning → amber #F59E0B, info → teal #14B8A6,
+  positive → green #22C55E
+- claim_text in quotes, 13px, white
+
+**HOW IT WAS CALCULATED section:**
+- Filter: dimension_summary if calibrated,
+  else "Default pipeline definition"
+- Threshold: threshold field from response. If null,
+  show "—"
+- Matched: total_entity_count formatted with commas
+- Value: sum record.amount across all records in
+  response, formatted as $XM or $XK
+
+**SAMPLE DEALS section:**
+- Show up to 10 records
+- Each row: severity dot (based on days_since_activity:
+  >45 days = coral, >14 days = amber, else teal),
+  deal name truncated to 24 chars, amount as $XK/$XM,
+  days_since_activity as "N days dark"
+- "View all N deals →" — only if total_entity_count > 10.
+  Links to /gtm with a query param to pre-filter
+
+**RESOLUTION section:**
+- Label: "Something wrong with this number?" in muted text
+- "Challenge this →" — amber outlined button, full width
+- "Recalibrate filter →" — muted teal text link below it
+
+### Loading state
+Three skeleton rows in each section — pulse animation,
+same pattern as CalibrationProgress skeleton.
+
+### Error state
+```
+Could not load evidence for this claim.
+The skill run may have been cleared.
+[Close]
+```
+
+---
+
+## Part 6 — Wire Resolution Paths
+
+In ReportViewer.tsx, define the two resolution handlers
+and pass them to ClaimEvidenceDrawer:
+
+```typescript
+function handleChallengeClaim(data: TraceClaimResult) {
+  const prompt =
+    `I want to challenge this claim: "${data.claim_text}". ` +
+    `The ${formatSkillName(data.skill_id)} skill reported ` +
+    `${data.metric_values?.[0]} ${data.metric_name}. ` +
+    `Challenge it from both sides — what supports it and ` +
+    `what would make it wrong?`
+
+  openPandoraRail({
+    prompt,
+    forcedMode: 'prosecutor_defense',
+  })
+  setClaimDrawerOpen(false)
+}
+
+function handleRecalibrateClaim(data: TraceClaimResult) {
+  const prompt =
+    `The definition behind this number might be wrong: ` +
+    `"${data.claim_text}". ` +
+    `Current filter: ${data.dimension_summary ?? 'default definition'}. ` +
+    `Let's adjust the ${data.metric_name} definition.`
+
+  openPandoraRail({
+    prompt,
+    intent: 'calibration_interview',
+  })
+  setClaimDrawerOpen(false)
+}
+```
+
+Use whatever openPandoraRail() mechanism already exists
+in ReportViewer — check how the amber calibration badge
+currently opens the Ask Pandora rail. Match that pattern.
+
+---
+
+## Render ClaimEvidenceDrawer
+
+In ReportViewer.tsx JSX, alongside the existing
+EvidenceDrawer:
+
+```typescript
+<ClaimEvidenceDrawer
+  open={claimDrawerOpen}
+  loading={claimDrawerLoading}
+  error={claimDrawerError}
+  data={claimDrawerData}
+  onClose={() => setClaimDrawerOpen(false)}
+  onChallenge={handleChallengeClaim}
+  onRecalibrate={handleRecalibrateClaim}
+  workspaceId={workspaceId}
+/>
+```
+
+---
+
+## Acceptance Criteria
+
+1. Numeric values in pandoraClaim-marked text render
+   as teal underlined links
+2. Clicking a teal link opens ClaimEvidenceDrawer
+   with loading state, then populated data
+3. Non-numeric claim text is invisible (no link)
+4. Selecting text that spans a pandoraClaim mark shows
+   "❓ Question this →" button in floating toolbar
+5. Selecting text with no claim mark shows only the
+   existing Rewrite button
+6. Question button is amber, distinct from teal Rewrite
+7. ClaimEvidenceDrawer shows all 5 sections correctly
+8. SOURCE shows correct skill name, timeAgo, and
+   calibration badge color
+9. Severity dot color matches claim severity
+10. SAMPLE DEALS shows up to 10 records with correct
+    severity dots based on days_since_activity
+11. "View all N deals →" only appears when
+    total_entity_count > 10
+12. "Challenge this →" opens Ask Pandora rail with
+    prosecutor_defense mode pre-loaded
+13. "Recalibrate filter →" opens Ask Pandora rail with
+    calibration intent pre-loaded
+14. Both resolution paths close the drawer
+15. Loading state shows skeleton rows
+16. Error state shows message + close button
+17. Drawer closes on X button click
+18. Drawer slides in from right, 200ms ease
+19. No TypeScript errors
+```

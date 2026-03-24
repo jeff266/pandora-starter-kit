@@ -6,6 +6,7 @@ import { StarterKit } from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import Image from '@tiptap/extension-image';
 import { ChartNode } from './extensions/ChartNode';
+import { PandoraClaimMark } from './extensions/ClaimMark';
 import AnnotatableSection, { type Annotation } from './AnnotatableSection';
 
 interface ReportSection {
@@ -45,6 +46,7 @@ const READ_EXTENSIONS = [
   StarterKit.configure({ link: LINK_CONFIG }),
   Image.configure({ inline: false }),
   ChartNode,
+  PandoraClaimMark,
 ];
 
 // Factory so each SectionEditor gets its own fresh extension instances
@@ -56,6 +58,7 @@ function makeEditorExtensions() {
     }),
     Image.configure({ inline: false }),
     ChartNode,
+    PandoraClaimMark,
   ];
 }
 
