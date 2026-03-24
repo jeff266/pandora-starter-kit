@@ -155,15 +155,37 @@ Does this match what your team counts as active pipeline? If not, tell me what t
 }
 
 async function buildPipelineCoverageQuestion(workspaceId: string): Promise<string> {
-  const preview = await previewFilter(workspaceId, DEFAULT_FILTERS.active_pipeline, 'amount', 'standard');
+  const [preview, pipelineResult] = await Promise.all([
+    previewFilter(workspaceId, DEFAULT_FILTERS.active_pipeline, 'amount', 'standard'),
+    query(
+      `SELECT ARRAY_AGG(DISTINCT NULLIF(TRIM(pipeline), ''))
+         FILTER (WHERE pipeline IS NOT NULL AND TRIM(pipeline) != '') AS pipelines
+       FROM deals
+       WHERE workspace_id = $1`,
+      [workspaceId]
+    ),
+  ]);
+
   const pipelineVal = formatCurrency(preview.total_value);
+  const pipelines: string[] = (pipelineResult.rows[0]?.pipelines ?? []).filter(Boolean);
+  const hasMultiplePipelines = pipelines.length > 1;
+
+  const pipelineSection = hasMultiplePipelines
+    ? `\nYou have **${pipelines.length} pipelines**: ${pipelines.map(p => `*${p}*`).join(', ')}.
+
+Do you want one coverage target for all pipelines, or a separate target for each?
+
+- **Global** — one coverage ratio across all pipelines (most common)
+- **Per pipeline** — separate targets per pipeline (useful when pipelines have very different win rates or cycle times)
+
+Most teams use a global target. If you want per-pipeline, tell me and I'll ask for each pipeline's quota separately.\n`
+    : '';
 
   return `**Step 2 of 6: Pipeline Coverage Ratio**
 
 Pipeline coverage is typically calculated as: **Active Pipeline ÷ Quarterly Quota**.
 
-Based on your active pipeline definition, you have ${pipelineVal} in pipeline. To calculate your coverage ratio, I need to know your quarterly quota.
-
+Based on your active pipeline definition, you have ${pipelineVal} in pipeline.${pipelineSection}
 What is your team's quarterly quota? (Or if you have it set in your CRM, tell me where to find it.)
 
 Once I know your quota, I can track coverage automatically and alert you when it drops below your target.`;

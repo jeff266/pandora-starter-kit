@@ -47,6 +47,33 @@ import type { NormalizedStage } from '../lib/stage-mapping-interview.js';
 
 const CALIBRATION_TRIGGERS = /\b(calibrat|calibrate|calibration|map.*stage|stage.*map|set up pipeline|define pipeline|what counts as pipeline|define.*at.?risk|define.*commit|define.*win.?rate|setup calibration|start calibration|pipeline definition|interview)\b/i;
 
+/**
+ * Classifies whether a mid-calibration message is a clarifying question,
+ * an explicit confirmation, or a substantive answer that should advance the step.
+ */
+function classifyCalibrationInput(message: string): 'question' | 'confirmation' | 'answer' {
+  const trimmed = message.trim();
+  const lower   = trimmed.toLowerCase();
+
+  // Ends with '?' → definitely a question
+  if (trimmed.endsWith('?')) return 'question';
+
+  // Starts with a question word → clarifying question
+  if (/^(is|are|does|do|will|should|can|how|what|why|when|which)\b/i.test(trimmed)) return 'question';
+
+  // Explicit affirmative confirmations → advance
+  if (/\b(yes|correct|right|confirmed|looks good|that'?s? right|sounds right|sounds good|perfect|ok|okay|agree|works for me|go ahead|proceed)\b/i.test(lower)) return 'confirmation';
+
+  // Numeric values — quota, threshold, percentage, multiplier, day count → advance
+  if (/\d+(\.\d+)?\s*(x|%|k|m|days?|weeks?)?/i.test(lower)) return 'answer';
+
+  // Named/definitional values that are substantive answers → advance
+  if (/\b(global|per.?pipeline|by pipeline|all pipelines|count.?based|value.?based|dollar.?based|trailing|rolling|quarterly|annual|commit|best.?case|forecast.?category|no activity|inactivity|stage.?name|custom.?field|renewal|expansion|no|none|skip|exclude|include)\b/i.test(lower)) return 'answer';
+
+  // Default: treat as a question — never silently advance on ambiguous input
+  return 'question';
+}
+
 export interface ConversationTurnInput {
   surface: 'slack_thread' | 'slack_dm' | 'in_app';
   workspaceId: string;
@@ -384,9 +411,9 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
         // Detect affirmative: "looks right", "all correct", "that's right", "yes", etc.
         const isAffirmative = /\b(looks? right|all correct|that'?s? right|yes|yeah|yep|correct|confirmed|good|ok(ay)?|sounds good|perfect|exactly)\b/i.test(message);
 
-        // Detect a correction: e.g. "closed_won is actually Evaluation" or "evaluation is Demo"
+        // Detect a correction: e.g. "Demo Conducted is actually Demo" or "Pilot is Evaluation"
         const normalizedStages: NormalizedStage[] = [
-          'prospecting', 'qualification', 'evaluation', 'demo', 'proposal',
+          'prospecting', 'qualification', 'demo', 'evaluation', 'proposal',
           'negotiation', 'closed_won', 'closed_lost',
         ];
 
@@ -511,15 +538,67 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
           answer = await buildCompletionSummary(workspaceId);
 
         } else if (inCalibrationSession && step !== 'stage_mapping') {
-          // User answered the current interview step — advance to next question immediately
-          const nextStep = await advanceInterview(workspaceId, step);
-          console.log('[Calibration] Advanced:', step, '→', nextStep);
+          // Classify the user's input before deciding whether to advance
+          const inputIntent = classifyCalibrationInput(message);
+          console.log('[Calibration] Intent:', inputIntent, '| step:', step);
 
-          if (nextStep === 'complete') {
-            answer = await buildCompletionSummary(workspaceId);
+          if (inputIntent === 'question') {
+            // User asked a clarifying question — answer it via LLM and re-ask the current step
+            // so inCalibrationSession stays true for the next message
+            const currentStepQuestion = await buildInterviewPrompt(workspaceId, step);
+            const convHistory = buildConversationHistory(state.messages || []);
+            const llmResponse = await callLLM(workspaceId, 'reason', {
+              systemPrompt: `You are Pandora, a revenue intelligence AI running a calibration interview.
+The user is currently on this calibration step:
+
+${currentStepQuestion}
+
+Answer their clarifying question briefly and accurately (2–3 sentences). Then re-ask the calibration question above verbatim so the interview can continue. Do not advance to a new topic.`,
+              messages: [
+                ...convHistory.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+                { role: 'user', content: message },
+              ],
+              maxTokens: 800,
+              temperature: 0.3,
+              _tracking: {
+                workspaceId,
+                phase: 'chat',
+                stepName: 'calibration-question-answer',
+                questionText: message.slice(0, 200),
+              },
+            });
+            answer = llmResponse.content;
+            tokensUsed = llmResponse.usage.input + llmResponse.usage.output;
+            console.log('[Calibration] Answered question, staying on step:', step);
+
           } else {
-            answer = await buildInterviewPrompt(workspaceId, nextStep);
+            // Confirmed answer or named value — save scope if pipeline_coverage, then advance
+            if (step === 'pipeline_coverage') {
+              const isPerPipeline = /\b(per.?pipeline|by pipeline|separate|each pipeline)\b/i.test(message);
+              const scope = isPerPipeline ? 'per_pipeline' : 'global';
+              await query(
+                `UPDATE workspaces
+                 SET workspace_config = jsonb_set(
+                   COALESCE(workspace_config, '{}'),
+                   '{calibration,coverage_target_scope}',
+                   $2::jsonb
+                 )
+                 WHERE id = $1`,
+                [workspaceId, JSON.stringify(scope)]
+              );
+              console.log('[Calibration] Saved coverage_target_scope:', scope);
+            }
+
+            const nextStep = await advanceInterview(workspaceId, step);
+            console.log('[Calibration] Advanced:', step, '→', nextStep);
+
+            if (nextStep === 'complete') {
+              answer = await buildCompletionSummary(workspaceId);
+            } else {
+              answer = await buildInterviewPrompt(workspaceId, nextStep);
+            }
           }
+
         } else {
           // Fresh calibration trigger — show current step question
           answer = await buildInterviewPrompt(workspaceId, step);
@@ -530,7 +609,7 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
         dataStrategy = 'calibration';
       }
 
-      tokensUsed = 0;
+      // tokensUsed already set by LLM call on question-answer path; 0 for state-machine paths
     } catch (calErr) {
       const msg = (calErr as Error).message ?? '';
 

@@ -1,0 +1,109 @@
+# Bug: Calibration self-advance ignores clarifying questions
+
+The self-advance fix from Task #53 is too aggressive.
+It advances to the next step on ANY user input.
+
+When the user asked "Are you developing coverage target
+by pipeline or globally across all pipeline types?"
+Pandora ignored it and jumped to Step 5.
+
+## The fix — intent detection before advancing
+
+In the calibration routing branch in orchestrator.ts,
+before calling advanceInterview(), classify the user's
+intent:
+```typescript
+function classifyCalibrationInput(message: string): 
+  'question' | 'confirmation' | 'answer' {
+  
+  const msg = message.trim().toLowerCase()
+  
+  // Ends with ? → clarifying question, don't advance
+  if (message.trim().endsWith('?')) return 'question'
+  
+  // Contains question words at the start
+  if (/^(is|are|does|do|will|should|can|how|what|why|when|which)\b/i
+      .test(msg)) return 'question'
+  
+  // Explicit confirmations → advance
+  if (/\b(yes|correct|right|confirmed|looks good|that'?s right|
+       sounds right|perfect|ok|okay|agree|confirmed|works for me)
+       \b/i.test(msg)) return 'confirmation'
+  
+  // Contains a number → likely an answer → advance
+  if (/\d+(\.\d+)?(x|%)?/.test(msg)) return 'answer'
+  
+  // Named values like "3x", "global", "per pipeline" → answer
+  if (/\b(global|per pipeline|by pipeline|all pipelines|
+       closed.?won|closed.?lost|negotiation|proposal)
+       \b/i.test(msg)) return 'answer'
+  
+  // Default: ambiguous → treat as question, stay on step
+  return 'question'
+}
+```
+
+Then in the routing branch:
+```typescript
+const intent = classifyCalibrationInput(userMessage)
+
+if (intent === 'question') {
+  // Don't advance — let the LLM answer the question
+  // The LLM will answer and re-ask the current step
+  // question as part of its response
+  // Pass the current step context so it knows to re-ask
+  answer = await buildInterviewResponseToQuestion(
+    workspaceId,
+    userMessage,
+    currentState,
+    conversationHistory
+  )
+} else {
+  // Confirmed answer or named value — advance
+  await advanceInterview(workspaceId, userMessage)
+  const nextState = await getInterviewState(workspaceId)
+  answer = await buildInterviewPrompt(
+    workspaceId, nextState, conversationHistory
+  )
+}
+```
+
+## The coverage target question needs per-pipeline support
+
+The "Are you developing coverage target by pipeline
+or globally" question is legitimate and important.
+For workspaces with multiple pipelines, this is a
+real configuration decision.
+
+When Step 4 (Coverage Target) is reached and the
+workspace has more than one pipeline, ask:
+
+"Do you want one coverage target for all pipelines,
+or a separate target for each pipeline?
+
+You have [N] pipelines: [list them]
+
+Most teams use a global target unless pipelines have
+very different win rates or cycle times."
+
+Store the answer as either:
+- coverage_target_scope: 'global'
+- coverage_target_scope: 'per_pipeline'
+
+If per_pipeline, ask for each pipeline's target
+separately.
+
+## Acceptance criteria
+
+1. User asking a question during calibration →
+   Pandora answers the question and re-asks the
+   current step question — does NOT advance
+2. User giving a clear confirmation → advances
+3. User giving a numeric answer ("3x") → advances
+4. Step 4 asks about global vs per-pipeline scope
+   when multiple pipelines exist
+5. The "Are you developing coverage by pipeline
+   or globally" question gets answered with the
+   scope options and stored correctly
+6. Zero regressions on the table stage mapping
+   and self-advance for confirmed answers
