@@ -419,26 +419,36 @@ export async function generateEditorialReport(
       const docType = (request as any).document_type || 'agent_run';
       const weekLabel = (request as any).period_label || '';
 
+      const agentSkillIds = agent.skills.map((s: any) => s.skillId);
+      const docConfig = {
+        agent_name: agent.name,
+        run_id: generationId,
+        skills_run: agentSkillIds,
+        generation_id: generationId,
+      };
+
       const docInsert = await query<{ id: string }>(
         `INSERT INTO report_documents
-           (workspace_id, agent_id, document_type, week_label, headline, sections,
-            actions, skills_included, tokens_used, tiptap_content,
+           (workspace_id, agent_id, agent_run_id, document_type, week_label, headline,
+            sections, actions, skills_included, tokens_used, tiptap_content, config,
             orchestrator_run_id, generated_at, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, gen_random_uuid(), NOW(), NOW())
+         VALUES ($1, $2, $3::uuid, $4, $5, $6, $7, $8, $9, $10, $11, $12, gen_random_uuid(), NOW(), NOW())
          RETURNING id`,
         [
           workspace_id,
           agent.id,
+          generationId,
           docType,
           weekLabel,
           docHeadline,
           JSON.stringify(sectionsForDoc),
           JSON.stringify([]),
-          agent.skills.map((s: any) => s.skillId),
+          agentSkillIds,
           editorial.tokens_used,
           Object.keys(tiptapContentMap).length > 0
             ? JSON.stringify(tiptapContentMap)
             : null,
+          JSON.stringify(docConfig),
         ]
       );
 
