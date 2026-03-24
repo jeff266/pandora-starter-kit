@@ -203,8 +203,37 @@ function buildSystemPrompt(input: EditorialInput): string {
   parts.push('6. METHODOLOGY COMPARISON RULE (Slack): If any skill evidence includes a methodologyComparisons array with severity "alert" (gap >30%), prepend a single-line callout before the main content: "⟳ Coverage note: [1-sentence gap explanation]". Suppress "info" severity entirely. For "notable" severity (15-30%), include as a footnote at the end. Never surface both alert and notable for the same metric — alert takes priority.');
   parts.push('');
 
+  // Claim annotation requirement
+  parts.push(CLAIM_TAGGING_INSTRUCTION);
+  parts.push('');
+
   return parts.join('\n');
 }
+
+const CLAIM_TAGGING_INSTRUCTION = `CLAIM ANNOTATION REQUIREMENT:
+For every specific factual claim you make that comes from the skill data,
+wrap it in a <claim> tag with the following attributes:
+
+  id:       The claim_id from the skill output that supports this statement.
+            If multiple claims support it, use the primary one.
+  skill:    The skill_id that produced this data.
+  metric:   The metric_name from the claim.
+  severity: The severity from the claim (critical|warning|info|positive).
+
+Example:
+  <claim id="stale_deal_count" skill="pipeline-hygiene"
+         metric="stale_deal_count" severity="warning">
+    162 deals (100% of active pipeline) meet the 14-day staleness threshold
+  </claim>
+
+Rules:
+- Only tag claims that trace directly to a specific claim_id in the skill output.
+- Do NOT tag general statements, transitions, or recommendations.
+- Do NOT tag the same text twice.
+- A single sentence may contain one claim tag.
+- Do NOT wrap multiple sentences in one tag.
+- If you cannot identify a specific claim_id for a statement, leave it untagged.
+- The surrounding prose must read naturally — tags are invisible to the reader.`;
 
 /**
  * Build the user prompt with evidence and section library
@@ -219,6 +248,16 @@ function buildUserPrompt(input: EditorialInput): string {
     parts.push(`## ${skillId}`);
     const summary = summarizeEvidence(evidence);
     parts.push(summary);
+
+    // Add available claim IDs for annotation
+    const claims = extractClaims(evidence);
+    if (claims.length > 0) {
+      parts.push('');
+      parts.push('AVAILABLE CLAIM IDs FOR ANNOTATION:');
+      for (const claim of claims) {
+        parts.push(`  - ${claim.claim_id}: "${claim.claim_text}" (${claim.severity})`);
+      }
+    }
     parts.push('');
   }
 
@@ -268,8 +307,18 @@ function buildUserPrompt(input: EditorialInput): string {
 }
 
 /**
+ * Extract claims array from skill evidence for annotation
+ */
+function extractClaims(rawEvidence: any): any[] {
+  const evidence: SkillEvidence | undefined = rawEvidence?.evidence ||
+    (rawEvidence?.claims ? rawEvidence : undefined);
+
+  return evidence?.claims || [];
+}
+
+/**
  * Summarize skill evidence into key findings (keep under 500 tokens per skill)
- * 
+ *
  * Skill run output shape is either:
  *   { narrative, evidence: { claims, evaluated_records, data_sources, parameters } }
  * or directly SkillEvidence (if evidence gatherer already unwrapped it)

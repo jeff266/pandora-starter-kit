@@ -208,6 +208,31 @@ export async function generateEditorialReport(
     }
   }
 
+  // 9b. Process claim tags in section narratives
+  const { processClaimTags } = await import('./claim-tag-processor.js');
+  for (const section of editorial.sections) {
+    if (!section.narrative) continue;
+
+    // Get skill_run_id from the first source skill
+    let skillRunId: string | undefined;
+    if (section.source_skills && section.source_skills.length > 0) {
+      const firstSkillId = section.source_skills[0];
+      const evidence = skillEvidence[firstSkillId];
+      // Evidence from skill gatherer includes run_id as a separate property
+      skillRunId = (evidence as any)?.run_id || (evidence as any)?.skill_run_id;
+    }
+
+    if (!skillRunId) continue;
+
+    // Process claim tags
+    const processed = processClaimTags(section.narrative, skillRunId);
+
+    // Update section with processed content
+    section.narrative = processed.plain_text;
+    (section as any).tiptap_content = processed.tiptap_content;
+    (section as any).claim_annotations = processed.annotations;
+  }
+
   // 9. Render to requested formats
   logger.info('[EditorialGenerator] Rendering report', { formats: template.formats });
   const renderStartTime = Date.now();

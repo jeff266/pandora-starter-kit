@@ -94,6 +94,18 @@ export interface SectionContent {
   dimension_label?: string;             // Human-readable dimension name
   calibrated?: boolean;                 // Whether dimension was user-confirmed
   dimension_summary?: string;           // Plain-English filter description
+
+  // Claim annotations (Claim Provenance BUILD 6)
+  claim_annotations?: Array<{
+    claim_id:    string;
+    skill_id:    string;
+    metric_name: string;
+    severity:    string;
+    text:        string;
+    start_pos:   number;
+    end_pos:     number;
+  }>;
+  tiptap_content?: any;                 // TipTap JSON with pandoraClaim marks
 }
 
 export interface MetricCard {

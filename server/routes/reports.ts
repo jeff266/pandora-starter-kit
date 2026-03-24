@@ -1284,4 +1284,124 @@ export function cleanupReportFiles() {
   }
 }
 
+// Claim Provenance Drill-Through — trace-claim endpoint
+router.post(
+  '/:workspaceId/reports/trace-claim',
+  requirePermission('workspaces', 'read'),
+  async (req: Request, res: Response) => {
+    const { workspaceId } = req.params;
+    const { claim_id, skill_run_id, section_id, document_id } = req.body;
+
+    if (!claim_id || !skill_run_id) {
+      return res.status(400).json({
+        error: 'claim_id and skill_run_id are required',
+      });
+    }
+
+    try {
+      // 1. Fetch the skill run output
+      const runResult = await query(`
+        SELECT
+          sr.id,
+          sr.skill_id,
+          sr.workspace_id,
+          sr.created_at,
+          sr.output,
+          sr.output->'dimension_key'     AS dimension_key,
+          sr.output->'dimension_label'   AS dimension_label,
+          sr.output->'calibrated'        AS calibrated
+        FROM skill_runs sr
+        WHERE sr.id = $1
+          AND sr.workspace_id = $2
+      `, [skill_run_id, workspaceId]);
+
+      if (!runResult.rows.length) {
+        return res.status(404).json({ error: 'Skill run not found' });
+      }
+
+      const run = runResult.rows[0];
+      const output = run.output ?? {};
+      const evidence = output.evidence ?? {};
+
+      // 2. Find the specific claim
+      const claims = evidence.claims ?? [];
+      const claim = claims.find((c: any) => c.claim_id === claim_id);
+
+      if (!claim) {
+        return res.status(404).json({
+          error: `Claim "${claim_id}" not found in skill run`,
+        });
+      }
+
+      // 3. Fetch evaluated records for this claim
+      const entityIds: string[] = claim.entity_ids ?? [];
+      let records: any[] = [];
+
+      if (entityIds.length) {
+        const recordsResult = await query(`
+          SELECT
+            d.id,
+            d.name,
+            d.amount,
+            d.stage_normalized AS stage,
+            d.owner_email,
+            d.close_date,
+            d.last_activity_date,
+            EXTRACT(days FROM NOW() - d.last_activity_date)::int
+              AS days_since_activity
+          FROM deals d
+          WHERE d.id = ANY($1::uuid[])
+            AND d.workspace_id = $2
+          ORDER BY d.amount DESC
+          LIMIT 50
+        `, [entityIds, workspaceId]);
+        records = recordsResult.rows;
+      }
+
+      // 4. Fetch dimension definition if calibrated
+      let dimensionSummary: string | null = null;
+      const dimKey = run.dimension_key;
+      if (dimKey && dimKey !== '_default') {
+        const { getDimension } = await import('../lib/data-dictionary.js');
+        const { buildFilterSummary } = await import('../lib/filter-summary.js');
+        const dim = await getDimension(workspaceId, dimKey);
+        if (dim) {
+          dimensionSummary = await buildFilterSummary(dim);
+        }
+      }
+
+      return res.json({
+        // Claim details
+        claim_id:       claim.claim_id,
+        claim_text:     claim.claim_text,
+        metric_name:    claim.metric_name,
+        metric_values:  claim.metric_values,
+        threshold:      claim.threshold_applied,
+        severity:       claim.severity,
+
+        // Skill provenance
+        skill_id:       run.skill_id,
+        skill_run_id:   run.id,
+        ran_at:         run.created_at,
+
+        // Calibration
+        calibrated:     run.calibrated,
+        dimension_key:  run.dimension_key,
+        dimension_label: run.dimension_label,
+        dimension_summary: dimensionSummary,
+
+        // Evidence
+        total_entity_count: entityIds.length,
+        records:        records.slice(0, 10),
+      });
+    } catch (err) {
+      logger.error('trace-claim error', err);
+      return res.status(500).json({
+        error: 'Failed to trace claim',
+        details: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+);
+
 export default router;
