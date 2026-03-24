@@ -1,0 +1,57 @@
+Yes — significantly. And what you're seeing in the screenshots makes the overlap concrete. Three separate systems all asking "tell me how your business works":
+
+**What each one does:**
+
+The **Setup Workspace Interview** (Image 3) is a Tier 0 inferred configuration flow. It reads your CRM, makes inferences, and asks you to confirm or correct them. Five steps: Motions (which pipelines are real selling motions), Calendar (fiscal year, quarter definitions), Stages (stage names and their funnel position), Team (rep hierarchy), Delivery (Slack, notifications). It stores answers in `workspace_config` as structured configuration.
+
+The **Calibration Interview** is a 6-step filter definition flow. It asks what counts as active pipeline, at-risk, committed, and how you define win rate and coverage. Stores confirmed filter definitions in `business_dimensions` and metric thresholds in `metric_definitions`.
+
+The **Data Dictionary** is a manually curated glossary of terms, metrics, filters, and stage definitions. Currently separate from both — nothing writes to it automatically.
+
+**Where they overlap:**
+
+```
+Setup Interview asks:        Calibration asks:         Data Dictionary stores:
+─────────────────────────────────────────────────────────────────────────
+Which pipelines are          What counts as active     PIPELINE source entries
+real selling motions?   →    pipeline?            →    (currently manual)
+
+What do your stages mean?    (Stage mapping step)      STAGE source entries
+                        →                         →    (currently manual)
+
+(not asked)                  What counts as            FILTER source entries
+                             at-risk? committed?  →    (currently manual)
+```
+
+The Stages step in Setup Interview and the Stage Mapping step in Calibration are asking the same question through different interfaces. A user who completes both is doing redundant work. And neither one writes to the Data Dictionary — so a third surface exists that captures none of what the first two confirmed.
+
+**The right mental model:**
+
+These aren't three separate features — they're three phases of the same onboarding job:
+
+```
+Phase 1: DISCOVER (Setup Interview)
+  Pandora reads your CRM and infers your structure.
+  You confirm or correct the inferences.
+  Output: workspace_config with motions, stages, team
+
+Phase 2: DEFINE (Calibration Interview)  
+  Pandora asks how you measure the business.
+  You confirm filter and metric definitions.
+  Output: business_dimensions, metric_definitions
+
+Phase 3: DOCUMENT (Data Dictionary)
+  Everything confirmed in Phase 1 + 2 auto-populates here.
+  Humans can add additional terms manually.
+  Output: single source of truth for all definitions
+```
+
+Right now Phase 1 and Phase 2 exist as separate interview flows with separate storage, and Phase 3 is completely disconnected from both. The Setup Guide checklist (with its 10 steps) is a fourth surface trying to orchestrate the first two without knowing about them.
+
+**The practical question for now:**
+
+Before Wednesday's demo, none of this needs to be resolved architecturally. But it's worth knowing that when a Frontera user goes through the demo, they may have already seen the Setup Interview (Image 3 is Frontera Health) — which means Pandora already has stage and motion data that the Calibration Interview will ask about again.
+
+For the demo, lean into this overlap as a feature narrative rather than a bug: "Pandora learns your business incrementally — the setup interview gives it your structure, calibration gives it your definitions, and the Data Dictionary gives you a single place to see everything it's learned." That's the vision, even if the plumbing isn't fully connected yet.
+
+Want me to log the unified onboarding architecture as a design task and move on to demo prep?

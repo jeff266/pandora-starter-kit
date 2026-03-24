@@ -1,0 +1,143 @@
+# Calibration → Data Dictionary: Fixes 2, 3, 4
+
+You have direct access to the Neon database.
+Run all verification queries first. Build nothing
+until you've confirmed the actual schemas.
+
+---
+
+## Step 1 — Verify schemas against Neon
+
+Run these queries:
+
+SELECT column_name, data_type
+FROM information_schema.columns
+WHERE table_name = 'data_dictionary'
+ORDER BY ordinal_position;
+
+SELECT column_name, data_type
+FROM information_schema.columns
+WHERE table_name = 'business_dimensions'
+ORDER BY ordinal_position;
+
+SELECT id, name,
+  workspace_config IS NOT NULL as has_config,
+  calibration_status
+FROM workspaces
+WHERE name ILIKE '%frontera%'
+LIMIT 1;
+
+SELECT COUNT(*) as mapped_stages
+FROM funnel_stages
+WHERE workspace_id = (
+  SELECT id FROM workspaces
+  WHERE name ILIKE '%frontera%' LIMIT 1
+)
+AND (is_won = TRUE OR is_lost = TRUE);
+
+-- Check what's currently in data_dictionary
+-- for Frontera to understand existing entries:
+SELECT term, source, left(definition, 80) as def
+FROM data_dictionary
+WHERE workspace_id = (
+  SELECT id FROM workspaces
+  WHERE name ILIKE '%frontera%' LIMIT 1
+)
+ORDER BY source, term
+LIMIT 20;
+
+Show all results before touching any code.
+
+---
+
+## Fix 2 — confirmDimension() writes to data_dictionary
+
+File: server/lib/data-dictionary.ts
+
+Find confirmDimension() and saveMetricDefinition().
+After the verification queries confirm exact column
+names, add a write to data_dictionary after each
+save to business_dimensions.
+
+Map dimension fields to the actual data_dictionary
+column names you find. Intent:
+- dimension.label → term
+- human description or filter summary → definition
+- 'USER' → source
+- dimension_key → technical_definition or equivalent
+- filter JSON → sql_definition or equivalent
+
+Use ON CONFLICT (workspace_id, term) DO UPDATE
+if a unique constraint exists. Otherwise explicit
+upsert (SELECT then INSERT or UPDATE).
+
+Do the same for saveMetricDefinition() —
+confirmed metrics write to data_dictionary with
+source='USER'.
+
+---
+
+## Fix 3 — "All Deals" renders "1=1 IN ()"
+
+Find where Data Dictionary entries render their
+sql_definition or filter field in the client.
+
+When the displayed value:
+- is null or empty
+- contains only "1=1"
+- contains "IN ()" with empty parentheses
+- has no meaningful conditions
+
+Render: "All open deals (no filter applied)"
+instead of the raw SQL fragment.
+
+One conditional in the render function.
+No data changes.
+
+---
+
+## Fix 4 — End-to-end verification on Frontera
+
+After fixes 2 and 3:
+
+1. Confirm funnel_stages has mapped stages for
+   Frontera — getUnmappedStages() should return []
+
+2. Confirm calibration interview would start at
+   active_pipeline for Frontera by checking
+   getInterviewState() returns the right step
+
+3. In the app: send "Let's calibrate my pipeline
+   definitions" as Frontera and confirm it enters
+   the interview (not pipeline analysis)
+
+4. Walk through the first step — confirm
+   previewFilter() returns live deal count + value
+
+5. After confirming one step, query Neon directly:
+   SELECT term, source, definition
+   FROM data_dictionary
+   WHERE workspace_id = '[frontera_id]'
+   AND source = 'USER'
+   LIMIT 5;
+   Confirm the confirmed dimension appears.
+
+Report what you see at each step.
+
+---
+
+## Acceptance Criteria
+
+1. data_dictionary schema confirmed from Neon
+   before any code written
+2. confirmDimension() writes to data_dictionary
+   using actual column names
+3. saveMetricDefinition() writes to data_dictionary
+4. "All Deals" shows "All open deals (no filter
+   applied)" not "1=1 IN ()"
+5. Calibration interview starts at active_pipeline
+   for Frontera (stage mapping skipped)
+6. previewFilter() returns live numbers for Frontera
+7. Confirmed dimension appears in data_dictionary
+   with source='USER' after confirmation
+8. Zero TypeScript errors

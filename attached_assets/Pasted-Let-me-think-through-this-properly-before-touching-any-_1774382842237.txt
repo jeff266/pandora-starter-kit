@@ -1,0 +1,101 @@
+Let me think through this properly before touching any code or logging anything.
+
+---
+
+**The fundamental problem isn't technical. It's philosophical.**
+
+Every system you've built — Setup Interview, Calibration Interview, Data Dictionary — was designed around the same wrong assumption: that configuration is something users do before they get value. That's why all three feel like work. That's why they overlap. That's why nobody completes them.
+
+Every world-class B2B onboarding that has stood the test of time inverts this. Stripe doesn't ask you to configure payment methods before you can process a test charge. Linear doesn't ask you to define your workflow before you can create an issue. Figma doesn't ask you to set up your design system before you can draw a rectangle.
+
+They show value immediately, then ask for configuration to make the value more accurate.
+
+**Pandora's version of this:**
+
+The moment a CRM connects, run the Concierge brief. Show the pipeline. Don't ask anything. Every number Pandora shows has a definition badge — hover it and you see "I'm defining active pipeline as: open deals closing this quarter, excluding Closed Won and Closed Lost. Is this right?" If yes, that definition is confirmed and stored. If no, they correct it inline. That correction IS calibration. That correction writes to `business_dimensions`, `data_dictionary`, and `workspace_config` simultaneously. The interview just ran. The user never knew they were in an interview.
+
+---
+
+**The three systems reframed:**
+
+Right now you have three separate flows that ask "tell me how your business works." Here's what they should be:
+
+**CONNECT** — two minutes, no configuration required.
+CRM + conversation intelligence. That's it. The moment these connect, Pandora has enough to run. Nothing else is required before first value.
+
+**DISCOVER** — automatic, zero user effort.
+Pandora reads the CRM, generates its first Concierge brief using its best-guess defaults, and flags every assumption it made. "Coverage ratio is 111x against an unknown revenue target" — the word "unknown" is a link that opens the quota setup. "162 deals meet the 14-day staleness threshold" — "14-day" is a link that opens the definition. The product surfaces its own configuration gaps. You don't need a setup interview to discover what's missing — the first brief tells you.
+
+**CORRECT** — ongoing, triggered by use.
+Every number in every brief, report, and deal card is interrogable. Click it, see the definition, correct it if wrong. The correction writes everywhere simultaneously. Over 2-4 weeks of normal use, the workspace becomes fully calibrated — not because someone sat through a 45-minute interview, but because every number that was wrong got corrected in the moment it mattered.
+
+**VERIFY** — weekly, surfaced by the product.
+The WBR generation shows calibration gaps inline. "Pipeline Snapshot is using default definitions for 3 metrics. Calibrate now for more accurate numbers →" This is the only moment a user needs to be aware that calibration exists as a concept.
+
+---
+
+**What this does to the three existing systems:**
+
+The **Setup Interview** keeps one job: stage mapping. That's the one thing Pandora genuinely can't infer from raw CRM data alone — what Evaluation means vs. Decision means vs. Verbal Commit means. That's a 3-question conversation, not a 5-step interview. It runs once, automatically, the first time a user asks Pandora about stage-level data and the mapping doesn't exist. Not in Settings. In context.
+
+The **Calibration Interview** becomes a triggered flow, not a destination. It runs when: (a) a user clicks a definition and wants to change it, (b) a WBR flags that a metric is using defaults, or (c) a user explicitly asks Pandora to recalibrate something. It's never something you navigate to from Settings and "complete." It's something that happens in the flow of using the product.
+
+The **Data Dictionary** becomes the audit log. Auto-populated from every confirmed definition. Read-only for most users. Editable for power users who want to add terms Pandora hasn't learned yet. Never a place where you configure things from scratch.
+
+---
+
+**The single mental model — what you tell users:**
+
+> "Pandora starts with its best guess. Every number you see has a definition behind it. When a definition is wrong, you fix it in place. Pandora gets smarter with every correction."
+
+That's it. No "Setup Interview." No "Calibration Interview." No "Data Dictionary." Those are implementation details. The user experience is: numbers, definitions, corrections. The system learns.
+
+---
+
+**What this means for the build queue:**
+
+Three things to change, in order:
+
+**1. Every number in Pandora must show its definition on hover.** Not just in the WBR with claim provenance — everywhere. Every metric card, every Concierge brief line, every deal score. One-sentence definition + "Is this right? ✓ Yes / Edit definition" inline. This is the core interaction. Everything else flows from it.
+
+**2. Inline correction must write everywhere simultaneously.** When a user confirms or corrects a definition, it writes to `business_dimensions` + `data_dictionary` + `workspace_config` in one atomic operation. No concept of "calibration is in one place, data dictionary is another." One edit, one truth.
+
+**3. The Setup Interview gets scoped to structural configuration only.** Motions (which pipelines are real) + Stage meaning (what each stage represents in the funnel). Two questions. Runs automatically the first time it's needed. Never lives in Settings.
+
+The Calibration tab in Settings becomes a status dashboard — "here's what Pandora has learned about your business so far, here's what's still using defaults." Not a place to do configuration. A place to see the current state of what the product has learned.
+
+---
+
+**The north star UX for a new workspace:**
+
+```
+Day 0:  Connect HubSpot → Pandora generates first brief in 90 seconds
+        Every number shows its definition
+        3 definitions are flagged as "Pandora's best guess"
+
+Day 1:  User reads brief, clicks "$111M pipeline"
+        Sees: "Active pipeline = open deals closing this quarter"
+        Says: "Actually we exclude deals under $5K"
+        Pandora: "Got it. Updated. Your active pipeline is $108M."
+        That correction is stored. That's calibration. Done.
+
+Day 3:  User asks "why is coverage 111x?"
+        Pandora: "Because I don't have your quota target yet.
+                  What's your Q1 target?"
+        User: "$2.4M"
+        Pandora: "Coverage is 46x. Still healthy but different story."
+        Quota is now set. That's configuration. Done.
+
+Day 7:  WBR generates. 8 of 10 definitions are user-confirmed.
+        2 still use defaults. WBR flags them.
+        User corrects them during the review meeting.
+
+Day 14: Data Dictionary shows 24 confirmed definitions.
+         All from corrections made in context.
+         Calibration status: Complete.
+         Nobody sat through a setup interview.
+```
+
+That's the product. That's what we're building toward.
+
+Want me to log this as the north star architecture task and then sequence the immediate builds that move toward it?

@@ -1,0 +1,277 @@
+# Make Calibration Work End-to-End
+
+## Goal
+
+The calibration interview should work as a complete,
+connected flow:
+
+1. User triggers calibration
+2. If Setup Interview already ran and stages are mapped
+   in workspace_config — skip stage mapping, go straight
+   to active pipeline question
+3. If Setup Interview hasn't run — run stage mapping
+   as step 1
+4. Walk through all remaining steps with previewFilter()
+   showing live deal counts at each step
+5. On confirmation — write confirmed definitions to
+   business_dimensions AND data_dictionary_terms
+6. Calibration status updates to 'complete'
+
+## Before Starting
+
+Read these files in full:
+
+1. server/lib/calibration-interview.ts
+   Show every function. Specifically:
+   - getInterviewState() — what does it return
+     for a fresh workspace after migration 207?
+   - buildInterviewPrompt() — does it call
+     previewFilter()? Does previewFilter() return
+     live deal counts?
+   - advanceInterview() — how does it move between
+     steps? What triggers step completion?
+   - What are the 6 steps in order?
+
+2. server/lib/stage-mapping-interview.ts
+   Show every function. Specifically:
+   - getUnmappedStages() — what does it query now
+     that workspace_config exists?
+   - Does it check workspace_config.stages from
+     the Setup Interview before asking about stages?
+
+3. server/orchestrator.ts
+   Find the CALIBRATION_TRIGGERS routing branch.
+   After migration 207, does it now successfully
+   reach buildInterviewPrompt()? Add a temporary
+   trace log and confirm.
+
+4. Check workspace_config for the Frontera Health
+   workspace to see what the Setup Interview stored:
+
+   SELECT
+     id,
+     name,
+     workspace_config,
+     calibration_status
+   FROM workspaces
+   WHERE name ILIKE '%frontera%'
+   LIMIT 1;
+
+   Specifically: does workspace_config have a
+   'stages' or 'motions' key from the Setup
+   Interview? If yes — the calibration interview
+   should use that data instead of asking again.
+
+5. server/lib/data-dictionary.ts
+   Find confirmDimension() and saveMetricDefinition().
+   Do they write to data_dictionary_terms at all?
+   Or only to business_dimensions/metric_definitions?
+
+Report findings. Then build the fixes below.
+
+---
+
+## Fix 1 — Stage mapping: use Setup Interview data
+## if already available
+
+File: server/lib/stage-mapping-interview.ts
+
+In getUnmappedStages(), before querying for unmapped
+stages, check if the Setup Interview already stored
+stage mappings in workspace_config:
+```typescript
+async function getUnmappedStages(
+  workspaceId: string
+): Promise<string[]> {
+  // Check if Setup Interview already mapped stages
+  const result = await db.query(
+    `SELECT workspace_config->'stages' AS stages
+     FROM workspaces WHERE id = $1`,
+    [workspaceId]
+  )
+
+  const setupStages = result.rows[0]?.stages
+  if (setupStages && Object.keys(setupStages).length > 0) {
+    // Setup Interview already ran — no unmapped stages
+    // from the calibration perspective
+    return []
+  }
+
+  // Otherwise: find stages in deals that have no
+  // mapping in workspace_config.calibration.stage_mappings
+  // (existing logic)
+}
+```
+
+When getUnmappedStages() returns an empty array,
+the calibration interview should skip the stage
+mapping step entirely and start at active_pipeline.
+
+In getInterviewState(), if all stages are already
+mapped (either from Setup Interview or prior
+calibration), set current_step to 'active_pipeline'
+not 'stage_mapping':
+```typescript
+function determineFirstStep(
+  workspaceConfig: any,
+  unmappedStages: string[]
+): string {
+  if (unmappedStages.length === 0) {
+    return 'active_pipeline'
+  }
+  return 'stage_mapping'
+}
+```
+
+---
+
+## Fix 2 — previewFilter() must return live numbers
+
+File: server/lib/calibration-interview.ts
+
+Find buildActivePipelineQuestion() (or equivalent
+for the active_pipeline step). It should call
+previewFilter() and show the result to the user.
+
+Verify previewFilter() is working:
+```typescript
+// previewFilter should execute a real SQL query:
+async function previewFilter(
+  workspaceId: string,
+  filter: FilterDefinition,
+  measureField: string,
+  dimensionKey: string
+): Promise<{ count: number; total_value: number }> {
+  // Translate filter to WHERE clause
+  // Run: SELECT COUNT(*), SUM(amount) FROM deals
+  //      WHERE workspace_id = $1 AND [filter conditions]
+  // Return: { count, total_value }
+}
+```
+
+The active pipeline question should read:
+"I found [N] deals worth [$X] using the most common
+definition of active pipeline: open deals closing
+this quarter, excluding Closed Won and Closed Lost.
+Does this match what your team counts?"
+
+If previewFilter() is not working or returning null,
+show what's failing and fix it.
+
+---
+
+## Fix 3 — Confirmed definitions write to Data Dictionary
+
+File: server/lib/data-dictionary.ts
+
+After confirmDimension() saves to business_dimensions,
+also write a corresponding entry to data_dictionary_terms:
+```typescript
+async function confirmDimension(
+  workspaceId: string,
+  dimensionKey: string,
+  definition: DimensionDefinition
+): Promise<void> {
+  // Existing: save to business_dimensions
+  await saveToBuisnessDimensions(workspaceId, definition)
+
+  // NEW: also write to data_dictionary_terms
+  await db.query(
+    `INSERT INTO data_dictionary_terms
+       (workspace_id, term, definition, source,
+        category, filter_json, created_at)
+     VALUES ($1, $2, $3, 'USER', $4, $5, NOW())
+     ON CONFLICT (workspace_id, term)
+     DO UPDATE SET
+       definition = EXCLUDED.definition,
+       filter_json = EXCLUDED.filter_json,
+       updated_at = NOW()`,
+    [
+      workspaceId,
+      definition.label,
+      definition.description ?? buildFilterSummary(definition),
+      mapDimensionToCategory(dimensionKey),
+      // e.g. 'active_pipeline' → 'FILTER'
+      //      'win_rate' → 'METRIC'
+      JSON.stringify(definition.filter_definition),
+    ]
+  )
+}
+```
+
+First check the actual schema of data_dictionary_terms
+— column names may differ. Adapt the INSERT to match.
+
+Do the same for saveMetricDefinition() — confirmed
+metrics should auto-populate as METRIC entries in
+the Data Dictionary.
+```typescript
+// Category mapping:
+function mapDimensionToCategory(key: string): string {
+  if (key.includes('pipeline') || key.includes('active'))
+    return 'FILTER'
+  if (key.includes('rate') || key.includes('coverage')
+      || key.includes('attainment'))
+    return 'METRIC'
+  if (key.includes('stage'))
+    return 'STAGE'
+  return 'FILTER'
+}
+```
+
+---
+
+## Fix 4 — Fix "All Deals" showing "1=1 IN ()"
+
+The Data Dictionary has an "All Deals" entry with
+source PIPELINE showing filter: "1=1 IN ()".
+This is an uncalibrated default rendering as broken SQL.
+
+Find where this entry is created or seeded. It should
+show "All open deals" in plain English, not a SQL
+fragment.
+
+Either:
+- Fix the filter_json stored for this entry to be
+  a proper FilterDefinition object, or
+- Fix the display layer to render null/empty filters
+  as "All deals (no filter applied)"
+
+---
+
+## Acceptance Criteria
+
+1. Sending "Let's calibrate my pipeline definitions"
+   enters the calibration interview — NOT general
+   pipeline analysis
+
+2. If Setup Interview already mapped stages,
+   calibration skips stage mapping and starts at
+   active pipeline question
+
+3. Active pipeline question shows live deal count
+   and total value from previewFilter()
+
+4. User can walk through all remaining steps
+   (at-risk, committed, win rate, coverage)
+
+5. Each step shows a previewFilter() result with
+   live numbers before asking for confirmation
+
+6. On confirmation of each step, definition saves
+   to both business_dimensions AND
+   data_dictionary_terms
+
+7. After all steps complete, calibration_status
+   in workspace_config updates to 'complete'
+
+8. Data Dictionary shows confirmed definitions
+   with USER source badge
+
+9. "All Deals" entry shows plain English,
+   not "1=1 IN ()"
+
+10. Zero TypeScript errors
+
+11. Frontera Health workspace: test the full flow
+    end to end and confirm all steps work

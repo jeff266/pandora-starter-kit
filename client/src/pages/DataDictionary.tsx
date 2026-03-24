@@ -21,6 +21,17 @@ import {
 } from 'lucide-react';
 import { format } from 'date-fns';
 
+function formatSqlDefinition(sql: string | null | undefined): string {
+  if (!sql) return '';
+  const trimmed = sql.trim();
+  if (
+    /^1=1(\s+IN\s*\(\))?$/i.test(trimmed) ||
+    /^IN\s*\(\)$/i.test(trimmed) ||
+    trimmed === '1=1'
+  ) return 'All open deals (no filter applied)';
+  return sql;
+}
+
 interface DictionaryEntry {
   id: string;
   term: string;
@@ -313,7 +324,7 @@ export default function DataDictionary() {
                       color: colors.textSecondary, whiteSpace: 'pre-wrap', wordBreak: 'break-all',
                       overflowX: 'auto',
                     }}>
-                      {entry.sql_definition}
+                      {formatSqlDefinition(entry.sql_definition)}
                     </pre>
                   )}
                 </td>

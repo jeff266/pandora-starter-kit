@@ -466,6 +466,17 @@ export async function saveDimension(
   return rowToDimension(result.rows[0]);
 }
 
+function dimensionToTermSource(dimensionKey: string): 'filter' | 'metric' {
+  if (
+    dimensionKey.includes('rate') ||
+    dimensionKey.includes('coverage') ||
+    dimensionKey.includes('rollup') ||
+    dimensionKey.includes('forecast') ||
+    dimensionKey.includes('attainment')
+  ) return 'metric';
+  return 'filter';
+}
+
 export async function confirmDimension(
   workspaceId: string,
   dimensionKey: string,
@@ -487,6 +498,42 @@ export async function confirmDimension(
        WHERE workspace_id = $1 AND dimension_key = $2`,
       [workspaceId, dimensionKey, confirmedValue, confirmedDealCount, source, notes ?? null]
     );
+
+    // Write confirmed definition to data_dictionary so it surfaces there automatically.
+    const dimResult = await query(
+      `SELECT label, description, filter_definition
+       FROM business_dimensions
+       WHERE workspace_id = $1 AND dimension_key = $2 LIMIT 1`,
+      [workspaceId, dimensionKey]
+    );
+    if (dimResult.rows[0]) {
+      const dim = dimResult.rows[0];
+      const termSource = dimensionToTermSource(dimensionKey);
+      const definition = dim.description ??
+        `${dim.label} — confirmed via calibration interview`;
+      await query(
+        `INSERT INTO data_dictionary
+           (workspace_id, term, definition, technical_definition, sql_definition, source, source_id, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'calibration')
+         ON CONFLICT (workspace_id, term) DO UPDATE SET
+           definition          = EXCLUDED.definition,
+           technical_definition = EXCLUDED.technical_definition,
+           sql_definition      = EXCLUDED.sql_definition,
+           source              = EXCLUDED.source,
+           source_id           = EXCLUDED.source_id,
+           updated_at          = NOW()`,
+        [
+          workspaceId,
+          dim.label,
+          definition,
+          dimensionKey,
+          dim.filter_definition ? JSON.stringify(dim.filter_definition) : null,
+          termSource,
+          dimensionKey,
+        ]
+      );
+      console.log(`[DataDictionary] Wrote confirmed dimension "${dim.label}" to data_dictionary (source=${termSource})`);
+    }
   } catch (err: any) {
     console.log('[DataDictionary] confirmDimension error:', err.message);
     throw err;
@@ -539,7 +586,37 @@ export async function saveMetricDefinition(
     ]
   );
 
-  return rowToMetric(result.rows[0]);
+  const saved = rowToMetric(result.rows[0]);
+
+  // Write confirmed metrics to data_dictionary so they surface there automatically.
+  if (metric.confirmed) {
+    const definition = metric.description ?? metric.label;
+    await query(
+      `INSERT INTO data_dictionary
+         (workspace_id, term, definition, technical_definition, sql_definition, source, source_id, created_by)
+       VALUES ($1, $2, $3, $4, $5, 'metric', $6, 'calibration')
+       ON CONFLICT (workspace_id, term) DO UPDATE SET
+         definition          = EXCLUDED.definition,
+         technical_definition = EXCLUDED.technical_definition,
+         sql_definition      = EXCLUDED.sql_definition,
+         source              = EXCLUDED.source,
+         source_id           = EXCLUDED.source_id,
+         updated_at          = NOW()`,
+      [
+        workspaceId,
+        metric.label,
+        definition,
+        metric.metric_key,
+        metric.formula ? JSON.stringify(metric.formula) : null,
+        metric.metric_key,
+      ]
+    ).catch((err: any) =>
+      console.warn(`[DataDictionary] saveMetricDefinition dict write failed: ${err.message}`)
+    );
+    console.log(`[DataDictionary] Wrote confirmed metric "${metric.label}" to data_dictionary`);
+  }
+
+  return saved;
 }
 
 export async function saveStageMappings(
