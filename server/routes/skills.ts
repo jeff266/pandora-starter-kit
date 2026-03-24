@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import cron from 'node-cron';
 import { getSkillRegistry } from '../skills/registry.js';
 import { getSkillRuntime } from '../skills/runtime.js';
 import {
@@ -403,6 +404,12 @@ router.put('/:workspaceId/skills/:skillId/schedule', requirePermission('skills.c
       return res.status(404).json({ error: `Skill not found: ${skillId}` });
     }
 
+    if (cronExpr !== null && cronExpr !== undefined) {
+      if (!cron.validate(cronExpr)) {
+        return res.status(400).json({ error: `Invalid cron expression: ${cronExpr}` });
+      }
+    }
+
     const existing = await query(
       `SELECT cron, enabled FROM skill_schedules WHERE workspace_id = $1 AND skill_id = $2`,
       [workspaceId, skillId]
@@ -419,7 +426,11 @@ router.put('/:workspaceId/skills/:skillId/schedule', requirePermission('skills.c
            updated_at = NOW()`,
         [workspaceId, skillId, cronExpr]
       );
-      updateWorkspaceSkillCron(workspaceId, skillId, cronExpr);
+      try {
+        updateWorkspaceSkillCron(workspaceId, skillId, cronExpr);
+      } catch (cronErr: any) {
+        console.error('[skills] Failed to register cron after DB write — row committed:', cronErr.message);
+      }
     } else {
       await query(
         `INSERT INTO skill_schedules (workspace_id, skill_id, cron, enabled, updated_at)
