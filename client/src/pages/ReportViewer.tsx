@@ -95,6 +95,7 @@ interface ReportDocumentData {
   tokens_used: number;
   generated_at: string;
   tiptap_content?: Record<string, any>;
+  created_by?: string;
 }
 
 interface DocListEntry {
@@ -176,7 +177,9 @@ export default function ReportViewer() {
     claimText: string;
   } | null>(null);
   const { canAnnotateReports } = usePermissions();
-  const { currentWorkspace } = useWorkspace();
+  const { currentWorkspace, user } = useWorkspace();
+  const isAdmin = currentWorkspace?.role === 'admin';
+  const canDeleteDoc = !!reportDocument && (isAdmin || reportDocument.created_by === user?.id);
 
   // Collapsible rails
   const [timelineOpen, setTimelineOpen] = useState(() => {
@@ -1381,7 +1384,7 @@ export default function ReportViewer() {
                         <Settings style={{ width: 13, height: 13 }} /> Template settings
                       </Link>
                     )}
-                    {reportDocument && !confirmDeleteDoc && (
+                    {canDeleteDoc && !confirmDeleteDoc && (
                       <>
                         <div style={{ height: 1, background: colors.border, margin: '4px 0' }} />
                         <button
@@ -1394,7 +1397,7 @@ export default function ReportViewer() {
                     )}
                   </div>
                 )}
-                {confirmDeleteDoc && reportDocument && (
+                {confirmDeleteDoc && canDeleteDoc && (
                   <div style={{
                     position: 'absolute', right: 0, top: '110%', zIndex: 200,
                     background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 8,

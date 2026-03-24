@@ -718,6 +718,7 @@ function ReportDocumentCard({ report, onView, onDelete }: {
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [cardHovered, setCardHovered] = useState(false);
 
   const meta = DOC_TYPE_META[report.document_type] || {
     label: report.document_type,
@@ -740,13 +741,17 @@ function ReportDocumentCard({ report, onView, onDelete }: {
   }
 
   return (
-    <div style={{
-      background: colors.surface,
-      border: `1px solid ${colors.border}`,
-      borderRadius: 8,
-      padding: 24,
-      transition: 'border-color 0.2s',
-    }}>
+    <div
+      onMouseEnter={() => setCardHovered(true)}
+      onMouseLeave={() => { setCardHovered(false); }}
+      style={{
+        background: colors.surface,
+        border: `1px solid ${colors.border}`,
+        borderRadius: 8,
+        padding: 24,
+        transition: 'border-color 0.2s',
+      }}
+    >
       <div style={{ display: 'flex', alignItems: 'start', justifyContent: 'space-between' }}>
         <div style={{ flex: 1 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
@@ -792,7 +797,7 @@ function ReportDocumentCard({ report, onView, onDelete }: {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 16 }}>
-          {onDelete && !confirmDelete && (
+          {onDelete && !confirmDelete && cardHovered && (
             <button
               onClick={(e) => { e.stopPropagation(); setConfirmDelete(true); }}
               title="Delete report"
