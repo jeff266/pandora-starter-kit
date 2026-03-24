@@ -293,11 +293,14 @@ export default function SkillsPage() {
     try {
       const cronExpr = schedulePreset === '__custom__' ? scheduleCustomCron.trim() : schedulePreset;
       if (cronExpr === '__default__') {
+        // Reset to system default — use PATCH with enabled=true (deletes override row)
         await api.patch(`/skills/${selectedSkill.id}/schedule`, { cron: null, enabled: true });
       } else if (cronExpr === '__ondemand__') {
-        await api.patch(`/skills/${selectedSkill.id}/schedule`, { cron: null, enabled: false });
+        // On demand only — PUT with cron=null
+        await api.put(`/skills/${selectedSkill.id}/schedule`, { cron: null });
       } else {
-        await api.patch(`/skills/${selectedSkill.id}/schedule`, { cron: cronExpr, enabled: false });
+        // Custom cron — PUT with cron expression
+        await api.put(`/skills/${selectedSkill.id}/schedule`, { cron: cronExpr });
       }
       showToast('Schedule updated', 'success');
       setScheduleEditing(false);

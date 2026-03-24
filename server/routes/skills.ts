@@ -267,11 +267,11 @@ router.get('/:workspaceId/skills/dashboard', async (req, res) => {
         category: s.category,
         description: s.description,
         isCustom: (s as any).isCustom ?? false,
-        schedule: {
-          ...baseSchedule,
-          cron: override !== undefined ? (override.cron ?? null) : (baseSchedule.cron ?? null),
-          enabled: override !== undefined ? override.enabled : true,
-        },
+        schedule: override !== undefined
+          // Workspace override: return only cron+enabled so description/trigger don't mask it
+          ? { cron: override.cron ?? null, enabled: override.enabled }
+          // System default: return base schedule as-is
+          : { ...baseSchedule, cron: baseSchedule.cron ?? null, enabled: true },
         lastRunAt: last?.at || null,
         lastRunStatus: last?.status || null,
         status,
@@ -376,11 +376,9 @@ router.get('/:workspaceId/skills', async (req, res) => {
         description: s.description,
         category: s.category,
         tier: s.tier,
-        schedule: {
-          ...baseSchedule,
-          cron: override !== undefined ? (override.cron ?? null) : (baseSchedule.cron ?? null),
-          enabled: override !== undefined ? override.enabled : true,
-        },
+        schedule: override !== undefined
+          ? { cron: override.cron ?? null, enabled: override.enabled }
+          : { ...baseSchedule, cron: baseSchedule.cron ?? null, enabled: true },
         lastRunAt: last?.at || null,
         lastRunStatus: last?.status || null,
         lastRunDuration: last?.duration || null,
