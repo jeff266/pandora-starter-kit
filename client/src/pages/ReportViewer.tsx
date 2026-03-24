@@ -1424,7 +1424,10 @@ export default function ReportViewer() {
                   const section = {
                     ...rawSection,
                     id: rawSection.section_id ?? rawSection.id ?? `section-${sectionIndex}`,
-                    content: rawSection.content ?? rawSection.narrative ?? '',
+                    content: (rawSection.content ?? rawSection.narrative ?? '')
+                      .replace(/<actions>[\s\S]*?<\/actions>/g, '')
+                      .replace(/<actions>[\s\S]*/g, '')
+                      .trim(),
                   };
                   const wid = currentWorkspace?.id || workspaceId || '';
                   const sectionChartList = sectionCharts[section.id] || [];

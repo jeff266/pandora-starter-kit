@@ -91,7 +91,11 @@ function parseBlock(raw: string): any {
 }
 
 function convertMarkdownToDoc(text: string): any {
-  const blocks = text.split(/\n\n+/).filter(b => b.trim());
+  const cleaned = text
+    .replace(/<actions>[\s\S]*?<\/actions>/g, '')
+    .replace(/<actions>[\s\S]*/g, '')
+    .trim();
+  const blocks = cleaned.split(/\n\n+/).filter(b => b.trim());
   if (!blocks.length) return { type: 'doc', content: [{ type: 'paragraph' }] };
   const nodes: any[] = [];
   for (const block of blocks) {
