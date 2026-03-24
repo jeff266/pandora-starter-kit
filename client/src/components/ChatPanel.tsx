@@ -1517,8 +1517,8 @@ function parseTableCells(line: string): string[] {
 const STAGE_MAP_OPTIONS = [
   { key: 'prospecting',  label: 'Prospecting' },
   { key: 'qualification', label: 'Qualification' },
-  { key: 'evaluation',  label: 'Evaluation' },
   { key: 'demo',        label: 'Demo' },
+  { key: 'evaluation',  label: 'Evaluation' },
   { key: 'proposal',    label: 'Proposal' },
   { key: 'negotiation', label: 'Negotiation' },
   { key: 'closed_won',  label: 'Closed Won' },

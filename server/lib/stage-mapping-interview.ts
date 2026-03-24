@@ -23,7 +23,7 @@ export const NORMALIZED_STAGE_LABELS: Record<NormalizedStage, string> = {
 };
 
 export const FUNNEL_ORDER: NormalizedStage[] = [
-  'prospecting', 'qualification', 'evaluation', 'demo', 'proposal', 'negotiation', 'closed_won', 'closed_lost',
+  'prospecting', 'qualification', 'demo', 'evaluation', 'proposal', 'negotiation', 'closed_won', 'closed_lost',
 ];
 
 export interface StageMappingQuestion {
