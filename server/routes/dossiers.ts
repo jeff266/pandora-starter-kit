@@ -32,16 +32,28 @@ router.get('/:workspaceId/deals/:dealId/dossier', async (req, res) => {
     const dossier = await assembleDealDossier(workspaceId, dealId, { includeNarrative });
 
     if (includeNarrative) {
-      // Check if narrative is fresh (< 1 hour old) to avoid unconditional LLM call
+      // Staleness check: regenerate narrative if ANY of these are true:
+      //   1. narrative is null or empty
+      //   2. deal.updated_at > narrative_generated_at (deal changed since last generation)
+      //   3. narrative_generated_at is older than 24 hours
+      //   4. caller passes ?refresh=true
+      const forceRefresh = req.query.refresh === 'true';
+      const narrative = (dossier as any).narrative;
       const narrativeGeneratedAt = (dossier as any).narrative_generated_at;
-      const narrativeAge = narrativeGeneratedAt
-        ? Date.now() - new Date(narrativeGeneratedAt).getTime()
-        : Infinity;
-      const ONE_HOUR_MS = 60 * 60 * 1000;
-      const hasFreshNarrative = (dossier as any).narrative && narrativeAge < ONE_HOUR_MS;
+      const dealUpdatedAt = dossier.deal?.updated_at;
 
-      if (hasFreshNarrative) {
-        console.log(`[Deal Dossier] Using cached narrative (${Math.round(narrativeAge / 60000)}m old)`);
+      const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
+
+      const narrativeIsStale =
+        !narrative ||
+        !narrativeGeneratedAt ||
+        forceRefresh ||
+        (Date.now() - new Date(narrativeGeneratedAt).getTime() > TWENTY_FOUR_HOURS_MS) ||
+        (dealUpdatedAt && new Date(dealUpdatedAt).getTime() > new Date(narrativeGeneratedAt).getTime());
+
+      if (!narrativeIsStale) {
+        const narrativeAge = Date.now() - new Date(narrativeGeneratedAt).getTime();
+        console.log(`[Deal Dossier] Using cached narrative (${Math.round(narrativeAge / 3600000)}h old)`);
       } else {
         try {
           const { narrative, recommended_actions } = await synthesizeDealNarrative(workspaceId, dossier);

@@ -17,6 +17,7 @@ export interface DealDossier {
     days_in_stage: number;
     days_open: number;
     created_at: string;
+    updated_at: string | null;
     probability: number | null;
     forecast_category: string | null;
     source: string | null;
@@ -538,6 +539,7 @@ export async function assembleDealDossier(
       days_in_stage: Math.max(0, Math.round(deal.calculated_days_in_stage ?? deal.days_in_stage ?? 0)),
       days_open: Math.max(0, Math.round(deal.days_open ?? 0)),
       created_at: deal.created_at ? new Date(deal.created_at).toISOString() : '',
+      updated_at: deal.updated_at ? new Date(deal.updated_at).toISOString() : null,
       probability: deal.probability ?? null,
       forecast_category: deal.forecast_category ?? null,
       source: deal.source ?? null,
