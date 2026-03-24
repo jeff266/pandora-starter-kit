@@ -103,6 +103,125 @@ function toStackedFormat(multiData: MultiSeriesData): Array<Record<string, any>>
   });
 }
 
+/**
+ * Compute outlier status for bar chart data.
+ * Outliers are bars that exceed threshold_multiple × median value.
+ * Outlier bars are capped at 1.3× the tallest non-outlier bar.
+ */
+function computeOutlierBars(
+  data: Array<{ label: string; value: number; [key: string]: any }>,
+  spec: ChartSpec
+): Array<{ label: string; value: number; isOutlier: boolean; cappedValue: number; trueValue: number; [key: string]: any }> {
+  if (!spec.outlier_mode?.enabled) {
+    return data.map(d => ({
+      ...d,
+      isOutlier: false,
+      cappedValue: d.value,
+      trueValue: d.value,
+    }));
+  }
+
+  const threshold = spec.outlier_mode.threshold_multiple ?? 3;
+  const values = data.map(d => d.value).sort((a, b) => a - b);
+  const median = values[Math.floor(values.length / 2)];
+  const outlierCutoff = median * threshold;
+
+  // Find the max non-outlier value for scale
+  const maxNormal = Math.max(
+    ...data
+      .filter(d => d.value <= outlierCutoff)
+      .map(d => d.value),
+    median // Fallback to median if all values are outliers
+  );
+
+  return data.map(d => ({
+    ...d,
+    isOutlier: d.value > outlierCutoff,
+    // Cap outlier bars at 1.3× the tallest normal bar
+    cappedValue: d.value > outlierCutoff ? maxNormal * 1.3 : d.value,
+    trueValue: d.value,
+  }));
+}
+
+/**
+ * Custom bar shape component for rendering outlier bars with broken axis indicator.
+ * When isOutlier is true, renders a wavy line near the top of the bar to indicate truncation,
+ * and displays the true value above the bar.
+ */
+function OutlierBar(props: any) {
+  const {
+    x, y, width, height, fill,
+    isOutlier, trueValue, formattedValue
+  } = props;
+
+  if (!isOutlier) {
+    // Normal bar — standard rect with rounded top
+    return (
+      <g>
+        <rect
+          x={x}
+          y={y}
+          width={width}
+          height={height}
+          fill={fill}
+          rx={3}
+          ry={3}
+        />
+      </g>
+    );
+  }
+
+  // Outlier bar — capped with wavy break indicator
+  const waveY = y + 20; // Position of wavy line from top of bar
+  const waveAmplitude = 4;
+  const waveFreq = width / 3;
+
+  // SVG path for wavy line across bar width
+  const wavePath =
+    `M ${x},${waveY} ` +
+    `Q ${x + waveFreq * 0.5},${waveY - waveAmplitude} ${x + waveFreq},${waveY} ` +
+    `Q ${x + waveFreq * 1.5},${waveY + waveAmplitude} ${x + waveFreq * 2},${waveY} ` +
+    `Q ${x + waveFreq * 2.5},${waveY - waveAmplitude} ${x + width},${waveY}`;
+
+  return (
+    <g>
+      {/* Bar body */}
+      <rect x={x} y={y} width={width} height={height} fill={fill} />
+
+      {/* White mask over wavy line area */}
+      <rect
+        x={x}
+        y={waveY - 6}
+        width={width}
+        height={14}
+        fill="white"
+        opacity={0.9}
+      />
+
+      {/* Wavy break line */}
+      <path
+        d={wavePath}
+        stroke={fill}
+        strokeWidth={2}
+        fill="none"
+        strokeLinecap="round"
+      />
+
+      {/* True value label above the bar */}
+      <text
+        x={x + width / 2}
+        y={y - 6}
+        textAnchor="middle"
+        fontSize={11}
+        fontWeight={500}
+        fill={fill}
+      >
+        {formattedValue}
+      </text>
+    </g>
+  );
+}
+
 function BarTooltip({ active, payload, label, yFormat, decimalPlaces }: any) {
   if (!active || !payload?.length) return null;
   return (
@@ -131,9 +250,28 @@ function BarChartRenderer({ spec, height, compact }: { spec: ChartSpec; height: 
   const dataLabelsFmt = spec.data_labels?.number_format || yFmt;
   const dataLabelsDP = spec.data_labels?.decimal_places ?? decimalPlaces;
 
+  // Process data for outlier detection and capping
+  const processedData = computeOutlierBars(spec.data, spec);
+  const outlierModeEnabled = spec.outlier_mode?.enabled ?? false;
+
+  // Custom bar shape with access to processedData via closure
+  const CustomBar = (props: any) => {
+    const dataPoint = processedData[props.index];
+    if (!dataPoint) return null;
+
+    return (
+      <OutlierBar
+        {...props}
+        isOutlier={dataPoint.isOutlier}
+        trueValue={dataPoint.trueValue}
+        formattedValue={formatValue(dataPoint.trueValue, yFmt, decimalPlaces)}
+      />
+    );
+  };
+
   return (
     <ResponsiveContainer width="100%" height={height}>
-      <BarChart data={spec.data} margin={{ top: 20, right: 8, bottom: 0, left: 0 }}>
+      <BarChart data={processedData} margin={{ top: outlierModeEnabled ? 40 : 20, right: 8, bottom: 0, left: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" vertical={false} />
         <XAxis
           dataKey="label"
@@ -153,14 +291,18 @@ function BarChartRenderer({ spec, height, compact }: { spec: ChartSpec; height: 
           label={spec.axis_format?.axis_title ? { value: spec.axis_format.axis_title, angle: -90, position: 'insideLeft' } : undefined}
         />
         <Tooltip content={<BarTooltip yFormat={yFmt} decimalPlaces={decimalPlaces} />} />
-        <Bar dataKey="value" radius={[3, 3, 0, 0]}>
-          {spec.data.map((entry, index) => (
+        <Bar
+          dataKey={outlierModeEnabled ? "cappedValue" : "value"}
+          radius={outlierModeEnabled ? [0, 0, 0, 0] : [3, 3, 0, 0]}
+          shape={outlierModeEnabled ? CustomBar : undefined}
+        >
+          {processedData.map((entry, index) => (
             <Cell
               key={`cell-${index}`}
               fill={getSegmentColor(entry.segment, spec.colorMap)}
             />
           ))}
-          {dataLabelsEnabled && (
+          {dataLabelsEnabled && !outlierModeEnabled && (
             <LabelList
               dataKey="value"
               position={dataLabelsPosition as any}
@@ -782,10 +924,9 @@ export default function ChartRenderer({ spec, compact = false, chartData }: Char
   const height = compact ? Math.round(fullHeight * 0.7) : fullHeight;
   const sortedSpec = { ...spec, data: sortData(spec.data, spec.sort) };
 
-  // TODO: Outlier mode broken axis rendering
-  // When spec.outlier_mode?.enabled === true, detect outliers using threshold_multiple
-  // and render a broken axis visual indicator. This requires custom axis rendering
-  // or post-processing the chart SVG to add break symbols.
+  // Outlier mode implemented in BarChartRenderer.
+  // When spec.outlier_mode?.enabled === true, bars exceeding threshold_multiple × median
+  // are capped and rendered with a wavy break indicator and true value label.
 
   const renderChart = () => {
     switch (spec.chartType) {
