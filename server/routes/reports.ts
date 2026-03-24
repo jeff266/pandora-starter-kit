@@ -110,10 +110,11 @@ router.get('/:workspaceId/report-documents/:documentId/content', async (req: Req
 router.patch('/:workspaceId/report-documents/:documentId', async (req: Request, res: Response) => {
   try {
     const { workspaceId, documentId } = req.params as Record<string, string>;
-    const { section_id, content } = req.body;
+    const { section_id, content, tiptap_content } = req.body;
+    const sectionContent = content ?? tiptap_content;
 
-    if (!section_id || !content) {
-      res.status(400).json({ error: 'section_id and content are required' });
+    if (!section_id || !sectionContent) {
+      res.status(400).json({ error: 'section_id and content (or tiptap_content) are required' });
       return;
     }
 
@@ -124,7 +125,7 @@ router.patch('/:workspaceId/report-documents/:documentId', async (req: Request, 
        SET tiptap_content = COALESCE(tiptap_content, '{}'::jsonb) || jsonb_build_object($3, $4)
        WHERE id = $1 AND workspace_id = $2
        RETURNING tiptap_content`,
-      [documentId, workspaceId, section_id, JSON.stringify(content)]
+      [documentId, workspaceId, section_id, JSON.stringify(sectionContent)]
     );
 
     if (result.rows.length === 0) {

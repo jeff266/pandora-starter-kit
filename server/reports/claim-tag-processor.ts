@@ -5,6 +5,22 @@
  * into TipTap pandoraClaim mark format for provenance drill-through.
  */
 
+const NUMERIC_PATTERNS = [
+  /^\$[\d,.]+[MKB]?$/,
+  /^\d[\d,]*\s+deals?$/i,
+  /^\d[\d,]*\s+accounts?$/i,
+  /^[\d.]+%$/,
+  /^[\d.]+x$/,
+  /^\d[\d,]*\s+reps?$/i,
+  /^\d+\s+days?$/i,
+  /^\d[\d,]*$/,
+];
+
+function isNumericText(text: string): boolean {
+  const t = text.trim();
+  return NUMERIC_PATTERNS.some(p => p.test(t));
+}
+
 export interface ClaimAnnotation {
   claim_id:    string;
   skill_id:    string;
@@ -175,11 +191,12 @@ function buildParagraphContent(
         marks: [{
           type: 'pandoraClaim',
           attrs: {
-            claim_id:    ann.claim_id,
-            skill_id:    ann.skill_id,
+            claim_id:     ann.claim_id,
+            skill_id:     ann.skill_id,
             skill_run_id: skillRunId,
-            metric_name: ann.metric_name,
-            severity:    ann.severity,
+            metric_name:  ann.metric_name,
+            severity:     ann.severity,
+            data_numeric: isNumericText(annotatedText) ? 'true' : 'false',
           }
         }]
       });

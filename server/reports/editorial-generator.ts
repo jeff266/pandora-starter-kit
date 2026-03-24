@@ -209,17 +209,37 @@ export async function generateEditorialReport(
   }
 
   // 9b. Process claim tags in section narratives
+  // Pre-fetch the latest completed skill_run id for each agent skill in one query.
+  // gatherFreshEvidence() returns the output JSONB only (no DB row id), so we must
+  // look up run ids directly from skill_runs here.
+  const allSkillIds = agent.skills.map((s: any) => s.skillId);
+  const skillRunIdBySkillId: Record<string, string> = {};
+  if (allSkillIds.length > 0) {
+    const skillRunRows = await query<{ skill_id: string; id: string }>(
+      `SELECT DISTINCT ON (skill_id) skill_id, id
+       FROM skill_runs
+       WHERE workspace_id = $1 AND skill_id = ANY($2) AND status = 'completed'
+       ORDER BY skill_id, completed_at DESC`,
+      [workspace_id, allSkillIds]
+    );
+    for (const row of skillRunRows.rows) {
+      skillRunIdBySkillId[row.skill_id] = row.id;
+    }
+  }
+
   const { processClaimTags } = await import('./claim-tag-processor.js');
   for (const section of editorial.sections) {
     if (!section.narrative) continue;
 
-    // Get skill_run_id from the first source skill
+    // Resolve skill_run_id from our pre-fetched map
     let skillRunId: string | undefined;
     if (section.source_skills && section.source_skills.length > 0) {
-      const firstSkillId = section.source_skills[0];
-      const evidence = skillEvidence[firstSkillId];
-      // Evidence from skill gatherer includes run_id as a separate property
-      skillRunId = (evidence as any)?.run_id || (evidence as any)?.skill_run_id;
+      for (const sid of section.source_skills) {
+        if (skillRunIdBySkillId[sid]) {
+          skillRunId = skillRunIdBySkillId[sid];
+          break;
+        }
+      }
     }
 
     if (!skillRunId) continue;
@@ -298,6 +318,7 @@ export async function generateEditorialReport(
 
   // 10. Save generation record (unless preview)
   let generationId: string;
+  let documentId: string | undefined;
 
   if (!preview_only) {
     const genResult = await query<{ id: string }>(
@@ -367,8 +388,76 @@ export async function generateEditorialReport(
       logger.error('[EditorialGenerator] Failed to update memory (non-fatal)', memErr instanceof Error ? memErr : undefined);
     }
 
+    // 10b. Create report_documents record so the Report Viewer can display this
+    //      editorial synthesis output and load claim-tagged tiptap_content.
+    try {
+      // Build tiptap_content map: { [section.id]: tiptapDoc }
+      const tiptapContentMap: Record<string, any> = {};
+      for (const section of editorial.sections) {
+        const tc = (section as any).tiptap_content;
+        if (tc) tiptapContentMap[section.id] = tc;
+      }
+
+      // Convert editorial sections to report_documents.sections array format
+      const sectionsForDoc = editorial.sections.map((s, i) => ({
+        id: s.id,
+        title: s.title,
+        content: s.narrative || (s as any).content || '',
+        source_skills: s.source_skills || [],
+        position: i + 1,
+      }));
+
+      // Extract headline: first sentence of opening_narrative, max 120 chars
+      const rawHeadline = (editorial.opening_narrative || template.name)
+        .replace(/^#+\s*/m, '')
+        .split(/[.!?]/)[0]
+        .trim();
+      const docHeadline = rawHeadline.length > 120
+        ? rawHeadline.slice(0, 117) + '...'
+        : rawHeadline;
+
+      const docType = (request as any).document_type || 'agent_run';
+      const weekLabel = (request as any).period_label || '';
+
+      const docInsert = await query<{ id: string }>(
+        `INSERT INTO report_documents
+           (workspace_id, agent_id, document_type, week_label, headline, sections,
+            actions, skills_included, tokens_used, tiptap_content,
+            orchestrator_run_id, generated_at, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, gen_random_uuid(), NOW(), NOW())
+         RETURNING id`,
+        [
+          workspace_id,
+          agent.id,
+          docType,
+          weekLabel,
+          docHeadline,
+          JSON.stringify(sectionsForDoc),
+          JSON.stringify([]),
+          agent.skills.map((s: any) => s.skillId),
+          editorial.tokens_used,
+          Object.keys(tiptapContentMap).length > 0
+            ? JSON.stringify(tiptapContentMap)
+            : null,
+        ]
+      );
+
+      documentId = docInsert.rows[0]?.id;
+
+      if (documentId) {
+        logger.info('[EditorialGenerator] Report document persisted', {
+          document_id: documentId,
+          sections: sectionsForDoc.length,
+          claim_sections: Object.keys(tiptapContentMap).length,
+        });
+      }
+    } catch (docErr) {
+      logger.error('[EditorialGenerator] Failed to persist report_documents (non-fatal)', docErr instanceof Error ? docErr : undefined);
+    }
+
     logger.info('[EditorialGenerator] Report generation complete', {
       generation_id: generationId,
+      document_id: documentId,
       duration_ms: Date.now() - startTime,
       formats: Object.keys(formatsGenerated),
     });
@@ -394,5 +483,6 @@ export async function generateEditorialReport(
     triggered_by,
     data_as_of: new Date().toISOString(),
     created_at: new Date().toISOString(),
+    document_id: documentId,
   };
 }
