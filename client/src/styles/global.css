@@ -291,3 +291,23 @@ input, textarea, select {
     font-size: 14px;
   }
 }
+
+/* Pandora Claim Mark — inline provenance hyperlinks */
+.pandora-claim {
+  cursor: text;
+}
+
+.pandora-claim--hyperlink {
+  color: #14B8A6;
+  border-bottom: 1px solid rgba(20, 184, 166, 0.4);
+  cursor: pointer;
+  border-radius: 2px;
+  transition: all 150ms ease;
+}
+
+.pandora-claim--hyperlink:hover {
+  color: #0D9488;
+  border-bottom-color: #14B8A6;
+  background: rgba(20, 184, 166, 0.08);
+  padding: 0 1px;
+}

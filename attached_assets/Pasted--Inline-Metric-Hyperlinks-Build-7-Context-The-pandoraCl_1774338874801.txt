@@ -1,0 +1,364 @@
+# Inline Metric Hyperlinks — Build 7
+
+## Context
+
+The pandoraClaim TipTap mark system is complete (Build 3,
+commit f7601bed). ClaimMark.ts exists and renders invisible
+spans with data attributes on claim-tagged text.
+
+Build 7 makes numeric values inside pandoraClaim marks
+visible as clickable teal hyperlinks. Clicking opens the
+Evidence Drawer (same handleQuestionClaim() function that
+Build 5 will also use). No new component needed.
+
+Three files change. Nothing else.
+
+## Before Starting
+
+Read these files:
+
+1. client/src/components/report/extensions/ClaimMark.ts
+   Show the full file. Specifically:
+   - addAttributes() — is data_numeric already there?
+   - renderHTML() — what classes does it currently apply?
+   - What attributes are available in HTMLAttributes?
+
+2. server/reports/claim-tag-processor.ts
+   Show the full file. Specifically:
+   - Where are mark attrs built when inserting a pandoraClaim?
+   - Is data_numeric already being set?
+   - What does the annotation object look like?
+
+3. client/src/pages/ReportViewer.tsx
+   Find:
+   - Where the TipTap editor content is rendered — the
+     container div that wraps the editor output
+   - Whether handleQuestionClaim() already exists (it may
+     if Build 5 was partially done)
+   - Whether claimDrawerOpen state already exists
+   - How the existing EvidenceDrawer is opened — what
+     state setter / function call triggers it
+
+Report findings then build.
+
+---
+
+## Change 1 — claim-tag-processor.ts
+
+File: server/reports/claim-tag-processor.ts
+
+In the function that builds pandoraClaim mark attrs,
+add numeric detection before the mark is constructed.
+```typescript
+const NUMERIC_PATTERNS = [
+  /^\$[\d,.]+[MKBmkb]?$/,          // $111M, $6.1M, $800K
+  /^\d[\d,]*\s+deals?$/i,           // 162 deals, 1 deal
+  /^\d[\d,]*\s+accounts?$/i,        // 14 accounts
+  /^\d[\d,]*\s+reps?$/i,            // 5 reps
+  /^\d[\d,]*\s+contacts?$/i,        // 23 contacts
+  /^[\d.]+%$/,                       // 34%, 100%
+  /^[\d.]+x$/,                       // 111x, 2.2x
+  /^\d+\s+days?$/i,                  // 45 days
+  /^\d[\d,]*$/,                      // standalone number
+]
+
+function isNumericText(text: string): boolean {
+  const trimmed = text.trim()
+  return NUMERIC_PATTERNS.some(p => p.test(trimmed))
+}
+```
+
+When building the mark attrs object, add the field:
+```typescript
+// In the section that constructs mark attrs:
+marks: [{
+  type: 'pandoraClaim',
+  attrs: {
+    claim_id:     ann.claim_id,
+    skill_id:     ann.skill_id,
+    skill_run_id: skillRunId,
+    metric_name:  ann.metric_name,
+    severity:     ann.severity,
+    data_numeric: isNumericText(ann.text) ? 'true' : 'false',
+  }
+}]
+```
+
+If data_numeric is already being set in a previous build,
+verify the isNumericText() logic matches the patterns
+above and update if needed.
+
+---
+
+## Change 2 — ClaimMark.ts
+
+File: client/src/components/report/extensions/ClaimMark.ts
+
+### Step A — addAttributes()
+
+If data_numeric is not already in addAttributes(), add it:
+```typescript
+addAttributes() {
+  return {
+    claim_id:     { default: null },
+    skill_id:     { default: null },
+    skill_run_id: { default: null },
+    metric_name:  { default: null },
+    severity:     { default: null },
+    data_numeric: { default: 'false' },
+  }
+},
+```
+
+### Step B — renderHTML()
+
+Update renderHTML() to apply the hyperlink class when
+data_numeric is 'true':
+```typescript
+renderHTML({ HTMLAttributes }) {
+  const isNumeric = HTMLAttributes.data_numeric === 'true'
+
+  return [
+    'span',
+    mergeAttributes(HTMLAttributes, {
+      'data-claim-id':     HTMLAttributes.claim_id,
+      'data-skill-id':     HTMLAttributes.skill_id,
+      'data-skill-run-id': HTMLAttributes.skill_run_id,
+      'data-metric-name':  HTMLAttributes.metric_name,
+      'data-severity':     HTMLAttributes.severity,
+      'data-numeric':      HTMLAttributes.data_numeric,
+      'class': isNumeric
+        ? 'pandora-claim pandora-claim--hyperlink'
+        : 'pandora-claim',
+    }),
+    0
+  ]
+},
+```
+
+### Step C — CSS
+
+Find where the report viewer styles live. This could be:
+- A CSS/SCSS file imported by ReportViewer.tsx
+- A styled-components or Tailwind class definition
+- Inline styles on the editor container
+
+Add these styles in whatever pattern the rest of the
+report viewer uses:
+```css
+/* Invisible base — all pandoraClaim marks */
+.pandora-claim {
+  cursor: text;
+}
+
+/* Visible hyperlink — numeric values only */
+.pandora-claim--hyperlink {
+  color: #14B8A6;
+  border-bottom: 1px solid rgba(20, 184, 166, 0.4);
+  cursor: pointer;
+  border-radius: 2px;
+  transition: all 150ms ease;
+}
+
+.pandora-claim--hyperlink:hover {
+  color: #0D9488;
+  border-bottom-color: #14B8A6;
+  background: rgba(20, 184, 166, 0.08);
+  padding: 0 1px;
+}
+```
+
+---
+
+## Change 3 — ReportViewer.tsx
+
+File: client/src/pages/ReportViewer.tsx
+
+### Step A — handleQuestionClaim function
+
+If handleQuestionClaim() does not already exist, add it.
+If it does exist from a partial Build 5 implementation,
+do not duplicate it — just use what's there.
+```typescript
+// State needed (add if not present):
+const [claimDrawerOpen, setClaimDrawerOpen] =
+  useState(false)
+const [claimDrawerLoading, setClaimDrawerLoading] =
+  useState(false)
+const [claimDrawerData, setClaimDrawerData] =
+  useState<any>(null)
+const [claimDrawerError, setClaimDrawerError] =
+  useState<string | null>(null)
+
+// Function:
+async function handleQuestionClaim(claim: {
+  claim_id: string
+  skill_run_id: string
+  skill_id?: string
+  metric_name?: string
+  severity?: string
+}) {
+  setClaimDrawerOpen(true)
+  setClaimDrawerLoading(true)
+  setClaimDrawerData(null)
+  setClaimDrawerError(null)
+
+  try {
+    const res = await fetch(
+      `/api/workspaces/${workspaceId}/reports/trace-claim`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          claim_id:     claim.claim_id,
+          skill_run_id: claim.skill_run_id,
+          document_id:  reportDocument?.id,
+        })
+      }
+    )
+    if (!res.ok) throw new Error('Failed to load evidence')
+    const data = await res.json()
+    setClaimDrawerData(data)
+  } catch (err) {
+    setClaimDrawerError('Could not load evidence for this claim.')
+  } finally {
+    setClaimDrawerLoading(false)
+  }
+}
+```
+
+### Step B — click handler
+
+Add a click handler on the div that wraps the TipTap
+editor output. Find the container div that renders the
+TipTap content and add onClick:
+```typescript
+function handleEditorClick(event: React.MouseEvent) {
+  const target = event.target as HTMLElement
+
+  if (target.classList.contains('pandora-claim--hyperlink')) {
+    const claimId    = target.dataset.claimId
+    const skillRunId = target.dataset.skillRunId
+
+    if (claimId && skillRunId) {
+      event.preventDefault()
+      event.stopPropagation()
+      handleQuestionClaim({
+        claim_id:     claimId,
+        skill_run_id: skillRunId,
+        skill_id:     target.dataset.skillId,
+        metric_name:  target.dataset.metricName,
+        severity:     target.dataset.severity,
+      })
+    }
+  }
+}
+```
+
+Attach to the editor container:
+```typescript
+<div onClick={handleEditorClick}>
+  {/* existing TipTap editor JSX */}
+</div>
+```
+
+One event listener on the container handles every
+hyperlinked number in every section — no per-element
+wiring needed.
+
+### Step C — Drawer placeholder
+
+The full ClaimEvidenceDrawer component is being built
+in Build 5. For now, render a minimal placeholder so
+the click flow is testable:
+```typescript
+{claimDrawerOpen && (
+  <div style={{
+    position: 'fixed',
+    right: 0,
+    top: 0,
+    bottom: 0,
+    width: 420,
+    background: 'var(--color-background-primary)',
+    borderLeft: '0.5px solid var(--color-border-tertiary)',
+    padding: 20,
+    zIndex: 50,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 12,
+  }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+      <span style={{ fontWeight: 500, fontSize: 14 }}>
+        Claim Provenance
+      </span>
+      <button onClick={() => setClaimDrawerOpen(false)}
+        style={{ background: 'none', border: 'none',
+                 cursor: 'pointer', fontSize: 16 }}>
+        ✕
+      </button>
+    </div>
+
+    {claimDrawerLoading && (
+      <div style={{ color: 'var(--color-text-secondary)',
+                    fontSize: 13 }}>
+        Loading evidence...
+      </div>
+    )}
+
+    {claimDrawerError && (
+      <div style={{ color: '#EF4444', fontSize: 13 }}>
+        {claimDrawerError}
+      </div>
+    )}
+
+    {claimDrawerData && (
+      <div style={{ fontSize: 13,
+                    color: 'var(--color-text-secondary)' }}>
+        <div style={{ fontWeight: 500, marginBottom: 8,
+                      color: 'var(--color-text-primary)' }}>
+          {claimDrawerData.claim_text}
+        </div>
+        <div>Skill: {claimDrawerData.skill_id}</div>
+        <div>Metric: {claimDrawerData.metric_name}</div>
+        <div>Records: {claimDrawerData.total_entity_count}</div>
+        <div style={{ marginTop: 8, fontSize: 11,
+                      color: 'var(--color-text-secondary)',
+                      fontStyle: 'italic' }}>
+          Full Evidence Drawer coming in Build 5
+        </div>
+      </div>
+    )}
+  </div>
+)}
+```
+
+This placeholder is intentionally minimal. Build 5
+replaces it with ClaimEvidenceDrawer. The state,
+the handleQuestionClaim() function, and the click
+handler all remain unchanged when Build 5 lands.
+
+---
+
+## Acceptance Criteria
+
+1. Numeric values inside pandoraClaim marks render as
+   teal underlined text in WBR/QBR sections
+2. Non-numeric claim text remains invisible — no teal
+   underline on "coverage is improving" type phrases
+3. Hovering a teal hyperlink shows darker teal color
+   and a subtle background tint
+4. Clicking a teal hyperlink opens the drawer placeholder
+5. Drawer shows loading state while trace-claim fetches
+6. Drawer shows claim_text, skill_id, metric_name,
+   total_entity_count from the trace-claim response
+7. Drawer closes on ✕ button
+8. Clicking non-hyperlink text in the report has no effect
+9. The click handler is on the container div — not
+   on individual spans
+10. data_numeric='true' is set correctly in
+    claim-tag-processor.ts for dollar amounts,
+    deal counts, percentages, and ratios
+11. data_numeric='false' for narrative text phrases
+12. ClaimMark.ts has data_numeric in addAttributes()
+13. No TypeScript errors
+14. No visual regression on existing report sections

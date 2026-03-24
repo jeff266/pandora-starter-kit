@@ -6,9 +6,10 @@
  */
 
 const NUMERIC_PATTERNS = [
-  /^\$[\d,.]+[MKB]?$/,
+  /^\$[\d,.]+[MKBmkb]?$/,
   /^\d[\d,]*\s+deals?$/i,
   /^\d[\d,]*\s+accounts?$/i,
+  /^\d[\d,]*\s+contacts?$/i,
   /^[\d.]+%$/,
   /^[\d.]+x$/,
   /^\d[\d,]*\s+reps?$/i,
