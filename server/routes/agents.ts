@@ -126,6 +126,7 @@ agentsWorkspaceRouter.post('/:workspaceId/agents/:agentId/run', requirePermissio
       dryRun,
       question: question || undefined,
       triggerType: question ? 'conversational' : 'manual',
+      createdByUserId: req.user?.user_id,
     });
     res.json(result);
   } catch (err: any) {

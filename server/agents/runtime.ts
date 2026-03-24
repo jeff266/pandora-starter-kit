@@ -54,6 +54,7 @@ export class AgentRuntime {
       dryRun?: boolean;
       question?: string;
       triggerType?: 'scheduled' | 'conversational' | 'manual';
+      createdByUserId?: string;
     }
   ): Promise<AgentRunResult> {
     const registry = getAgentRegistry();
@@ -429,7 +430,10 @@ export class AgentRuntime {
             ...(issueTreeNodes ? { issue_tree_nodes: issueTreeNodes } : {}),
           });
 
-          // 8. Persist report
+          // 8. Persist report (set creator if invoked manually)
+          if (options?.createdByUserId) {
+            reportDocument.created_by = options.createdByUserId;
+          }
           const reportId = await persistReportDocument(reportDocument);
           console.log(`[Agent ${agentId}] Report document persisted: ${reportId}`);
 
