@@ -314,8 +314,22 @@ export default function SkillsPage() {
     setSelectedSkill(skill);
     setDrawerOpen(true);
     setScheduleEditing(false);
-    setSchedulePreset('__default__');
-    setScheduleCustomCron('');
+    // Initialise preset from the saved schedule state
+    // enabled=true (default) means system default; enabled=false means workspace override
+    const hasOverride = skill.schedule?.enabled === false;
+    if (!hasOverride) {
+      setSchedulePreset('__default__');
+      setScheduleCustomCron('');
+    } else if (!skill.schedule?.cron) {
+      setSchedulePreset('__ondemand__');
+      setScheduleCustomCron('');
+    } else {
+      const match = SCHEDULE_PRESETS.find(p =>
+        p.value !== '__default__' && p.value !== '__ondemand__' && p.value !== '__custom__' && p.value === skill.schedule?.cron
+      );
+      setSchedulePreset(match ? skill.schedule.cron : '__custom__');
+      setScheduleCustomCron(match ? '' : (skill.schedule.cron || ''));
+    }
     fetchRunHistory(skill.id);
     fetchConfigHistory(skill.id);
   };
@@ -744,10 +758,22 @@ export default function SkillsPage() {
                       {canConfigureSkills && !scheduleEditing && (
                         <button
                           onClick={() => {
-                            const curCron = selectedSkill.schedule?.cron ?? null;
-                            const match = SCHEDULE_PRESETS.find(p => p.value === curCron);
-                            setSchedulePreset(match ? curCron! : curCron ? '__custom__' : '__default__');
-                            setScheduleCustomCron(curCron && !match ? curCron : '');
+                            // Re-derive from enabled flag (same as openDrawer logic)
+                            const hasOverride = selectedSkill.schedule?.enabled === false;
+                            if (!hasOverride) {
+                              setSchedulePreset('__default__');
+                              setScheduleCustomCron('');
+                            } else if (!selectedSkill.schedule?.cron) {
+                              setSchedulePreset('__ondemand__');
+                              setScheduleCustomCron('');
+                            } else {
+                              const curCron = selectedSkill.schedule.cron;
+                              const match = SCHEDULE_PRESETS.find(p =>
+                                p.value !== '__default__' && p.value !== '__ondemand__' && p.value !== '__custom__' && p.value === curCron
+                              );
+                              setSchedulePreset(match ? curCron : '__custom__');
+                              setScheduleCustomCron(match ? '' : curCron);
+                            }
                             setScheduleEditing(true);
                           }}
                           style={{

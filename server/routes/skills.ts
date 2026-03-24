@@ -269,7 +269,7 @@ router.get('/:workspaceId/skills/dashboard', async (req, res) => {
         isCustom: (s as any).isCustom ?? false,
         schedule: {
           ...baseSchedule,
-          cron: override?.cron ?? baseSchedule.cron ?? null,
+          cron: override !== undefined ? (override.cron ?? null) : (baseSchedule.cron ?? null),
           enabled: override !== undefined ? override.enabled : true,
         },
         lastRunAt: last?.at || null,
@@ -378,7 +378,7 @@ router.get('/:workspaceId/skills', async (req, res) => {
         tier: s.tier,
         schedule: {
           ...baseSchedule,
-          cron: override?.cron ?? baseSchedule.cron ?? null,
+          cron: override !== undefined ? (override.cron ?? null) : (baseSchedule.cron ?? null),
           enabled: override !== undefined ? override.enabled : true,
         },
         lastRunAt: last?.at || null,
@@ -391,6 +391,70 @@ router.get('/:workspaceId/skills', async (req, res) => {
     return res.json(result);
   } catch (err) {
     console.error('[skills] Error listing skills:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.put('/:workspaceId/skills/:skillId/schedule', requirePermission('skills.configure'), async (req, res) => {
+  try {
+    const { workspaceId, skillId } = req.params;
+    const { cron: cronExpr } = req.body || {};
+
+    const registry = getSkillRegistry();
+    if (!registry.get(skillId)) {
+      return res.status(404).json({ error: `Skill not found: ${skillId}` });
+    }
+
+    const existing = await query(
+      `SELECT cron, enabled FROM skill_schedules WHERE workspace_id = $1 AND skill_id = $2`,
+      [workspaceId, skillId]
+    );
+    const previousSnapshot = existing.rows[0] ?? null;
+
+    if (cronExpr !== null && cronExpr !== undefined) {
+      await query(
+        `INSERT INTO skill_schedules (workspace_id, skill_id, cron, enabled, updated_at)
+         VALUES ($1, $2, $3, false, NOW())
+         ON CONFLICT (workspace_id, skill_id) DO UPDATE SET
+           cron = EXCLUDED.cron,
+           enabled = false,
+           updated_at = NOW()`,
+        [workspaceId, skillId, cronExpr]
+      );
+      updateWorkspaceSkillCron(workspaceId, skillId, cronExpr);
+    } else {
+      await query(
+        `INSERT INTO skill_schedules (workspace_id, skill_id, cron, enabled, updated_at)
+         VALUES ($1, $2, null, false, NOW())
+         ON CONFLICT (workspace_id, skill_id) DO UPDATE SET
+           cron = null,
+           enabled = false,
+           updated_at = NOW()`,
+        [workspaceId, skillId]
+      );
+      updateWorkspaceSkillCron(workspaceId, skillId, null);
+    }
+
+    await query(
+      `INSERT INTO skill_governance (
+        workspace_id, source_type, change_type, change_description,
+        change_payload, supersedes_snapshot, status, deployed_at, deployed_by
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8)`,
+      [
+        workspaceId,
+        'manual',
+        'skill_schedule',
+        cronExpr ? 'Schedule updated via UI' : 'Schedule set to on-demand',
+        JSON.stringify({ skill_id: skillId, cron: cronExpr ?? null }),
+        previousSnapshot ? JSON.stringify(previousSnapshot) : null,
+        'deployed',
+        (req as any).user?.user_id ?? 'admin',
+      ]
+    );
+
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[skills] Error saving schedule (PUT):', err);
     return res.status(500).json({ error: 'Internal server error' });
   }
 });
