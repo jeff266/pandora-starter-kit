@@ -55,7 +55,7 @@ export function updateWorkspaceSkillCron(
       console.log(`[WS Cron] Workspace ${workspaceId} skill ${skillId} triggered by custom schedule`);
       try {
         const { runScheduledSkills } = await import('./skill-scheduler.js');
-        await runScheduledSkills(workspaceId, [skillId], 'scheduled');
+        await runScheduledSkills(workspaceId, [skillId], 'workspace_cron');
       } catch (err: any) {
         console.error(`[WS Cron] Error running ${skillId} for workspace ${workspaceId}:`, err.message);
       }
@@ -159,28 +159,32 @@ async function hasRecentRun(workspaceId: string, skillId: string): Promise<boole
 async function executeSkill(
   workspaceId: string,
   skill: SkillDefinition,
-  triggerType: 'scheduled' | 'manual_batch',
+  triggerType: 'scheduled' | 'manual_batch' | 'workspace_cron',
   scope?: ActiveScope
 ): Promise<{ success: boolean; runId?: string; duration_ms?: number; error?: string }> {
   const startTime = Date.now();
 
   try {
-    // Check per-workspace schedule override — skip if disabled or has custom cron
-    const overrideResult = await query<{ enabled: boolean; cron: string | null }>(
-      `SELECT enabled, cron FROM skill_schedules WHERE workspace_id = $1 AND skill_id = $2`,
-      [workspaceId, skill.id]
-    ).catch(() => ({ rows: [] as { enabled: boolean; cron: string | null }[] }));
-    if (overrideResult.rows.length > 0) {
-      const override = overrideResult.rows[0];
-      if (override.enabled === false && override.cron === null) {
-        // On-demand only: no automatic runs for this workspace
-        console.log(`[Skill Scheduler] Skipping ${skill.id} for workspace ${workspaceId} (on-demand only override)`);
-        return { success: false, error: 'Skill set to on-demand for this workspace' };
-      }
-      if (override.enabled === false && override.cron !== null) {
-        // Custom cron: workspace-specific job handles execution
-        console.log(`[Skill Scheduler] Skipping ${skill.id} for workspace ${workspaceId} (handled by workspace cron)`);
-        return { success: false, error: 'Handled by workspace-specific cron schedule' };
+    // Skip the workspace override check when execution originates from a workspace-specific
+    // cron job — the cron IS the override, so applying the guard would prevent it from running.
+    if (triggerType !== 'workspace_cron') {
+      // Check per-workspace schedule override — skip if disabled or has custom cron
+      const overrideResult = await query<{ enabled: boolean; cron: string | null }>(
+        `SELECT enabled, cron FROM skill_schedules WHERE workspace_id = $1 AND skill_id = $2`,
+        [workspaceId, skill.id]
+      ).catch(() => ({ rows: [] as { enabled: boolean; cron: string | null }[] }));
+      if (overrideResult.rows.length > 0) {
+        const override = overrideResult.rows[0];
+        if (override.enabled === false && override.cron === null) {
+          // On-demand only: no automatic runs for this workspace
+          console.log(`[Skill Scheduler] Skipping ${skill.id} for workspace ${workspaceId} (on-demand only override)`);
+          return { success: false, error: 'Skill set to on-demand for this workspace' };
+        }
+        if (override.enabled === false && override.cron !== null) {
+          // Custom cron: workspace-specific job handles execution
+          console.log(`[Skill Scheduler] Skipping ${skill.id} for workspace ${workspaceId} (handled by workspace cron)`);
+          return { success: false, error: 'Handled by workspace-specific cron schedule' };
+        }
       }
     }
 
@@ -296,7 +300,7 @@ async function executeSkill(
 export async function runScheduledSkills(
   workspaceId: string,
   skillIds: string[],
-  triggerType: 'scheduled' | 'manual_batch' = 'scheduled',
+  triggerType: 'scheduled' | 'manual_batch' | 'workspace_cron' = 'scheduled',
   scope?: ActiveScope
 ): Promise<Array<{ skillId: string; success: boolean; runId?: string; duration_ms?: number; error?: string }>> {
   const registry = getSkillRegistry();
