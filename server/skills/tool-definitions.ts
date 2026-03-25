@@ -4611,6 +4611,22 @@ const prepareWaterfallSummaryTool: ToolDefinition = {
         [context.workspaceId, ...ctx.params]
       );
 
+      // Stalled deals: open deals stuck in their current stage > 30 days.
+      // Uses stage_changed_at from deals table (most reliable for current stage duration).
+      const stalledRows = await query(
+        `SELECT d.name, d.amount, d.owner, d.stage_normalized,
+           EXTRACT(DAY FROM NOW() - d.stage_changed_at)::int AS days_in_current_stage
+         FROM deals d
+         WHERE d.workspace_id = $1
+           AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
+           AND d.stage_changed_at IS NOT NULL
+           AND d.stage_changed_at < NOW() - INTERVAL '30 days'
+           AND ${ctx.where_clause}
+         ORDER BY d.amount DESC
+         LIMIT 10`,
+        [context.workspaceId, ...ctx.params]
+      );
+
       const stageDistribution = stageRows.rows.map((r: any) => ({
         stage: r.stage_normalized,
         count: Number(r.count),
@@ -4619,6 +4635,14 @@ const prepareWaterfallSummaryTool: ToolDefinition = {
 
       const totalOpenDeals = stageDistribution.reduce((sum: number, s: any) => sum + s.count, 0);
       const totalOpenValue = stageDistribution.reduce((sum: number, s: any) => sum + s.totalValue, 0);
+
+      const allStalledRows = stalledRows.rows.map((r: any) => ({
+        name: r.name,
+        amount: Number(r.amount),
+        owner: r.owner,
+        stage: r.stage_normalized,
+        daysInStage: Number(r.days_in_current_stage),
+      })).sort((a: any, b: any) => b.daysInStage - a.daysInStage);
 
       return {
         stageDistribution,
@@ -4637,6 +4661,7 @@ const prepareWaterfallSummaryTool: ToolDefinition = {
           stage: r.stage_normalized,
           daysSinceActivity: Number(r.days_since_activity),
         })),
+        stalledDeals: allStalledRows,
         pipelineTotals: {
           totalOpenDeals,
           totalOpenValue,

@@ -395,7 +395,7 @@ export async function getStalledDeals(
       d.stage,
       d.stage_normalized,
       d.owner,
-      d.pipeline_name,
+      d.pipeline AS pipeline_name,
       d.close_date,
       d.stage_changed_at,
       EXTRACT(DAY FROM (NOW() - d.stage_changed_at))::int AS days_in_stage

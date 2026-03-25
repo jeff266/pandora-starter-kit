@@ -266,6 +266,11 @@ STALE DEALS (no activity > 14 days):
 - {{this.name}} (\${{this.amount}}, {{this.owner}}) — Stage: {{this.stage}}, {{this.daysSinceActivity}} days since activity
 {{/each}}
 
+STALLED DEALS (stuck in stage > 30 days vs benchmark):
+{{#each pipeline_context.stalledDeals}}
+- {{this.name}} (\${{this.amount}}, {{this.owner}}) — Stage: {{this.stage}}, {{this.daysInStage}} days in stage
+{{/each}}
+
 Produce a Pipeline Waterfall Report that answers:
 1. Where is the pipeline leaking? (which stages have the highest fall-out, and why)
 2. Where is it bottlenecked? (which stages have the lowest advance rates)
