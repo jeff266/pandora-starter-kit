@@ -999,6 +999,16 @@ const PANDORA_TOOLS: ToolDef[] = [
       required: [],
     },
   },
+  {
+    name: 'query_grade_diagnostic',
+    description:
+      'Diagnose why deal grades are all A (or explain the current grade distribution). Inspects the findings table and skill_runs table — the ACTUAL sources that drive deal grades. ALWAYS call this before explaining why grades are A, why grades haven\'t changed after running skills, or why scoring seems broken. Returns: active finding counts by severity, which deals are affected, which of the 4 grade-producing skills have run, and a plain-English diagnosis. Important: deal grades are NOT driven by CRM custom properties like ai_score, rfm_grade, or icp_fit_score — those are CRM write-back fields. Grades come from the findings table only.',
+    parameters: {
+      type: 'object',
+      properties: {},
+      required: [],
+    },
+  },
 
   // ─── Extended tools (11 new) ─────────────────────────────────────────────
 
@@ -1196,6 +1206,26 @@ You have tools that query the company's live data. When someone asks a question,
 
 5. CHECK SKILL EVIDENCE FIRST. Before querying raw data for pipeline health, risk, forecasting, or rep performance questions, check get_skill_evidence. Skills have already analyzed the data with richer context than a raw query provides.
    Available skills: pipeline-hygiene, single-thread-alert, data-quality-audit, pipeline-coverage-by-rep, weekly-forecast-rollup, pipeline-waterfall, rep-scorecard, stage-velocity-benchmarks, conversation-intelligence, forecast-model, pipeline-gen-forecast, competitive-intelligence, contact-role-resolution.
+
+5a. DEAL GRADING SYSTEM — HOW GRADES ARE CALCULATED:
+   Deal grades (A/B/C/D/F) are computed from the findings table ONLY. They are NOT driven by CRM custom properties such as ai_score, rfm_grade, or icp_fit_score — those are separate CRM write-back fields.
+
+   Grade formula: score = 100 − (act×25) − (watch×10) − (notable×3) − (info×1)
+   Grade thresholds: A ≥ 90  |  B ≥ 75  |  C ≥ 50  |  D ≥ 25  |  F < 25
+
+   The 4 skills that write per-deal findings (and therefore affect grades):
+   - pipeline-hygiene
+   - single-thread-alert
+   - data-quality-audit
+   - pipeline-coverage
+
+   MANDATORY: Whenever the user asks "why are all grades A?", "why hasn't the grade changed?", "why is everything A?", or questions about the grading system accuracy — you MUST call query_grade_diagnostic FIRST. This tool checks:
+   - How many active findings exist by severity
+   - Which deals are affected
+   - Which of the 4 grade skills have actually run and completed
+   - Gives you a plain-English diagnosis
+
+   If grades are all A it could mean: (a) skills have not run yet, (b) skills ran but found no problems, or (c) findings were resolved. query_grade_diagnostic will tell you which. Never guess.
 
 6. CROSS-REFERENCE. When a question spans entities (deals + calls, reps + accounts), query both sides. Don't answer with half the picture.
 
@@ -2583,6 +2613,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   'calculate': 'Performing calculation',
   'query_schema': 'Checking data schema',
   'get_action_threshold_settings': 'Checking action settings',
+  'query_grade_diagnostic': 'Diagnosing deal grade distribution',
 };
 
 function getToolDisplayName(toolName: string): string {

@@ -439,6 +439,8 @@ export async function executeDataTool(
         result = await getSkillRun(workspaceId, params); break;
       case 'get_skill_status':
         result = await getSkillStatus(workspaceId, params); break;
+      case 'query_grade_diagnostic':
+        result = await queryGradeDiagnostic(workspaceId, params); break;
 
       // ── Extended tools ──────────────────────────────────────────────────
       case 'query_prior_deals':
@@ -4806,6 +4808,108 @@ async function getSkillStatus(workspaceId: string, _params: Record<string, any>)
     })),
     total_skills_with_runs: result.rows.length,
     query_description: `Retrieved run status for ${result.rows.length} skill(s)`,
+  };
+}
+
+// ─── Tool: query_grade_diagnostic ────────────────────────────────────────────
+
+/**
+ * Explains why deal grades are all A (or any distribution) by inspecting the
+ * findings table and skill_runs table — the actual sources that drive grades.
+ *
+ * Grade formula: score = 100 − (act×25) − (watch×10) − (notable×3) − (info×1)
+ * Score ≥ 90 → A  |  ≥ 75 → B  |  ≥ 50 → C  |  ≥ 25 → D  |  < 25 → F
+ *
+ * The 4 expected skills that write per-deal findings:
+ *   pipeline-hygiene, single-thread-alert, data-quality-audit, pipeline-coverage
+ */
+async function queryGradeDiagnostic(workspaceId: string, _params: Record<string, any>): Promise<any> {
+  const EXPECTED_GRADE_SKILLS = [
+    'pipeline-hygiene',
+    'single-thread-alert',
+    'data-quality-audit',
+    'pipeline-coverage',
+  ];
+
+  const [findingsSummary, dealsWithFindings, skillRunsResult] = await Promise.all([
+    // Count active findings by severity
+    query(
+      `SELECT severity, COUNT(*) AS count
+       FROM findings
+       WHERE workspace_id = $1 AND resolved_at IS NULL
+       GROUP BY severity
+       ORDER BY CASE severity WHEN 'act' THEN 1 WHEN 'watch' THEN 2 WHEN 'notable' THEN 3 ELSE 4 END`,
+      [workspaceId]
+    ),
+    // Count distinct deals with at least one active finding
+    query(
+      `SELECT COUNT(DISTINCT deal_id)::int AS deals_with_findings,
+              COUNT(*)::int AS total_findings
+       FROM findings
+       WHERE workspace_id = $1 AND resolved_at IS NULL AND deal_id IS NOT NULL`,
+      [workspaceId]
+    ),
+    // Which skills have completed runs, and when
+    query(
+      `SELECT DISTINCT ON (skill_id)
+              skill_id,
+              status,
+              completed_at
+       FROM skill_runs
+       WHERE workspace_id = $1
+       ORDER BY skill_id, completed_at DESC`,
+      [workspaceId]
+    ),
+  ]);
+
+  const severityCounts: Record<string, number> = {};
+  for (const row of findingsSummary.rows as any[]) {
+    severityCounts[row.severity] = parseInt(row.count, 10);
+  }
+
+  const act = severityCounts['act'] ?? 0;
+  const watch = severityCounts['watch'] ?? 0;
+  const notable = severityCounts['notable'] ?? 0;
+  const info = severityCounts['info'] ?? 0;
+  const totalFindings = (dealsWithFindings.rows[0] as any)?.total_findings ?? 0;
+  const dealsAffected = (dealsWithFindings.rows[0] as any)?.deals_with_findings ?? 0;
+
+  const completedSkills = new Set(
+    (skillRunsResult.rows as any[])
+      .filter(r => ['completed', 'success'].includes(r.status))
+      .map(r => r.skill_id)
+  );
+
+  const gradeSkillStatus = EXPECTED_GRADE_SKILLS.map(skillId => ({
+    skill_id: skillId,
+    has_completed_run: completedSkills.has(skillId),
+    last_completed_at: (skillRunsResult.rows as any[]).find(
+      r => r.skill_id === skillId && ['completed', 'success'].includes(r.status)
+    )?.completed_at ?? null,
+  }));
+
+  const missingGradeSkills = gradeSkillStatus.filter(s => !s.has_completed_run).map(s => s.skill_id);
+  const allGradeSkillsRan = missingGradeSkills.length === 0;
+
+  let diagnosis: string;
+  if (totalFindings === 0 && !allGradeSkillsRan) {
+    diagnosis = `No findings exist yet. The grade-producing skills have not all run: ${missingGradeSkills.join(', ')}. Grades default to A (score 100) until findings are written.`;
+  } else if (totalFindings === 0 && allGradeSkillsRan) {
+    diagnosis = `All 4 grade-producing skills have run but found zero problems — deals genuinely have no detected hygiene issues. All deals correctly score 100 → grade A. Consider whether stale-deal thresholds or CRM data need adjustment.`;
+  } else {
+    diagnosis = `${totalFindings} active finding(s) affect ${dealsAffected} deal(s). Deals with findings score below 100 and will show grades below A.`;
+  }
+
+  return {
+    grading_formula: 'score = 100 − (act×25) − (watch×10) − (notable×3) − (info×1)',
+    grade_thresholds: { A: '≥90', B: '≥75', C: '≥50', D: '≥25', F: '<25' },
+    active_findings: { act, watch, notable, info, total: totalFindings, deals_affected: dealsAffected },
+    grade_skill_status: gradeSkillStatus,
+    missing_grade_skills: missingGradeSkills,
+    all_grade_skills_ran: allGradeSkillsRan,
+    diagnosis,
+    note: 'Deal grades are driven by the findings table — NOT by CRM custom properties (ai_score / rfm_grade / icp_fit_score). Those are separate CRM write-back fields.',
+    query_description: `Grade diagnostic: ${totalFindings} active findings across ${dealsAffected} deals; ${gradeSkillStatus.filter(s => s.has_completed_run).length}/4 grade-producing skills have run`,
   };
 }
 
