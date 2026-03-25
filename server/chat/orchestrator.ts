@@ -41,7 +41,7 @@ import { extractSkillContext, formatMethodologyComparisons } from './context-ass
 import { buildConversationContext } from '../context/build-conversation-context.js';
 import { PandoraResponseBuilder } from '../lib/pandora-response-builder.js';
 import { getCalibrationStatus } from '../lib/data-dictionary.js';
-import { getInterviewState, buildInterviewPrompt, advanceInterview, buildCompletionSummary } from '../lib/calibration-interview.js';
+import { getInterviewState, buildInterviewPrompt, advanceInterview, advanceAndConfirmStep, buildCompletionSummary } from '../lib/calibration-interview.js';
 import { getUnmappedStages, buildStageMappingResponse, buildStageMappingTablePrompt, confirmStageMapping, isStageMappingComplete } from '../lib/stage-mapping-interview.js';
 import type { NormalizedStage } from '../lib/stage-mapping-interview.js';
 
@@ -589,8 +589,8 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
               console.log('[Calibration] Saved coverage_target_scope:', scope);
             }
 
-            const nextStep = await advanceInterview(workspaceId, step);
-            console.log('[Calibration] Advanced:', step, '→', nextStep);
+            const nextStep = await advanceAndConfirmStep(workspaceId, step);
+            console.log('[Calibration] Advanced+confirmed:', step, '→', nextStep);
 
             if (nextStep === 'complete') {
               answer = await buildCompletionSummary(workspaceId);

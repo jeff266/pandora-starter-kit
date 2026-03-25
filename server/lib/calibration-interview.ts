@@ -397,6 +397,103 @@ export async function buildCompletionSummary(workspaceId: string): Promise<strin
   return lines.join('\n');
 }
 
+/** Per-step dimension configuration used to UPSERT business_dimensions rows. */
+const STEP_DIMENSION_CONFIG: Partial<Record<InterviewStep, {
+  key: string;
+  label: string;
+  description: string;
+  filter: DimensionFilter;
+}>> = {
+  active_pipeline: {
+    key: 'active_pipeline',
+    label: 'Active Pipeline',
+    description: 'Open deals with close dates in the current quarter, excluding terminal stages',
+    filter: DEFAULT_FILTERS.active_pipeline,
+  },
+  at_risk: {
+    key: 'at_risk',
+    label: 'At-Risk Deals',
+    description: 'Deals with no activity in the last 30 days or a past-due close date',
+    filter: DEFAULT_FILTERS.at_risk,
+  },
+  commit: {
+    key: 'commit',
+    label: 'Commit / Forecast',
+    description: 'Deals in Commit or Best Case forecast category, excluding closed stages',
+    filter: DEFAULT_FILTERS.commit,
+  },
+  forecast_rollup: {
+    key: 'forecast_rollup',
+    label: 'Forecast Rollup',
+    description: 'Total forecasted pipeline value used in weekly leadership rollup',
+    filter: DEFAULT_FILTERS.active_pipeline,
+  },
+};
+
+/**
+ * Advances the interview state AND writes the confirmed dimension to both
+ * business_dimensions and data_dictionary. Replaces bare advanceInterview()
+ * calls in the dimension interview phase so writes actually persist.
+ */
+export async function advanceAndConfirmStep(
+  workspaceId: string,
+  step: InterviewStep
+): Promise<InterviewStep> {
+  const config = STEP_DIMENSION_CONFIG[step];
+
+  if (config) {
+    // Resolve preview data (best-effort — don't block advance on failure)
+    let confirmedValue = 0;
+    let confirmedCount = 0;
+    try {
+      const preview = await previewFilter(workspaceId, config.filter, 'amount', 'standard');
+      confirmedValue = preview.total_value;
+      confirmedCount = preview.deal_count;
+    } catch (err: any) {
+      console.warn(`[CalibrationStep] previewFilter failed for ${step}:`, err.message);
+    }
+
+    // UPSERT the dimension row so confirmDimension has something to update
+    try {
+      await query(
+        `INSERT INTO business_dimensions
+           (workspace_id, dimension_key, label, description, filter_definition,
+            value_field, value_field_label, value_field_type,
+            confirmed, confirmed_at, confirmed_value, confirmed_deal_count,
+            calibration_source)
+         VALUES ($1, $2, $3, $4, $5, 'amount', 'Amount', 'standard',
+                 TRUE, NOW(), $6, $7, 'interview')
+         ON CONFLICT (workspace_id, dimension_key) DO UPDATE SET
+           label                = EXCLUDED.label,
+           description          = EXCLUDED.description,
+           filter_definition    = EXCLUDED.filter_definition,
+           confirmed            = TRUE,
+           confirmed_at         = NOW(),
+           confirmed_value      = EXCLUDED.confirmed_value,
+           confirmed_deal_count = EXCLUDED.confirmed_deal_count,
+           calibration_source   = 'interview',
+           updated_at           = NOW()`,
+        [
+          workspaceId, config.key, config.label, config.description,
+          JSON.stringify(config.filter), confirmedValue, confirmedCount,
+        ]
+      );
+      console.log(`[CalibrationStep] Upserted business_dimension "${config.key}" (${confirmedCount} deals, $${Math.round(confirmedValue)})`);
+    } catch (err: any) {
+      console.error(`[CalibrationStep] business_dimensions upsert failed for ${step}:`, err.message);
+    }
+
+    // confirmDimension now finds the row and writes through to data_dictionary
+    try {
+      await confirmDimension(workspaceId, config.key, confirmedValue, confirmedCount, 'interview');
+    } catch (err: any) {
+      console.error(`[CalibrationStep] confirmDimension failed for ${step}:`, err.message);
+    }
+  }
+
+  return advanceInterview(workspaceId, step);
+}
+
 export async function confirmInterviewStep(
   workspaceId: string,
   step: InterviewStep,
