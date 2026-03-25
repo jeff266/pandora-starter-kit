@@ -389,17 +389,42 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
 
   // ── Metric Assertion Detection & Comparison ────────────────────────────────────
   // Check for metric assertions (e.g. "our win rate is 30%") before routing to PandoraAgent
+  let metricEvidence: any = undefined;
   if (!answer) {
     const assertion = detectMetricAssertion(message);
     if (assertion) {
+      const computeStart = Date.now();
       const computed = await getComputedMetric(
         assertion.metric_key, workspaceId
       );
+      const computeDuration = Date.now() - computeStart;
 
       // Build comparison response — don't write anything yet
       answer = buildComparisonResponse(assertion, computed);
       routerDecision = 'metric_assertion_comparison';
       dataStrategy = 'computed_comparison';
+
+      // Build evidence/trace entry for Show the Math
+      if (computed) {
+        metricEvidence = {
+          tool_calls: [{
+            tool: 'compute_metric',
+            params: {
+              metric_key: assertion.metric_key,
+              workspace_id: workspaceId,
+              lookback: '12 months',
+            },
+            result: {
+              value: computed.value,
+              unit: computed.unit,
+              methodology: computed.methodology,
+              computed_at: computed.computed_at,
+            },
+            description: `Computed ${assertion.metric_key} from CRM data`,
+            duration_ms: computeDuration,
+          }],
+        };
+      }
 
       // If no computed value, store as asserted with low
       // confidence in workspace_knowledge (not metric_definitions)
@@ -1629,6 +1654,7 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
     response_id: responseId,
     feedback_enabled: feedbackEnabled,
     entities_mentioned: entitiesMentioned,
+    evidence: metricEvidence,
   };
 }
 
@@ -1737,7 +1763,29 @@ Today's date is ${today}. Any deal close date before today is past-due. Do not d
 
 Answer the user's question with specific, practical guidance.
 Avoid generic advice — be opinionated and direct.
-When recommending frameworks or structures, explain the reasoning behind each choice.`;
+When recommending frameworks or structures, explain the reasoning behind each choice.
+
+## Response Format Rules
+
+USE A TABLE when:
+- Showing 3 or more items that share the same attributes (name, amount, stage, owner, date)
+- Comparing reps, deals, or stages side by side
+- Presenting pipeline breakdowns with multiple dimensions
+- Any ranked list with 3+ columns of data
+
+USE BULLET POINTS when:
+- Items don't share a common set of attributes
+- The list has fewer than 3 items
+- Each item requires a sentence of explanation
+
+MARKDOWN TABLE FORMAT:
+| Deal | Amount | Stage | Owner | Close Date |
+|---|---|---|---|---|
+| Action Behavior Centers | $300K | Demo | Nate | May 29 |
+
+Always include a header row.
+Sort by the most relevant column (usually amount DESC for deals).
+Cap tables at 10 rows — add "... and N more" if there are additional results.`;
 
   if (!workspaceContext) return base;
 
