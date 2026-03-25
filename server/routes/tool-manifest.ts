@@ -535,6 +535,36 @@ WHERE sr.workspace_id = $1
 GROUP BY sr.skill_id
 ORDER BY MAX(sr.started_at) DESC`,
     },
+
+    {
+      id: 'query_quota_config',
+      name: 'Quota Config Check',
+      category: 'query',
+      description: 'Check whether quota has been configured for this workspace. Returns quota_configured (boolean), the most recent active period target and dates, and active target count. Used as a readiness gate before computing attainment numbers.',
+      source: 'query_tool',
+      status: 'live',
+      answers_questions: [
+        'quota configured', 'has quota been set up', 'is there a quota', 'attainment',
+        'quota readiness', 'targets configured',
+      ],
+      examples: [
+        { query: "What's our attainment this quarter?" },
+        { query: "How are we doing against quota?" },
+        { query: "Has quota been uploaded?" },
+      ],
+      sql: `-- Quota config check: targets + quota_periods + rep_quotas
+SELECT
+  t.target_amount,
+  t.period_start,
+  t.period_end,
+  t.label,
+  t.is_active
+FROM targets t
+WHERE t.workspace_id = $1
+  AND t.is_active = true
+ORDER BY t.period_start DESC
+LIMIT 1`,
+    },
   ];
 }
 

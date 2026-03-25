@@ -479,6 +479,8 @@ export async function executeDataTool(
         ); break;
       case 'get_crm_sync_status':
         result = await getCrmSyncStatus(workspaceId, params); break;
+      case 'query_quota_config':
+        result = await queryQuotaConfig(workspaceId, params); break;
 
       default:
         throw new Error(`Unknown tool: ${toolName}`);
@@ -5225,5 +5227,90 @@ async function getCrmSyncStatus(workspaceId: string, _params: Record<string, any
     stale_count: connectors.filter((c: any) => ['stale', 'overdue'].includes(c.sync_health)).length,
     error_count: connectors.filter((c: any) => c.sync_health === 'error').length,
     query_description: `Retrieved sync status for ${connectors.length} connector(s)`,
+  };
+}
+
+// ─── Tool: query_quota_config ────────────────────────────────────────────────
+
+/**
+ * Returns whether any quota periods are configured for the workspace,
+ * plus the most recent period's target and date range.
+ * Used by Pandora as a readiness gate before citing attainment numbers.
+ */
+async function queryQuotaConfig(workspaceId: string, _params: Record<string, any>): Promise<any> {
+  // Check targets table first (primary quota source)
+  const targetsResult = await query<{
+    target_amount: string;
+    period_start: Date;
+    period_end: Date;
+    label: string;
+    is_active: boolean;
+  }>(
+    `SELECT target_amount::text, period_start, period_end, label, is_active
+     FROM targets
+     WHERE workspace_id = $1
+     ORDER BY period_start DESC
+     LIMIT 5`,
+    [workspaceId]
+  ).catch(() => ({ rows: [] as any[] }));
+
+  // Check quota_periods table (secondary source used by inference engine)
+  const quotaPeriodsResult = await query<{
+    period_start: Date;
+    period_end: Date;
+    period_type: string;
+  }>(
+    `SELECT period_start, period_end, period_type
+     FROM quota_periods
+     WHERE workspace_id = $1
+     ORDER BY period_start DESC
+     LIMIT 5`,
+    [workspaceId]
+  ).catch(() => ({ rows: [] as any[] }));
+
+  // Check rep_quotas table (another possible source)
+  const repQuotasResult = await query<{ count: string }>(
+    `SELECT COUNT(*)::text AS count
+     FROM rep_quotas rq
+     JOIN quota_periods qp ON qp.id = rq.period_id
+     WHERE qp.workspace_id = $1`,
+    [workspaceId]
+  ).catch(() => ({ rows: [{ count: '0' }] as any[] }));
+
+  const repQuotaCount = parseInt(repQuotasResult.rows[0]?.count || '0', 10);
+
+  // quota_configured is true when any target with a positive target_amount exists
+  // (active or historical). Only return false when the workspace has never had any
+  // quota targets at all. Active flag is noted but does not block quota_configured.
+  const targetsWithAmount = targetsResult.rows.filter(r => parseFloat(r.target_amount || '0') > 0);
+  const hasUsableTarget = targetsWithAmount.length > 0 || repQuotaCount > 0;
+
+  if (!hasUsableTarget) {
+    return {
+      quota_configured: false,
+      has_quota_periods: quotaPeriodsResult.rows.length > 0,
+      has_targets_rows: targetsResult.rows.length > 0,
+      message: 'No quota with a target amount has been configured for this workspace. Upload quota targets before attainment can be calculated.',
+      query_description: 'quota_config check: no usable quota target configured',
+    };
+  }
+
+  // Use the most recently dated target that has an amount; fall back to any recent row
+  const mostRecent = targetsWithAmount[0] || targetsResult.rows[0];
+  const activeTargets = targetsResult.rows.filter(r => r.is_active && parseFloat(r.target_amount || '0') > 0);
+
+  return {
+    quota_configured: true,
+    active_target_count: activeTargets.length,
+    most_recent_period: mostRecent ? {
+      label: mostRecent.label || null,
+      target_amount: parseFloat(mostRecent.target_amount || '0'),
+      period_start: mostRecent.period_start,
+      period_end: mostRecent.period_end,
+      is_active: mostRecent.is_active,
+    } : null,
+    quota_periods_count: quotaPeriodsResult.rows.length,
+    rep_quota_count: repQuotaCount,
+    query_description: `Quota config check: ${targetsWithAmount.length} target(s) with quota amounts configured (${activeTargets.length} active)`,
   };
 }
