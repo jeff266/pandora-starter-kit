@@ -475,6 +475,8 @@ export async function executeDataTool(
           params,
           params._userRole as string | undefined
         ); break;
+      case 'get_crm_sync_status':
+        result = await getCrmSyncStatus(workspaceId, params); break;
 
       default:
         throw new Error(`Unknown tool: ${toolName}`);
@@ -4971,5 +4973,93 @@ async function getUpcomingMeetings(workspaceId: string, params: Record<string, a
     count: result.rows.length,
     days_ahead: days,
     query_description: `Retrieved upcoming meetings for next ${days} days${params.deal_id ? ' linked to specified deal' : ''}`,
+  };
+}
+
+// ─── Tool: get_crm_sync_status ────────────────────────────────────────────────
+
+/** Static category map — mirrors what the adapter registry reports. */
+const CONNECTOR_CATEGORY_MAP: Record<string, string> = {
+  hubspot: 'crm',
+  salesforce: 'crm',
+  gong: 'conversations',
+  fireflies: 'conversations',
+  monday: 'tasks',
+  'google-drive': 'documents',
+  'google-calendar': 'calendar',
+  csv_import: 'import',
+  enrichment_config: 'enrichment',
+};
+
+/**
+ * Returns the sync health for all connectors in this workspace.
+ * Queries the connections table for last_sync_at, status, adapter_type, and
+ * sync_interval_minutes so Pandora can answer "when was HubSpot last synced?"
+ */
+async function getCrmSyncStatus(workspaceId: string, _params: Record<string, any>): Promise<any> {
+  const result = await query(
+    `SELECT
+       connector_name,
+       status,
+       last_sync_at,
+       sync_interval_minutes,
+       error_message,
+       created_at AS connected_at
+     FROM connections
+     WHERE workspace_id = $1
+     ORDER BY connector_name`,
+    [workspaceId]
+  );
+
+  if (result.rows.length === 0) {
+    return {
+      connectors: [],
+      message: 'No connectors configured for this workspace.',
+      query_description: 'Queried CRM sync status — no connectors found',
+    };
+  }
+
+  const now = Date.now();
+
+  const connectors = result.rows.map((r: any) => {
+    const lastSyncAt = r.last_sync_at ? new Date(r.last_sync_at) : null;
+    const ageHours = lastSyncAt ? Math.round((now - lastSyncAt.getTime()) / 3600000) : null;
+    const ageDays = ageHours !== null ? Math.round(ageHours / 24 * 10) / 10 : null;
+
+    let syncHealth: 'current' | 'stale' | 'overdue' | 'never_synced' | 'error';
+    if (r.status === 'error') {
+      syncHealth = 'error';
+    } else if (!lastSyncAt) {
+      syncHealth = 'never_synced';
+    } else if (r.sync_interval_minutes && ageHours !== null && ageHours > r.sync_interval_minutes / 60 * 3) {
+      syncHealth = 'overdue';
+    } else if (ageHours !== null && ageHours > 48) {
+      syncHealth = 'stale';
+    } else {
+      syncHealth = 'current';
+    }
+
+    return {
+      connector: r.connector_name,
+      adapter_type: r.connector_name,
+      adapter_category: CONNECTOR_CATEGORY_MAP[r.connector_name] ?? 'unknown',
+      status: r.status,
+      sync_health: syncHealth,
+      last_sync_at: lastSyncAt ? lastSyncAt.toISOString() : null,
+      data_age_hours: ageHours,
+      data_age_days: ageDays,
+      sync_interval_minutes: r.sync_interval_minutes,
+      error_message: r.error_message ?? null,
+      connected_at: r.connected_at ? new Date(r.connected_at).toISOString() : null,
+    };
+  });
+
+  return {
+    connectors,
+    total_connectors: connectors.length,
+    healthy_count: connectors.filter((c: any) => c.sync_health === 'current').length,
+    stale_count: connectors.filter((c: any) => ['stale', 'overdue'].includes(c.sync_health)).length,
+    error_count: connectors.filter((c: any) => c.sync_health === 'error').length,
+    query_description: `Retrieved sync status for ${connectors.length} connector(s)`,
   };
 }

@@ -1167,6 +1167,18 @@ const PANDORA_TOOLS: ToolDef[] = [
       additionalProperties: false,
     },
   },
+
+  {
+    name: 'get_crm_sync_status',
+    description: 'Returns sync health for all connectors in this workspace — last sync timestamp, status, data age, and sync interval per adapter. Use when the user asks "when was HubSpot last synced?", "is our data up to date?", "when did the last sync run?", "how fresh is our CRM data?", or any question about data currency or sync health.',
+    parameters: {
+      type: 'object',
+      properties: {},
+      required: [],
+      // @ts-ignore
+      additionalProperties: false,
+    },
+  },
 ];
 
 // ─── System prompt ────────────────────────────────────────────────────────────
@@ -1315,7 +1327,15 @@ You have tools that query the company's live data. When someone asks a question,
    - Do not present an unrecognized name as an active team member without this flag.
    - This applies to deal owner fields returned by query_deals and query_skill_evidence alike.
 
-27. ENTITY HYPERLINKS — MANDATORY: Whenever you reference an entity (deal, contact, account, or call) by name that appeared in a tool result, you MUST include a markdown link. No exceptions.
+27. SKILL FINDINGS STALENESS CHECK — MANDATORY: Before presenting conclusions from get_insights_findings or get_skill_evidence, you MUST check the found_at or last_run_at timestamp of the underlying skill run.
+   - If the skill run is more than 7 days old, prepend a one-sentence freshness caveat immediately before the finding: "Note: this finding is from the [skill-name] run [N] days ago — current deal status may have changed."
+   - Calculate the age using the timestamp in the tool result. Never skip this check.
+   - Do not present stale skill output as if it reflects real-time reality. A deal flagged as single-threaded 12 days ago may have added new stakeholders since then.
+   - This rule applies to ALL skill-based conclusions regardless of question type.
+
+28. CRM SYNC STATUS: When the user asks "when was HubSpot last synced?", "is our data up to date?", "how fresh is our CRM data?", or any question about sync health or data currency, call get_crm_sync_status. It returns last_sync_at, status, data_age_hours, and sync_health per connector. Report the exact timestamp and data age — do not guess or estimate.
+
+29. ENTITY HYPERLINKS — MANDATORY: Whenever you reference an entity (deal, contact, account, or call) by name that appeared in a tool result, you MUST include a markdown link. No exceptions.
    - Deals: [Deal Name](pandora://deals/{id}) — use the id field (UUID) from query_deals or lookup_live_deal results
    - Deals (HubSpot source): [Deal Name](hubspot://deals/{source_id}) — use source_id when the deal's source field is "hubspot"; preferred over pandora:// for HubSpot-sourced deals
    - Contacts: [Contact Name](hubspot://contacts/{source_id}) — use the source_id field from query_contacts results; ALWAYS link every contact name you mention from a tool result
