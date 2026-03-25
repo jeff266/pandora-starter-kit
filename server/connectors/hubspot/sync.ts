@@ -1265,8 +1265,7 @@ export async function backfillRawOwnerIdsForAllWorkspaces(): Promise<void> {
        INNER JOIN connections c ON c.workspace_id = d.workspace_id
          AND c.connector_name = 'hubspot'
          AND c.status IN ('active', 'healthy')
-       WHERE d.owner ~ '^[0-9]+$'
-       LIMIT 50`
+       WHERE d.owner ~ '^[0-9]+$'`
     );
 
     if (affected.rows.length === 0) return;
