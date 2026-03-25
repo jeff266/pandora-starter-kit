@@ -76,7 +76,7 @@ function handleAuthorize(req: Request, res: Response): void {
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: callbackUrl,
-    scope: "crm.objects.contacts.read crm.objects.contacts.write crm.objects.companies.read crm.objects.companies.write crm.objects.deals.read crm.objects.deals.write crm.schemas.contacts.read crm.schemas.companies.read crm.schemas.deals.read",
+    scope: "crm.objects.contacts.read crm.objects.contacts.write crm.objects.companies.read crm.objects.companies.write crm.objects.deals.read crm.objects.deals.write crm.schemas.contacts.read crm.schemas.companies.read crm.schemas.deals.read crm.objects.users.read settings.users.read",
     state: signedState,
   });
 
