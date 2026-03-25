@@ -1009,6 +1009,21 @@ const PANDORA_TOOLS: ToolDef[] = [
       required: [],
     },
   },
+  {
+    name: 'query_deal_grade',
+    description:
+      'Explain why a specific deal has its current grade letter. Takes a deal_id and returns: the deal\'s grade letter, computed score, active findings with severities, full penalty breakdown, days in current stage vs. stale threshold, pipeline-hygiene run status (has it run? did it flag this deal?), and a plain-English one-paragraph diagnosis. ALWAYS call this when the user asks why a specific deal has its grade, why a deal is still grade A despite appearing stuck or risky, or to explain a single deal\'s score. Do NOT manually chain get_insights_findings + query_deal_velocity + query_grade_diagnostic for this purpose — use query_deal_grade instead.',
+    parameters: {
+      type: 'object',
+      properties: {
+        deal_id: {
+          type: 'string',
+          description: 'UUID of the deal to explain the grade for',
+        },
+      },
+      required: ['deal_id'],
+    },
+  },
 
   // ─── Extended tools (11 new) ─────────────────────────────────────────────
 
@@ -1238,6 +1253,8 @@ You have tools that query the company's live data. When someone asks a question,
    - Gives you a plain-English diagnosis
 
    If grades are all A it could mean: (a) skills have not run yet, (b) skills ran but found no problems, or (c) findings were resolved. query_grade_diagnostic will tell you which. Never guess.
+
+   MANDATORY: Whenever the user asks why a SPECIFIC deal has its grade — e.g., "why is Acme still grade A?", "why hasn't [deal name]'s grade changed?", "why is this deal grade B even though it seems risky?", "explain [deal]'s grade" — you MUST call query_deal_grade FIRST. Do NOT manually chain get_insights_findings + query_deal_velocity + query_grade_diagnostic for this purpose. query_deal_grade returns the full picture in a single call: score, grade letter, active findings with severities, penalty breakdown, days in current stage vs. stale threshold, and pipeline-hygiene run status for that deal.
 
 6. CROSS-REFERENCE. When a question spans entities (deals + calls, reps + accounts), query both sides. Don't answer with half the picture.
 
@@ -2655,6 +2672,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   'query_schema': 'Checking data schema',
   'get_action_threshold_settings': 'Checking action settings',
   'query_grade_diagnostic': 'Diagnosing deal grade distribution',
+  'query_deal_grade': 'Explaining deal grade',
 };
 
 function getToolDisplayName(toolName: string): string {

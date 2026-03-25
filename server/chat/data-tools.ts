@@ -441,6 +441,8 @@ export async function executeDataTool(
         result = await getSkillStatus(workspaceId, params); break;
       case 'query_grade_diagnostic':
         result = await queryGradeDiagnostic(workspaceId, params); break;
+      case 'query_deal_grade':
+        result = await queryDealGrade(workspaceId, params); break;
 
       // ── Extended tools ──────────────────────────────────────────────────
       case 'query_prior_deals':
@@ -4910,6 +4912,168 @@ async function queryGradeDiagnostic(workspaceId: string, _params: Record<string,
     diagnosis,
     note: 'Deal grades are driven by the findings table — NOT by CRM custom properties (ai_score / rfm_grade / icp_fit_score). Those are separate CRM write-back fields.',
     query_description: `Grade diagnostic: ${totalFindings} active findings across ${dealsAffected} deals; ${gradeSkillStatus.filter(s => s.has_completed_run).length}/4 grade-producing skills have run`,
+  };
+}
+
+// ─── Tool: query_deal_grade ───────────────────────────────────────────────────
+/**
+ * Explains why a specific deal has its current grade letter.
+ * Returns: active findings (with severities), computed score, grade letter,
+ * penalty breakdown, days in current stage, stale threshold, pipeline-hygiene
+ * run status, and a plain-English one-paragraph diagnosis.
+ *
+ * Grade formula: score = 100 − (act×25) − (watch×10) − (notable×3) − (info×1)
+ * Score ≥ 90 → A  |  ≥ 75 → B  |  ≥ 50 → C  |  ≥ 25 → D  |  < 25 → F
+ */
+async function queryDealGrade(workspaceId: string, params: Record<string, any>): Promise<any> {
+  const dealId = String(params.deal_id || '');
+  if (!dealId) return { error: 'deal_id is required' };
+
+  const [dealRow, findingsRows, stageHistoryRow, hygienRunRow, workspaceConfigRow] = await Promise.all([
+    // Deal basic info
+    query(
+      `SELECT id, name, stage, amount, owner_name, created_at::text
+       FROM deals
+       WHERE workspace_id = $1 AND id = $2`,
+      [workspaceId, dealId]
+    ),
+    // Active findings for this deal
+    query(
+      `SELECT id, severity, category, title, description, created_at::text
+       FROM findings
+       WHERE workspace_id = $1 AND deal_id = $2 AND resolved_at IS NULL
+       ORDER BY CASE severity WHEN 'act' THEN 1 WHEN 'watch' THEN 2 WHEN 'notable' THEN 3 ELSE 4 END, created_at DESC`,
+      [workspaceId, dealId]
+    ),
+    // Current stage duration from stage_history
+    query(
+      `SELECT stage_name,
+              entered_at::text,
+              EXTRACT(EPOCH FROM NOW() - entered_at)::int / 86400 AS days_in_stage
+       FROM deal_stage_history
+       WHERE workspace_id = $1 AND deal_id = $2 AND exited_at IS NULL
+       ORDER BY entered_at DESC
+       LIMIT 1`,
+      [workspaceId, dealId]
+    ),
+    // When did pipeline-hygiene last run successfully
+    query(
+      `SELECT skill_id, status, completed_at::text
+       FROM skill_runs
+       WHERE workspace_id = $1 AND skill_id = 'pipeline-hygiene'
+         AND status IN ('completed', 'success')
+       ORDER BY completed_at DESC
+       LIMIT 1`,
+      [workspaceId]
+    ),
+    // Workspace config for stale threshold
+    query(
+      `SELECT config FROM workspace_configs WHERE workspace_id = $1 LIMIT 1`,
+      [workspaceId]
+    ),
+  ]);
+
+  if (!dealRow.rows.length) return { error: 'Deal not found', deal_id: dealId };
+
+  const deal = dealRow.rows[0] as any;
+  const findings = findingsRows.rows as any[];
+
+  // Compute score
+  const act = findings.filter(f => f.severity === 'act').length;
+  const watch = findings.filter(f => f.severity === 'watch').length;
+  const notable = findings.filter(f => f.severity === 'notable').length;
+  const info = findings.filter(f => f.severity === 'info').length;
+  const score = Math.max(0, 100 - act * 25 - watch * 10 - notable * 3 - info * 1);
+
+  function scoreToGrade(s: number): string {
+    if (s >= 90) return 'A';
+    if (s >= 75) return 'B';
+    if (s >= 50) return 'C';
+    if (s >= 25) return 'D';
+    return 'F';
+  }
+  const grade = scoreToGrade(score);
+
+  // Stage info
+  const currentStageRow = stageHistoryRow.rows[0] as any | undefined;
+  const daysInCurrentStage: number | null = currentStageRow?.days_in_stage ?? null;
+  const currentStageName: string | null = currentStageRow?.stage_name ?? deal.stage ?? null;
+  const stageEnteredAt: string | null = currentStageRow?.entered_at ?? null;
+
+  // Stale threshold
+  const config = (workspaceConfigRow.rows[0] as any)?.config ?? null;
+  const staleThresholdDays: number =
+    config?.thresholds?.stale_deal_days ??
+    config?.goals_and_targets?.stale_deal_days ??
+    14;
+  const isStale = daysInCurrentStage !== null && daysInCurrentStage >= staleThresholdDays;
+
+  // Pipeline-hygiene run status
+  const hygieneRun = hygienRunRow.rows[0] as any | undefined;
+  const hygieneLastRanAt: string | null = hygieneRun?.completed_at ?? null;
+  const hygieneHasRun = !!hygieneRun;
+
+  // Pipeline-hygiene finding for this deal specifically
+  const hygieneFinding = findings.find(f => f.category === 'stale_deal' || (f.title && f.title.toLowerCase().includes('stale')));
+
+  // Plain-English diagnosis
+  let diagnosis: string;
+  if (findings.length === 0 && !hygieneHasRun) {
+    diagnosis = `${deal.name} is grade ${grade} (score ${score}/100) because pipeline-hygiene has never run — no findings have been written for this deal yet. Grades default to A (score 100) until a skill runs and generates findings. Run pipeline-hygiene to get an accurate grade.`;
+  } else if (findings.length === 0 && hygieneHasRun) {
+    const ageInfo = daysInCurrentStage !== null
+      ? ` It has been in "${currentStageName}" for ${daysInCurrentStage} day(s) (stale threshold: ${staleThresholdDays} days).`
+      : '';
+    const staleNote = isStale
+      ? ` Note: the deal exceeds the stale threshold but pipeline-hygiene did not flag it — this may indicate it was already resolved, filtered by pipeline scope, or the threshold was different at run time.`
+      : ` It is within the ${staleThresholdDays}-day stale threshold so pipeline-hygiene correctly found no issue.`;
+    diagnosis = `${deal.name} is grade ${grade} (score ${score}/100) because pipeline-hygiene ran on ${hygieneLastRanAt} and found no active issues for this deal.${ageInfo}${staleNote}`;
+  } else if (findings.length > 0) {
+    const penaltyParts: string[] = [];
+    if (act > 0) penaltyParts.push(`${act} act finding(s) (−${act * 25} pts)`);
+    if (watch > 0) penaltyParts.push(`${watch} watch finding(s) (−${watch * 10} pts)`);
+    if (notable > 0) penaltyParts.push(`${notable} notable finding(s) (−${notable * 3} pts)`);
+    if (info > 0) penaltyParts.push(`${info} info finding(s) (−${info * 1} pts)`);
+    const stageNote = daysInCurrentStage !== null
+      ? ` The deal has been in "${currentStageName}" for ${daysInCurrentStage} day(s) vs. a ${staleThresholdDays}-day stale threshold.`
+      : '';
+    diagnosis = `${deal.name} is grade ${grade} (score ${score}/100) because it has ${findings.length} active finding(s): ${penaltyParts.join(', ')}.${stageNote} Resolve the active findings to improve the grade.`;
+  } else {
+    diagnosis = `${deal.name} is grade ${grade} (score ${score}/100).`;
+  }
+
+  return {
+    deal_id: deal.id,
+    deal_name: deal.name,
+    current_stage: currentStageName,
+    grade,
+    score,
+    grading_formula: 'score = 100 − (act×25) − (watch×10) − (notable×3) − (info×1)',
+    grade_thresholds: { A: '≥90', B: '≥75', C: '≥50', D: '≥25', F: '<25' },
+    penalty_breakdown: { act, watch, notable, info },
+    total_active_findings: findings.length,
+    active_findings: findings.map(f => ({
+      id: f.id,
+      severity: f.severity,
+      category: f.category,
+      title: f.title,
+      description: f.description,
+      created_at: f.created_at,
+    })),
+    stage_info: {
+      current_stage: currentStageName,
+      days_in_current_stage: daysInCurrentStage,
+      stage_entered_at: stageEnteredAt,
+      stale_threshold_days: staleThresholdDays,
+      is_stale: isStale,
+    },
+    pipeline_hygiene_status: {
+      has_run: hygieneHasRun,
+      last_completed_at: hygieneLastRanAt,
+      flagged_this_deal: !!hygieneFinding,
+    },
+    diagnosis,
+    query_description: `Grade explainer for deal "${deal.name}": grade ${grade} (score ${score}), ${findings.length} active finding(s)`,
   };
 }
 
