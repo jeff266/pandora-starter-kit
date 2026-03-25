@@ -1,0 +1,198 @@
+# Investigation: Deal stage history data for pipeline waterfall
+
+Read only. No changes. Answer every question below
+using direct Neon queries.
+
+---
+
+## Part 1 — Table inventory
+
+Does a deal stage history table exist?
+
+SELECT table_name
+FROM information_schema.tables
+WHERE table_schema = 'public'
+  AND table_name ILIKE '%stage%'
+ORDER BY table_name;
+
+Also check for related tables:
+SELECT table_name
+FROM information_schema.tables
+WHERE table_schema = 'public'
+  AND table_name ILIKE '%history%'
+ORDER BY table_name;
+
+---
+
+## Part 2 — Deals table stage fields
+
+Does the deals table have any stage
+timestamp columns?
+
+SELECT column_name, data_type
+FROM information_schema.columns
+WHERE table_name = 'deals'
+  AND (
+    column_name ILIKE '%stage%'
+    OR column_name ILIKE '%previous%'
+    OR column_name ILIKE '%changed%'
+    OR column_name ILIKE '%moved%'
+    OR column_name ILIKE '%transition%'
+  )
+ORDER BY column_name;
+
+---
+
+## Part 3 — source_data JSONB inspection
+
+If a source_data JSONB column exists on deals,
+check what stage-related keys it contains for
+Frontera deals:
+
+SELECT DISTINCT jsonb_object_keys(source_data)
+FROM deals
+WHERE workspace_id = (
+  SELECT id FROM workspaces
+  WHERE name ILIKE '%frontera%' LIMIT 1
+)
+AND source_data IS NOT NULL
+LIMIT 1;
+
+Then specifically check if HubSpot stage history
+is stored in source_data:
+
+SELECT
+  id,
+  name,
+  stage_normalized,
+  source_data->'properties'->'dealstage' AS stage_field,
+  source_data->'properties'->'hs_date_entered_closedwon'
+    AS date_entered_closedwon,
+  source_data->'properties'->'hs_date_entered_contractsent'
+    AS date_entered_contract,
+  source_data->'properties'->'hs_time_in_closedwon'
+    AS time_in_closedwon
+FROM deals
+WHERE workspace_id = (
+  SELECT id FROM workspaces
+  WHERE name ILIKE '%frontera%' LIMIT 1
+)
+AND source_data IS NOT NULL
+LIMIT 3;
+
+HubSpot stores "hs_date_entered_[stage_id]" and
+"hs_time_in_[stage_id]" properties for each stage.
+If these are present in source_data, we have
+implicit stage history even without a history table.
+
+---
+
+## Part 4 — stage_configs and funnel_stages
+
+Check what stage configuration data exists:
+
+SELECT
+  raw_stage,
+  normalized_stage,
+  is_open,
+  display_order
+FROM stage_mappings
+WHERE workspace_id = (
+  SELECT id FROM workspaces
+  WHERE name ILIKE '%frontera%' LIMIT 1
+)
+ORDER BY display_order ASC;
+
+SELECT *
+FROM funnel_stages
+WHERE workspace_id = (
+  SELECT id FROM workspaces
+  WHERE name ILIKE '%frontera%' LIMIT 1
+)
+LIMIT 10;
+
+---
+
+## Part 5 — HubSpot sync code inspection
+
+Find the HubSpot sync/transform code. Search for:
+- Where deals are written to the deals table
+- Whether the sync calls HubSpot's property
+  history API (/crm/v3/objects/deals/{id}/
+  associations or /crm/v3/properties/deals)
+- Whether hs_date_entered_* properties are
+  explicitly mapped or stored as part of
+  source_data passthrough
+
+Show the relevant section of the HubSpot deal
+transform function.
+
+---
+
+## Part 6 — Data volume check
+
+How many Frontera deals have non-null source_data?
+
+SELECT
+  COUNT(*) AS total_deals,
+  COUNT(source_data) AS with_source_data,
+  COUNT(stage_normalized) AS with_stage,
+  MIN(created_date) AS earliest_deal,
+  MAX(updated_at) AS most_recent_update
+FROM deals
+WHERE workspace_id = (
+  SELECT id FROM workspaces
+  WHERE name ILIKE '%frontera%' LIMIT 1
+);
+
+---
+
+## What to report
+
+For each part, answer:
+
+PART 1: Does deal_stage_history table exist?
+  Yes / No
+
+PART 2: Does deals table have stage timestamp cols?
+  List any found, or "none"
+
+PART 3: Does source_data contain HubSpot stage
+  timestamps (hs_date_entered_*)?
+  Yes with examples / No / source_data is null
+
+PART 4: How many stages are mapped in
+  stage_mappings for Frontera?
+  List them in funnel order
+
+PART 5: Does the HubSpot sync store raw
+  source_data passthrough or does it only
+  map known fields?
+  If passthrough: hs_date_entered_* fields
+  would already be in source_data
+  If mapped-only: we need to extend the sync
+
+PART 6: Deal volume and date range
+
+CONCLUSION: Based on the findings, which path
+applies for the waterfall skill?
+
+  PATH A — Full stage history available:
+  deal_stage_history table exists with
+  transition timestamps. Best case.
+
+  PATH B — HubSpot timestamp fields available:
+  hs_date_entered_* in source_data. Can
+  reconstruct stage entry times without a
+  separate history table.
+
+  PATH C — No stage history, current snapshot only:
+  Waterfall uses current stage + previous
+  skill run snapshot for comparison. Less
+  precise but functional for v1.
+
+  PATH D — Sync extension required:
+  No history data exists but HubSpot has it.
+  Need to extend sync to capture
+  hs_date_entered_* or call the property
+  history API.
