@@ -5,7 +5,11 @@ export type SuggestedActionType =
   | 'create_crm_tasks'
   | 'update_forecast_category'
   | 'update_close_date'
-  | 'run_meddic_coverage';
+  | 'run_meddic_coverage'
+  | 'update_data_dictionary'
+  | 'update_workspace_knowledge'
+  | 'confirm_metric_definition'
+  | 'update_calibration';
 
 export type ExecutionMode = 'auto' | 'queue' | 'hitl';
 
@@ -224,6 +228,88 @@ export async function extractSuggestedActions(
           evidence: 'Skill referenced in analysis',
         });
       }
+    }
+  }
+
+  // ── 6. Update data dictionary (P1, hitl) ──────────────────────────────
+  const ddTermMatch = synthesisText.match(
+    /(?:definition\s+of|define|how\s+(?:do\s+)?we\s+define|what\s+is\s+(?:our\s+)?definition\s+of)\s+["']?([A-Za-z][A-Za-z\s\-]{2,40}?)["']?(?:\s|[.,?]|$)/i
+  );
+  const ddRefined = /refine|update.*(?:definition|term)|(?:definition|term).*update|more\s+precise|better\s+definition|new\s+definition|derived.*definition|updated.*definition|save.*(?:to|in|into).*(?:dictionary|data\s+dictionary)/i.test(synthesisText);
+  const ddToolRan = toolCallHistory.some(tc => ['getDataDictionary', 'queryDeals', 'runSqlQuery', 'getStageVelocityBenchmarks'].includes(tc.tool));
+
+  if (ddTermMatch && ddRefined && ddToolRan) {
+    const term = ddTermMatch[1].trim();
+    actions.push({
+      id: randomUUID(),
+      type: 'update_data_dictionary',
+      title: `Update Data Dictionary: ${term}`,
+      description: `Save refined definition for "${term}"`,
+      priority: 'P1',
+      execution_mode: 'hitl',
+      action_payload: { term, source: 'computed', confidence: 1.0 },
+      evidence: 'Refined definition derived from data analysis in this conversation',
+      threshold_note: 'Requires approval — updates shared workspace knowledge',
+    });
+  }
+
+  // ── 7. Update workspace knowledge (P2, hitl) ─────────────────────────
+  if (/you(?:'ve)?\s+(?:told|mentioned|said|shared)|based\s+on\s+what\s+you(?:'ve)?\s+told\s+me|noted|remember(?:ing)?|save\s+(?:this|that)\s+(?:for|to)|learned\s+from\s+(?:this|our)\s+conversation/i.test(synthesisText)) {
+    const knowledgeMatch = synthesisText.match(/(?:noted|remember|save):\s*(.{10,120})/i)
+      || synthesisText.match(/you(?:'ve)?\s+(?:told|mentioned|said|shared)\s+(?:me\s+)?(?:that\s+)?(.{10,80})/i);
+    if (knowledgeMatch) {
+      const value = knowledgeMatch[1].replace(/[.,;]$/, '').trim();
+      actions.push({
+        id: randomUUID(),
+        type: 'update_workspace_knowledge',
+        title: 'Save to workspace knowledge',
+        description: value.length > 60 ? value.slice(0, 57) + '…' : value,
+        priority: 'P2',
+        execution_mode: 'hitl',
+        action_payload: { key: 'conversation_note', value, source: 'conversation', confidence: 0.7 },
+        evidence: 'Business context stated in conversation',
+        threshold_note: 'Requires approval — saves to shared workspace memory',
+      });
+    }
+  }
+
+  // ── 8. Confirm metric definition (P1, hitl) ───────────────────────────
+  if (/\b(win\s*rate|average\s+deal\s+size|avg\s+sales\s+cycle|pipeline\s+coverage|close\s+rate|conversion\s+rate)\b/i.test(synthesisText)
+    && /\b(confirm|lock|use\s+(?:this|that)|(?:that'?s?\s+(?:right|correct))|(?:go\s+with)|(?:option\s+[AB])|(?:choice\s+[AB]))\b/i.test(synthesisText)) {
+    const metricMatch = synthesisText.match(/\b(win\s*rate|average\s+deal\s+size|avg\s+sales\s+cycle|pipeline\s+coverage|close\s+rate|conversion\s+rate)\b/i);
+    if (metricMatch) {
+      const metricKey = metricMatch[1].toLowerCase().replace(/\s+/g, '_');
+      actions.push({
+        id: randomUUID(),
+        type: 'confirm_metric_definition',
+        title: `Confirm ${metricMatch[1]}`,
+        description: 'Lock this metric value as the official benchmark',
+        priority: 'P1',
+        execution_mode: 'hitl',
+        action_payload: { metric_key: metricKey, calibration_source: 'confirmed' },
+        evidence: 'User confirmed metric value in this conversation',
+        threshold_note: 'Requires approval — locks as confirmed benchmark',
+      });
+    }
+  }
+
+  // ── 9. Update calibration threshold (P2, hitl) ───────────────────────
+  if (/(?:stale|stall|threshold|benchmark|p75|percentile|days\s+in\s+stage|stage\s+velocity)/i.test(synthesisText)
+    && /(?:update|save|use\s+(?:this|that|these)|apply|set\s+(?:the\s+)?threshold)/i.test(synthesisText)) {
+    const dimMatch = synthesisText.match(/\b(evaluation|qualification|decision|negotiation|awareness|discovery)\b/i);
+    if (dimMatch) {
+      const dimensionKey = dimMatch[1].toLowerCase();
+      actions.push({
+        id: randomUUID(),
+        type: 'update_calibration',
+        title: `Update calibration: ${dimMatch[1]}`,
+        description: `Save new ${dimMatch[1]} stage threshold from velocity benchmarks`,
+        priority: 'P2',
+        execution_mode: 'hitl',
+        action_payload: { dimension_key: dimensionKey, source: 'computed' },
+        evidence: 'Stage threshold derived from velocity benchmark analysis',
+        threshold_note: 'Requires approval — updates business dimension definition',
+      });
     }
   }
 

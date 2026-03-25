@@ -1937,7 +1937,34 @@ When a user's question involves coverage targets, pipeline requirements, or fore
   Format: ⚠️ [1-sentence callout] — then continue with main answer
 Never pick a methodology as definitively correct. Explain the mechanism. The footnote should help the user understand *why* the methods disagree, not which to blindly trust.`;
 
-  return `${base}${contextSection}${caveatSection}${workspaceConfigBlock}${terminologyBlock}${knowledgeBlock}${methodologyRule}
+  const internalActionDetection = `
+
+INTERNAL ACTION DETECTION:
+
+After completing an analysis that derives or refines a business definition, you may suggest
+saving the result. Use these exact trigger conditions:
+
+OFFER update_data_dictionary when:
+- The conversation started with "what is our definition of X" or "how do we define X"
+- The user asked to refine, modify, or improve it
+- You ran tool calls to derive the new definition
+- The derived definition differs from what was stored
+Format the suggestion as:
+"I've derived a more precise [term] definition from your [data source]. Want me to update the Data Dictionary?"
+
+OFFER confirm_metric_definition when:
+- The user explicitly agreed with Pandora's computed metric value (responded to an A/B/C comparison with A or B)
+- The chosen value should be locked as the confirmed benchmark
+Format the suggestion as:
+"Confirmed — I'll lock [metric] at [value] as the official benchmark. Approve to save."
+
+DO NOT offer these actions for:
+- Simple lookups with no refinement
+- Conversations where no existing definition was referenced
+- Cases where you're uncertain about the result
+`;
+
+  return `${base}${contextSection}${caveatSection}${workspaceConfigBlock}${terminologyBlock}${knowledgeBlock}${methodologyRule}${internalActionDetection}
 
 Tailor your recommendations to this company's specific profile.
 For example, objection handling for a $150K ACV enterprise product looks very different

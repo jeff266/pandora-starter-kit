@@ -33,7 +33,37 @@ const SOURCE_LABELS: Record<string, string> = {
 
 type InFlight = 'primary' | 'note' | 'dismiss' | null;
 
+const INTERNAL_TYPE_CONFIG: Record<string, { icon: string; label: string; buttonLabel: string }> = {
+  update_data_dictionary: {
+    icon: '📖',
+    label: 'Update Data Dictionary',
+    buttonLabel: 'Save definition ▶',
+  },
+  update_workspace_knowledge: {
+    icon: '🧠',
+    label: 'Save to workspace knowledge',
+    buttonLabel: 'Save knowledge ▶',
+  },
+  confirm_metric_definition: {
+    icon: '✓',
+    label: 'Confirm metric benchmark',
+    buttonLabel: 'Confirm & lock ▶',
+  },
+  update_calibration: {
+    icon: '⚙',
+    label: 'Update calibration',
+    buttonLabel: 'Save threshold ▶',
+  },
+};
+
+function isInternalType(actionType?: string) {
+  return !!actionType && actionType in INTERNAL_TYPE_CONFIG;
+}
+
 function getPrimaryConfig(item: ActionCardItem): { label: string; mode: string } {
+  if (isInternalType(item.action_type)) {
+    return { label: INTERNAL_TYPE_CONFIG[item.action_type!].buttonLabel, mode: 'internal' };
+  }
   switch (item.action_type) {
     case 'run_skill':
       return { label: 'Run skill ▶', mode: 'skill_run' };
@@ -75,7 +105,12 @@ export function ActionCard({ item, crmSource, onRemove }: ActionCardProps) {
     setInFlight('primary');
     setError(null);
     try {
-      if (isSkillType(item.action_type)) {
+      if (isInternalType(item.action_type)) {
+        await api.post(`/actions/${item.id}/execute-inline`, {
+          mode: 'internal',
+          user_id: 'rep',
+        });
+      } else if (isSkillType(item.action_type)) {
         await api.post(`/actions/${item.id}/execute-inline`, {
           mode: 'skill_run',
           skill_id: item.skill_id,
@@ -167,7 +202,9 @@ export function ActionCard({ item, crmSource, onRemove }: ActionCardProps) {
     );
   }
 
-  const showNoteButton = !isSkillType(item.action_type) && !isFieldWriteType(item.action_type);
+  const showNoteButton = !isSkillType(item.action_type) && !isFieldWriteType(item.action_type) && !isInternalType(item.action_type);
+
+  const internalConfig = item.action_type ? INTERNAL_TYPE_CONFIG[item.action_type] : undefined;
 
   return (
     <div style={{
@@ -182,17 +219,21 @@ export function ActionCard({ item, crmSource, onRemove }: ActionCardProps) {
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
 
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-        <span style={{
-          fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 4,
-          background: pm.bg, color: pm.color, flexShrink: 0, marginTop: 1,
-        }}>{item.priority}</span>
+        {internalConfig ? (
+          <span style={{ fontSize: 16, flexShrink: 0, marginTop: 1 }}>{internalConfig.icon}</span>
+        ) : (
+          <span style={{
+            fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 4,
+            background: pm.bg, color: pm.color, flexShrink: 0, marginTop: 1,
+          }}>{item.priority}</span>
+        )}
         <span style={{ fontSize: 13, color: colors.text, lineHeight: 1.45, flex: 1 }}>
-          {item.title}
+          {internalConfig ? internalConfig.label : item.title}
         </span>
       </div>
 
       <div style={{ fontSize: 11, color: colors.textMuted }}>
-        Source: {sourceLabel}
+        {internalConfig ? item.title : `Source: ${sourceLabel}`}
       </div>
 
       {reviewing && isFieldWriteType(item.action_type) && (

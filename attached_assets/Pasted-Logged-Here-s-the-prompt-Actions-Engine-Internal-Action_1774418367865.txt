@@ -1,0 +1,336 @@
+Logged. Here's the prompt:
+
+```
+# Actions Engine: Internal Action Types
+
+## Context
+
+The Actions system currently handles outbound CRM
+write-backs only. Four new internal action types
+are needed so Pandora can write back to its own
+tables after analysis — same confidence model,
+same undo window, different destination.
+
+New action types:
+- update_data_dictionary
+- update_workspace_knowledge
+- confirm_metric_definition
+- update_calibration
+
+## Before Starting
+
+1. Find and show action-extractor.ts in full.
+   What action types are currently registered?
+   What is the shape of an extracted action?
+
+2. Find approve_pending_action — where does it
+   live and what does it currently do? Show the
+   routing logic that decides which CRM API
+   to call based on action type.
+
+3. Show the pending_actions table schema:
+   SELECT column_name, data_type
+   FROM information_schema.columns
+   WHERE table_name = 'pending_actions'
+   ORDER BY ordinal_position;
+
+4. Show the shape of an action card as rendered
+   in the Ask Pandora UI — what fields does the
+   frontend expect from a pending action?
+
+Report findings then build.
+
+---
+
+## Step 1 — Register four new action types
+
+File: server/actions/action-extractor.ts
+(or wherever action types are defined)
+
+Add to the action type registry:
+
+```typescript
+// Internal Pandora action types
+'update_data_dictionary'     // update/create a DD entry
+'update_workspace_knowledge' // store a learned fact
+'confirm_metric_definition'  // lock a metric value
+'update_calibration'         // update a dimension threshold
+```
+
+Each action type needs a corresponding extractor
+pattern. The extractor runs after synthesis to
+detect whether the response warrants an action card.
+
+Trigger patterns for each type:
+
+update_data_dictionary:
+  Triggered when: conversation started with a
+  definition question AND user asked to refine
+  it AND Pandora ran tool calls to derive the
+  new definition.
+  Payload: { term, definition, sql_definition,
+             source: 'computed', confidence: 1.0 }
+
+update_workspace_knowledge:
+  Triggered when: user stated a workspace-specific
+  fact (operational context, constraints, business
+  rules) that was extracted by extractWorkspaceKnowledge()
+  but hasn't been confirmed yet.
+  Payload: { key, value, source: 'conversation',
+             confidence: 0.7 }
+
+confirm_metric_definition:
+  Triggered when: user explicitly agreed with
+  Pandora's computed metric value (responded to
+  A/B/C comparison with A or B).
+  Payload: { metric_key, value, unit,
+             methodology, calibration_source: 'confirmed' }
+
+update_calibration:
+  Triggered when: Pandora derived a new threshold
+  for a business dimension based on data analysis
+  (e.g. stage-specific staleness thresholds from
+  velocity benchmarks).
+  Payload: { dimension_key, filter_definition,
+             description, source: 'computed' }
+
+---
+
+## Step 2 — Internal action executor
+
+File: wherever approve_pending_action is defined
+
+Find the routing logic that dispatches approved
+actions. Currently it routes to CRM API calls
+based on action_type. Add a parallel routing
+branch for internal types BEFORE the CRM routing:
+
+```typescript
+async function approveInternalAction(
+  action: PendingAction,
+  workspaceId: string,
+  db: any
+): Promise<{ success: boolean; message: string }> {
+
+  switch (action.action_type) {
+
+    case 'update_data_dictionary': {
+      const { term, definition, sql_definition,
+              source, confidence } = action.payload
+      await db.query(`
+        INSERT INTO data_dictionary
+          (workspace_id, term, definition,
+           sql_definition, source, confidence,
+           created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, NOW())
+        ON CONFLICT (workspace_id, term)
+        DO UPDATE SET
+          definition    = EXCLUDED.definition,
+          sql_definition = EXCLUDED.sql_definition,
+          source        = EXCLUDED.source,
+          confidence    = EXCLUDED.confidence,
+          updated_at    = NOW()
+      `, [workspaceId, term, definition,
+          sql_definition, source, confidence])
+      return {
+        success: true,
+        message: `Updated "${term}" in Data Dictionary`
+      }
+    }
+
+    case 'update_workspace_knowledge': {
+      const { key, value, source, confidence }
+        = action.payload
+      await db.query(`
+        INSERT INTO workspace_knowledge
+          (workspace_id, key, value, source,
+           confidence, created_at)
+        VALUES ($1, $2, $3, $4, $5, NOW())
+        ON CONFLICT (workspace_id, key)
+        DO UPDATE SET
+          value       = EXCLUDED.value,
+          confidence  = LEAST(
+            workspace_knowledge.confidence + 0.05,
+            1.0
+          ),
+          last_used_at = NOW(),
+          used_count   = workspace_knowledge.used_count + 1
+      `, [workspaceId, key, value, source, confidence])
+      return {
+        success: true,
+        message: `Saved "${key}" to workspace knowledge`
+      }
+    }
+
+    case 'confirm_metric_definition': {
+      const { metric_key, value, unit,
+              methodology, calibration_source }
+        = action.payload
+      await db.query(`
+        INSERT INTO metric_definitions
+          (workspace_id, metric_key, value, unit,
+           methodology, calibration_source, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, NOW())
+        ON CONFLICT (workspace_id, metric_key)
+        DO UPDATE SET
+          value              = EXCLUDED.value,
+          unit               = EXCLUDED.unit,
+          methodology        = EXCLUDED.methodology,
+          calibration_source = EXCLUDED.calibration_source,
+          updated_at         = NOW()
+      `, [workspaceId, metric_key, value, unit,
+          methodology, calibration_source])
+      return {
+        success: true,
+        message: `Confirmed ${metric_key}: ${value}`
+      }
+    }
+
+    case 'update_calibration': {
+      const { dimension_key, filter_definition,
+              description }
+        = action.payload
+      await db.query(`
+        UPDATE business_dimensions
+        SET filter_definition = $1,
+            description       = $2,
+            confirmed         = TRUE,
+            updated_at        = NOW()
+        WHERE workspace_id  = $3
+          AND dimension_key = $4
+      `, [JSON.stringify(filter_definition),
+          description, workspaceId, dimension_key])
+      return {
+        success: true,
+        message: `Updated ${dimension_key} definition`
+      }
+    }
+
+    default:
+      return { success: false,
+               message: 'Unknown internal action type' }
+  }
+}
+```
+
+Wire this into the main action approval flow:
+
+```typescript
+// In approve_pending_action:
+const INTERNAL_ACTION_TYPES = [
+  'update_data_dictionary',
+  'update_workspace_knowledge',
+  'confirm_metric_definition',
+  'update_calibration',
+]
+
+if (INTERNAL_ACTION_TYPES.includes(action.action_type)) {
+  return await approveInternalAction(
+    action, workspaceId, db
+  )
+}
+// ... existing CRM routing continues below
+```
+
+---
+
+## Step 3 — Detection logic in synthesis prompt
+
+In buildAdvisorySystemPrompt() or the synthesis
+instruction block, add:
+
+```
+INTERNAL ACTION DETECTION:
+
+After completing an analysis that derives or
+refines a business definition, you may suggest
+saving the result. Use these exact trigger conditions:
+
+OFFER update_data_dictionary when:
+- The conversation started with "what is our
+  definition of X" or "how do we define X"
+- The user asked to refine, modify, or improve it
+- You ran tool calls to derive the new definition
+- The derived definition differs from what was
+  stored
+
+Format the suggestion as:
+"I've derived a more precise [term] definition
+from your [data source]. Want me to update the
+Data Dictionary?
+
+[Update Data Dictionary] [Keep current]"
+
+OFFER confirm_metric_definition when:
+- User responded "A" or "B" to a metric
+  assertion comparison (win rate, coverage, etc.)
+- The chosen value should be locked as confirmed
+
+DO NOT offer these actions for:
+- Simple lookups with no refinement
+- Conversations where no existing definition
+  was referenced
+- Cases where you're uncertain about the result
+```
+
+---
+
+## Step 4 — Action card label for internal types
+
+Internal actions need distinct card labels so
+users know they're updating Pandora's knowledge,
+not writing to the CRM.
+
+In the action card renderer (Replit task),
+internal action types should show:
+
+update_data_dictionary:
+  Icon: 📖 (or book icon)
+  Label: "Update Data Dictionary"
+  Description: "Save refined definition for [term]"
+
+update_workspace_knowledge:
+  Icon: 🧠
+  Label: "Save to workspace knowledge"
+  Description: "Remember: [value]"
+
+confirm_metric_definition:
+  Icon: ✓
+  Label: "Confirm [metric_key]"
+  Description: "[value] locked as official benchmark"
+
+update_calibration:
+  Icon: ⚙
+  Label: "Update calibration"
+  Description: "Save new [dimension_key] threshold"
+
+Note these label/icon specs for Replit handoff.
+The backend executor is the Claude Code task.
+The card rendering is a Replit task.
+
+---
+
+## Acceptance Criteria
+
+1. Four new action types registered in extractor
+2. approveInternalAction() handles all four types
+3. update_data_dictionary writes to data_dictionary
+   with ON CONFLICT update
+4. update_workspace_knowledge writes to
+   workspace_knowledge with confidence increment
+5. confirm_metric_definition writes to
+   metric_definitions with calibration_source
+   = 'confirmed'
+6. update_calibration writes to business_dimensions
+   and sets confirmed = TRUE
+7. Internal types route through approveInternalAction
+   BEFORE CRM routing is attempted
+8. Synthesis prompt includes detection instructions
+   for update_data_dictionary and
+   confirm_metric_definition
+9. After the stale deal analysis from earlier
+   session, an "Update Data Dictionary" action
+   card appears
+10. Zero TypeScript errors
+11. Existing CRM action types unchanged
+```

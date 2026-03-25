@@ -15,6 +15,14 @@ import { getCredentials } from '../connectors/adapters/credentials.js';
 import { HubSpotClient } from '../connectors/hubspot/client.js';
 import { SalesforceClient } from '../connectors/salesforce/client.js';
 import { requireWorkspaceAccess } from '../middleware/auth.js';
+import { approveInternalAction } from '../workflow/action-approver.js';
+
+const INTERNAL_ACTION_TYPES_SET = new Set([
+  'update_data_dictionary',
+  'update_workspace_knowledge',
+  'confirm_metric_definition',
+  'update_calibration',
+]);
 
 const router = Router();
 
@@ -211,6 +219,20 @@ router.post(
       }
 
       const action = actionResult.rows[0];
+
+      // Internal Pandora action types — write to Pandora's own tables
+      if (INTERNAL_ACTION_TYPES_SET.has(action.action_type)) {
+        const result = await approveInternalAction(action, workspaceId);
+        if (!result.success) {
+          return res.status(400).json({ success: false, error: result.message });
+        }
+        await dbQuery(
+          `UPDATE actions SET execution_status = 'executed', executed_at = now(), executed_by = $3, updated_at = now()
+           WHERE id = $1 AND workspace_id = $2`,
+          [actionId, workspaceId, user_id]
+        );
+        return res.json({ success: true, message: result.message, executed_at: new Date().toISOString() });
+      }
 
       // Next-step action: handle task_create / note_create directly
       if (mode && action.action_type === 'next_step') {
@@ -744,14 +766,24 @@ router.post('/:workspaceId/suggested-actions/sync', async (req: Request, res: Re
       action.priority === 'P1' ? 'P0' :
       action.priority === 'P2' ? 'P1' : 'P2';
 
-    const crmAction: 'task_create' | 'field_write' =
+    const INTERNAL_TYPES = [
+      'update_data_dictionary',
+      'update_workspace_knowledge',
+      'confirm_metric_definition',
+      'update_calibration',
+    ];
+
+    const crmAction: 'task_create' | 'field_write' | null =
       action.type === 'update_forecast_category' || action.type === 'update_close_date'
         ? 'field_write'
-        : 'task_create';
+        : INTERNAL_TYPES.includes(action.type)
+          ? null
+          : 'task_create';
 
     const source =
       action.type === 'run_meddic_coverage' ? 'meddic' :
       action.type === 'run_skill' ? 'dossier' :
+      INTERNAL_TYPES.includes(action.type) ? 'pandora_internal' :
       'dossier';
 
     const dedupInput = `${workspaceId}:suggested:${action.type}:${action.title}`;
@@ -764,22 +796,29 @@ router.post('/:workspaceId/suggested-actions/sync', async (req: Request, res: Re
       action.type === 'run_meddic_coverage' ? 'meddic-coverage' :
       action.type;
 
+    const storedActionType = INTERNAL_TYPES.includes(action.type) ? action.type : 'next_step';
+    const executionPayload = INTERNAL_TYPES.includes(action.type) && action.action_payload
+      ? JSON.stringify(action.action_payload)
+      : null;
+
     try {
       const result = await dbQuery(
         `INSERT INTO actions (
            workspace_id, action_type, severity, title, summary,
            source, priority, suggested_crm_action, dedup_hash,
-           execution_status, target_deal_id, source_skill
-         ) VALUES ($1, 'next_step', 'info', $2, $3, $4, $5, $6, $7, 'open', $8, $9)
+           execution_status, target_deal_id, source_skill, execution_payload
+         ) VALUES ($1, $2, 'info', $3, $4, $5, $6, $7, $8, 'open', $9, $10, $11)
          ON CONFLICT (workspace_id, dedup_hash)
            WHERE execution_status != 'dismissed' AND dedup_hash IS NOT NULL
          DO UPDATE SET
            title = EXCLUDED.title,
            summary = EXCLUDED.summary,
+           execution_payload = COALESCE(EXCLUDED.execution_payload, actions.execution_payload),
            updated_at = now()
          RETURNING id`,
         [
           workspaceId,
+          storedActionType,
           action.title,
           summary,
           source,
@@ -788,6 +827,7 @@ router.post('/:workspaceId/suggested-actions/sync', async (req: Request, res: Re
           dedupHash,
           action.deal_id || null,
           sourceSkill,
+          executionPayload,
         ]
       );
 
@@ -798,6 +838,7 @@ router.post('/:workspaceId/suggested-actions/sync', async (req: Request, res: Re
           priority: cardPriority,
           source,
           suggested_crm_action: crmAction,
+          action_type: storedActionType,
         } as any);
       }
     } catch (err) {
