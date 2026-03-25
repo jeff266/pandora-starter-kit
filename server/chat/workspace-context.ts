@@ -201,14 +201,14 @@ async function computeDealMetrics(workspaceId: string): Promise<{
          PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY amount) as p25_amount,
          PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY amount) as p75_amount,
          AVG(amount) as avg_deal_size,
-         AVG(EXTRACT(EPOCH FROM (COALESCE(close_date, NOW()) - created_date)) / 86400) as avg_sales_cycle_days,
+         AVG(EXTRACT(EPOCH FROM (COALESCE(close_date, NOW()) - created_at)) / 86400) as avg_sales_cycle_days,
          COUNT(*) FILTER (WHERE stage_normalized = 'closed_won') as won_count,
          COUNT(*) FILTER (WHERE stage_normalized = 'closed_lost') as lost_count,
          COUNT(*) FILTER (WHERE stage_normalized NOT IN ('closed_won', 'closed_lost')) as open_count,
          COUNT(*) as total_count
        FROM deals
        WHERE workspace_id = $1
-         AND created_date IS NOT NULL
+         AND created_at IS NOT NULL
          AND amount > 0`,
       [workspaceId]
     );

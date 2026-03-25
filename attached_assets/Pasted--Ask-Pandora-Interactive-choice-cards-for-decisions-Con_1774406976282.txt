@@ -1,0 +1,126 @@
+# Ask Pandora: Interactive choice cards for decisions
+
+## Context
+
+When Pandora asks the user to make a discrete
+choice (A/B/C, yes/no, pick a quarter), the
+response currently uses text labels. These should
+render as clickable buttons that send the user's
+choice back automatically.
+
+## Before Starting
+
+Find where action cards / suggested actions are
+rendered in the Ask Pandora UI. The metric
+assertion response already has A/B/C options as
+text. Show:
+1. How suggested actions are currently rendered
+2. Whether there's an existing "quick reply"
+   or "choice button" component
+3. How clicking an action card sends a message
+
+## The pattern
+
+When Pandora's response ends with a discrete
+choice, render clickable choice buttons below
+the response text instead of expecting the user
+to type A, B, or C.
+
+Trigger: if the response contains a line matching
+the pattern:
+  A) [text]
+  B) [text]
+  C) [text] (optional)
+
+Parse these into choice buttons. Clicking a button
+sends that choice as a user message automatically.
+```typescript
+// Parse choice options from response text:
+function parseChoiceOptions(
+  text: string
+): Array<{ label: string; value: string }> | null {
+  const lines = text.split('\n')
+  const choices: Array<{ label: string; value: string }> = []
+
+  for (const line of lines) {
+    const match = line.match(/^\s*([A-C])\)\s+(.+)$/)
+    if (match) {
+      choices.push({
+        label: match[2].trim(),
+        value: match[1],  // "A", "B", or "C"
+      })
+    }
+  }
+
+  return choices.length >= 2 ? choices : null
+}
+```
+
+Render as pill buttons below the response:
+```typescript
+{choices && (
+  <div style={{
+    display: 'flex',
+    gap: 8,
+    flexWrap: 'wrap',
+    marginTop: 12,
+  }}>
+    {choices.map(choice => (
+      <button
+        key={choice.value}
+        onClick={() => sendMessage(
+          `${choice.value}) ${choice.label}`
+        )}
+        style={{
+          padding: '6px 14px',
+          borderRadius: 20,
+          border: '1px solid rgba(20,184,166,0.4)',
+          background: 'rgba(20,184,166,0.08)',
+          color: '#14B8A6',
+          fontSize: 13,
+          cursor: 'pointer',
+          transition: 'all 150ms',
+        }}
+        onMouseEnter={e => {
+          e.currentTarget.style.background =
+            'rgba(20,184,166,0.18)'
+        }}
+        onMouseLeave={e => {
+          e.currentTarget.style.background =
+            'rgba(20,184,166,0.08)'
+        }}
+      >
+        {choice.label}
+      </button>
+    ))}
+  </div>
+)}
+```
+
+## Specific use cases to verify
+
+1. Win rate assertion response:
+   "A) Your number: 35.0%
+    B) My computed number: 37.2%
+    C) Let me dig deeper first"
+   → renders 3 teal pill buttons
+
+2. Coverage scope question:
+   "A) One target for all pipelines
+    B) Separate targets per pipeline"
+   → renders 2 teal pill buttons
+
+3. Regular response with no choice pattern:
+   → no buttons rendered
+
+## Acceptance Criteria
+
+1. Responses with A)/B)/C) pattern render
+   clickable teal pill buttons
+2. Clicking a button sends that choice as a
+   user message
+3. Buttons appear after the response text,
+   not replacing it
+4. Responses without choice patterns unaffected
+5. Buttons work on mobile (touch targets ≥ 44px)
+6. No TypeScript errors

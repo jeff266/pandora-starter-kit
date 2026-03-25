@@ -669,6 +669,38 @@ export default function ChatPanel({ isOpen, onClose, scope, initialSessionId, pe
               <div style={styles.messageContent}>
                 {formatMarkdown(anon.text(msg.content), msg.role === 'assistant' ? (text) => sendMessage(text) : undefined)}
               </div>
+              {msg.role === 'assistant' && (() => {
+                const choices = parseChoiceOptions(msg.content);
+                if (!choices) return null;
+                return (
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
+                    {choices.map(choice => (
+                      <button
+                        key={choice.value}
+                        onClick={() => sendMessage(`${choice.value}) ${choice.label}`)}
+                        style={{
+                          padding: '8px 14px',
+                          minHeight: 44,
+                          borderRadius: 20,
+                          border: '1px solid rgba(20,184,166,0.4)',
+                          background: 'rgba(20,184,166,0.08)',
+                          color: '#14B8A6',
+                          fontSize: 13,
+                          cursor: 'pointer',
+                          transition: 'all 150ms',
+                          display: 'flex',
+                          alignItems: 'center',
+                        }}
+                        onMouseEnter={e => { e.currentTarget.style.background = 'rgba(20,184,166,0.18)'; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = 'rgba(20,184,166,0.08)'; }}
+                      >
+                        <span style={{ fontWeight: 600, marginRight: 5 }}>{choice.value})</span>
+                        {choice.label}
+                      </button>
+                    ))}
+                  </div>
+                );
+              })()}
               {msg.role === 'assistant' && msg.evidence && msg.evidence.tool_calls.length > 0 && (
                 <ChainOfThoughtPanel
                   evidence={msg.evidence}
@@ -1455,6 +1487,20 @@ function EvidencePanel({ evidence, toolCallCount, latencyMs }: {
       )}
     </div>
   );
+}
+
+function parseChoiceOptions(text: string): Array<{ label: string; value: string }> | null {
+  const lines = text.split('\n');
+  const choices: Array<{ label: string; value: string }> = [];
+
+  for (const line of lines) {
+    const match = line.match(/^\s*([A-C])\)\s+(.+)$/);
+    if (match) {
+      choices.push({ label: match[2].trim(), value: match[1] });
+    }
+  }
+
+  return choices.length >= 2 ? choices : null;
 }
 
 function getSuggestions(scope?: ChatScope): string[] {
