@@ -133,6 +133,8 @@ router.post('/:workspaceId/editable-fields',
         return;
       }
 
+      const normalizedFieldType = String(field_type).toLowerCase().trim();
+
       // Check for duplicate
       const existing = await query(
         'SELECT id FROM editable_deal_fields WHERE workspace_id = $1 AND field_name = $2',
@@ -163,7 +165,7 @@ router.post('/:workspaceId/editable-fields',
           workspaceId,
           field_name,
           field_label,
-          field_type,
+          normalizedFieldType,
           crm_property_name,
           crm_property_label || null,
           is_required || false,
@@ -218,7 +220,10 @@ router.patch('/:workspaceId/editable-fields/:fieldId',
           paramIndex++;
         } else if (allowedFields.includes(key)) {
           setClause.push(`${key} = $${paramIndex}`);
-          values.push(value);
+          const normalizedValue = key === 'field_type' && value !== null && value !== undefined
+            ? String(value).toLowerCase().trim()
+            : value;
+          values.push(normalizedValue);
           paramIndex++;
         }
       }

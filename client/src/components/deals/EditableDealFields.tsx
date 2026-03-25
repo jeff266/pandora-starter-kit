@@ -529,7 +529,13 @@ function formatFieldValue(value: any, type: string, options?: PicklistOption[] |
     return '';
   }
 
-  switch (type) {
+  const normalizedType = type ? type.toLowerCase().trim() : type;
+  const resolvedType =
+    normalizedType === 'double' || normalizedType === 'currency' || normalizedType === 'int'
+      ? 'number'
+      : normalizedType;
+
+  switch (resolvedType) {
     case 'picklist': {
       if (options && options.length > 0) {
         const match = options.find((o) => o.value === String(value));
