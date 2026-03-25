@@ -1122,18 +1122,12 @@ const aggregateStaleDeals: ToolDefinition = {
       });
       const staleDays = params.staleDays || staleThreshold.warning;
       const topN = params.topN || 20;
-      const [deals, nameMap] = await Promise.all([
-        dealTools.getStaleDeals(context.workspaceId, staleDays).catch(err => {
-          const msg = err instanceof Error ? err.message : String(err);
-          console.warn('[aggregateStaleDeals] getStaleDeals failed, returning empty:', msg);
-          _errors.push({ source: 'getStaleDeals', error: msg });
-          return [];
-        }),
-        resolveOwnerNames(context.workspaceId).catch(err => {
-          _errors.push({ source: 'resolveOwnerNames', error: err instanceof Error ? err.message : String(err) });
-          return new Map<string, string>();
-        }),
-      ]);
+      // Core deal data is required — rethrow so runtime marks this step failed
+      const deals = await dealTools.getStaleDeals(context.workspaceId, staleDays);
+      const nameMap = await resolveOwnerNames(context.workspaceId).catch(err => {
+        _errors.push({ source: 'resolveOwnerNames', error: err instanceof Error ? err.message : String(err) });
+        return new Map<string, string>();
+      });
 
       // Load ICP scores for stale deals (if available)
       const dealIds = deals.map((d: any) => d.id);
@@ -1727,21 +1721,12 @@ const dealThreadingAnalysisTool: ToolDefinition = {
   execute: async (params, context) => {
     return safeExecute('dealThreadingAnalysis', async () => {
       const _errors: Array<{ source: string; error: string }> = [];
-      const [threadingData, nameMap] = await Promise.all([
-        dealThreadingAnalysis(context.workspaceId).catch(err => {
-          const msg = err instanceof Error ? err.message : String(err);
-          console.warn('[dealThreadingAnalysis] core analysis failed, returning empty:', msg);
-          _errors.push({ source: 'dealThreadingAnalysis', error: msg });
-          return {
-            summary: { totalOpenDeals: 0, singleThreaded: { count: 0, totalValue: 0 }, multiThreaded: { count: 0, totalValue: 0 } },
-            byStage: {}, byOwner: {}, criticalDeals: [], warningDeals: [], wellThreadedDeals: [],
-          };
-        }),
-        resolveOwnerNames(context.workspaceId).catch(err => {
-          _errors.push({ source: 'resolveOwnerNames', error: err instanceof Error ? err.message : String(err) });
-          return new Map<string, string>();
-        }),
-      ]);
+      // Core analysis is required — rethrow so runtime marks this step failed
+      const threadingData = await dealThreadingAnalysis(context.workspaceId);
+      const nameMap = await resolveOwnerNames(context.workspaceId).catch(err => {
+        _errors.push({ source: 'resolveOwnerNames', error: err instanceof Error ? err.message : String(err) });
+        return new Map<string, string>();
+      });
 
       // Map owner IDs to names in all sections
       const mapOwner = (owner: string) => resolveOwnerName(owner, nameMap);
@@ -1854,24 +1839,12 @@ const dataQualityAuditTool: ToolDefinition = {
   execute: async (params, context) => {
     return safeExecute('dataQualityAudit', async () => {
       const _errors: Array<{ source: string; error: string }> = [];
-      const [qualityData, nameMap] = await Promise.all([
-        dataQualityAudit(context.workspaceId).catch(err => {
-          const msg = err instanceof Error ? err.message : String(err);
-          console.warn('[dataQualityAudit] core audit failed, returning empty:', msg);
-          _errors.push({ source: 'dataQualityAudit', error: msg });
-          return {
-            overallGrade: 'unknown' as any,
-            overallScore: 0,
-            byEntity: { deals: { score: 0, fieldCompleteness: [], criticalIssues: 0 }, contacts: { score: 0, fieldCompleteness: [], criticalIssues: 0 }, accounts: { score: 0, fieldCompleteness: [], criticalIssues: 0 } },
-            ownerBreakdown: [],
-            worstOffenders: [],
-          };
-        }),
-        resolveOwnerNames(context.workspaceId).catch(err => {
-          _errors.push({ source: 'resolveOwnerNames', error: err instanceof Error ? err.message : String(err) });
-          return new Map<string, string>();
-        }),
-      ]);
+      // Core audit is required — rethrow so runtime marks this step failed
+      const qualityData = await dataQualityAudit(context.workspaceId);
+      const nameMap = await resolveOwnerNames(context.workspaceId).catch(err => {
+        _errors.push({ source: 'resolveOwnerNames', error: err instanceof Error ? err.message : String(err) });
+        return new Map<string, string>();
+      });
 
       // Map owner IDs to names in owner breakdown
       const mapOwner = (owner: string) => resolveOwnerName(owner, nameMap);

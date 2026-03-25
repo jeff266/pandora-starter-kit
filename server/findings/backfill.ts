@@ -17,6 +17,7 @@
  */
 
 import { query } from '../db.js';
+import { insertFindingsBatch, type FindingRow } from './extractor.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function isUUID(v: unknown): v is string {
@@ -57,45 +58,22 @@ interface BackfillFinding {
 async function insertBackfillFindings(findings: BackfillFinding[]): Promise<number> {
   if (findings.length === 0) return 0;
 
-  const BATCH_SIZE = 100;
-  let inserted = 0;
+  // Convert BackfillFinding → FindingRow and delegate to shared insertion primitive.
+  // ON CONFLICT DO NOTHING keeps this idempotent without the resolve-existing side effect.
+  const rows: FindingRow[] = findings.map(f => ({
+    workspace_id: f.workspace_id,
+    skill_run_id: f.skill_run_id,
+    skill_id: f.skill_id,
+    severity: f.severity,
+    category: f.category,
+    message: f.message,
+    deal_id: f.deal_id ?? undefined,
+    owner_email: undefined,
+    metadata: f.metadata,
+  }));
 
-  for (let i = 0; i < findings.length; i += BATCH_SIZE) {
-    const batch = findings.slice(i, i + BATCH_SIZE);
-    const values: unknown[] = [];
-    const placeholders: string[] = [];
-
-    for (let j = 0; j < batch.length; j++) {
-      const f = batch[j];
-      const base = j * 9;
-      placeholders.push(
-        `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, $${base + 9}::jsonb, NOW())`
-      );
-      values.push(
-        f.workspace_id,
-        f.skill_run_id,
-        f.skill_id,
-        f.severity,
-        f.category,
-        f.message,
-        f.deal_id,
-        null,
-        JSON.stringify(f.metadata),
-      );
-    }
-
-    const result = await query<{ id: string }>(
-      `INSERT INTO findings
-         (workspace_id, skill_run_id, skill_id, severity, category, message, deal_id, owner_email, metadata, found_at)
-       VALUES ${placeholders.join(', ')}
-       ON CONFLICT DO NOTHING
-       RETURNING id`,
-      values,
-    );
-    inserted += result.rows.length;
-  }
-
-  return inserted;
+  const inserted = await insertFindingsBatch(rows, { onConflict: 'nothing' });
+  return inserted.length;
 }
 
 /**

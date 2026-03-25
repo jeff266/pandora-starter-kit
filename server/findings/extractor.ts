@@ -605,19 +605,21 @@ function extractGenericFallback(
   return findings;
 }
 
-export async function insertFindings(findings: FindingRow[]): Promise<FindingRow[]> {
+/**
+ * Shared batch insert primitive used by both insertFindings and the startup backfill.
+ * Inserts findings rows without the resolve-existing-findings side effect.
+ * Callers may pass onConflict='nothing' for idempotent upserts (backfill) or
+ * 'replace' / no conflict clause for regular skill runs.
+ */
+export async function insertFindingsBatch(
+  findings: FindingRow[],
+  options: { onConflict?: 'nothing' } = {}
+): Promise<FindingRow[]> {
   if (!findings || findings.length === 0) return [];
-
-  const workspaceId = findings[0].workspace_id;
-  const skillId = findings[0].skill_id;
-
-  await query(
-    `UPDATE findings SET resolved_at = now() WHERE workspace_id = $1 AND skill_id = $2 AND resolved_at IS NULL`,
-    [workspaceId, skillId],
-  );
 
   const BATCH_SIZE = 100;
   const insertedFindings: FindingRow[] = [];
+  const conflictClause = options.onConflict === 'nothing' ? ' ON CONFLICT DO NOTHING' : '';
 
   for (let i = 0; i < findings.length; i += BATCH_SIZE) {
     const batch = findings.slice(i, i + BATCH_SIZE);
@@ -650,7 +652,7 @@ export async function insertFindings(findings: FindingRow[]): Promise<FindingRow
 
     const result = await query<{ id: string }>(
       `INSERT INTO findings (workspace_id, skill_run_id, skill_id, severity, category, message, deal_id, owner_email, metadata, assumptions)
-       VALUES ${placeholders.join(', ')}
+       VALUES ${placeholders.join(', ')}${conflictClause}
        RETURNING id`,
       values,
     );
@@ -659,6 +661,22 @@ export async function insertFindings(findings: FindingRow[]): Promise<FindingRow
       insertedFindings.push({ ...batch[j], id: result.rows[j].id } as FindingRow);
     }
   }
+
+  return insertedFindings;
+}
+
+export async function insertFindings(findings: FindingRow[]): Promise<FindingRow[]> {
+  if (!findings || findings.length === 0) return [];
+
+  const workspaceId = findings[0].workspace_id;
+  const skillId = findings[0].skill_id;
+
+  await query(
+    `UPDATE findings SET resolved_at = now() WHERE workspace_id = $1 AND skill_id = $2 AND resolved_at IS NULL`,
+    [workspaceId, skillId],
+  );
+
+  const insertedFindings = await insertFindingsBatch(findings);
 
   // Trigger workflow rules for each finding (fire-and-forget)
   for (const finding of insertedFindings) {
