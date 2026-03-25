@@ -60,7 +60,7 @@ const SKILL_PATTERNS: Array<{ pattern: RegExp; skill_id: string; title: string; 
     description: 'Audit missing or inconsistent CRM fields',
   },
   {
-    pattern: /deal.?scor|rfm.?scor|scoring.?model|deal.*rfm|run.*deal.*scoring/i,
+    pattern: /deal.?scor|rfm.?scor|scoring.?model|deal.*rfm|run.*deal.*scoring|deal.*score.*(?:null|missing|empty|not\s+computed|never\s+run|not\s+run|uniform|all\s+same)|score.*deal.*(?:null|missing|not\s+computed)/i,
     skill_id: 'deal-scoring-model',
     title: 'Run Deal Scoring',
     description: 'Score all open deals by fit, engagement, and pipeline health',
