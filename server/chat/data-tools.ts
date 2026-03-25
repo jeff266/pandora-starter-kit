@@ -4849,7 +4849,8 @@ async function queryGradeDiagnostic(workspaceId: string, _params: Record<string,
        WHERE workspace_id = $1 AND resolved_at IS NULL AND deal_id IS NOT NULL`,
       [workspaceId]
     ),
-    // Which skills have completed runs, and when
+    // Latest completed/success run per skill (ignores failed runs so we don't
+    // mis-diagnose "never ran" when a prior run succeeded but the latest failed)
     query(
       `SELECT DISTINCT ON (skill_id)
               skill_id,
@@ -4857,6 +4858,7 @@ async function queryGradeDiagnostic(workspaceId: string, _params: Record<string,
               completed_at
        FROM skill_runs
        WHERE workspace_id = $1
+         AND status IN ('completed', 'success')
        ORDER BY skill_id, completed_at DESC`,
       [workspaceId]
     ),
@@ -4874,18 +4876,14 @@ async function queryGradeDiagnostic(workspaceId: string, _params: Record<string,
   const totalFindings = (dealsWithFindings.rows[0] as any)?.total_findings ?? 0;
   const dealsAffected = (dealsWithFindings.rows[0] as any)?.deals_with_findings ?? 0;
 
-  const completedSkills = new Set(
-    (skillRunsResult.rows as any[])
-      .filter(r => ['completed', 'success'].includes(r.status))
-      .map(r => r.skill_id)
+  const completedSkillMap = new Map<string, string | null>(
+    (skillRunsResult.rows as any[]).map(r => [r.skill_id, r.completed_at ?? null])
   );
 
   const gradeSkillStatus = EXPECTED_GRADE_SKILLS.map(skillId => ({
     skill_id: skillId,
-    has_completed_run: completedSkills.has(skillId),
-    last_completed_at: (skillRunsResult.rows as any[]).find(
-      r => r.skill_id === skillId && ['completed', 'success'].includes(r.status)
-    )?.completed_at ?? null,
+    has_completed_run: completedSkillMap.has(skillId),
+    last_completed_at: completedSkillMap.get(skillId) ?? null,
   }));
 
   const missingGradeSkills = gradeSkillStatus.filter(s => !s.has_completed_run).map(s => s.skill_id);
