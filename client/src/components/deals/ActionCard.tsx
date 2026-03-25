@@ -84,6 +84,16 @@ const INTERNAL_TYPE_CONFIG: Record<string, InternalTypeConfig> = {
     descriptionFn: (p, title) =>
       p?.dimension_key ? `Save new threshold for ${p.dimension_key}` : title,
   },
+  run_skill: {
+    icon: '🚀',
+    label: 'Run Pandora Skill',
+    buttonLabel: 'Run now ▶',
+    descriptionFn: (p, title) => {
+      if (p?.reason) return String(p.reason).slice(0, 100) + (String(p.reason).length > 100 ? '…' : '');
+      if (p?.skill_id) return `Trigger ${String(p.skill_id).replace(/-/g, ' ')}`;
+      return title;
+    },
+  },
 };
 
 const TEAL_PRIMARY = '#0d9488';

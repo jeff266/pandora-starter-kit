@@ -89,6 +89,18 @@ const SKILL_PATTERNS: Array<{ pattern: RegExp; skill_id: string; title: string; 
     title: 'Run MEDDIC Coverage',
     description: 'Score qualification completeness across open deals',
   },
+  {
+    pattern: /rfm.*(?:null|missing|not.*run|never.*run|all.*same|all.*A|all.*graded|no.*grade)|deal.*grade.*(?:null|missing|empty|not\s+computed)|grades.*(?:missing|empty|null|uniform|all\s*A)|all deals.*graded.*A|deal.*health.*(?:null|missing|not.*scored)/i,
+    skill_id: 'deal-rfm-scoring',
+    title: 'Run Deal RFM Scoring',
+    description: 'Compute risk grades (A–F) for all deals based on recency, frequency, and deal value',
+  },
+  {
+    pattern: /icp.*(?:score|fit|tier).*(?:null|missing|not.*run|never.*run|same|uniform)|fit.*score.*(?:missing|empty|not\s+computed)|icp.*(?:hasn.t|has not|never).*run/i,
+    skill_id: 'icp-discovery',
+    title: 'Run ICP Discovery',
+    description: 'Score all accounts against your Ideal Customer Profile to populate ICP fit tiers',
+  },
 ];
 
 const HITL_NOTE = 'Requires approval — protected field';

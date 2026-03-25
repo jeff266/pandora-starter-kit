@@ -771,6 +771,7 @@ router.post('/:workspaceId/suggested-actions/sync', async (req: Request, res: Re
       'update_workspace_knowledge',
       'confirm_metric_definition',
       'update_calibration',
+      'run_skill',
     ];
 
     const crmAction: 'task_create' | 'field_write' | null =

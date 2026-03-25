@@ -1,12 +1,15 @@
 import { query } from '../db.js';
 import { createLogger } from '../utils/logger.js';
 import { ActionExecutor } from './action-executor.js';
+import { getSkillRuntime } from '../skills/runtime.js';
+import { getSkillRegistry } from '../skills/registry.js';
 
 const INTERNAL_ACTION_TYPES = [
   'update_data_dictionary',
   'update_workspace_knowledge',
   'confirm_metric_definition',
   'update_calibration',
+  'run_skill',
 ] as const;
 
 type InternalActionType = typeof INTERNAL_ACTION_TYPES[number];
@@ -217,6 +220,43 @@ export async function approveInternalAction(
       });
 
       return { success: true, message: `Updated ${dimension_key} definition` };
+    }
+
+    case 'run_skill': {
+      const { skill_id } = payload as { skill_id?: string; reason?: string };
+      if (!skill_id) return { success: false, message: 'Missing skill_id in payload' };
+
+      const beforeResult = await query(
+        `SELECT skill_id, status, created_at, completed_at, error
+         FROM skill_runs
+         WHERE workspace_id = $1 AND skill_id = $2
+         ORDER BY created_at DESC LIMIT 1`,
+        [workspaceId, skill_id]
+      );
+      const beforeSnap = beforeResult.rows[0] ?? null;
+
+      const registry = getSkillRegistry();
+      const skillDef = registry.get(skill_id);
+      if (!skillDef) return { success: false, message: `Unknown skill: ${skill_id}` };
+
+      const runtime = getSkillRuntime();
+      runtime.executeSkill(skillDef, workspaceId, { trigger: 'action_card' })
+        .catch((err: Error) =>
+          console.error(`[run_skill] Execution error for ${skill_id}:`, err.message)
+        );
+
+      await writeChangeLog({
+        workspaceId,
+        tableName: 'skill_runs',
+        recordKey: skill_id,
+        actionId: logActionId,
+        changedBy: logChangedBy,
+        changeType: 'write',
+        before: beforeSnap,
+        after: null,
+      });
+
+      return { success: true, message: `Triggered ${skill_id} — results available in ~60 seconds` };
     }
 
     default:

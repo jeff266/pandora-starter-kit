@@ -89,6 +89,14 @@ router.post(
       const logRow = logResult.rows[0];
       const { table_name, record_key, before_snapshot, after_snapshot } = logRow;
 
+      // run_skill entries are not revertable — a triggered skill cannot be un-triggered
+      if (table_name === 'skill_runs') {
+        return res.status(400).json({
+          success: false,
+          error: 'Skill runs cannot be reverted. A triggered skill cannot be un-triggered.',
+        });
+      }
+
       // Read current state (this becomes the new "before" in the revert log row)
       const currentSnap = await readCurrentSnapshot(workspaceId, table_name, record_key);
 

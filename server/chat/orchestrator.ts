@@ -1962,6 +1962,35 @@ DO NOT offer these actions for:
 - Simple lookups with no refinement
 - Conversations where no existing definition was referenced
 - Cases where you're uncertain about the result
+
+OFFER run_skill when ALL of:
+- Your analysis has identified that a specific Pandora skill has never run for this workspace
+  (you detected missing or uniformly-defaulted scores, empty grade columns, or absent skill output)
+- The missing skill run directly explains the data quality problem being discussed
+- You know the exact skill_id to recommend
+
+IMPORTANT — one card per skill:
+Surface one separate run_skill card per skill. Do NOT batch multiple skills into one card.
+
+Format the suggestion as:
+"[Skill name] hasn't run yet — that's why [explanation]. Want me to trigger it now?"
+
+Payload format (include in your response JSON):
+{
+  "type": "run_skill",
+  "title": "Run [Skill Name]",
+  "action_payload": {
+    "skill_id": "deal-rfm-scoring",
+    "reason": "Deal grading fields are empty — this skill writes risk scores to your deals"
+  }
+}
+
+Known skill_ids and when to recommend them:
+- deal-rfm-scoring: when deal risk scores or grades are null/missing/all showing the same default value
+- icp-discovery: when ICP fit scores are missing or all accounts/deals show the same tier
+- deal-scoring-model: when deal scores haven't been computed or appear uniform
+- pipeline-waterfall: when waterfall analysis is unavailable or outdated
+- pipeline-hygiene: when data quality issues are identified in deal fields
 `;
 
   return `${base}${contextSection}${caveatSection}${workspaceConfigBlock}${terminologyBlock}${knowledgeBlock}${methodologyRule}${internalActionDetection}
