@@ -1,0 +1,281 @@
+```
+# Actions Engine: Add run_skill Internal Action Type
+
+## Context
+
+The internal action type infrastructure shipped in
+Task #60. Four types exist: update_data_dictionary,
+update_workspace_knowledge, confirm_metric_definition,
+update_calibration.
+
+Add a fifth: run_skill. Allows Ask Pandora to offer
+to trigger a skill directly from an action card
+instead of telling the user to navigate to the
+Skills tab manually.
+
+Observed trigger case (GrowthBook):
+User asks "why are all deals graded A?" → Pandora
+diagnoses deal-rfm-scoring, icp-discovery, and
+deal-scoring-model have never run → currently ends
+with "go to Skills tab and trigger these manually"
+→ should end with three run_skill action cards.
+
+## Before Starting
+
+1. Show the current approveInternalAction() function
+   in full. Show all four existing cases and the
+   routing branch that directs to it.
+
+2. Find the manual skill trigger path — how does
+   the Skills tab trigger a skill run? Is there a
+   triggerSkill() function, a POST endpoint, or
+   a direct insertion into a job queue? Show it.
+
+3. Show the skill_runs table schema:
+   SELECT column_name, data_type
+   FROM information_schema.columns
+   WHERE table_name = 'skill_runs'
+   ORDER BY ordinal_position;
+
+4. Show what skills exist for the workspace:
+   SELECT skill_id, last_run_at, status
+   FROM skill_runs
+   WHERE workspace_id = (
+     SELECT id FROM workspaces
+     WHERE name ILIKE '%growthbook%' LIMIT 1
+   )
+   ORDER BY last_run_at DESC NULLS LAST;
+
+   Also check if there's a skills registry or
+   skill definitions table:
+   SELECT table_name FROM information_schema.tables
+   WHERE table_schema = 'public'
+     AND table_name ILIKE '%skill%';
+
+Report findings then build.
+
+---
+
+## Step 1 — Register run_skill action type
+
+File: wherever action types are registered
+(action-extractor.ts or equivalent)
+
+Add 'run_skill' to the internal action types list:
+
+```typescript
+const INTERNAL_ACTION_TYPES = [
+  'update_data_dictionary',
+  'update_workspace_knowledge',
+  'confirm_metric_definition',
+  'update_calibration',
+  'run_skill',               // NEW
+]
+```
+
+Action payload shape:
+
+```typescript
+interface RunSkillPayload {
+  skill_id:    string   // e.g. 'deal-rfm-scoring'
+  reason:      string   // why Pandora is recommending this
+  priority?:   'high' | 'normal'  // default: 'normal'
+}
+```
+
+---
+
+## Step 2 — Add run_skill to approveInternalAction()
+
+Add to the switch statement in approveInternalAction():
+
+```typescript
+case 'run_skill': {
+  const { skill_id, reason } = action.payload as RunSkillPayload
+
+  // Read before snapshot
+  const beforeResult = await db.query(`
+    SELECT skill_id, status, last_run_at,
+           completed_at, error_message
+    FROM skill_runs
+    WHERE workspace_id = $1
+      AND skill_id = $2
+    ORDER BY created_at DESC
+    LIMIT 1
+  `, [workspaceId, skill_id])
+
+  const beforeSnapshot = beforeResult.rows[0] ?? null
+
+  // Trigger the skill using the same path as
+  // the manual trigger from the Skills tab.
+  // Use whatever function/endpoint was found
+  // in the pre-read above.
+  // This should insert a new skill_runs row
+  // with status = 'pending' or 'running'.
+
+  await triggerSkill(workspaceId, skill_id)
+  // OR: equivalent direct insertion if no
+  // triggerSkill function exists:
+  // await db.query(`
+  //   INSERT INTO skill_runs
+  //     (workspace_id, skill_id, status, created_at)
+  //   VALUES ($1, $2, 'pending', NOW())
+  // `, [workspaceId, skill_id])
+
+  // Read after snapshot
+  const afterResult = await db.query(`
+    SELECT skill_id, status, created_at
+    FROM skill_runs
+    WHERE workspace_id = $1
+      AND skill_id = $2
+    ORDER BY created_at DESC
+    LIMIT 1
+  `, [workspaceId, skill_id])
+
+  const afterSnapshot = afterResult.rows[0] ?? null
+
+  // Log to knowledge_change_log
+  await db.query(`
+    INSERT INTO knowledge_change_log (
+      workspace_id,
+      target_table,
+      record_key,
+      before_snapshot,
+      after_snapshot,
+      operation,
+      approved_by,
+      action_id,
+      created_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+  `, [
+    workspaceId,
+    'skill_runs',
+    skill_id,
+    beforeSnapshot ? JSON.stringify(beforeSnapshot) : null,
+    afterSnapshot ? JSON.stringify(afterSnapshot) : null,
+    'write',
+    action.approved_by ?? null,
+    action.id ?? null,
+  ])
+
+  return {
+    success: true,
+    message: `Triggered ${skill_id} — results available in ~60 seconds`,
+  }
+}
+```
+
+Note on revert: run_skill is NOT revertable.
+A triggered skill run can't be un-triggered.
+The knowledge_change_log entry is for audit
+purposes only. Do not add revert handling
+for this action type.
+
+---
+
+## Step 3 — Detection in synthesis prompt
+
+File: server/chat/orchestrator.ts
+In buildAdvisorySystemPrompt() under
+INTERNAL ACTION DETECTION, add:
+
+```
+OFFER run_skill when ALL of:
+- Your analysis reveals a skill has never run
+  (no rows in skill_runs for that skill_id)
+  OR last ran more than 7 days ago
+- The missing skill run directly explains the
+  data quality issue being discussed
+- You know the specific skill_id that should run
+
+IMPORTANT — one card per skill:
+If multiple skills need to run, surface one
+separate run_skill action card for each.
+Do NOT batch them into a single card.
+
+Payload format:
+{
+  "action_type": "run_skill",
+  "payload": {
+    "skill_id": "deal-rfm-scoring",
+    "reason": "Deal grading fields are empty — this skill writes risk scores to your deals"
+  }
+}
+
+Known skill_ids and when to recommend them:
+- deal-rfm-scoring: when deal risk scores or
+  grades are missing or stale
+- icp-discovery: when ICP fit scores are
+  missing or all deals show the same grade
+- deal-scoring-model: when deal scores haven't
+  been computed or appear uniform
+- pipeline-waterfall: when waterfall analysis
+  is unavailable or outdated
+- pipeline-hygiene: when data quality issues
+  are identified in deal fields
+```
+
+---
+
+## Step 4 — Revert guard
+
+run_skill should NOT appear as revertable.
+In the knowledge_change_log or wherever
+the revert endpoint checks eligibility,
+ensure run_skill entries cannot be reverted:
+
+```typescript
+// In the revert endpoint:
+if (changeLogEntry.target_table === 'skill_runs') {
+  return {
+    success: false,
+    message: 'Skill runs cannot be reverted. ' +
+             'A triggered skill cannot be un-triggered.'
+  }
+}
+```
+
+---
+
+## Acceptance Criteria
+
+1. 'run_skill' added to INTERNAL_ACTION_TYPES array
+2. approveInternalAction() handles run_skill case
+3. Skill is triggered using the same path as
+   manual trigger from Skills tab
+4. knowledge_change_log row inserted with
+   target_table='skill_runs', record_key=skill_id
+5. Before snapshot is null when skill has never run
+6. Return message includes ~60 second estimate
+7. Synthesis prompt includes run_skill detection
+8. Asking "why are all deals graded A?" surfaces
+   run_skill action cards for the relevant skills
+9. Revert endpoint rejects run_skill change log
+   entries with a clear message
+10. Existing four internal action types unchanged
+11. Zero TypeScript errors
+
+## Verification
+
+After building, test against GrowthBook workspace:
+
+Ask "why are all deals graded A and no calls
+are linked?" in Ask Pandora on GrowthBook.
+
+Expected: response includes 2-3 run_skill
+action cards for the unrun scoring skills.
+Clicking "Run now" on one triggers the skill.
+
+Check:
+SELECT skill_id, status, created_at
+FROM skill_runs
+WHERE workspace_id = (
+  SELECT id FROM workspaces
+  WHERE name ILIKE '%growthbook%' LIMIT 1
+)
+ORDER BY created_at DESC
+LIMIT 5;
+
+Should show a new 'pending' or 'running' row
+for the triggered skill.
+```
