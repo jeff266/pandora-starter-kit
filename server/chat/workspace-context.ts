@@ -24,6 +24,43 @@ export interface WorkspaceContext {
   top_objections: string[] | null;
   has_conversation_signals: boolean;
   has_icp_profile: boolean;
+  // NEW: Targets and team roster
+  current_quarter_target: number | null;
+  active_targets: ActiveTarget[];
+  sales_reps: SalesRep[];
+  confirmed_dimensions: ConfirmedDimension[];
+  workspace_knowledge: WorkspaceKnowledgeItem[];
+}
+
+export interface ActiveTarget {
+  period_label: string;
+  target_amount: number;
+  pipeline: string | null;
+  target_type: string;
+  period_start: string;
+  period_end: string;
+}
+
+export interface SalesRep {
+  name: string;
+  email: string;
+  role: string;
+  manager_email: string | null;
+}
+
+export interface ConfirmedDimension {
+  dimension_key: string;
+  label: string;
+  filter_definition: any;
+  description: string | null;
+}
+
+export interface WorkspaceKnowledgeItem {
+  key:        string;
+  value:      string;
+  source:     string;
+  confidence: number;
+  used_count: number;
 }
 
 // 15-minute in-memory cache
@@ -43,13 +80,24 @@ export async function getWorkspaceContext(workspaceId: string): Promise<Workspac
   }
 
   try {
-    const [meta, config, dealMetrics, icpProfile, signals] = await Promise.all([
+    const [meta, config, dealMetrics, icpProfile, signals, activeTargets, salesReps, confirmedDimensions, workspaceKnowledge] = await Promise.all([
       loadWorkspaceMeta(workspaceId),
       loadWorkspaceConfig(workspaceId),
       computeDealMetrics(workspaceId),
       loadICPProfile(workspaceId),
       loadTopSignals(workspaceId),
+      loadActiveTargets(workspaceId),
+      loadSalesReps(workspaceId),
+      loadConfirmedDimensions(workspaceId),
+      loadWorkspaceKnowledge(workspaceId),
     ]);
+
+    // Find current quarter target
+    const now = new Date();
+    const currentTarget = activeTargets.find(t =>
+      new Date(t.period_start) <= now &&
+      new Date(t.period_end) >= now
+    );
 
     const context: WorkspaceContext = {
       workspace_name: meta.name,
@@ -68,6 +116,11 @@ export async function getWorkspaceContext(workspaceId: string): Promise<Workspac
       top_objections: signals.top_objections,
       has_conversation_signals: signals.has_signals,
       has_icp_profile: icpProfile.has_profile,
+      current_quarter_target: currentTarget?.target_amount ?? null,
+      active_targets: activeTargets,
+      sales_reps: salesReps,
+      confirmed_dimensions: confirmedDimensions,
+      workspace_knowledge: workspaceKnowledge,
     };
 
     // Cache for 15 minutes
@@ -311,5 +364,154 @@ async function loadTopSignals(workspaceId: string): Promise<{
   } catch (err) {
     // Table might not exist or no signals extracted yet
     return { top_competitors: [], top_objections: [], has_signals: false };
+  }
+}
+
+// ============================================================================
+// Query 6: Active Targets
+// ============================================================================
+
+async function loadActiveTargets(workspaceId: string): Promise<ActiveTarget[]> {
+  try {
+    // Find the current quarter and next quarter targets
+    // "Current quarter" = period containing today's date
+    const result = await query<{
+      period_label: string;
+      target_amount: string;
+      pipeline: string | null;
+      target_type: string;
+      period_start: string;
+      period_end: string;
+    }>(
+      `SELECT
+         period_label,
+         target_amount,
+         pipeline,
+         target_type,
+         period_start,
+         period_end
+       FROM targets
+       WHERE workspace_id = $1
+         AND period_end >= NOW()
+       ORDER BY period_start ASC
+       LIMIT 4`,
+      [workspaceId]
+    );
+
+    return result.rows.map(row => ({
+      period_label: row.period_label,
+      target_amount: parseFloat(row.target_amount),
+      pipeline: row.pipeline,
+      target_type: row.target_type,
+      period_start: row.period_start,
+      period_end: row.period_end,
+    }));
+  } catch (err) {
+    // Table might not exist yet
+    return [];
+  }
+}
+
+// ============================================================================
+// Query 7: Sales Reps
+// ============================================================================
+
+async function loadSalesReps(workspaceId: string): Promise<SalesRep[]> {
+  try {
+    const result = await query<{
+      name: string;
+      email: string;
+      role: string;
+      manager_email: string | null;
+    }>(
+      `SELECT name, email, role, manager_email
+       FROM sales_reps
+       WHERE workspace_id = $1
+       ORDER BY name ASC`,
+      [workspaceId]
+    );
+
+    return result.rows;
+  } catch (err) {
+    // Table might not exist yet
+    return [];
+  }
+}
+
+// ============================================================================
+// Query 8: Confirmed Dimensions
+// ============================================================================
+
+async function loadConfirmedDimensions(workspaceId: string): Promise<ConfirmedDimension[]> {
+  try {
+    const result = await query<{
+      dimension_key: string;
+      label: string;
+      filter_definition: any;
+      description: string | null;
+    }>(
+      `SELECT
+         dimension_key,
+         label,
+         filter_definition,
+         description
+       FROM business_dimensions
+       WHERE workspace_id = $1
+         AND is_active = TRUE
+       ORDER BY dimension_key ASC`,
+      [workspaceId]
+    );
+
+    return result.rows;
+  } catch (err) {
+    // Table might not exist yet
+    return [];
+  }
+}
+
+// ============================================================================
+// Query 9: Workspace Knowledge
+// ============================================================================
+
+async function loadWorkspaceKnowledge(workspaceId: string): Promise<WorkspaceKnowledgeItem[]> {
+  try {
+    const result = await query<{
+      key: string;
+      value: string;
+      source: string;
+      confidence: string;
+      used_count: string;
+    }>(
+      `SELECT key, value, source, confidence, used_count
+       FROM workspace_knowledge
+       WHERE workspace_id = $1
+         AND confidence >= 0.6
+       ORDER BY used_count DESC, confidence DESC
+       LIMIT 10`,
+      [workspaceId]
+    );
+
+    // Update last_used_at for returned items
+    if (result.rows.length > 0) {
+      const keys = result.rows.map(r => r.key);
+      query(
+        `UPDATE workspace_knowledge
+         SET last_used_at = NOW()
+         WHERE workspace_id = $1
+           AND key = ANY($2::text[])`,
+        [workspaceId, keys]
+      ).catch(() => {});
+    }
+
+    return result.rows.map(row => ({
+      key: row.key,
+      value: row.value,
+      source: row.source,
+      confidence: parseFloat(row.confidence),
+      used_count: parseInt(row.used_count, 10),
+    }));
+  } catch (err) {
+    // Table might not exist yet
+    return [];
   }
 }

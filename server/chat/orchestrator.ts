@@ -28,6 +28,8 @@ import { createAnnotation, getActiveAnnotations } from '../feedback/annotations.
 import { randomUUID } from 'crypto';
 import { runPandoraAgent, buildConversationHistory } from './pandora-agent.js';
 import { classifyDeliberationMode } from './intent-classifier.js';
+import { extractWorkspaceKnowledge } from './workspace-knowledge.js';
+import { detectMetricAssertion, getComputedMetric, buildComparisonResponse } from './metric-assertion.js';
 import { runDeliberation, type DeliberationResult } from './deliberation-engine.js';
 import { logChatMessage } from '../lib/chat-logger.js';
 import { estimateTokens } from './token-estimator.js';
@@ -382,6 +384,33 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
       }
     } catch (err) {
       console.warn('[orchestrator] Failed to record correction:', err);
+    }
+  }
+
+  // ── Metric Assertion Detection & Comparison ────────────────────────────────────
+  // Check for metric assertions (e.g. "our win rate is 30%") before routing to PandoraAgent
+  if (!answer) {
+    const assertion = detectMetricAssertion(message);
+    if (assertion) {
+      const computed = await getComputedMetric(
+        assertion.metric_key, workspaceId
+      );
+
+      // Build comparison response — don't write anything yet
+      answer = buildComparisonResponse(assertion, computed);
+      routerDecision = 'metric_assertion_comparison';
+      dataStrategy = 'computed_comparison';
+
+      // If no computed value, store as asserted with low
+      // confidence in workspace_knowledge (not metric_definitions)
+      if (!computed) {
+        await extractWorkspaceKnowledge(
+          `${assertion.metric_key} is ${assertion.asserted_value}`,
+          workspaceId
+        ).catch(() => {});
+      }
+      // If computed exists, DON'T write anything yet.
+      // Wait for explicit user confirmation in the next turn.
     }
   }
 
@@ -1582,6 +1611,9 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
     entitiesMentioned.reps.push({ id: repEmail, name: repEmail });
   }
 
+  // Extract workspace knowledge from user message (non-blocking, fire and forget)
+  extractWorkspaceKnowledge(message, workspaceId).catch(() => {});
+
   return {
     answer,
     thread_id: threadId,
@@ -1765,6 +1797,62 @@ When recommending frameworks or structures, explain the reasoning behind each ch
     ? `\n\nData coverage notes:\n${caveats.map(c => `- ${c}`).join('\n')}`
     : '';
 
+  // Build workspace configuration section
+  const targetLines = workspaceContext.active_targets.length > 0
+    ? workspaceContext.active_targets.map(t =>
+        `  ${t.period_label}: ${(t.target_amount/1000).toFixed(0)}K (${t.target_type}${t.pipeline ? ` · ${t.pipeline}` : ''})`
+      ).join('\n')
+    : '  No targets configured';
+
+  const currentQTarget = workspaceContext.current_quarter_target
+    ? `${(workspaceContext.current_quarter_target/1000).toFixed(0)}K`
+    : 'not set';
+
+  const repLines = workspaceContext.sales_reps.length > 0
+    ? workspaceContext.sales_reps.map(r =>
+        `  ${r.name} (${r.role})${r.manager_email ? ` · reports to ${r.manager_email}` : ''}`
+      ).join('\n')
+    : '  No sales roster configured';
+
+  const dimLines = workspaceContext.confirmed_dimensions.length > 0
+    ? workspaceContext.confirmed_dimensions.map(d =>
+        `  ${d.label} (${d.dimension_key})${d.description ? `: ${d.description}` : ''}`
+      ).join('\n')
+    : '  No confirmed dimensions';
+
+  const workspaceConfigBlock = `
+
+WORKSPACE CONFIGURATION:
+
+Current quarter target: ${currentQTarget}
+
+Quota targets:
+${targetLines}
+
+Sales team:
+${repLines}
+
+Confirmed business definitions:
+${dimLines}
+`;
+
+  const knowledgeLines = workspaceContext.workspace_knowledge.length > 0
+    ? workspaceContext.workspace_knowledge.map(k => {
+        const conf = k.confidence >= 0.9 ? 'high'
+                   : k.confidence >= 0.7 ? 'medium'
+                   : 'low';
+        return `  [${conf}] ${k.value}`;
+      }).join('\n')
+    : '  No workspace-specific knowledge stored yet';
+
+  const knowledgeBlock = `
+
+BUSINESS KNOWLEDGE (learned from conversations):
+${knowledgeLines}
+
+When using any item above with confidence "high", cite it: "Based on what you've told me about [topic]..."
+`;
+
   const methodologyRule = `
 
 METHODOLOGY COMPARISON RULE:
@@ -1776,7 +1864,7 @@ When a user's question involves coverage targets, pipeline requirements, or fore
   Format: ⚠️ [1-sentence callout] — then continue with main answer
 Never pick a methodology as definitively correct. Explain the mechanism. The footnote should help the user understand *why* the methods disagree, not which to blindly trust.`;
 
-  return `${base}${contextSection}${caveatSection}${methodologyRule}
+  return `${base}${contextSection}${caveatSection}${workspaceConfigBlock}${knowledgeBlock}${methodologyRule}
 
 Tailor your recommendations to this company's specific profile.
 For example, objection handling for a $150K ACV enterprise product looks very different
