@@ -220,7 +220,7 @@ export default function LinkDealModal({
                       {deal.name}
                     </div>
                     <div style={{ fontSize: 11, color: colors.textMuted }}>
-                      {deal.owner} · {deal.stage}
+                      {[deal.owner && !/^\d+$/.test(deal.owner) ? deal.owner : null, deal.stage].filter(Boolean).join(' · ')}
                     </div>
                   </div>
                   {deal.amount != null && (

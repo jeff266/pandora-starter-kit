@@ -1200,7 +1200,7 @@ export default function DealDetail() {
               )}
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: isMobile ? 8 : 16, marginTop: 8, fontSize: 12, color: colors.textMuted }}>
-              <span>Owner: {deal.owner_name ? anon.person(deal.owner_name) : deal.owner_email ? anon.email(deal.owner_email) : deal.owner ? anon.person(deal.owner) : '--'}</span>
+              <span>Owner: {deal.owner_name ? anon.person(deal.owner_name) : deal.owner_email ? anon.email(deal.owner_email) : deal.owner && !/^\d+$/.test(deal.owner) ? anon.person(deal.owner) : '--'}</span>
               <span>
                 Close: {deal.close_date ? formatDate(deal.close_date) : '--'}
                 {deal.close_date_suspect && (

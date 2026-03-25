@@ -127,18 +127,36 @@ async function getForecastConfig(workspaceId: string): Promise<ForecastConfig> {
   return { commit_threshold: 0.90, best_case_threshold: 0.60, forecasted_pipelines: null };
 }
 
-async function buildOwnerMap(client: HubSpotClient): Promise<Map<string, { name: string; email: string }>> {
+async function buildOwnerMap(client: HubSpotClient, workspaceId?: string): Promise<Map<string, { name: string; email: string }>> {
   const ownerMap = new Map<string, { name: string; email: string }>();
   try {
     const owners = await client.getOwners();
     for (const owner of owners) {
-      const name = `${owner.firstName} ${owner.lastName}`.trim();
-      const email = owner.email?.toLowerCase().trim();  // Normalize email
-      if (name && email) {
-        ownerMap.set(owner.id, { name, email });
+      const name = `${owner.firstName || ''} ${owner.lastName || ''}`.trim();
+      const email = owner.email?.toLowerCase().trim() ?? '';
+      // Include owner as long as they have a name OR an email — don't require both.
+      // Previously requiring both silently excluded owners with no email, causing raw
+      // numeric IDs to persist in the deals/contacts/accounts tables.
+      if (name || email) {
+        ownerMap.set(owner.id, { name: name || email, email });
       }
     }
     console.log(`[HubSpot Sync] Built owner map: ${ownerMap.size} owners`);
+
+    // Persist the resolved owner map into workspace settings so that display-time
+    // lookups in owner-resolver.ts have the same complete data without an extra API call.
+    if (workspaceId && ownerMap.size > 0) {
+      const serialized: Record<string, string> = {};
+      for (const [id, { name }] of ownerMap) {
+        serialized[id] = name;
+      }
+      query(
+        `UPDATE workspaces SET settings = jsonb_set(COALESCE(settings, '{}'::jsonb), '{owner_map}', $2::jsonb) WHERE id = $1`,
+        [workspaceId, JSON.stringify(serialized)]
+      ).catch(err => {
+        console.warn(`[HubSpot Sync] Failed to persist owner_map to workspace settings:`, err.message);
+      });
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
     console.warn(`[HubSpot Sync] Failed to fetch owners: ${msg}`);
@@ -652,7 +670,7 @@ export async function initialSync(
   try {
     const [dealOptions, ownerMap, forecastConfig] = await Promise.all([
       buildStageMaps(client, workspaceId),
-      buildOwnerMap(client),
+      buildOwnerMap(client, workspaceId),
       getForecastConfig(workspaceId),
     ]);
     dealOptions.ownerMap = ownerMap;
@@ -948,7 +966,7 @@ export async function incrementalSync(
 
   const [dealOptions, ownerMap, forecastConfig] = await Promise.all([
     buildStageMaps(hubspotClient, workspaceId),
-    buildOwnerMap(hubspotClient),
+    buildOwnerMap(hubspotClient, workspaceId),
     getForecastConfig(workspaceId),
   ]);
   dealOptions.ownerMap = ownerMap;
@@ -1231,6 +1249,49 @@ export async function backfillAssociations(
     errors,
     duration: Date.now() - startTime,
   };
+}
+
+/**
+ * Detects any HubSpot workspace with raw numeric owner IDs still in the database
+ * and resolves them using the current HubSpot owner list. Safe to call on startup.
+ */
+export async function backfillRawOwnerIdsForAllWorkspaces(): Promise<void> {
+  try {
+    // Find workspaces that have active HubSpot connections AND at least one deal/contact/account
+    // whose owner field looks like a raw numeric HubSpot owner ID (all digits).
+    const affected = await query<{ workspace_id: string }>(
+      `SELECT DISTINCT d.workspace_id
+       FROM deals d
+       INNER JOIN connections c ON c.workspace_id = d.workspace_id
+         AND c.connector_name = 'hubspot'
+         AND c.status IN ('active', 'healthy')
+       WHERE d.owner ~ '^[0-9]+$'
+       LIMIT 50`
+    );
+
+    if (affected.rows.length === 0) return;
+
+    console.log(`[OwnerBackfill] Found ${affected.rows.length} workspace(s) with raw numeric owner IDs — resolving...`);
+
+    const { fetchAndCacheOwners } = await import('../../utils/owner-resolver.js');
+
+    for (const { workspace_id } of affected.rows) {
+      try {
+        const ownerRecord = await fetchAndCacheOwners(workspace_id);
+        if (Object.keys(ownerRecord).length === 0) continue;
+
+        const ownerMap = new Map<string, string>(Object.entries(ownerRecord));
+        const backfilled = await backfillOwnerNames(workspace_id, ownerMap);
+        if (backfilled > 0) {
+          console.log(`[OwnerBackfill] Resolved ${backfilled} raw owner ID(s) in workspace ${workspace_id}`);
+        }
+      } catch (err: any) {
+        console.warn(`[OwnerBackfill] Failed for workspace ${workspace_id}:`, err.message);
+      }
+    }
+  } catch (err: any) {
+    console.warn('[OwnerBackfill] Startup backfill check failed (non-fatal):', err.message);
+  }
 }
 
 async function updateConnectionSyncStatus(

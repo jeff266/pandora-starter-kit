@@ -74,7 +74,7 @@ export default function DealsToWatchCard({ deals, highlightNames = [], briefType
                       {deal.name}
                     </div>
                     <div style={{ fontSize: 11, color: colors.textSecondary, marginTop: 2 }}>
-                      {deal.owner} · {deal.stage}
+                      {[deal.owner && !/^\d+$/.test(deal.owner) ? deal.owner : null, deal.stage].filter(Boolean).join(' · ')}
                       {isQuarterClose && deal.close_date && <span style={{ color: colors.yellow, marginLeft: 6 }}>closes {deal.close_date}</span>}
                     </div>
                   </div>

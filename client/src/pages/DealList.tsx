@@ -536,7 +536,7 @@ export default function DealList() {
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, fontSize: 12, color: colors.textSecondary }}>
                     <span style={{ fontFamily: fonts.mono, color: colors.text }}>{deal.amount ? formatCurrency(anon.amount(deal.amount)) : '—'}</span>
                     <span style={{ fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 4, background: colors.accentSoft, color: colors.accent, textTransform: 'capitalize' }}>{deal.stage?.replace(/_/g, ' ') || '—'}</span>
-                    <span>{anon.person(shortName(deal.owner)) || '—'}</span>
+                    <span>{deal.owner && !/^\d+$/.test(deal.owner) ? anon.person(shortName(deal.owner)) || '—' : '—'}</span>
                     <span style={{ color: pastDue ? colors.red : colors.textMuted }}>{deal.close_date ? formatDate(deal.close_date) : ''}</span>
                     {(totalFindings > 0 || (deal.action_count && deal.action_count > 0)) && (
                       <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -639,7 +639,7 @@ export default function DealList() {
                   </span>
                 </div>
                 <div style={{ fontSize: 12, color: colors.textSecondary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {anon.person(shortName(deal.owner)) || '—'}
+                  {deal.owner && !/^\d+$/.test(deal.owner) ? anon.person(shortName(deal.owner)) || '—' : '—'}
                 </div>
                 <div style={{ fontSize: 12, color: pastDue ? colors.red : colors.textMuted, fontWeight: pastDue ? 600 : 400 }}>
                   {deal.close_date ? formatDate(deal.close_date) : '—'}

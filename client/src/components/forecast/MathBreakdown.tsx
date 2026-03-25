@@ -159,7 +159,7 @@ export function MathBreakdown({ metric, value, context, deals, workspaceId, onCl
                     {deal.name}
                   </div>
                   <div style={{ fontSize: 10, color: colors.textMuted }}>
-                    {deal.stage || deal.stage_normalized} · {deal.owner || deal.owner_name}
+                    {deal.stage || deal.stage_normalized}{(deal.owner_name || (deal.owner && !/^\d+$/.test(deal.owner))) ? ` · ${deal.owner_name || deal.owner}` : ''}
                   </div>
                 </div>
                 <div style={{ textAlign: 'right', marginLeft: 12, flexShrink: 0 }}>

@@ -614,6 +614,13 @@ async function initializeAfterStart(t0: number, tDb: number): Promise<void> {
   }
 
   try {
+    const { backfillRawOwnerIdsForAllWorkspaces } = await import('./connectors/hubspot/sync.js');
+    await backfillRawOwnerIdsForAllWorkspaces();
+  } catch (err) {
+    console.warn("[server] Owner ID backfill check failed (non-fatal):", err instanceof Error ? err.message : err);
+  }
+
+  try {
     const { migrateAllBowtiesToFunnel } = await import('./funnel/migration.js');
     await migrateAllBowtiesToFunnel();
   } catch (err) {
