@@ -1112,18 +1112,27 @@ const aggregateStaleDeals: ToolDefinition = {
   },
   execute: async (params, context) => {
     return safeExecute('aggregateStaleDeals', async () => {
+      const _errors: Array<{ source: string; error: string }> = [];
+
       const staleThreshold = await configLoader.getStaleThreshold(context.workspaceId).catch(err => {
-        console.warn('[aggregateStaleDeals] getStaleThreshold failed, using defaults:', err instanceof Error ? err.message : err);
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn('[aggregateStaleDeals] getStaleThreshold failed, using defaults:', msg);
+        _errors.push({ source: 'getStaleThreshold', error: msg });
         return { warning: 14, serious: 30, critical: 60 };
       });
       const staleDays = params.staleDays || staleThreshold.warning;
       const topN = params.topN || 20;
       const [deals, nameMap] = await Promise.all([
         dealTools.getStaleDeals(context.workspaceId, staleDays).catch(err => {
-          console.warn('[aggregateStaleDeals] getStaleDeals failed, returning empty:', err instanceof Error ? err.message : err);
+          const msg = err instanceof Error ? err.message : String(err);
+          console.warn('[aggregateStaleDeals] getStaleDeals failed, returning empty:', msg);
+          _errors.push({ source: 'getStaleDeals', error: msg });
           return [];
         }),
-        resolveOwnerNames(context.workspaceId).catch(() => new Map<string, string>()),
+        resolveOwnerNames(context.workspaceId).catch(err => {
+          _errors.push({ source: 'resolveOwnerNames', error: err instanceof Error ? err.message : String(err) });
+          return new Map<string, string>();
+        }),
       ]);
 
       // Load ICP scores for stale deals (if available)
@@ -1282,6 +1291,7 @@ const aggregateStaleDeals: ToolDefinition = {
         icpRiskSignals,
         rfmBreakdown,
         hasRFMScores,
+        ...(_errors.length > 0 ? { _errors } : {}),
       };
     }, params);
   },
@@ -1716,15 +1726,21 @@ const dealThreadingAnalysisTool: ToolDefinition = {
   },
   execute: async (params, context) => {
     return safeExecute('dealThreadingAnalysis', async () => {
+      const _errors: Array<{ source: string; error: string }> = [];
       const [threadingData, nameMap] = await Promise.all([
         dealThreadingAnalysis(context.workspaceId).catch(err => {
-          console.warn('[dealThreadingAnalysis] core analysis failed, returning empty:', err instanceof Error ? err.message : err);
+          const msg = err instanceof Error ? err.message : String(err);
+          console.warn('[dealThreadingAnalysis] core analysis failed, returning empty:', msg);
+          _errors.push({ source: 'dealThreadingAnalysis', error: msg });
           return {
             summary: { totalOpenDeals: 0, singleThreaded: { count: 0, totalValue: 0 }, multiThreaded: { count: 0, totalValue: 0 } },
             byStage: {}, byOwner: {}, criticalDeals: [], warningDeals: [], wellThreadedDeals: [],
           };
         }),
-        resolveOwnerNames(context.workspaceId).catch(() => new Map<string, string>()),
+        resolveOwnerNames(context.workspaceId).catch(err => {
+          _errors.push({ source: 'resolveOwnerNames', error: err instanceof Error ? err.message : String(err) });
+          return new Map<string, string>();
+        }),
       ]);
 
       // Map owner IDs to names in all sections
@@ -1775,6 +1791,7 @@ const dealThreadingAnalysisTool: ToolDefinition = {
         ),
         criticalDeals: threadingData.criticalDeals.map(d => ({ ...d, owner: mapOwner(d.owner) })),
         warningDeals: threadingData.warningDeals.map(d => ({ ...d, owner: mapOwner(d.owner) })),
+        ...(_errors.length > 0 ? { _errors } : {}),
       };
     }, params);
   },
@@ -1836,9 +1853,12 @@ const dataQualityAuditTool: ToolDefinition = {
   },
   execute: async (params, context) => {
     return safeExecute('dataQualityAudit', async () => {
+      const _errors: Array<{ source: string; error: string }> = [];
       const [qualityData, nameMap] = await Promise.all([
         dataQualityAudit(context.workspaceId).catch(err => {
-          console.warn('[dataQualityAudit] core audit failed, returning empty:', err instanceof Error ? err.message : err);
+          const msg = err instanceof Error ? err.message : String(err);
+          console.warn('[dataQualityAudit] core audit failed, returning empty:', msg);
+          _errors.push({ source: 'dataQualityAudit', error: msg });
           return {
             overallGrade: 'unknown' as any,
             overallScore: 0,
@@ -1847,7 +1867,10 @@ const dataQualityAuditTool: ToolDefinition = {
             worstOffenders: [],
           };
         }),
-        resolveOwnerNames(context.workspaceId).catch(() => new Map<string, string>()),
+        resolveOwnerNames(context.workspaceId).catch(err => {
+          _errors.push({ source: 'resolveOwnerNames', error: err instanceof Error ? err.message : String(err) });
+          return new Map<string, string>();
+        }),
       ]);
 
       // Map owner IDs to names in owner breakdown
@@ -1905,6 +1928,7 @@ const dataQualityAuditTool: ToolDefinition = {
           ...wo,
           owner: mapOwner(wo.owner),
         })),
+        ...(_errors.length > 0 ? { _errors } : {}),
       };
     }, params);
   },
@@ -3162,17 +3186,24 @@ const forecastRollup: ToolDefinition = {
   },
   execute: async (params, context) => {
     return safeExecute('forecastRollup', async () => {
-      // Resolve dimension for this skill
+      const _errors: Array<{ source: string; error: string }> = [];
+
+      // Resolve dimension for this skill (required — rethrow if unavailable so step is properly failed)
       const ctx = await resolveSkillDimension(context.workspaceId, {
         skillCategory: 'forecast',
         includeQuota: true,
         paramOffset: 2
       }).catch(err => {
-        console.warn('[forecastRollup] resolveSkillDimension failed, proceeding without dimension:', err instanceof Error ? err.message : err);
-        return null;
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('[forecastRollup] resolveSkillDimension failed (required):', msg);
+        _errors.push({ source: 'resolveSkillDimension', error: msg });
+        throw new Error(`forecastRollup aborted: resolveSkillDimension failed — ${msg}`);
       });
 
-      const nameMap = await resolveOwnerNames(context.workspaceId).catch(() => new Map<string, string>());
+      const nameMap = await resolveOwnerNames(context.workspaceId).catch(err => {
+        _errors.push({ source: 'resolveOwnerNames', error: err instanceof Error ? err.message : String(err) });
+        return new Map<string, string>();
+      });
 
       // Resolve calibrated pipeline dimension totals and quota if available
       let calibratedPipelineTotal: number | undefined;
@@ -3685,6 +3716,7 @@ const forecastRollup: ToolDefinition = {
         dimension_key: ctx.dimension_key,
         dimension_label: ctx.dimension_label,
         calibrated: ctx.calibrated,
+        ...(_errors.length > 0 ? { _errors } : {}),
       };
     }, params);
   },

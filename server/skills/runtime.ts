@@ -471,15 +471,38 @@ export class SkillRuntime {
           context.stepResults[step.outputKey] = result;
 
           const duration = Date.now() - stepStartTime;
-          stepResults.push({
-            stepId: step.id,
-            status: 'completed',
-            tier: step.tier,
-            duration_ms: duration,
-            tokenUsage: 0,
-          });
 
-          console.log(`[Skill Runtime] Step ${step.id} completed in ${duration}ms`);
+          // Detect tool-level error objects returned by safeExecute — mark as failed
+          // so skill_runs.steps accurately reflects compute-step failures
+          const isToolError = result !== null &&
+            typeof result === 'object' &&
+            !Array.isArray(result) &&
+            'error' in result &&
+            typeof (result as any).error === 'string' &&
+            Object.keys(result as object).length === 1;
+
+          if (isToolError) {
+            const errorMsg = (result as any).error as string;
+            console.error(`[Skill Runtime] Step ${step.id} returned tool-level error: ${errorMsg}`);
+            context.metadata.errors.push({ step: step.id, error: errorMsg });
+            stepResults.push({
+              stepId: step.id,
+              status: 'failed',
+              tier: step.tier,
+              duration_ms: duration,
+              tokenUsage: 0,
+              error: errorMsg,
+            });
+          } else {
+            stepResults.push({
+              stepId: step.id,
+              status: 'completed',
+              tier: step.tier,
+              duration_ms: duration,
+              tokenUsage: 0,
+            });
+            console.log(`[Skill Runtime] Step ${step.id} completed in ${duration}ms`);
+          }
         } catch (error) {
           const errorMsg = error instanceof Error ? error.message : String(error);
           console.error(`[Skill Runtime] Step ${step.id} failed:`, errorMsg);
