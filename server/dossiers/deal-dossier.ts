@@ -2,6 +2,7 @@ import { query } from '../db.js';
 import { getDealRiskScore } from '../tools/deal-risk-score.js';
 import { getActiveAnnotations } from '../feedback/annotations.js';
 import { computeCompositeScore } from '../computed-fields/deal-scores.js';
+import { resolveOwnerNames } from '../utils/owner-resolver.js';
 
 export interface DealDossier {
   deal: {
@@ -525,6 +526,15 @@ export async function assembleDealDossier(
     (c: any) => c.email && participantEmails.has(c.email.toLowerCase())
   ).length;
 
+  // Resolve numeric owner IDs to names via the workspace owner_map.
+  // Workspaces synced from CSV/upload store the raw HubSpot owner ID in deals.owner;
+  // look it up in the owner_map so the UI displays a name instead of a number.
+  let resolvedOwnerName: string = deal.owner || '';
+  if (deal.owner && /^\d+$/.test(deal.owner)) {
+    const ownerMap = await resolveOwnerNames(workspaceId).catch(() => ({}));
+    resolvedOwnerName = ownerMap[deal.owner] || deal.owner;
+  }
+
   return {
     deal: {
       id: deal.id,
@@ -534,8 +544,8 @@ export async function assembleDealDossier(
       stage_normalized: deal.stage_normalized || '',
       close_date: deal.close_date ? new Date(deal.close_date).toISOString() : null,
       close_date_suspect: closeDateSuspect,
-      owner_email: deal.owner || '',
-      owner_name: deal.owner || '',
+      owner_email: deal.owner_email || '',
+      owner_name: resolvedOwnerName,
       days_in_stage: Math.max(0, Math.round(deal.calculated_days_in_stage ?? deal.days_in_stage ?? 0)),
       days_open: Math.max(0, Math.round(deal.days_open ?? 0)),
       created_at: deal.created_at ? new Date(deal.created_at).toISOString() : '',
