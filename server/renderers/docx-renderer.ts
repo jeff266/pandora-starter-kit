@@ -61,12 +61,15 @@ function severityTag(severity: string): TextRun {
 
 function stripMarkdown(text: string): string {
   return text
+    .replace(/<actions>[\s\S]*?<\/actions>/g, '')
+    .replace(/```[\s\S]*?```/g, '')
     .replace(/\*\*(.*?)\*\*/g, '$1')
     .replace(/\*(.*?)\*/g, '$1')
-    .replace(/#{1,6}\s*/g, '')
+    .replace(/#{1,6}\s+/g, '')
+    .replace(/^---+$/gm, '')
     .replace(/🚨|🔴|🟡|🟢|⚠️|📊|📈|📉|💡|🎯/g, '')
-    .replace(/```[\s\S]*?```/g, '')
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
 

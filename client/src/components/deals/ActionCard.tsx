@@ -63,6 +63,7 @@ const INTERNAL_TYPE_CONFIG: Record<string, InternalTypeConfig> = {
     icon: '✓',
     label: 'Confirm metric',
     buttonLabel: 'Confirm & lock ▶',
+    visualTeal: false,
     descriptionFn: (p, title) => {
       if (!p?.metric_key) return title;
       const name = String(p.metric_key).replace(/_/g, ' ');

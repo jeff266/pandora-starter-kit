@@ -536,7 +536,7 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
           const remaining = await getUnmappedStages(workspaceId);
 
           if (remaining.length > 0) {
-            answer = `Updated **${correctedCrmStage}** → **${correctedMapping}**. Here's the revised table:\n\n${buildStageMappingTablePrompt(remaining)}`;
+            answer = `Updated **${correctedCrmStage}** → **${correctedMapping}**. ${remaining.length} stage${remaining.length === 1 ? '' : 's'} left to map.`;
           } else {
             // That correction cleared the last unmapped stage
             const interviewState = await getInterviewState(workspaceId);

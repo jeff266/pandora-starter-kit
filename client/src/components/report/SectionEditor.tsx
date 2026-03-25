@@ -648,7 +648,10 @@ export default function SectionEditor({
             {SLASH_MENU_ITEMS.map((item, i) => (
               <button
                 key={item.id}
-                onClick={() => executeSlashCommand(item.id)}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  executeSlashCommand(item.id);
+                }}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '8px 12px',
                   background: i === slashMenuIndex ? '#F0FDF9' : 'white', border: 'none', cursor: 'pointer',
