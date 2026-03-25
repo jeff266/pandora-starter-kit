@@ -39,7 +39,8 @@ interface DictionaryEntry {
   technical_definition: string | null;
   sql_definition: string | null;
   segmentable_by: string[];
-  source: 'user' | 'system' | 'filter' | 'metric' | 'stage' | 'scope';
+  source: 'user' | 'system' | 'filter' | 'metric' | 'stage' | 'scope'
+        | 'computed' | 'confirmed' | 'asserted' | 'interview';
   source_id?: string;
   created_by: string;
   created_at: string;
@@ -55,7 +56,81 @@ const SOURCE_OPTIONS = [
   { label: 'Metric', value: 'metric', color: '#3b82f6', icon: BarChart2 },
   { label: 'Stage', value: 'stage', color: '#14b8a6', icon: Activity },
   { label: 'Pipeline', value: 'scope', color: '#f97316', icon: GitBranch },
+  { label: 'Computed', value: 'computed', color: '#1d4ed8', icon: BarChart2 },
+  { label: 'Confirmed', value: 'confirmed', color: '#0f766e', icon: Check },
+  { label: 'Asserted', value: 'asserted', color: '#b45309', icon: Activity },
+  { label: 'Interview', value: 'interview', color: '#7c3aed', icon: User },
 ];
+
+interface SourceBadgeDef {
+  label: string;
+  bg: string;
+  color: string;
+  tooltip: string;
+}
+
+const SOURCE_BADGE_CONFIG: Record<string, SourceBadgeDef> = {
+  system: {
+    label: 'System',
+    bg: '#f1f5f920',
+    color: '#64748b',
+    tooltip: 'Built-in Pandora definition',
+  },
+  user: {
+    label: 'User',
+    bg: `${colors.accent}18`,
+    color: colors.accent,
+    tooltip: 'Added manually by your team',
+  },
+  computed: {
+    label: 'Computed',
+    bg: '#eff6ff',
+    color: '#1d4ed8',
+    tooltip: 'Calculated from your CRM data. Pandora verified this from deal history.',
+  },
+  confirmed: {
+    label: 'Confirmed',
+    bg: '#f0fdfa',
+    color: '#0f766e',
+    tooltip: 'Verified and locked by your team. Pandora will not auto-update this.',
+  },
+  asserted: {
+    label: 'Asserted',
+    bg: '#fffbeb',
+    color: '#b45309',
+    tooltip: 'Stated in conversation — not yet verified against your CRM data.',
+  },
+  filter: {
+    label: 'Confirmed',
+    bg: '#f0fdfa',
+    color: '#0f766e',
+    tooltip: 'Confirmed via calibration interview.',
+  },
+  metric: {
+    label: 'Confirmed',
+    bg: '#f0fdfa',
+    color: '#0f766e',
+    tooltip: 'Confirmed via calibration interview.',
+  },
+  interview: {
+    label: 'Interview',
+    bg: '#f5f3ff',
+    color: '#7c3aed',
+    tooltip: 'Captured during setup or calibration interview.',
+  },
+  stage: {
+    label: 'Stage',
+    bg: '#f0fdfa',
+    color: '#0f766e',
+    tooltip: 'Derived from pipeline stage definition.',
+  },
+  scope: {
+    label: 'Pipeline',
+    bg: '#fff7ed',
+    color: '#c2410c',
+    tooltip: 'Derived from pipeline scope configuration.',
+  },
+};
 
 const inputStyle: React.CSSProperties = {
   width: '100%',
@@ -139,20 +214,37 @@ export default function DataDictionary() {
     }
   };
 
-  const getSourceBadge = (source: DictionaryEntry['source']) => {
-    const opt = SOURCE_OPTIONS.find(o => o.value === source);
-    if (!opt || !opt.color) return null;
-    const Icon = opt.icon;
+  const getSourceBadge = (source: string) => {
+    const badge = SOURCE_BADGE_CONFIG[source] ?? {
+      label: source,
+      bg: '#f8fafc',
+      color: '#94a3b8',
+      tooltip: '',
+    };
     return (
-      <div style={{
-        display: 'inline-flex', alignItems: 'center', gap: 5,
-        padding: '3px 9px', borderRadius: 6,
-        fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em',
-        backgroundColor: `${opt.color}18`, color: opt.color, border: `1px solid ${opt.color}30`,
-        whiteSpace: 'nowrap',
-      }}>
-        {Icon && <Icon size={11} />}
-        {opt.label}
+      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+        <div
+          title={badge.tooltip || undefined}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 4,
+            padding: '3px 9px', borderRadius: 6,
+            fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em',
+            backgroundColor: badge.bg, color: badge.color,
+            border: `1px solid ${badge.color}30`,
+            whiteSpace: 'nowrap',
+            cursor: badge.tooltip ? 'help' : 'default',
+          }}
+        >
+          {badge.label}
+        </div>
+        {source === 'asserted' && (
+          <span
+            title="Not yet verified against CRM data"
+            style={{ color: '#f59e0b', fontSize: 13, lineHeight: 1, cursor: 'help' }}
+          >
+            ⚠
+          </span>
+        )}
       </div>
     );
   };

@@ -10,6 +10,7 @@ export interface ActionCardItem {
   suggested_crm_action: 'task_create' | 'note_create' | 'field_write' | null;
   action_type?: string;
   skill_id?: string;
+  payload?: Record<string, any>;
 }
 
 interface ActionCardProps {
@@ -33,28 +34,61 @@ const SOURCE_LABELS: Record<string, string> = {
 
 type InFlight = 'primary' | 'note' | 'dismiss' | null;
 
-const INTERNAL_TYPE_CONFIG: Record<string, { icon: string; label: string; buttonLabel: string }> = {
+interface InternalTypeConfig {
+  icon: string;
+  label: string;
+  buttonLabel: string;
+  descriptionFn: (payload: Record<string, any> | undefined, title: string) => string;
+}
+
+const INTERNAL_TYPE_CONFIG: Record<string, InternalTypeConfig> = {
   update_data_dictionary: {
     icon: '📖',
     label: 'Update Data Dictionary',
     buttonLabel: 'Save definition ▶',
+    descriptionFn: (p, title) =>
+      p?.term ? `Save refined definition for "${p.term}"` : title,
   },
   update_workspace_knowledge: {
     icon: '🧠',
     label: 'Save to workspace knowledge',
     buttonLabel: 'Save knowledge ▶',
+    descriptionFn: (p, title) =>
+      p?.value
+        ? `Remember: ${String(p.value).slice(0, 80)}${String(p.value).length > 80 ? '…' : ''}`
+        : title,
   },
   confirm_metric_definition: {
     icon: '✓',
-    label: 'Confirm metric benchmark',
+    label: 'Confirm metric',
     buttonLabel: 'Confirm & lock ▶',
+    descriptionFn: (p, title) => {
+      if (!p?.metric_key) return title;
+      const name = String(p.metric_key).replace(/_/g, ' ');
+      if (p.value == null) return `Lock ${name}`;
+      let formatted: string;
+      if (p.unit === 'percent') {
+        formatted = `${(Number(p.value) * 100).toFixed(1)}%`;
+      } else if (p.unit === 'dollars') {
+        formatted = `$${(Number(p.value) / 1000).toFixed(0)}K`;
+      } else {
+        formatted = String(p.value);
+      }
+      return `Lock ${name} at ${formatted}`;
+    },
   },
   update_calibration: {
     icon: '⚙',
     label: 'Update calibration',
     buttonLabel: 'Save threshold ▶',
+    descriptionFn: (p, title) =>
+      p?.dimension_key ? `Save new threshold for ${p.dimension_key}` : title,
   },
 };
+
+const TEAL_PRIMARY = '#0d9488';
+const TEAL_BORDER = '#5eead430';
+const TEAL_BG = '#f0fdfa60';
 
 function isInternalType(actionType?: string) {
   return !!actionType && actionType in INTERNAL_TYPE_CONFIG;
@@ -206,10 +240,16 @@ export function ActionCard({ item, crmSource, onRemove }: ActionCardProps) {
 
   const internalConfig = item.action_type ? INTERNAL_TYPE_CONFIG[item.action_type] : undefined;
 
+  const cardBg = internalConfig ? TEAL_BG : colors.surface;
+  const primaryBg = internalConfig ? TEAL_PRIMARY : colors.accent;
+  const description = internalConfig
+    ? internalConfig.descriptionFn(item.payload, item.title)
+    : `Source: ${sourceLabel}`;
+
   return (
     <div style={{
-      background: colors.surface,
-      border: `1px solid ${colors.border}`,
+      background: cardBg,
+      border: internalConfig ? `1px solid ${TEAL_BORDER}` : `1px solid ${colors.border}`,
       borderRadius: 8,
       padding: '12px 14px',
       display: 'flex',
@@ -227,13 +267,17 @@ export function ActionCard({ item, crmSource, onRemove }: ActionCardProps) {
             background: pm.bg, color: pm.color, flexShrink: 0, marginTop: 1,
           }}>{item.priority}</span>
         )}
-        <span style={{ fontSize: 13, color: colors.text, lineHeight: 1.45, flex: 1 }}>
+        <span style={{
+          fontSize: 13, lineHeight: 1.45, flex: 1,
+          color: internalConfig ? TEAL_PRIMARY : colors.text,
+          fontWeight: internalConfig ? 600 : undefined,
+        }}>
           {internalConfig ? internalConfig.label : item.title}
         </span>
       </div>
 
       <div style={{ fontSize: 11, color: colors.textMuted }}>
-        {internalConfig ? item.title : `Source: ${sourceLabel}`}
+        {description}
       </div>
 
       {reviewing && isFieldWriteType(item.action_type) && (
@@ -279,7 +323,7 @@ export function ActionCard({ item, crmSource, onRemove }: ActionCardProps) {
             onClick={handlePrimary}
             style={{
               ...btnBase,
-              background: colors.accent,
+              background: primaryBg,
               color: '#fff',
             }}
           >

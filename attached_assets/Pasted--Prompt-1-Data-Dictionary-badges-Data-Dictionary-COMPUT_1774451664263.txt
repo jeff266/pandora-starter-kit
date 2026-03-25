@@ -1,0 +1,411 @@
+**Prompt 1 — Data Dictionary badges:**
+
+```
+# Data Dictionary: COMPUTED / CONFIRMED / ASSERTED Source Badges
+
+## Context
+
+The Data Dictionary currently shows two source badges:
+- SYSTEM (gray) — Pandora default definitions
+- USER (teal) — manually added terms
+
+Three new source values now exist from the metric
+confidence model:
+- computed — Pandora calculated from CRM data
+- confirmed — user explicitly agreed with computed value
+- asserted — user stated without Pandora computing first
+
+These need distinct visual badges so users can see
+the trust level of each definition at a glance.
+
+## Before Starting
+
+1. Find the Data Dictionary page component.
+   Show where source badges are currently rendered —
+   the component that reads the source field and
+   shows the colored pill.
+
+2. Show what the current badge values and colors are.
+
+3. Check what source values actually exist in
+   Frontera's data_dictionary:
+   SELECT DISTINCT source, COUNT(*)
+   FROM data_dictionary
+   WHERE workspace_id = (
+     SELECT id FROM workspaces
+     WHERE name ILIKE '%frontera%' LIMIT 1
+   )
+   GROUP BY source;
+
+Report findings then build.
+
+---
+
+## The Five Badges
+
+Replace the current source badge component with
+one that handles all five values:
+
+```typescript
+const SOURCE_BADGES: Record<string, {
+  label:   string
+  bg:      string
+  text:    string
+  tooltip: string
+}> = {
+  // Existing — keep visually unchanged
+  system: {
+    label:   'System',
+    bg:      'bg-slate-100',
+    text:    'text-slate-500',
+    tooltip: 'Built-in Pandora definition',
+  },
+  USER: {
+    label:   'User',
+    bg:      'bg-teal-50',
+    text:    'text-teal-700',
+    tooltip: 'Added manually by your team',
+  },
+
+  // New — from metric confidence model
+  computed: {
+    label:   'Computed',
+    bg:      'bg-blue-50',
+    text:    'text-blue-700',
+    tooltip: 'Calculated from your CRM data. ' +
+             'Pandora verified this from deal history.',
+  },
+  confirmed: {
+    label:   'Confirmed',
+    bg:      'bg-teal-50',
+    text:    'text-teal-700',
+    tooltip: 'Verified and locked by your team. ' +
+             'Pandora will not auto-update this.',
+  },
+  asserted: {
+    label:   'Asserted',
+    bg:      'bg-amber-50',
+    text:    'text-amber-700',
+    tooltip: 'Stated in conversation — not yet ' +
+             'verified against your CRM data.',
+  },
+
+  // Calibration write-through sources
+  // (may exist from recent calibration sessions)
+  filter: {
+    label:   'Confirmed',
+    bg:      'bg-teal-50',
+    text:    'text-teal-700',
+    tooltip: 'Confirmed via calibration interview.',
+  },
+  metric: {
+    label:   'Confirmed',
+    bg:      'bg-teal-50',
+    text:    'text-teal-700',
+    tooltip: 'Confirmed via calibration interview.',
+  },
+}
+```
+
+## Badge component
+
+```tsx
+function SourceBadge({ source }: { source: string }) {
+  const badge = SOURCE_BADGES[source] ?? {
+    label:   source,
+    bg:      'bg-slate-50',
+    text:    'text-slate-400',
+    tooltip: '',
+  }
+
+  return (
+    <span
+      title={badge.tooltip}
+      className={`inline-flex items-center px-2 py-0.5
+        rounded text-xs font-medium
+        ${badge.bg} ${badge.text}
+        ${badge.tooltip ? 'cursor-help' : ''}`}
+    >
+      {badge.label}
+    </span>
+  )
+}
+```
+
+## Warning icon for asserted items
+
+When source === 'asserted', show a small warning
+icon alongside the badge:
+
+```tsx
+{source === 'asserted' && (
+  <span
+    title="Not yet verified against CRM data"
+    className="text-amber-400 text-xs ml-1"
+  >
+    ⚠
+  </span>
+)}
+```
+
+---
+
+## Acceptance Criteria
+
+1. SYSTEM badge: gray pill, unchanged from current
+2. USER badge: teal pill, unchanged from current
+3. computed: blue pill — label "Computed"
+4. confirmed: teal pill — label "Confirmed"
+5. asserted: amber pill — label "Asserted" + ⚠ icon
+6. filter and metric sources show as "Confirmed" teal
+7. Unknown source values show raw value in gray
+8. Hovering any badge shows tooltip text
+9. No visual regression on existing DD entries
+10. Zero TypeScript errors
+```
+
+---
+
+**Prompt 2 — Action card UI for internal types:**
+
+```
+# Ask Pandora: Action Card UI for Internal Action Types
+
+## Context
+
+Four new internal action types are now live in
+the backend (shipped in Task #60):
+- update_data_dictionary
+- update_workspace_knowledge
+- confirm_metric_definition
+- update_calibration
+
+The backend creates pending_actions rows for these.
+The frontend action card renderer needs to handle
+them with appropriate icons, labels, and descriptions
+distinct from CRM action cards.
+
+## Before Starting
+
+1. Find the action card component in Ask Pandora.
+   Show how it currently renders a pending action —
+   what fields does it read? (action_type, payload,
+   description, etc.)
+
+2. Show how CRM action cards are currently labeled
+   and what icons/colors they use.
+
+3. Check if any internal action type pending_actions
+   rows exist yet in Frontera:
+   SELECT action_type, payload, status, created_at
+   FROM pending_actions
+   WHERE workspace_id = (
+     SELECT id FROM workspaces
+     WHERE name ILIKE '%frontera%' LIMIT 1
+   )
+   AND action_type IN (
+     'update_data_dictionary',
+     'update_workspace_knowledge',
+     'confirm_metric_definition',
+     'update_calibration'
+   )
+   ORDER BY created_at DESC
+   LIMIT 5;
+
+Report findings then build.
+
+---
+
+## The Four Internal Action Cards
+
+Internal action cards should feel distinct from
+CRM action cards. CRM actions write to external
+systems (HubSpot, Salesforce). Internal actions
+update Pandora's own knowledge — they should
+feel lighter and more confirmatory.
+
+### Visual treatment
+
+CRM cards: amber/orange accent (they're external
+writes with higher stakes)
+Internal cards: teal accent (they're updating
+Pandora's understanding — lower stakes, can revert)
+
+### Card specs per action type
+
+```typescript
+const INTERNAL_ACTION_CONFIG = {
+  update_data_dictionary: {
+    icon:        '📖',
+    label:       'Update Data Dictionary',
+    accentColor: 'teal',
+    descriptionFn: (payload) =>
+      `Save refined definition for "${payload.term}"`,
+    confirmText: 'Update',
+    revertable:  true,
+  },
+
+  update_workspace_knowledge: {
+    icon:        '🧠',
+    label:       'Save to workspace knowledge',
+    accentColor: 'teal',
+    descriptionFn: (payload) =>
+      `Remember: ${payload.value?.slice(0, 80)}...`,
+    confirmText: 'Save',
+    revertable:  true,
+  },
+
+  confirm_metric_definition: {
+    icon:        '✓',
+    label:       'Confirm metric',
+    accentColor: 'teal',
+    descriptionFn: (payload) => {
+      const formatted = payload.unit === 'percent'
+        ? `${(payload.value * 100).toFixed(1)}%`
+        : payload.unit === 'dollars'
+        ? `$${(payload.value/1000).toFixed(0)}K`
+        : String(payload.value)
+      return `Lock ${payload.metric_key?.replace(/_/g,' ')} at ${formatted}`
+    },
+    confirmText: 'Confirm',
+    revertable:  true,
+  },
+
+  update_calibration: {
+    icon:        '⚙',
+    label:       'Update calibration',
+    accentColor: 'teal',
+    descriptionFn: (payload) =>
+      `Save new threshold for ${payload.dimension_key}`,
+    confirmText: 'Update',
+    revertable:  true,
+  },
+}
+```
+
+### Card layout
+
+```tsx
+function InternalActionCard({
+  action,
+  onApprove,
+  onDismiss
+}: {
+  action: PendingAction
+  onApprove: () => void
+  onDismiss: () => void
+}) {
+  const config = INTERNAL_ACTION_CONFIG[action.action_type]
+  if (!config) return null
+
+  return (
+    <div className="flex items-start gap-3 p-3
+      rounded-lg border border-teal-200
+      bg-teal-50/50">
+
+      <span className="text-lg flex-shrink-0 mt-0.5">
+        {config.icon}
+      </span>
+
+      <div className="flex-1 min-w-0">
+        <div className="text-xs font-medium
+          text-teal-700 mb-0.5">
+          {config.label}
+        </div>
+        <div className="text-xs text-slate-600
+          leading-relaxed">
+          {config.descriptionFn(action.payload)}
+        </div>
+      </div>
+
+      <div className="flex gap-2 flex-shrink-0">
+        <button
+          onClick={onApprove}
+          className="text-xs px-2.5 py-1 rounded
+            bg-teal-600 text-white font-medium
+            hover:bg-teal-700 transition-colors"
+        >
+          {config.confirmText}
+        </button>
+        <button
+          onClick={onDismiss}
+          className="text-xs px-2.5 py-1 rounded
+            border border-slate-200
+            text-slate-500 hover:bg-slate-50
+            transition-colors"
+        >
+          Dismiss
+        </button>
+      </div>
+    </div>
+  )
+}
+```
+
+### Integration
+
+In the action card renderer (the "N actions from
+this analysis" section), route internal action
+types to InternalActionCard and CRM types to
+the existing CrmActionCard:
+
+```tsx
+function ActionCard({ action, ...props }) {
+  const INTERNAL_TYPES = [
+    'update_data_dictionary',
+    'update_workspace_knowledge',
+    'confirm_metric_definition',
+    'update_calibration',
+  ]
+
+  if (INTERNAL_TYPES.includes(action.action_type)) {
+    return <InternalActionCard action={action} {...props} />
+  }
+
+  return <CrmActionCard action={action} {...props} />
+}
+```
+
+### Approve/dismiss wiring
+
+Approving an internal action calls the same
+approve endpoint already used for CRM actions:
+POST /api/workspaces/:id/actions/:actionId/approve
+
+The backend routes internal types to
+approveInternalAction() automatically —
+no frontend routing changes needed.
+
+Dismissing calls the existing dismiss/reject
+endpoint.
+
+---
+
+## Acceptance Criteria
+
+1. update_data_dictionary card shows 📖 icon,
+   "Update Data Dictionary" label, teal accent
+2. update_workspace_knowledge shows 🧠 icon,
+   "Save to workspace knowledge" label
+3. confirm_metric_definition shows ✓ icon,
+   formatted metric value in description
+4. update_calibration shows ⚙ icon,
+   dimension key in description
+5. All four use teal accent, not amber
+6. Approve button calls the same approve endpoint
+7. Dismiss works as expected
+8. CRM action cards (update_forecast_category etc.)
+   visually unchanged
+9. If no internal pending_actions exist yet,
+   create a mock one to verify rendering:
+   INSERT INTO pending_actions (workspace_id,
+   action_type, payload, status, confidence)
+   VALUES (
+     '4160191d-73bc-414b-97dd-5a1853190378',
+     'update_data_dictionary',
+     '{"term":"Stale Deal","definition":"...",
+       "source":"computed","confidence":1.0}',
+     'pending', 1.0
+   );
+10. Zero TypeScript errors
+```

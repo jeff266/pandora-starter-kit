@@ -60,6 +60,7 @@ export interface SuggestedAction {
   priority: 'P1' | 'P2' | 'P3';
   deal_id?: string;
   execution_mode?: string;
+  action_payload?: Record<string, unknown>;
 }
 
 export interface ConversationState {

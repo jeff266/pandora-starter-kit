@@ -832,14 +832,18 @@ router.post('/:workspaceId/suggested-actions/sync', async (req: Request, res: Re
       );
 
       if (result.rows[0]) {
-        cards.push({
+        const card: Record<string, unknown> = {
           id: result.rows[0].id,
           title: action.title,
           priority: cardPriority,
           source,
           suggested_crm_action: crmAction,
           action_type: storedActionType,
-        } as any);
+        };
+        if (INTERNAL_TYPES.includes(action.type) && action.action_payload) {
+          card.payload = action.action_payload;
+        }
+        cards.push(card as any);
       }
     } catch (err) {
       console.error('[SuggestedActions] Failed to persist action:', (err as Error).message);
