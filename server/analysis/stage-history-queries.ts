@@ -427,6 +427,7 @@ export interface StageTimeBenchmark {
   stage: string;
   avgDays: number;
   medianDays: number;
+  p75Days: number;
   dealCount: number;
 }
 
@@ -437,6 +438,7 @@ export async function getAverageTimeInStage(
     stage: string;
     avg_days: string;
     median_days: string;
+    p75_days: string;
     deal_count: string;
   }>(
     `SELECT
@@ -445,6 +447,9 @@ export async function getAverageTimeInStage(
       ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (
         ORDER BY dsh.duration_days
       )::NUMERIC, 2) AS median_days,
+      ROUND(PERCENTILE_CONT(0.75) WITHIN GROUP (
+        ORDER BY dsh.duration_days
+      )::NUMERIC, 2) AS p75_days,
       COUNT(*) AS deal_count
     FROM deal_stage_history dsh
     WHERE dsh.workspace_id = $1
@@ -459,6 +464,7 @@ export async function getAverageTimeInStage(
     stage: row.stage,
     avgDays: parseFloat(row.avg_days) || 0,
     medianDays: parseFloat(row.median_days) || 0,
+    p75Days: parseFloat(row.p75_days) || 0,
     dealCount: parseInt(row.deal_count, 10),
   }));
 }

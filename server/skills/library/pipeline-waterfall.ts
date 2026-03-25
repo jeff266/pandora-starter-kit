@@ -211,7 +211,12 @@ Skip the full waterfall report.
 
 {{#if dataFreshness.hasStageHistory}}
 BUSINESS CONTEXT:
-{{businessContext}}
+{{#if business_model.company_name}}Company: {{business_model.company_name}}{{/if}}
+{{#if business_model.gtm_motion}}GTM Motion: {{business_model.gtm_motion}}{{/if}}
+{{#if business_model.segment}}Segment: {{business_model.segment}}{{/if}}
+{{#if business_model.sales_cycle_days}}Typical sales cycle: {{business_model.sales_cycle_days}} days{{/if}}
+{{#if goals_and_targets.current_quarter_target}}Current quarter target: ${{goals_and_targets.current_quarter_target}}{{/if}}
+{{#if workspaceContextBlock}}{{{workspaceContextBlock}}}{{/if}}
 
 WATERFALL SUMMARY ({{time_windows.periodLabel}}):
 Total open pipeline start: {{current_waterfall.summary.totalOpenStart}} deals
