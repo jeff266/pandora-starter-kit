@@ -451,20 +451,53 @@ router.get('/:workspaceId/admin/numeric-fields', requirePermission('config.view'
   const workspaceId = req.params.workspaceId as string;
 
   try {
-    // Standard numeric fields always available
-    const standardFields = [
-      { key: 'amount',        label: 'Amount (default)' },
-      { key: 'probability',   label: 'Probability' },
-    ];
+    const allFields: Array<{ key: string; label: string; is_default: boolean }> = [];
 
-    // Discover numeric custom_fields keys by sampling deals in this workspace.
-    // We cast each value to text and try to parse; keys with numeric-looking values are included.
-    let customFields: Array<{ key: string; label: string }> = [];
+    // Step 1: Discover numeric columns from deals table schema
+    const schemaResult = await query<{ column_name: string; data_type: string }>(
+      `SELECT column_name, data_type
+       FROM information_schema.columns
+       WHERE table_name = 'deals'
+         AND data_type IN (
+           'numeric', 'integer', 'bigint',
+           'double precision', 'real', 'money'
+         )
+         AND column_name NOT IN (
+           'id', 'workspace_id', 'source_id',
+           'deal_risk', 'deal_score', 'days_in_stage',
+           'created_at', 'updated_at'
+         )
+       ORDER BY column_name`,
+      []
+    );
+
+    // Map column names to friendly labels
+    const labelMap: Record<string, string> = {
+      amount: 'Amount',
+      probability: 'Probability',
+      arr_value: 'ARR Value',
+      acv_amount: 'ACV Amount',
+      mrr: 'MRR',
+      forecast_amount: 'Forecast Amount',
+      commit_amount: 'Commit Amount',
+      best_case_amount: 'Best Case Amount',
+      upside_amount: 'Upside Amount',
+    };
+
+    for (const row of schemaResult.rows) {
+      const key = row.column_name;
+      const label = labelMap[key] || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+      const is_default = key === 'amount';
+
+      allFields.push({ key, label: is_default ? `${label} (default)` : label, is_default });
+    }
+
+    // Step 2: Discover numeric custom_fields keys by sampling deals in this workspace
     try {
       const sampleResult = await query<{ custom_fields: any }>(
         `SELECT custom_fields FROM deals
          WHERE workspace_id = $1 AND custom_fields IS NOT NULL AND custom_fields != '{}'
-         LIMIT 50`,
+         LIMIT 100`,
         [workspaceId]
       );
 
@@ -479,16 +512,25 @@ router.get('/:workspaceId/admin/numeric-fields', requirePermission('config.view'
         }
       }
 
-      customFields = Array.from(numericKeys).sort().map(k => ({
+      const customFields = Array.from(numericKeys).sort().map(k => ({
         key: `custom_fields.${k}`,
         label: k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+        is_default: false,
       }));
+
+      allFields.push(...customFields);
     } catch (_e) {
-      // custom_fields column may not exist — skip gracefully
+      // custom_fields column may not exist or no deals yet — skip gracefully
     }
 
+    // Sort: default first, then alphabetically by label
+    allFields.sort((a, b) => {
+      if (a.is_default !== b.is_default) return a.is_default ? -1 : 1;
+      return a.label.localeCompare(b.label);
+    });
+
     res.json({
-      fields: [...standardFields, ...customFields],
+      fields: allFields,
     });
   } catch (err) {
     console.error('[Admin Scopes] numeric-fields error:', err);
