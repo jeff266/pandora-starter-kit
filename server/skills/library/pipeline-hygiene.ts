@@ -296,7 +296,7 @@ Focus on the top 5-10 most impactful actions. Prioritize by deal amount and stal
   ],
 
   schedule: {
-    trigger: 'on_demand',
+    cron: '0 8 * * 1',
   },
 
   outputFormat: 'slack',

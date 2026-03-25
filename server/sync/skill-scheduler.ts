@@ -436,20 +436,30 @@ export function startSkillScheduler(): void {
       async () => {
         console.log(`[Skill Scheduler] Cron triggered: ${cronExpression} (${skillIds.length} skills)`);
 
-        // Get all workspaces with connected sources
+        // Get all workspaces with connected sources OR at least one deal row
+        // (the latter covers upload-only workspaces like GrowthBook that have no active CRM connection)
         const workspacesResult = await query<{ id: string; name: string }>(
           `SELECT DISTINCT w.id, w.name
            FROM workspaces w
-           INNER JOIN connections c ON c.workspace_id = w.id
-           WHERE c.status IN ('connected', 'synced', 'error')
-             AND w.status = 'active'
+           WHERE w.status = 'active'
+             AND (
+               EXISTS (
+                 SELECT 1 FROM connections c
+                 WHERE c.workspace_id = w.id
+                   AND c.status IN ('connected', 'synced', 'error')
+               )
+               OR EXISTS (
+                 SELECT 1 FROM deals d
+                 WHERE d.workspace_id = w.id
+               )
+             )
            ORDER BY w.name`
         );
 
         const workspaces = workspacesResult.rows;
 
         if (workspaces.length === 0) {
-          console.log('[Skill Scheduler] No workspaces with connected sources — skipping');
+          console.log('[Skill Scheduler] No workspaces with deal data or connected sources — skipping');
           return;
         }
 
