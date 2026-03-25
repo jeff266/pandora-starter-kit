@@ -22,7 +22,7 @@ import type { ConversationMessage } from './conversation-state.js';
 import { buildWorkspaceContextBlock } from '../context/workspace-memory.js';
 import { buildMemoryContextBlock, getForecastAccuracyContext } from '../memory/workspace-memory.js';
 import { getSkillRegistry } from '../skills/registry.js';
-import { getDictionaryContext } from '../dictionary/dictionary-context.js';
+import { getWorkspaceContext } from './workspace-context.js';
 import { getPandoraToolsContext } from '../skills/tool-context.js';
 import { validateChartSpec } from '../renderers/types.js';
 import type { ChartSpec } from '../renderers/types.js';
@@ -1712,7 +1712,16 @@ export async function runPandoraAgent(
 
   const contextBlock = await buildWorkspaceContextBlock(workspaceId).catch(() => '');
   let memoryBlock = await buildMemoryContextBlock(workspaceId).catch(() => '');
-  const dictionaryContext = await getDictionaryContext(workspaceId).catch(() => '');
+  const wsCtx = await getWorkspaceContext(workspaceId).catch(() => null);
+  const dictionaryContext = (() => {
+    const terms = wsCtx?.data_dictionary_terms ?? [];
+    if (terms.length === 0) return '';
+    const lines = terms.map(t => {
+      const def = t.technical_definition || t.definition || '';
+      return def ? `${t.term}: ${def}` : t.term;
+    }).join('\n');
+    return `\n<workspace_terminology>\n${lines}\n</workspace_terminology>`;
+  })();
   const toolContext = getPandoraToolsContext();
 
   // ── Ambiguity Marker Stripping ──────────────────────────────────────────────

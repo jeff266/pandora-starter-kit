@@ -1850,6 +1850,17 @@ Questions answerable from configuration alone (no tools needed):
 - How many reps do we have?
 `;
 
+  const termLines = workspaceContext.data_dictionary_terms.length > 0
+    ? workspaceContext.data_dictionary_terms.map(t => {
+        const def = t.technical_definition || t.definition || '';
+        return `  ${t.term}${def ? `: ${def}` : ''}${t.source ? ` [source: ${t.source}]` : ''}`;
+      }).join('\n')
+    : '';
+
+  const terminologyBlock = termLines
+    ? `\n\nWORKSPACE TERMINOLOGY:\n${termLines}\n\nWhen asked to define or explain any of the terms above, use the workspace definition exactly as written. These override generic industry definitions.`
+    : '';
+
   const knowledgeLines = workspaceContext.workspace_knowledge.length > 0
     ? workspaceContext.workspace_knowledge.map(k => {
         const conf = k.confidence >= 0.9 ? 'high'
@@ -1878,7 +1889,7 @@ When a user's question involves coverage targets, pipeline requirements, or fore
   Format: ⚠️ [1-sentence callout] — then continue with main answer
 Never pick a methodology as definitively correct. Explain the mechanism. The footnote should help the user understand *why* the methods disagree, not which to blindly trust.`;
 
-  return `${base}${contextSection}${caveatSection}${workspaceConfigBlock}${knowledgeBlock}${methodologyRule}
+  return `${base}${contextSection}${caveatSection}${workspaceConfigBlock}${terminologyBlock}${knowledgeBlock}${methodologyRule}
 
 Tailor your recommendations to this company's specific profile.
 For example, objection handling for a $150K ACV enterprise product looks very different

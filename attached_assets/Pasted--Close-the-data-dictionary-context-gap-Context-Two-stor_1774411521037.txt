@@ -1,0 +1,176 @@
+# Close the data_dictionary context gap
+
+## Context
+
+Two stores describe workspace business definitions
+but they're injected into different agent paths
+and never cross over:
+
+data_dictionary → tool-calling agent only
+business_dimensions → advisory handler only
+
+This means neither path has the full picture.
+The fix: load data_dictionary into getWorkspaceContext()
+so both agent paths see both stores.
+
+## Before Starting
+
+1. Show server/chat/workspace-context.ts —
+   the full getWorkspaceContext() function.
+   How many loaders does it currently run?
+   What's in WorkspaceContext today?
+
+2. Show where the existing data_dictionary injection
+   happens for the tool-calling agent. Search for
+   'workspace_terminology' in orchestrator.ts.
+   Is it loaded separately from getWorkspaceContext()?
+   Or is it inside the WorkspaceContext object already?
+
+3. Check the data_dictionary table schema:
+   The column for sort priority — is it refs_count,
+   reference_count, last_referenced_at, or something
+   else? Show the schema.
+
+4. How many rows does Frontera's data_dictionary
+   currently have?
+   SELECT COUNT(*), source
+   FROM data_dictionary
+   WHERE workspace_id = (
+     SELECT id FROM workspaces
+     WHERE name ILIKE '%frontera%' LIMIT 1
+   )
+   GROUP BY source;
+
+Report findings then build.
+
+---
+
+## The Fix
+
+### Step 1 — Add loadDataDictionaryTerms()
+
+File: server/chat/workspace-context.ts
+```typescript
+async function loadDataDictionaryTerms(
+  workspaceId: string,
+  db: any
+): Promise<DataDictionaryTerm[]> {
+  // Adapt column names to match actual schema
+  // Sort by most-referenced terms first
+  // so the most important definitions appear in
+  // the (token-limited) context window
+  const result = await db.query(`
+    SELECT
+      term,
+      definition,
+      source,
+      technical_definition,
+      sql_definition
+    FROM data_dictionary
+    WHERE workspace_id = $1
+    ORDER BY
+      -- most referenced terms first
+      COALESCE(last_referenced_at, created_at) DESC
+    LIMIT 30
+  `, [workspaceId])
+
+  return result.rows
+}
+
+interface DataDictionaryTerm {
+  term:                 string
+  definition:           string
+  source:               string
+  technical_definition: string | null
+  sql_definition:       string | null
+}
+```
+
+Adapt the ORDER BY to use whatever column tracks
+usage frequency. If no such column exists, order
+by created_at DESC.
+
+### Step 2 — Add to WorkspaceContext interface
+```typescript
+interface WorkspaceContext {
+  // ... existing fields ...
+  data_dictionary_terms: DataDictionaryTerm[]
+}
+```
+
+### Step 3 — Wire into getWorkspaceContext()
+
+Add loadDataDictionaryTerms() to the existing
+Promise.all() alongside the other loaders:
+```typescript
+const [
+  // ... existing loaders ...
+  dataDictionaryTerms,
+] = await Promise.all([
+  // ... existing calls ...
+  loadDataDictionaryTerms(workspaceId, db),
+])
+
+return {
+  // ... existing fields ...
+  data_dictionary_terms: dataDictionaryTerms,
+}
+```
+
+### Step 4 — Update buildAdvisorySystemPrompt()
+
+In the advisory handler, add a WORKSPACE TERMINOLOGY
+block using the loaded terms:
+```typescript
+const terminologyBlock = ctx.data_dictionary_terms
+  .length > 0
+  ? `\nWORKSPACE TERMINOLOGY:\n` +
+    ctx.data_dictionary_terms.map(t => {
+      const source = t.source === 'confirmed'
+        ? '[confirmed]'
+        : t.source === 'computed'
+        ? '[computed]'
+        : t.source === 'USER'
+        ? '[user-defined]'
+        : '[system]'
+      return `  ${t.term} ${source}: ${t.definition}`
+    }).join('\n')
+  : ''
+```
+
+Inject this block into the advisory system prompt
+alongside the existing WORKSPACE CONFIGURATION block.
+
+### Step 5 — Update tool-calling agent prompt
+
+Find where workspace_terminology is currently
+injected into the tool-calling agent system prompt.
+It's probably loading data_dictionary separately
+with its own query.
+
+Replace that separate load with the already-loaded
+ctx.data_dictionary_terms from WorkspaceContext.
+Eliminates a duplicate DB query.
+
+If the tool-calling agent uses a different system
+prompt builder than buildAdvisorySystemPrompt(),
+add the same terminology block there.
+
+---
+
+## Acceptance Criteria
+
+1. loadDataDictionaryTerms() added to workspace-context.ts
+2. WorkspaceContext interface has data_dictionary_terms
+3. Both advisory and tool-calling agent handlers
+   receive the same data_dictionary_terms
+4. No duplicate data_dictionary queries —
+   one load in getWorkspaceContext() serves both
+5. Terminology block appears in both system prompts
+   with source badges [confirmed]/[computed]/[user-defined]
+6. Terms sorted by most-referenced first so the
+   most important definitions are in the context window
+7. Capped at 30 terms to avoid bloating token budget
+8. Zero TypeScript errors
+9. Existing workspace_terminology injection
+   in tool-calling agent replaced, not duplicated

@@ -30,6 +30,7 @@ export interface WorkspaceContext {
   sales_reps: SalesRep[];
   confirmed_dimensions: ConfirmedDimension[];
   workspace_knowledge: WorkspaceKnowledgeItem[];
+  data_dictionary_terms: DataDictionaryTerm[];
 }
 
 export interface ActiveTarget {
@@ -62,6 +63,14 @@ export interface WorkspaceKnowledgeItem {
   used_count: number;
 }
 
+export interface DataDictionaryTerm {
+  term:                 string;
+  definition:           string | null;
+  source:               string | null;
+  technical_definition: string | null;
+  sql_definition:       string | null;
+}
+
 // 15-minute in-memory cache
 interface CacheEntry {
   context: WorkspaceContext;
@@ -79,7 +88,7 @@ export async function getWorkspaceContext(workspaceId: string): Promise<Workspac
   }
 
   try {
-    const [meta, config, dealMetrics, icpProfile, signals, activeTargets, salesReps, confirmedDimensions, workspaceKnowledge] = await Promise.all([
+    const [meta, config, dealMetrics, icpProfile, signals, activeTargets, salesReps, confirmedDimensions, workspaceKnowledge, dataDictionaryTerms] = await Promise.all([
       loadWorkspaceMeta(workspaceId),
       loadWorkspaceConfig(workspaceId),
       computeDealMetrics(workspaceId),
@@ -89,6 +98,7 @@ export async function getWorkspaceContext(workspaceId: string): Promise<Workspac
       loadSalesReps(workspaceId),
       loadConfirmedDimensions(workspaceId),
       loadWorkspaceKnowledge(workspaceId),
+      loadDataDictionaryTerms(workspaceId),
     ]);
 
     // Find current quarter target
@@ -120,6 +130,7 @@ export async function getWorkspaceContext(workspaceId: string): Promise<Workspac
       sales_reps: salesReps,
       confirmed_dimensions: confirmedDimensions,
       workspace_knowledge: workspaceKnowledge,
+      data_dictionary_terms: dataDictionaryTerms,
     };
 
     // Cache for 15 minutes
@@ -510,6 +521,40 @@ async function loadWorkspaceKnowledge(workspaceId: string): Promise<WorkspaceKno
     }));
   } catch (err) {
     // Table might not exist yet
+    return [];
+  }
+}
+
+// ============================================================================
+// Query 10: Data Dictionary Terms
+// ============================================================================
+
+async function loadDataDictionaryTerms(workspaceId: string): Promise<DataDictionaryTerm[]> {
+  try {
+    const result = await query<{
+      term: string;
+      definition: string | null;
+      source: string | null;
+      technical_definition: string | null;
+      sql_definition: string | null;
+    }>(
+      `SELECT
+         term,
+         definition,
+         source,
+         technical_definition,
+         sql_definition
+       FROM data_dictionary
+       WHERE workspace_id = $1
+         AND is_active = TRUE
+       ORDER BY
+         COALESCE(last_referenced_at, created_at) DESC NULLS LAST
+       LIMIT 30`,
+      [workspaceId]
+    );
+
+    return result.rows;
+  } catch (err) {
     return [];
   }
 }
