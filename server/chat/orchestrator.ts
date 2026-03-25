@@ -1810,7 +1810,7 @@ When recommending frameworks or structures, explain the reasoning behind each ch
 
   const repLines = workspaceContext.sales_reps.length > 0
     ? workspaceContext.sales_reps.map(r =>
-        `  ${r.name} (${r.role})${r.manager_email ? ` · reports to ${r.manager_email}` : ''}`
+        `  ${r.name} (${r.role})`
       ).join('\n')
     : '  No sales roster configured';
 
@@ -1834,6 +1834,15 @@ ${repLines}
 
 Confirmed business definitions:
 ${dimLines}
+
+IMPORTANT: The WORKSPACE CONFIGURATION block above contains authoritative data about this workspace's quota targets, sales team, and business definitions. Answer questions about team members, quota targets, coverage targets, and confirmed definitions directly from this block WITHOUT making tool calls. Only use tools when the question requires live deal data, activity data, or computed metrics not present in the configuration block.
+
+Questions answerable from configuration alone (no tools needed):
+- Who are our reps / sales team?
+- What's our quota target?
+- What's our coverage target?
+- What are our confirmed pipeline definitions?
+- How many reps do we have?
 `;
 
   const knowledgeLines = workspaceContext.workspace_knowledge.length > 0

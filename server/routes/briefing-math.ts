@@ -254,16 +254,15 @@ async function handleCoverageMath(
       breakdown: formattedBreakdown,
     });
   } else {
-    const quotaRatio = target > 0 ? Math.round((weightedPipeline / target) * 10) / 10 : 0;
     res.json({
       mathKey: 'coverage',
-      title: 'Pipeline Coverage (Quota Met)',
+      title: 'Pipeline Coverage (Quota Exceeded)',
       type: 'coverage',
       calculation: {
         numerator: { value: fmtDollar(weightedPipeline), label: 'Weighted pipeline' },
         denominator: { value: fmtDollar(target), label: 'Original quota' },
-        result: { value: `${quotaRatio}x` },
-        note: `Quota already met — no remaining gap. Coverage shown against the original ${fmtDollar(target)} quota for context. Closed won: ${fmtDollar(closedWon)}.`,
+        result: { value: 'N/A' },
+        note: `Quota already met — closed ${fmtDollar(closedWon)} against ${fmtDollar(target)} target. Coverage is a forward-looking metric. Focus shifts to upside and next quarter pipeline.`,
       },
       breakdown: formattedBreakdown,
     });

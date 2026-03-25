@@ -73,7 +73,14 @@ router.get('/:id/forecast/snapshots', async (req, res) => {
         attainment_pct: team.attainment || null,
         pipe_gen_this_week: wowDelta.pipeline_delta || null,
         pipe_gen_avg: null,
-        coverage_ratio: team.teamQuota ? (team.pipeline || 0) / team.teamQuota : null,
+        coverage_ratio: (() => {
+          const quota = team.teamQuota;
+          const closedWon = team.closedWon || 0;
+          const pipeline = team.pipeline || 0;
+          if (!quota) return null;
+          const remaining = quota - closedWon;
+          return remaining > 0 ? pipeline / remaining : null;
+        })(),
         by_rep: byRep.map((r: any) => ({
           rep_name: r.name || 'Unknown',
           rep_email: r.email || '',

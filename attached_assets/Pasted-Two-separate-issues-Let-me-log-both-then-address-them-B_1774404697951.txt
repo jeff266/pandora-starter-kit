@@ -1,0 +1,140 @@
+Two separate issues. Let me log both then address them.Both logged. Send these to Claude Code:
+
+```
+Two fixes. Start with #1 (one line), then #2.
+
+---
+
+## Fix 1 — Agent reads from injected context instead
+## of making tool calls for known workspace data
+
+File: server/chat/orchestrator.ts
+
+Find buildAdvisorySystemPrompt(). The WORKSPACE
+CONFIGURATION block is injected but the agent
+ignores it and still runs tool calls to find rep
+names, targets, etc.
+
+Add this instruction immediately before or after
+the WORKSPACE CONFIGURATION block:
+
+"IMPORTANT: The WORKSPACE CONFIGURATION block above
+contains authoritative data about this workspace's
+quota targets, sales team, and business definitions.
+Answer questions about team members, quota targets,
+coverage targets, and confirmed definitions directly
+from this block WITHOUT making tool calls.
+Only use tools when the question requires live deal
+data, activity data, or computed metrics not present
+in the configuration block."
+
+Also add specific examples of what should NOT
+require tool calls:
+"Questions answerable from configuration alone
+(no tools needed):
+- Who are our reps / sales team?
+- What's our quota target?
+- What's our coverage target?
+- What are our confirmed pipeline definitions?
+- How many reps do we have?"
+
+This is a prompt-only change. No logic changes.
+
+---
+
+## Fix 2 — Coverage formula: use remaining gap,
+## not full quota, as denominator
+
+Find wherever coverage_ratio is computed. Search for:
+- compute_pipeline_coverage
+- coverage_ratio
+- coverage calculation
+in server/skills/ and server/tools/
+
+Show the current formula before changing it.
+
+The correct coverage formula is:
+
+```typescript
+function computeCoverageRatio(
+  openPipeline: number,
+  target: number,
+  closedWon: number
+): {
+  ratio: number | null
+  formula: string
+  interpretation: string
+} {
+  const remainingGap = target - closedWon
+
+  // Quota already exceeded
+  if (closedWon >= target) {
+    return {
+      ratio: null,
+      formula: 'Quota exceeded — coverage not applicable',
+      interpretation:
+        `Closed $${(closedWon/1000).toFixed(0)}K against ` +
+        `$${(target/1000).toFixed(0)}K target. ` +
+        `Coverage is a forward-looking metric — ` +
+        `focus shifts to upside and next quarter.`
+    }
+  }
+
+  // Normal case: coverage of remaining gap
+  const ratio = openPipeline / remainingGap
+  return {
+    ratio,
+    formula:
+      `Open pipeline ($${(openPipeline/1000).toFixed(0)}K) / ` +
+      `Remaining gap ($${(remainingGap/1000).toFixed(0)}K) ` +
+      `= ${ratio.toFixed(2)}x`,
+    interpretation:
+      ratio >= 3.0
+        ? `Strong coverage — ${ratio.toFixed(1)}x against ` +
+          `remaining $${(remainingGap/1000).toFixed(0)}K gap.`
+        : ratio >= 2.0
+        ? `Adequate coverage — ${ratio.toFixed(1)}x but ` +
+          `monitor for slippage.`
+        : `Thin coverage — ${ratio.toFixed(1)}x against ` +
+          `remaining gap. At risk.`
+  }
+}
+```
+
+Three cases:
+1. Closed Won >= Target → quota exceeded, return null
+   ratio with clear message, pivot to next quarter
+2. Normal: ratio = open pipeline / (target - closed won)
+3. In the system prompt context and Concierge brief,
+   when quota is exceeded: automatically surface
+   next quarter coverage instead of current quarter
+
+Also update the coverage_ratio entry in the Data
+Dictionary system defaults — the formula field
+should read: "Open Pipeline / (Target - Closed Won)"
+not "Open Pipeline / Target"
+
+Find the seeded data_dictionary rows and update the
+Coverage Ratio formula field to match.
+
+---
+
+## Acceptance criteria
+
+Fix 1:
+1. "Who are our reps?" answered in under 3 seconds
+   with zero tool calls
+2. "What's our Q2 target?" answered from context,
+   no tool calls
+3. Questions about live deal data (pipeline value,
+   specific deal status) still use tools normally
+
+Fix 2:
+4. Coverage ratio uses (target - closed won) as
+   denominator
+5. When closed won >= target, returns null ratio
+   with "Quota exceeded" message and pivots to
+   next quarter coverage
+6. Data Dictionary Coverage Ratio formula updated
+7. No TypeScript errors
+```

@@ -1339,7 +1339,7 @@ router.get('/:workspaceId/pipeline/metric-breakdown', async (req: Request, res: 
     let formula = '';
     if (metric === 'total_pipeline') formula = 'Sum of Amount for all open deals (excluding Closed Won/Lost)';
     else if (metric === 'weighted_pipeline') formula = 'Sum of (Amount × Probability) for all open deals';
-    else if (metric === 'coverage') formula = 'Total Pipeline ÷ Quota Target';
+    else if (metric === 'coverage') formula = 'Open Pipeline / (Target − Closed Won)';
 
     res.json({
       metric,
