@@ -89,11 +89,21 @@ async function extractPipelineHygiene(runId: string, workspaceId: string, result
   const findings: FindingRow[] = [];
   const skillId = 'pipeline-hygiene';
 
-  const staleThresholds = await configLoader.getStaleThreshold(workspaceId);
-  const staleWarningDays = staleThresholds.warning;
+  let staleWarningDays = 30;
+  try {
+    const staleThresholds = await configLoader.getStaleThreshold(workspaceId);
+    staleWarningDays = staleThresholds.warning;
+  } catch {
+    console.warn(`[FindingsExtractor] Could not load stale thresholds for ${workspaceId}, using default ${staleWarningDays}d`);
+  }
 
-  const workspaceConfig = await configLoader.getConfig(workspaceId);
-  const excludedOwners: string[] = workspaceConfig.teams?.excluded_owners ?? [];
+  let excludedOwners: string[] = [];
+  try {
+    const workspaceConfig = await configLoader.getConfig(workspaceId);
+    excludedOwners = workspaceConfig.teams?.excluded_owners ?? [];
+  } catch {
+    console.warn(`[FindingsExtractor] Could not load workspace config for ${workspaceId}, excluded_owners defaulting to []`);
+  }
 
   const stale = result.stale_deals_agg;
   if (stale && typeof stale === 'object' && !stale.error) {
@@ -620,6 +630,10 @@ export async function insertFindings(findings: FindingRow[]): Promise<FindingRow
       placeholders.push(
         `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9}, $${offset + 10})`,
       );
+      let metadataJson = '{}';
+      try { metadataJson = JSON.stringify(f.metadata ?? {}); } catch {}
+      let assumptionsJson: string | null = null;
+      try { assumptionsJson = f.assumptions ? JSON.stringify(f.assumptions) : null; } catch {}
       values.push(
         f.workspace_id,
         f.skill_run_id,
@@ -629,8 +643,8 @@ export async function insertFindings(findings: FindingRow[]): Promise<FindingRow
         f.message,
         f.deal_id || null,
         f.owner_email || null,
-        JSON.stringify(f.metadata),
-        f.assumptions ? JSON.stringify(f.assumptions) : null,
+        metadataJson,
+        assumptionsJson,
       );
     }
 

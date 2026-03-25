@@ -196,33 +196,37 @@ export async function backfillFindingsFromEvidence(workspaceId: string): Promise
 }
 
 /**
- * Run backfill for all workspaces that have evidence claims but 0 findings.
- * Called once at server startup.
+ * Run backfill for all workspaces that have skill runs with evidence claims
+ * but no corresponding findings (per-run gap detection — not just workspace-level
+ * zero total). Called once at server startup.
  */
 export async function runStartupFindingsBackfill(): Promise<void> {
   try {
-    const result = await query<{ workspace_id: string; claim_run_count: number }>(
-      `SELECT sr.workspace_id, COUNT(DISTINCT sr.run_id) as claim_run_count
+    // Find distinct workspaces that have at least one skill run with claims
+    // but no findings linked to that run (per-run gap, not workspace zero check)
+    const result = await query<{ workspace_id: string; gap_run_count: string }>(
+      `SELECT sr.workspace_id, COUNT(DISTINCT sr.run_id)::text as gap_run_count
        FROM skill_runs sr
        WHERE sr.status = 'completed'
          AND sr.output->'evidence'->'claims' IS NOT NULL
          AND jsonb_array_length(sr.output->'evidence'->'claims') > 0
          AND NOT EXISTS (
-           SELECT 1 FROM findings f WHERE f.workspace_id = sr.workspace_id
+           SELECT 1 FROM findings f
+           WHERE f.workspace_id = sr.workspace_id AND f.skill_run_id = sr.run_id
          )
        GROUP BY sr.workspace_id`
     );
 
     if (result.rows.length === 0) {
-      console.log('[FindingsBackfill] No workspaces need backfill');
+      console.log('[FindingsBackfill] No skill runs have findings gaps');
       return;
     }
 
-    console.log(`[FindingsBackfill] Found ${result.rows.length} workspace(s) with evidence claims but 0 findings — backfilling...`);
+    console.log(`[FindingsBackfill] Found ${result.rows.length} workspace(s) with per-run findings gaps — backfilling...`);
 
     for (const row of result.rows) {
       const inserted = await backfillFindingsFromEvidence(row.workspace_id);
-      console.log(`[FindingsBackfill] Workspace ${row.workspace_id}: inserted ${inserted} findings from ${row.claim_run_count} skill runs`);
+      console.log(`[FindingsBackfill] Workspace ${row.workspace_id}: inserted ${inserted} findings from ${row.gap_run_count} gap run(s)`);
     }
   } catch (err) {
     console.error('[FindingsBackfill] Startup backfill failed:', err instanceof Error ? err.message : err);
