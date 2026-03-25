@@ -208,7 +208,7 @@ export async function approveInternalAction(
         `SELECT * FROM business_dimensions WHERE workspace_id = $1 AND dimension_key = $2`,
         [workspaceId, dimension_key]
       );
-      const after = afterResult.rows[0] || {};
+      const after = afterResult.rows[0] || null;
 
       await writeChangeLog({
         workspaceId, tableName: 'business_dimensions', recordKey: dimension_key,
