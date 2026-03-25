@@ -36,67 +36,67 @@ interface ToolCallRecord {
 
 const SKILL_PATTERNS: Array<{ pattern: RegExp; skill_id: string; title: string; description: string }> = [
   {
-    pattern: /pipeline.?hygiene|deal.?hygiene|stage.?velocity.?missing|missing.*stage.?data/i,
+    pattern: /pipeline-hygiene|pipeline.?hygiene|deal.?hygiene|stage.?velocity.?missing|missing.*stage.?data/i,
     skill_id: 'pipeline-hygiene',
     title: 'Run Pipeline Hygiene Check',
     description: 'Audit stage completeness and velocity across the pipeline',
   },
   {
-    pattern: /deal.?risk.?sweep|run.*deal.?risk/i,
+    pattern: /deal-risk-review|deal.?risk.?sweep|run.*deal.?risk/i,
     skill_id: 'deal-risk-review',
     title: 'Run Deal Risk Review',
     description: 'Identify at-risk deals across your pipeline',
   },
   {
-    pattern: /forecast.*rollup|run.*forecast.*rollup/i,
+    pattern: /forecast-rollup|forecast.*rollup|run.*forecast.*rollup/i,
     skill_id: 'forecast-rollup',
     title: 'Run Forecast Rollup',
     description: 'Aggregate forecast across all reps and pipelines',
   },
   {
-    pattern: /data.?quality|missing.*field|incomplete.*data/i,
+    pattern: /data-quality-audit|data.?quality(?:.?audit)?|missing.*field|incomplete.*data/i,
     skill_id: 'data-quality-audit',
     title: 'Run Data Quality Audit',
     description: 'Audit missing or inconsistent CRM fields',
   },
   {
-    pattern: /deal.?scor|rfm.?scor|scoring.?model|deal.*rfm|run.*deal.*scoring|deal.*score.*(?:null|missing|empty|not\s+computed|never\s+run|not\s+run|uniform|all\s+same)|score.*deal.*(?:null|missing|not\s+computed)/i,
+    pattern: /deal-scoring-model|scoring.?model|run.*deal.*scoring|deal.*score.*(?:null|missing|empty|not\s+computed|never\s+run|not\s+run|uniform|all\s+same)|score.*deal.*(?:null|missing|not\s+computed)/i,
     skill_id: 'deal-scoring-model',
     title: 'Run Deal Scoring',
     description: 'Score all open deals by fit, engagement, and pipeline health',
   },
   {
-    pattern: /pipeline.?coverage|coverage.?gap|coverage.?ratio/i,
+    pattern: /pipeline-coverage|pipeline.?coverage|coverage.?gap|coverage.?ratio/i,
     skill_id: 'pipeline-coverage',
     title: 'Run Pipeline Coverage Analysis',
     description: 'Measure pipeline coverage vs. quota across all reps',
   },
   {
-    pattern: /rep.?scorecard|rep.*performance.*review|coaching.*digest/i,
+    pattern: /rep-scorecard|rep.?scorecard|rep.*performance.*review|coaching.*digest/i,
     skill_id: 'rep-scorecard',
     title: 'Run Rep Scorecard',
     description: 'Benchmark rep performance against team averages',
   },
   {
-    pattern: /stage.?mismatch|stage.*divergen|divergen.*stage/i,
+    pattern: /stage-mismatch-detector|stage.?mismatch|stage.*divergen|divergen.*stage/i,
     skill_id: 'stage-mismatch-detector',
     title: 'Run Stage Mismatch Detector',
     description: 'Find deals where CRM stage conflicts with conversation signals',
   },
   {
-    pattern: /meddic.?coverage|run.*meddic/i,
+    pattern: /meddic-coverage|meddic.?coverage|run.*meddic/i,
     skill_id: 'meddic-coverage',
     title: 'Run MEDDIC Coverage',
     description: 'Score qualification completeness across open deals',
   },
   {
-    pattern: /rfm.*(?:null|missing|not.*run|never.*run|all.*same|all.*A|all.*graded|no.*grade)|deal.*grade.*(?:null|missing|empty|not\s+computed)|grades.*(?:missing|empty|null|uniform|all\s*A)|all deals.*graded.*A|deal.*health.*(?:null|missing|not.*scored)/i,
+    pattern: /deal-rfm-scoring|rfm.*(?:null|missing|not.*run|never.*run|all.*same|all.*A|all.*graded|no.*grade)|deal.*grade.*(?:null|missing|empty|not\s+computed)|grades.*(?:missing|empty|null|uniform|all\s*A)|all deals.*graded.*A|deal.*health.*(?:null|missing|not.*scored)/i,
     skill_id: 'deal-rfm-scoring',
     title: 'Run Deal RFM Scoring',
     description: 'Compute risk grades (A–F) for all deals based on recency, frequency, and deal value',
   },
   {
-    pattern: /icp.*(?:score|fit|tier).*(?:null|missing|not.*run|never.*run|same|uniform)|fit.*score.*(?:missing|empty|not\s+computed)|icp.*(?:hasn.t|has not|never).*run/i,
+    pattern: /icp-discovery|icp.*(?:score|fit|tier).*(?:null|missing|not.*run|never.*run|same|uniform)|fit.*score.*(?:missing|empty|not\s+computed)|icp.*(?:hasn.t|has not|never).*run/i,
     skill_id: 'icp-discovery',
     title: 'Run ICP Discovery',
     description: 'Score all accounts against your Ideal Customer Profile to populate ICP fit tiers',
@@ -224,11 +224,12 @@ export async function extractSuggestedActions(
   }
 
   // ── 5. Skill run suggestions (P2, auto) ───────────────────────────────
+  const seenSkillIds = new Set<string>();
   for (const sp of SKILL_PATTERNS) {
     if (sp.pattern.test(synthesisText)) {
-      const alreadyCovered =
-        (sp.skill_id === 'meddic-coverage' && actions.some(a => a.type === 'run_meddic_coverage'));
-      if (!alreadyCovered) {
+      const isMeddicCovered = sp.skill_id === 'meddic-coverage' && actions.some(a => a.type === 'run_meddic_coverage');
+      if (!isMeddicCovered && !seenSkillIds.has(sp.skill_id)) {
+        seenSkillIds.add(sp.skill_id);
         actions.push({
           id: randomUUID(),
           type: 'run_skill',
