@@ -755,11 +755,16 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
   // Falls through to Pandora Agent for data_query or ambiguous categories.
   // slack_dm gets the full classification + Pandora Agent path (same as in_app).
   // slack_thread uses the lighter runScopedAnalysis path below.
+  //
+  // Workspace context is loaded here (cached, ~1ms warm) so the classifier can
+  // see what's already in memory and avoid routing context-answerable questions
+  // to the tool-calling agent.
   let intentClassification: Awaited<ReturnType<typeof classifyIntent>> | null = null;
   if (!answer && (surface === 'in_app' || surface === 'slack_dm')) {
     try {
       const conversationHistory = buildConversationHistory(state.messages || [] as any);
-      intentClassification = await classifyIntent(message, conversationHistory, workspaceId);
+      const ctxForClassifier = await getWorkspaceContext(workspaceId).catch(() => null);
+      intentClassification = await classifyIntent(message, conversationHistory, workspaceId, ctxForClassifier);
 
       console.log('[Intent]', JSON.stringify(intentClassification));
 

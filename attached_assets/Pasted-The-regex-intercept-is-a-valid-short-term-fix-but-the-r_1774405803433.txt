@@ -1,0 +1,57 @@
+The regex intercept is a valid short-term fix but
+the right solution is making the intent classifier
+context-aware.
+
+In the intent classifier, before it classifies the
+message, inject the workspace context availability
+as a hint:
+
+Build a function that checks what workspace context
+is loaded for this request and adds it as a prefix
+to the classifier prompt:
+
+function buildContextAvailabilityHint(ctx: WorkspaceContext): string {
+  const available = []
+  if (ctx.sales_reps?.length)
+    available.push(`Sales roster: ${ctx.sales_reps.length} reps loaded`)
+  if (ctx.current_quarter_target)
+    available.push(`Current quarter target: loaded`)
+  if (ctx.active_targets?.length)
+    available.push(`Quota targets: ${ctx.active_targets.length} periods loaded`)
+  if (ctx.confirmed_dimensions?.length)
+    available.push(`Business definitions: ${ctx.confirmed_dimensions.length} loaded`)
+  if (ctx.workspace_knowledge?.length)
+    available.push(`Business knowledge: ${ctx.workspace_knowledge.length} items`)
+
+  if (!available.length) return ''
+
+  return `WORKSPACE CONTEXT ALREADY LOADED:\n` +
+    available.map(a => `- ${a}`).join('\n') +
+    `\n\nQuestions answerable from this context ` +
+    `should be classified as 'advisory', not ` +
+    `'data_query'. Use 'data_query' only for ` +
+    `questions requiring live deal records, ` +
+    `activity logs, or computed metrics.\n\n`
+}
+
+Prepend this to the intent classifier prompt.
+
+This means:
+- "Who are our reps?" → classifier sees roster loaded
+  → classifies advisory → answered from context
+- "What's our Q2 target?" → classifier sees targets
+  loaded → classifies advisory → answered from context
+- "Which deals closed last week?" → no matching
+  context → classifies data_query → tool calls
+  (correct behavior)
+
+This handles the full question space correctly —
+not just the five regex patterns. The classifier
+learns the distinction rather than pattern-matching
+against a brittle regex list.
+
+Do this instead of the regex intercept.
+If the classifier fix takes longer to validate,
+the regex intercept is acceptable as a temporary
+measure — but the classifier fix is the right
+architecture.
