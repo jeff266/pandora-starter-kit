@@ -222,7 +222,7 @@ router.post(
 
       // Internal Pandora action types — write to Pandora's own tables
       if (INTERNAL_ACTION_TYPES_SET.has(action.action_type)) {
-        const result = await approveInternalAction(action, workspaceId);
+        const result = await approveInternalAction(action, workspaceId, actionId, user_id);
         if (!result.success) {
           return res.status(400).json({ success: false, error: result.message });
         }

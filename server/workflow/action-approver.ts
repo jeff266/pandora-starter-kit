@@ -11,18 +11,58 @@ const INTERNAL_ACTION_TYPES = [
 
 type InternalActionType = typeof INTERNAL_ACTION_TYPES[number];
 
+async function writeChangeLog(opts: {
+  workspaceId: string;
+  tableName: string;
+  recordKey: string;
+  actionId: string | null;
+  changedBy: string;
+  changeType: 'write' | 'revert';
+  before: Record<string, any> | null;
+  after: Record<string, any> | null;
+}): Promise<void> {
+  await query(
+    `INSERT INTO knowledge_change_log
+       (workspace_id, table_name, record_key, action_id, changed_by, change_type,
+        before_snapshot, after_snapshot)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [
+      opts.workspaceId,
+      opts.tableName,
+      opts.recordKey,
+      opts.actionId || null,
+      opts.changedBy,
+      opts.changeType,
+      opts.before ? JSON.stringify(opts.before) : null,
+      opts.after ? JSON.stringify(opts.after) : null,
+    ]
+  );
+}
+
 export async function approveInternalAction(
   action: Record<string, any>,
-  workspaceId: string
+  workspaceId: string,
+  actionId?: string,
+  changedBy?: string
 ): Promise<{ success: boolean; message: string }> {
   const payload = typeof action.execution_payload === 'string'
     ? JSON.parse(action.execution_payload || '{}')
     : (action.execution_payload || {});
 
+  const logActionId = actionId || action.id || null;
+  const logChangedBy = changedBy || 'system';
+
   switch (action.action_type as InternalActionType) {
     case 'update_data_dictionary': {
-      const { term, definition, sql_definition, source, confidence } = payload;
+      const { term, definition, sql_definition, source } = payload;
       if (!term) return { success: false, message: 'Missing term in payload' };
+
+      const beforeResult = await query(
+        `SELECT * FROM data_dictionary WHERE workspace_id = $1 AND term = $2`,
+        [workspaceId, term]
+      );
+      const before = beforeResult.rows[0] || null;
+
       await query(
         `INSERT INTO data_dictionary
            (workspace_id, term, definition, sql_definition, source, is_active, created_at)
@@ -36,12 +76,32 @@ export async function approveInternalAction(
            updated_at     = NOW()`,
         [workspaceId, term, definition || null, sql_definition || null, source || 'computed']
       );
+
+      const afterResult = await query(
+        `SELECT * FROM data_dictionary WHERE workspace_id = $1 AND term = $2`,
+        [workspaceId, term]
+      );
+      const after = afterResult.rows[0];
+
+      await writeChangeLog({
+        workspaceId, tableName: 'data_dictionary', recordKey: term,
+        actionId: logActionId, changedBy: logChangedBy, changeType: 'write',
+        before, after,
+      });
+
       return { success: true, message: `Updated "${term}" in Data Dictionary` };
     }
 
     case 'update_workspace_knowledge': {
       const { key, value, source, confidence } = payload;
       if (!key || !value) return { success: false, message: 'Missing key or value in payload' };
+
+      const beforeResult = await query(
+        `SELECT * FROM workspace_knowledge WHERE workspace_id = $1 AND key = $2`,
+        [workspaceId, key]
+      );
+      const before = beforeResult.rows[0] || null;
+
       await query(
         `INSERT INTO workspace_knowledge
            (workspace_id, key, value, source, confidence, created_at)
@@ -54,12 +114,32 @@ export async function approveInternalAction(
            used_count   = workspace_knowledge.used_count + 1`,
         [workspaceId, key, value, source || 'conversation', confidence ?? 0.7]
       );
+
+      const afterResult = await query(
+        `SELECT * FROM workspace_knowledge WHERE workspace_id = $1 AND key = $2`,
+        [workspaceId, key]
+      );
+      const after = afterResult.rows[0];
+
+      await writeChangeLog({
+        workspaceId, tableName: 'workspace_knowledge', recordKey: key,
+        actionId: logActionId, changedBy: logChangedBy, changeType: 'write',
+        before, after,
+      });
+
       return { success: true, message: `Saved "${key}" to workspace knowledge` };
     }
 
     case 'confirm_metric_definition': {
       const { metric_key, value, unit, methodology, calibration_source } = payload;
       if (!metric_key) return { success: false, message: 'Missing metric_key in payload' };
+
+      const beforeResult = await query(
+        `SELECT * FROM metric_definitions WHERE workspace_id = $1 AND metric_key = $2`,
+        [workspaceId, metric_key]
+      );
+      const before = beforeResult.rows[0] || null;
+
       await query(
         `INSERT INTO metric_definitions
            (workspace_id, metric_key, label, unit, description, calibration_source,
@@ -82,12 +162,32 @@ export async function approveInternalAction(
           calibration_source || 'confirmed',
         ]
       );
+
+      const afterResult = await query(
+        `SELECT * FROM metric_definitions WHERE workspace_id = $1 AND metric_key = $2`,
+        [workspaceId, metric_key]
+      );
+      const after = afterResult.rows[0];
+
+      await writeChangeLog({
+        workspaceId, tableName: 'metric_definitions', recordKey: metric_key,
+        actionId: logActionId, changedBy: logChangedBy, changeType: 'write',
+        before, after,
+      });
+
       return { success: true, message: `Confirmed ${metric_key}${value != null ? `: ${value}` : ''}` };
     }
 
     case 'update_calibration': {
       const { dimension_key, filter_definition, description } = payload;
       if (!dimension_key) return { success: false, message: 'Missing dimension_key in payload' };
+
+      const beforeResult = await query(
+        `SELECT * FROM business_dimensions WHERE workspace_id = $1 AND dimension_key = $2`,
+        [workspaceId, dimension_key]
+      );
+      const before = beforeResult.rows[0] || null;
+
       await query(
         `UPDATE business_dimensions
          SET filter_definition = COALESCE($1::jsonb, filter_definition),
@@ -103,6 +203,19 @@ export async function approveInternalAction(
           dimension_key,
         ]
       );
+
+      const afterResult = await query(
+        `SELECT * FROM business_dimensions WHERE workspace_id = $1 AND dimension_key = $2`,
+        [workspaceId, dimension_key]
+      );
+      const after = afterResult.rows[0] || {};
+
+      await writeChangeLog({
+        workspaceId, tableName: 'business_dimensions', recordKey: dimension_key,
+        actionId: logActionId, changedBy: logChangedBy, changeType: 'write',
+        before, after,
+      });
+
       return { success: true, message: `Updated ${dimension_key} definition` };
     }
 
@@ -226,7 +339,7 @@ export async function executeActionApproval(
 
     // Route internal action types before CRM executor
     if ((INTERNAL_ACTION_TYPES as readonly string[]).includes(action.action_type)) {
-      const internalResult = await approveInternalAction(action, workspaceId);
+      const internalResult = await approveInternalAction(action, workspaceId, actionId, userId);
       if (!internalResult.success) {
         await query(
           `UPDATE actions SET approval_status = 'failed', block_reason = $1, updated_at = NOW() WHERE id = $2`,
