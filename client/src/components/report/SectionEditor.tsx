@@ -232,6 +232,7 @@ export default function SectionEditor({
   const [linkPopover, setLinkPopover] = useState<{ open: boolean; url: string }>({ open: false, url: '' });
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const editorContentRef = useRef<HTMLDivElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const fromEditorRef = useRef(false);
 
@@ -257,10 +258,10 @@ export default function SectionEditor({
   const slashExtension = useRef(
     createSlashCommandExtension(
       (absPos) => {
-        const containerRect = containerRef.current?.getBoundingClientRect();
+        const contentRect = editorContentRef.current?.getBoundingClientRect();
         setSlashMenuAbsPos({
-          top: absPos.top - (containerRect?.top ?? 0) + 4,
-          left: absPos.left - (containerRect?.left ?? 0),
+          top: absPos.top - (contentRect?.top ?? 0) + 4,
+          left: absPos.left - (contentRect?.left ?? 0),
         });
         setSlashMenuActive(true);
         setSlashMenuIndex(0);
@@ -619,6 +620,7 @@ export default function SectionEditor({
       </div>
 
       <div
+        ref={editorContentRef}
         className="section-editor-content"
         style={{ border: '1.5px solid #0D9488', borderTop: 'none', borderRadius: '0 0 8px 8px', padding: '12px 16px', background: '#FAFFFE', position: 'relative' }}
         onKeyDown={handleEditorKeyDown}
