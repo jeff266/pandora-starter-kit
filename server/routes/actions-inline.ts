@@ -22,6 +22,7 @@ const INTERNAL_ACTION_TYPES_SET = new Set([
   'update_workspace_knowledge',
   'confirm_metric_definition',
   'update_calibration',
+  'run_skill',
 ]);
 
 const router = Router();
