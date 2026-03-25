@@ -39,6 +39,7 @@ interface InternalTypeConfig {
   label: string;
   buttonLabel: string;
   descriptionFn: (payload: Record<string, any> | undefined, title: string) => string;
+  visualTeal?: boolean;
 }
 
 const INTERNAL_TYPE_CONFIG: Record<string, InternalTypeConfig> = {
@@ -88,6 +89,7 @@ const INTERNAL_TYPE_CONFIG: Record<string, InternalTypeConfig> = {
     icon: '🚀',
     label: 'Run Pandora Skill',
     buttonLabel: 'Run now ▶',
+    visualTeal: false,
     descriptionFn: (p, title) => {
       if (p?.reason) return String(p.reason).slice(0, 100) + (String(p.reason).length > 100 ? '…' : '');
       if (p?.skill_id) return `Trigger ${String(p.skill_id).replace(/-/g, ' ')}`;
@@ -102,6 +104,11 @@ const TEAL_BG = '#f0fdfa60';
 
 function isInternalType(actionType?: string) {
   return !!actionType && actionType in INTERNAL_TYPE_CONFIG;
+}
+
+function isVisualTealType(actionType?: string) {
+  if (!actionType || !(actionType in INTERNAL_TYPE_CONFIG)) return false;
+  return INTERNAL_TYPE_CONFIG[actionType].visualTeal !== false;
 }
 
 function getPrimaryConfig(item: ActionCardItem): { label: string; mode: string } {
@@ -249,9 +256,10 @@ export function ActionCard({ item, crmSource, onRemove }: ActionCardProps) {
   const showNoteButton = !isSkillType(item.action_type) && !isFieldWriteType(item.action_type) && !isInternalType(item.action_type);
 
   const internalConfig = item.action_type ? INTERNAL_TYPE_CONFIG[item.action_type] : undefined;
+  const visualTeal = isVisualTealType(item.action_type);
 
-  const cardBg = internalConfig ? TEAL_BG : colors.surface;
-  const primaryBg = internalConfig ? TEAL_PRIMARY : colors.accent;
+  const cardBg = visualTeal ? TEAL_BG : colors.surface;
+  const primaryBg = visualTeal ? TEAL_PRIMARY : colors.accent;
   const description = internalConfig
     ? internalConfig.descriptionFn(item.payload, item.title)
     : `Source: ${sourceLabel}`;
@@ -259,7 +267,7 @@ export function ActionCard({ item, crmSource, onRemove }: ActionCardProps) {
   return (
     <div style={{
       background: cardBg,
-      border: internalConfig ? `1px solid ${TEAL_BORDER}` : `1px solid ${colors.border}`,
+      border: visualTeal ? `1px solid ${TEAL_BORDER}` : `1px solid ${colors.border}`,
       borderRadius: 8,
       padding: '12px 14px',
       display: 'flex',
@@ -269,8 +277,8 @@ export function ActionCard({ item, crmSource, onRemove }: ActionCardProps) {
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
 
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-        {internalConfig ? (
-          <span style={{ fontSize: 16, flexShrink: 0, marginTop: 1 }}>{internalConfig.icon}</span>
+        {visualTeal ? (
+          <span style={{ fontSize: 16, flexShrink: 0, marginTop: 1 }}>{internalConfig!.icon}</span>
         ) : (
           <span style={{
             fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 4,
@@ -279,10 +287,10 @@ export function ActionCard({ item, crmSource, onRemove }: ActionCardProps) {
         )}
         <span style={{
           fontSize: 13, lineHeight: 1.45, flex: 1,
-          color: internalConfig ? TEAL_PRIMARY : colors.text,
-          fontWeight: internalConfig ? 600 : undefined,
+          color: visualTeal ? TEAL_PRIMARY : colors.text,
+          fontWeight: visualTeal ? 600 : undefined,
         }}>
-          {internalConfig ? internalConfig.label : item.title}
+          {visualTeal ? internalConfig!.label : item.title}
         </span>
       </div>
 
