@@ -394,9 +394,14 @@ function ConsultantConnectorSection({ addToast }: { addToast: (message: string, 
   );
 }
 
+const CONNECTOR_AUTH_ROUTES: Record<string, string> = {
+  hubspot: '/api/auth/hubspot',
+  salesforce: '/api/auth/salesforce',
+};
+
 export default function ConnectorsPage() {
   const navigate = useNavigate();
-  const { workspaces, token } = useWorkspace();
+  const { workspaces, token, currentWorkspace } = useWorkspace();
   const isConsultant = workspaces && workspaces.length > 1;
 
   const [connectors, setConnectors] = useState<Connector[]>([]);
@@ -892,6 +897,33 @@ export default function ConnectorsPage() {
               )}
 
               <div style={{ display: 'flex', gap: 8 }}>
+                {connector.status === 'disconnected' ? (
+                  <button
+                    onClick={() => {
+                      const authRoute = CONNECTOR_AUTH_ROUTES[connector.type];
+                      if (authRoute && currentWorkspace?.id) {
+                        window.location.href = `${authRoute}?workspaceId=${currentWorkspace.id}`;
+                      } else {
+                        navigate('/marketplace');
+                      }
+                    }}
+                    style={{
+                      flex: 1,
+                      padding: '10px 12px',
+                      border: `1px solid ${colors.accent}`,
+                      background: colors.accent,
+                      color: '#fff',
+                      borderRadius: 6,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      transition: 'all 0.2s',
+                    }}
+                  >
+                    Reconnect
+                  </button>
+                ) : (
+                <>
                 <button
                   onClick={() => handleSyncNow(connector.type)}
                   disabled={syncingConnector === connector.type}
@@ -953,6 +985,8 @@ export default function ConnectorsPage() {
                 >
                   Disconnect
                 </button>
+                </>
+                )}
               </div>
             </div>
           );
