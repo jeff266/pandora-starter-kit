@@ -1112,12 +1112,18 @@ const aggregateStaleDeals: ToolDefinition = {
   },
   execute: async (params, context) => {
     return safeExecute('aggregateStaleDeals', async () => {
-      const staleThreshold = await configLoader.getStaleThreshold(context.workspaceId);
+      const staleThreshold = await configLoader.getStaleThreshold(context.workspaceId).catch(err => {
+        console.warn('[aggregateStaleDeals] getStaleThreshold failed, using defaults:', err instanceof Error ? err.message : err);
+        return { warning: 14, serious: 30, critical: 60 };
+      });
       const staleDays = params.staleDays || staleThreshold.warning;
       const topN = params.topN || 20;
       const [deals, nameMap] = await Promise.all([
-        dealTools.getStaleDeals(context.workspaceId, staleDays),
-        resolveOwnerNames(context.workspaceId),
+        dealTools.getStaleDeals(context.workspaceId, staleDays).catch(err => {
+          console.warn('[aggregateStaleDeals] getStaleDeals failed, returning empty:', err instanceof Error ? err.message : err);
+          return [];
+        }),
+        resolveOwnerNames(context.workspaceId).catch(() => new Map<string, string>()),
       ]);
 
       // Load ICP scores for stale deals (if available)
@@ -1711,8 +1717,14 @@ const dealThreadingAnalysisTool: ToolDefinition = {
   execute: async (params, context) => {
     return safeExecute('dealThreadingAnalysis', async () => {
       const [threadingData, nameMap] = await Promise.all([
-        dealThreadingAnalysis(context.workspaceId),
-        resolveOwnerNames(context.workspaceId),
+        dealThreadingAnalysis(context.workspaceId).catch(err => {
+          console.warn('[dealThreadingAnalysis] core analysis failed, returning empty:', err instanceof Error ? err.message : err);
+          return {
+            summary: { totalOpenDeals: 0, singleThreaded: { count: 0, totalValue: 0 }, multiThreaded: { count: 0, totalValue: 0 } },
+            byStage: {}, byOwner: {}, criticalDeals: [], warningDeals: [], wellThreadedDeals: [],
+          };
+        }),
+        resolveOwnerNames(context.workspaceId).catch(() => new Map<string, string>()),
       ]);
 
       // Map owner IDs to names in all sections
@@ -1825,8 +1837,17 @@ const dataQualityAuditTool: ToolDefinition = {
   execute: async (params, context) => {
     return safeExecute('dataQualityAudit', async () => {
       const [qualityData, nameMap] = await Promise.all([
-        dataQualityAudit(context.workspaceId),
-        resolveOwnerNames(context.workspaceId),
+        dataQualityAudit(context.workspaceId).catch(err => {
+          console.warn('[dataQualityAudit] core audit failed, returning empty:', err instanceof Error ? err.message : err);
+          return {
+            overallGrade: 'unknown' as any,
+            overallScore: 0,
+            byEntity: { deals: { score: 0, fieldCompleteness: [], criticalIssues: 0 }, contacts: { score: 0, fieldCompleteness: [], criticalIssues: 0 }, accounts: { score: 0, fieldCompleteness: [], criticalIssues: 0 } },
+            ownerBreakdown: [],
+            worstOffenders: [],
+          };
+        }),
+        resolveOwnerNames(context.workspaceId).catch(() => new Map<string, string>()),
       ]);
 
       // Map owner IDs to names in owner breakdown
@@ -3146,9 +3167,12 @@ const forecastRollup: ToolDefinition = {
         skillCategory: 'forecast',
         includeQuota: true,
         paramOffset: 2
+      }).catch(err => {
+        console.warn('[forecastRollup] resolveSkillDimension failed, proceeding without dimension:', err instanceof Error ? err.message : err);
+        return null;
       });
 
-      const nameMap = await resolveOwnerNames(context.workspaceId);
+      const nameMap = await resolveOwnerNames(context.workspaceId).catch(() => new Map<string, string>());
 
       // Resolve calibrated pipeline dimension totals and quota if available
       let calibratedPipelineTotal: number | undefined;
@@ -3165,8 +3189,14 @@ const forecastRollup: ToolDefinition = {
       }
 
       // Load forecast-eligible and non-forecast-eligible pipelines
-      const forecastPipelines = await configLoader.getForecastPipelines(context.workspaceId);
-      const nonForecastPipelines = await configLoader.getNonForecastPipelines(context.workspaceId);
+      const forecastPipelines = await configLoader.getForecastPipelines(context.workspaceId).catch(err => {
+        console.warn('[forecastRollup] getForecastPipelines failed, using empty list:', err instanceof Error ? err.message : err);
+        return [];
+      });
+      const nonForecastPipelines = await configLoader.getNonForecastPipelines(context.workspaceId).catch(err => {
+        console.warn('[forecastRollup] getNonForecastPipelines failed, using empty list:', err instanceof Error ? err.message : err);
+        return [];
+      });
       const forecastPipelineNames = forecastPipelines.map(p => p.name);
 
       // Quarter bounds and ownership come from the pre-resolved QueryScope.
