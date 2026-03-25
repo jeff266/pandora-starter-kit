@@ -1,0 +1,276 @@
+Screenshot 2026-03-24 at 6.04.14 PM.png
+Screenshot 2026-03-24 at 6.04.26 PM.png
+Screenshot 2026-03-24 at 6.04.32 PM.png
+Additional insights into how we set targets. one thing is the calibration could surface these tables, collect feedback, and then write back to these settings.
+
+6:05 PM
+
+Synthesized calibration workflow integrating existing quota infrastructure bidirectionally
+Synthesized calibration workflow integrating existing quota infrastructure bidirectionally
+Logged. This is the most important architectural insight of the day.
+
+What you just identified is the design principle that unifies everything:
+
+Calibration isn't a configuration system. It's an orchestrator. It reads from canonical sources, surfaces them for confirmation, and writes back to those same sources. It has no storage of its own — or rather, business_dimensions and workspace_config are just its working memory, not the final destination.
+
+The full map of what already exists vs. what calibration should read/write:
+
+What calibration asks	Already exists in	Should write to
+What's your quota target?	Targets page (FY2027 quarters set)	Targets table
+Which pipelines are real?	Segments tab (4 pipelines)	Pipeline Config
+What do stages mean?	funnel_stages (mapped)	stage_mappings
+Who are your reps?	Sales Roster (4 reps)	Sales Roster
+What field = deal value?	Pipeline Config (Amount default)	Pipeline Config
+What's your win rate?	Deal history (30% computed)	metric_definitions
+What counts as active?	business_dimensions (post-calibration)	business_dimensions
+The only things calibration actually needs to ask about are the things that can't be inferred from existing data — and Frontera has targets set through FY2027. The Q2 target question during calibration was completely unnecessary. The answer was already in the app.
+
+The north star prompt: "I've read your workspace. Here's everything I already know. Tell me what's wrong." Then show the full table. One confirmation exchange. Done.
+
+this makes sense. also curious. how agentic is pandora in this regard. when a user types into ask pandora to run a skill or query it shoud then take into configuration these sttings. the goal is that ask pandora is a platform that can be leveraged across a multitude of environments. if specifics are not captured in the items above, how will pandora learn and store that context?
+
+6:08 PM
+
+Examined Pandora's agentic capabilities and context learning mechanisms
+Examined Pandora's agentic capabilities and context learning mechanisms
+This is the deepest product question of the day. Let me think through it properly.
+
+How agentic is Pandora today?
+
+When a user sends a query to Ask Pandora, the agent loop has access to 62 tools and a system prompt that includes workspace context. But "workspace context" today means whatever is in get_workspace_context — which pulls from workspace_config, the calibrated dimensions, and some basic metadata. It does not automatically pull from:
+
+The Targets table (quota by period)
+The Sales Roster (rep hierarchy)
+The Methodology config (qualification framework)
+The Segments table (business segments)
+The Pipeline Config (value fields per pipeline)
+So when a user asks "what's our coverage ratio?" Pandora computes pipeline / some default target — not pipeline / the actual Q2 target that's sitting in the Targets table. It's running analysis without reading the configuration that defines what the analysis should mean.
+
+That's the core gap. The tools exist. The data exists. The connection between "user intent" and "workspace-specific definition" is missing.
+
+The agentic learning problem — what happens when specifics aren't in structured settings?
+
+This is where it gets interesting. Three categories of context that Pandora encounters in conversations:
+
+Category 1: Correctable structured settings User says "actually our win rate benchmark is 35%, not 30%." This should update metric_definitions. Already partially solved by calibration. The pattern: detect the correction, write to the canonical table, confirm back to the user.
+
+Category 2: Business context that has no structured home User says "our ABA therapy deals take 90 days minimum because of insurance authorization." There's no table for that. But it's critical context — it means Pandora shouldn't flag a 60-day deal as stale, and it means win rate benchmarks need to account for cycle time. This is the hard problem.
+
+Category 3: Implicit preferences revealed through use User always asks about Core Sales Pipeline but never mentions Fellowship Pipeline. User always filters by Nate's deals. User always asks about Q2 close dates. These aren't corrections or statements — they're revealed preferences that Pandora can infer from usage patterns.
+
+The mechanism for learning and storing unstructured context:
+
+The right architecture is a three-tier memory system:
+
+Tier 1 — Structured workspace configuration (what exists today) workspace_config, business_dimensions, metric_definitions, Targets table, Pipeline Config, Sales Roster. Fast lookup, canonical, affects all computations. Modified through calibration + direct settings edits.
+
+Tier 2 — Workspace knowledge base (needs building) A workspace_knowledge table. Free-form key-value pairs with a source, confidence score, and last-referenced timestamp. Every time Pandora learns something in conversation that doesn't fit Tier 1, it writes here.
+
+sql
+workspace_knowledge (
+  workspace_id,
+  key,           -- e.g. 'deal_cycle_constraint.insurance_auth'
+  value,         -- e.g. 'ABA therapy deals require 90d minimum 
+                 --       due to insurance authorization process'
+  source,        -- 'conversation' | 'calibration' | 'inferred'
+  confidence,    -- 0-1
+  created_at,
+  last_used_at,
+  used_count
+)
+```
+
+When a user says "our ABA therapy deals take 90 days minimum because of insurance authorization" — Pandora extracts the claim, writes it to `workspace_knowledge`, and uses it in every subsequent analysis. Stale deal alerts for ABA deals now use 90 days, not 14. Coverage analysis notes the cycle time constraint.
+
+**Tier 3 — Conversation patterns** (partially exists via training data capture)
+Usage patterns extracted from conversation history. Which pipelines get queried most. Which reps get focused on. Which time periods matter. These inform defaults but don't override structured config.
+
+---
+
+**The agentic read pattern — what Ask Pandora should do on every query:**
+
+Before running any skill or query, the agent should build a context block from all three tiers:
+```
+WORKSPACE CONTEXT (injected into every agent call):
+
+Structured config:
+- Active pipeline: open deals, exc. Closed Won/Lost [confirmed]
+- Win rate benchmark: 30% [confirmed]
+- Q2 FY2026 target: $350K [from Targets table]
+- Coverage target multiple: 2.4x [confirmed]
+- Value field: Amount [Pipeline Config]
+- Reps: Nate Phillips (AE), Sara Bollman (AE) [Roster]
+
+Business knowledge:
+- ABA therapy deals require 90d minimum cycle 
+  (insurance auth) [from conversation, high confidence]
+- Sara is focused on Assessment Builder, 
+  Nate on Reassessment Builder [inferred from CRM]
+- Fellowship Pipeline is partnership-driven, 
+  not direct sales [from calibration]
+
+Usage patterns:
+- Most queried: Core Sales Pipeline (87% of queries)
+- Rarely queried: Customer Expansion, Partnership
+- Default time period: current quarter
+This context block is what makes every Pandora response workspace-specific rather than generic. Without it, Pandora is a general analyst. With it, Pandora is a Frontera Health analyst.
+
+The extraction mechanism — how Pandora learns from conversation:
+
+After every Ask Pandora conversation, a lightweight extraction pass runs:
+
+typescript
+// After every chat turn, extract learnable claims:
+async function extractWorkspaceKnowledge(
+  message: string,
+  workspaceId: string
+): Promise<void> {
+  // Pattern: "our X is Y" / "we define X as Y" / 
+  //          "X always means Y for us"
+  // These are workspace-specific definitions
+  
+  // Pattern: "X because of Y" — causal constraints
+  // These are operational context
+  
+  // Pattern: "don't use X for Y" — exclusion rules
+  
+  // Write anything extracted to workspace_knowledge
+  // with source='conversation', confidence=0.7
+  // (lower than confirmed calibration at 1.0)
+}
+The user never sees this happening. Pandora just gets smarter with every conversation.
+
+The confirmation loop: When Pandora uses a knowledge item in a response, it surfaces it: "Based on what you told me about insurance authorization cycles, I'm using 90 days as your ABA deal staleness threshold." If the user says "that's right" — confidence goes to 0.95. If they say "actually we've streamlined that to 60 days now" — the knowledge updates.
+
+The platform angle — why this matters for multiple environments:
+
+You said Ask Pandora should be a platform across multiple environments. The workspace knowledge system is what makes that possible. The same underlying Pandora engine, pointed at different workspace contexts, behaves completely differently:
+
+Frontera Health: ABA therapy, insurance auth cycles, Nate/Sara split
+Imubit: industrial software, enterprise deals, Transcript__c custom objects
+GrowthBook: PLG motion, product-led conversion, different velocity benchmarks
+None of that differentiation comes from the skill code. It comes from the workspace context layer. The skills are generic. The context makes them specific.
+
+This is also why the consultant channel works at $500-750/workspace. A RevOps consultant managing 8 clients in Pandora has 8 completely separate workspace knowledge bases. Pandora knows that Acme Corp uses a 6-month sales cycle and Initech uses a 30-day trial-close motion. Same platform, 8 different analysts.
+
+
+Create task
+Create task
+Logged. Phase 1 of this is a one-day Claude Code build and it will immediately make every Ask Pandora query more accurate for Frontera.
+
+The thing to understand about what you've built: the skills are already good. The agent loop is already good. The 62 tools are already good. But right now they're running against a thin context layer that knows about pipeline definitions and almost nothing else.
+
+Expanding get_workspace_context to pull from Targets, Roster, Pipeline Config, and Segments means the next time someone asks "what's our coverage?" Pandora answers with the actual Q2 FY2026 $350K target that's sitting in the Targets table — not "unknown revenue target." That one change makes the Concierge brief, the WBR, and every Ask Pandora query materially more accurate without touching a single skill.
+
+The Tier 2 knowledge base is what separates a good product from a platform. When Pandora can learn "ABA therapy deals require 90 days minimum because of insurance authorization" from a single offhand comment in conversation and carry that forward into every subsequent analysis — that's when it stops feeling like a tool and starts feeling like someone who actually knows the business.
+
+Suggested sequence for tomorrow:
+
+Expand get_workspace_context — Phase 1, Claude Code, one day
+Fix data_dictionary write-through — still broken, Replit, blocking proof of value
+Pre-read context for calibration interview — reads Targets/Roster/Segments before asking anything
+Those three together close the most painful gaps in a single session.
+
+if a user says our win rate is 30% but doesn't back that up with evidence should it really rewrite to the system?
+
+6:13 PM
+No. And this is one of the most important design decisions in the whole system.
+
+The problem with blind write-back:
+
+If a user says "our win rate is 30%" and Pandora immediately overwrites metric_definitions, you've replaced a computed value with an asserted one. Pandora actually computed 30% from 122 won / 349 closed. That's a fact. The user saying "our win rate is 30%" might mean:
+
+Confirming what Pandora already computed — safe to write
+Stating a target or aspiration, not an actuality — dangerous to write
+Repeating something they heard in a meeting that was wrong — dangerous to write
+Referring to a different time period than Pandora computed — wrong to overwrite without context
+Referring to a different pipeline than Pandora computed — wrong to overwrite globally
+The three-tier confidence model:
+
+TIER 1 — COMPUTED (highest trust)
+  Source: Pandora computed from CRM data
+  Example: win rate = 30% (122/349, last 12 months)
+  Write behavior: Always authoritative. Never overwritten 
+  by assertion alone.
+
+TIER 2 — CONFIRMED (high trust)  
+  Source: User reviewed Pandora's computed value 
+  and agreed with it
+  Example: "Yes, 30% sounds right"
+  Write behavior: Locks the value as confirmed. 
+  Pandora stops recomputing and uses this number.
+
+TIER 3 — ASSERTED (lower trust)
+  Source: User stated a value without Pandora 
+  computing it first
+  Example: "Our win rate is 30%"
+  Write behavior: Stored in workspace_knowledge 
+  with confidence=0.6, NOT written to 
+  metric_definitions. Surfaced for verification.
+What Pandora should do when a user asserts a metric value:
+
+If Pandora has a computed value for that metric, show the comparison:
+
+"You mentioned your win rate is 30%. That matches what I computed — 122 wins out of 349 closed deals over the last 12 months. Want me to lock this in as your official win rate benchmark?"
+
+If user says yes → write to metric_definitions as CONFIRMED, confidence=1.0.
+
+If Pandora's computed value differs — say it computed 24%:
+
+"You mentioned 30%, but from your CRM data I'm computing 24% over the last 12 months (89 won / 371 closed). A few things could explain the gap: different time period, different pipeline scope, or deals that closed after your count. Which should I use?"
+
+Now the user has to make an active choice with the discrepancy surfaced. They can't accidentally overwrite a computed value with a casual assertion.
+
+If Pandora has no computed value at all (metric doesn't exist in CRM data):
+
+"I can't verify that from your CRM — I don't have enough closed-lost data to compute it myself. I'll store 30% as your stated win rate and use it for coverage calculations. You can update it anytime."
+
+This is the only case where an assertion writes directly to metric_definitions — when Pandora has no basis to contradict it.
+
+The write-back rules:
+
+User asserts value + Pandora has computed value
+  → Show comparison
+  → Ask for explicit confirmation
+  → Write only on confirmation
+
+User asserts value + Pandora computed value matches
+  → Still ask for confirmation (closes the loop)
+  → Write on confirmation
+
+User asserts value + Pandora has no computed value
+  → Write with source='asserted', confidence=0.6
+  → Flag as unverified in Data Dictionary
+  → Recompute when data becomes available
+
+User corrects a CONFIRMED value
+  → "You previously confirmed 30%. You're now saying X. 
+     Should I update the benchmark?"
+  → Write only on explicit yes
+  → Log the change with reason
+
+Pandora computes a new value that differs from 
+a CONFIRMED value
+  → Surface the discrepancy in next brief
+  → Do NOT auto-update the confirmed value
+  → Let the user decide
+
+Create task story
+Create task story
+Logged. This principle has a name in epistemology — it's the difference between testimony and evidence. Pandora should trust evidence over testimony, and require explicit confirmation to elevate testimony to the level of evidence.
+
+The practical implication is also what makes Pandora trustworthy in a board meeting. If a CRO asks "what's our win rate?" and Pandora says 30% — they need to know whether that's:
+
+Computed — Pandora counted it from deal history. Cite-able.
+Confirmed — Pandora computed it, you agreed. Cite-able.
+Asserted — Someone told Pandora. Not cite-able without verification.
+The Data Dictionary source badge already captures this distinction — SYSTEM vs USER. Extending it to COMPUTED / CONFIRMED / ASSERTED gives every metric a full audit trail. Anyone can see not just what the number is, but how Pandora knows it.
+
+That's the difference between a reporting tool that shows numbers and an intelligence platform that you'd stake a forecast on.
+
+
+
+
+
+
+

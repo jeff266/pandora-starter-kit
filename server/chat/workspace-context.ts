@@ -45,7 +45,6 @@ export interface SalesRep {
   name: string;
   email: string;
   role: string;
-  manager_email: string | null;
 }
 
 export interface ConfirmedDimension {
@@ -385,8 +384,8 @@ async function loadActiveTargets(workspaceId: string): Promise<ActiveTarget[]> {
     }>(
       `SELECT
          period_label,
-         target_amount,
-         pipeline,
+         amount AS target_amount,
+         pipeline_name AS pipeline,
          target_type,
          period_start,
          period_end
@@ -422,12 +421,11 @@ async function loadSalesReps(workspaceId: string): Promise<SalesRep[]> {
       name: string;
       email: string;
       role: string;
-      manager_email: string | null;
     }>(
-      `SELECT name, email, role, manager_email
+      `SELECT rep_name AS name, rep_email AS email, pandora_role AS role
        FROM sales_reps
        WHERE workspace_id = $1
-       ORDER BY name ASC`,
+       ORDER BY rep_name ASC`,
       [workspaceId]
     );
 
@@ -457,7 +455,7 @@ async function loadConfirmedDimensions(workspaceId: string): Promise<ConfirmedDi
          description
        FROM business_dimensions
        WHERE workspace_id = $1
-         AND is_active = TRUE
+         AND confirmed = TRUE
        ORDER BY dimension_key ASC`,
       [workspaceId]
     );
