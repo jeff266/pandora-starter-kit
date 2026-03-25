@@ -972,7 +972,7 @@ The full `run-now` → 9 skills → Orchestrator → `report_documents` pipeline
 - Document `986b275e`: earlier run, 2 sections, 3 actions, 160 words — also clean
 
 ### Known Non-Fatal Issues (don't block demo)
-- `findings.assumptions` column missing — logged, non-fatal
+- `findings.assumptions` column — FIXED in migration 213 (was causing all `insertFindings` calls to fail silently; GrowthBook backfilled via `runStartupFindingsBackfill` on server startup)
 - `deals.rfm_score` column missing — logged, non-fatal  
 - `users.hire_date` column missing — logged, non-fatal
 - `stale_deal_days` not configured for Frontera — `prepareWaterfallSummary` logs warning, skill completes

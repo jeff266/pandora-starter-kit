@@ -737,6 +737,14 @@ async function initializeAfterStart(t0: number, tDb: number): Promise<void> {
   setInterval(runGovernanceMonitor, 6 * 60 * 60 * 1000);
   console.log('[Governance] Auto-rollback monitor scheduled (every 6 hours)');
 
+  // Backfill findings from evidence claims for any workspace that has claims but 0 findings.
+  // Runs non-blocking — failure is non-fatal.
+  import('./findings/backfill.js').then(({ runStartupFindingsBackfill }) => {
+    runStartupFindingsBackfill().catch((err: unknown) => {
+      console.warn('[FindingsBackfill] Non-fatal startup error:', err instanceof Error ? err.message : err);
+    });
+  }).catch(() => null);
+
   setServerReady();
 
   const tTotal = performance.now();

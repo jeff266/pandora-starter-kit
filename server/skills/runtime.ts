@@ -553,7 +553,8 @@ export class SkillRuntime {
         Date.now() - startTime,
         methodologyConfigId,
         methodologyConfigVersion,
-        methodologyContextSnapshot
+        methodologyContextSnapshot,
+        stepResults
       );
 
       try {
@@ -715,7 +716,8 @@ export class SkillRuntime {
         Date.now() - startTime,
         methodologyConfigId,
         methodologyConfigVersion,
-        methodologyContextSnapshot
+        methodologyContextSnapshot,
+        stepResults.length > 0 ? stepResults : undefined
       );
 
       return {
@@ -1290,7 +1292,8 @@ Important:
     durationMs?: number,
     methodologyConfigId?: string | null,
     methodologyConfigVersion?: number | null,
-    methodologyContextSnapshot?: any
+    methodologyContextSnapshot?: any,
+    stepResultsData?: any[]
   ): Promise<void> {
     try {
       if (status === 'running') {
@@ -1369,7 +1372,8 @@ Important:
           `UPDATE skill_runs
            SET status = $2, output = $3, error = $4, completed_at = NOW(),
                duration_ms = COALESCE($6, duration_ms),
-               token_usage = COALESCE($5::jsonb, token_usage)
+               token_usage = COALESCE($5::jsonb, token_usage),
+               steps = COALESCE($7::jsonb, steps)
            WHERE run_id = $1`,
           [
             runId,
@@ -1378,6 +1382,7 @@ Important:
             error,
             enhancedTokenUsage ? JSON.stringify(enhancedTokenUsage) : null,
             durationMs ?? null,
+            stepResultsData && stepResultsData.length > 0 ? JSON.stringify(stepResultsData) : null,
           ]
         );
       }
