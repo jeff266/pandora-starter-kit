@@ -239,6 +239,11 @@ export async function approveInternalAction(
       const skillDef = registry.get(skill_id);
       if (!skillDef) return { success: false, message: `Unknown skill: ${skill_id}` };
 
+      // Workspace isolation: custom skills must belong to this workspace
+      if (skillDef.workspaceId && skillDef.workspaceId !== workspaceId) {
+        return { success: false, message: `Skill not found in this workspace` };
+      }
+
       const runtime = getSkillRuntime();
       runtime.executeSkill(skillDef, workspaceId, { trigger: 'action_card' })
         .catch((err: Error) =>

@@ -104,6 +104,11 @@ export interface SkillDefinition {
   /** True for skills created via the Skill Builder (not built-in) */
   isCustom?: boolean;
 
+  /** Workspace that owns this skill — set for custom skills only.
+   *  Built-in skills have no workspaceId and are available to all workspaces.
+   *  Used to prevent cross-workspace execution via run_skill action cards. */
+  workspaceId?: string;
+
   /** True for utility skills hidden from the user-facing Skills library and agent picker */
   isUtility?: boolean;
 

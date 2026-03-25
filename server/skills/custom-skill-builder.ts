@@ -132,6 +132,7 @@ ${classifyDepends.length > 0 ? '\nClassifications: {{{json classifications}}}' :
     outputFormat: 'markdown',
     estimatedDuration: '60s',
     isCustom: true,
+    workspaceId: row.workspace_id,
     runCount: row.run_count,
     ...(row.replaces_skill_id ? { replacesSkillId: row.replaces_skill_id } : {}),
   };
