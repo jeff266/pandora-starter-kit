@@ -21,6 +21,8 @@ export const pipelineWaterfallSkill: SkillDefinition = {
     'topDealsInMotion',
     'velocityBenchmarks',
     'prepareWaterfallSummary',
+    'buildSankeyChart',
+    'stalledDealsAnalysis',
   ],
 
   requiredContext: ['goals_and_targets'],
@@ -95,7 +97,29 @@ export const pipelineWaterfallSkill: SkillDefinition = {
       outputKey: 'velocity_benchmarks',
     },
 
-    // Step 7: Prepare waterfall summary for Claude
+    // Step 7: Build Sankey chart (depends on both waterfall periods)
+    {
+      id: 'build-sankey-chart',
+      name: 'Build Sankey Chart',
+      tier: 'compute',
+      dependsOn: ['gather-current-waterfall', 'gather-previous-waterfall'],
+      computeFn: 'buildSankeyChart',
+      computeArgs: {},
+      outputKey: 'sankey_chart',
+    },
+
+    // Step 8: Stalled deals analysis (depends on velocity benchmarks for P75 comparison)
+    {
+      id: 'stalled-deals-analysis',
+      name: 'Stalled Deals Analysis',
+      tier: 'compute',
+      dependsOn: ['gather-velocity-benchmarks'],
+      computeFn: 'stalledDealsAnalysis',
+      computeArgs: { minDays: 14 },
+      outputKey: 'stalled_deals',
+    },
+
+    // Step 9: Prepare waterfall summary for Claude
     {
       id: 'prepare-summary',
       name: 'Prepare Waterfall Summary',
@@ -106,7 +130,7 @@ export const pipelineWaterfallSkill: SkillDefinition = {
       outputKey: 'pipeline_context',
     },
 
-    // Step 8: Classify movement patterns (DeepSeek)
+    // Step 10: Classify movement patterns (DeepSeek)
     {
       id: 'classify-movement-patterns',
       name: 'Classify Movement Patterns (DeepSeek)',
@@ -180,7 +204,7 @@ Respond with ONLY a JSON object: { "dealClassifications": [...], "anomalyClassif
       outputKey: 'classifications',
     },
 
-    // Step 9: Synthesize waterfall report (Claude)
+    // Step 11: Synthesize waterfall report (Claude)
     {
       id: 'synthesize-waterfall-report',
       name: 'Synthesize Waterfall Report',
@@ -192,6 +216,7 @@ Respond with ONLY a JSON object: { "dealClassifications": [...], "anomalyClassif
         'gather-velocity-benchmarks',
         'classify-movement-patterns',
         'prepare-summary',
+        'stalled-deals-analysis',
       ],
       claudePrompt: `You are a RevOps strategist analyzing pipeline flow for a sales team.
 
@@ -215,7 +240,7 @@ BUSINESS CONTEXT:
 {{#if business_model.gtm_motion}}GTM Motion: {{business_model.gtm_motion}}{{/if}}
 {{#if business_model.segment}}Segment: {{business_model.segment}}{{/if}}
 {{#if business_model.sales_cycle_days}}Typical sales cycle: {{business_model.sales_cycle_days}} days{{/if}}
-{{#if goals_and_targets.current_quarter_target}}Current quarter target: ${{goals_and_targets.current_quarter_target}}{{/if}}
+{{#if goals_and_targets.current_quarter_target}}Current quarter target: \${{goals_and_targets.current_quarter_target}}{{/if}}
 {{#if workspaceContextBlock}}{{{workspaceContextBlock}}}{{/if}}
 
 WATERFALL SUMMARY ({{time_windows.periodLabel}}):
@@ -271,9 +296,9 @@ STALE DEALS (no activity > 14 days):
 - {{this.name}} (\${{this.amount}}, {{this.owner}}) — Stage: {{this.stage}}, {{this.daysSinceActivity}} days since activity
 {{/each}}
 
-STALLED DEALS (stuck in stage > 30 days vs benchmark):
-{{#each pipeline_context.stalledDeals}}
-- {{this.name}} (\${{this.amount}}, {{this.owner}}) — Stage: {{this.stage}}, {{this.daysInStage}} days in stage
+STALLED DEALS (stuck in current stage >= 14 days, sorted by duration):
+{{#each stalled_deals}}
+- {{this.name}} (\${{this.amount}}, {{this.owner}}) — Stage: {{this.stage_normalized}}, {{this.duration_days}} days{{#if this.benchmark_p75}} (P75 benchmark: {{this.benchmark_p75}} days){{/if}}
 {{/each}}
 
 Produce a Pipeline Waterfall Report that answers:

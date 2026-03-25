@@ -1,0 +1,180 @@
+# Pipeline Waterfall Skill — End-to-End Test
+
+Read only to start. No code changes unless a test fails.
+
+## Setup
+
+Frontera workspace_id: 4160191d-73bc-414b-97dd-5a1853190378
+
+Confirm the skill exists before triggering:
+SELECT id, skill_id, status, created_at
+FROM skill_runs
+WHERE workspace_id = '4160191d-73bc-414b-97dd-5a1853190378'
+  AND skill_id = 'pipeline-waterfall'
+ORDER BY created_at DESC
+LIMIT 5;
+
+If no rows → skill has never run. Expected.
+
+---
+
+## Trigger the skill manually
+
+Find the manual trigger endpoint or the skill runner
+function. The skill_id is 'pipeline-waterfall'.
+
+Trigger it for Frontera workspace_id:
+4160191d-73bc-414b-97dd-5a1853190378
+
+Use the default time window (trailing_7d).
+
+---
+
+## Verification queries — run after skill completes
+
+### 1. Did a skill_run record get created?
+
+SELECT
+  id,
+  skill_id,
+  status,
+  error_message,
+  created_at,
+  completed_at,
+  token_usage
+FROM skill_runs
+WHERE workspace_id = '4160191d-73bc-414b-97dd-5a1853190378'
+  AND skill_id = 'pipeline-waterfall'
+ORDER BY created_at DESC
+LIMIT 1;
+
+Expected: status = 'completed', error_message = null
+
+If status = 'failed': show error_message in full.
+
+---
+
+### 2. Does the output contain valid waterfall data?
+
+SELECT
+  jsonb_pretty(
+    result_data->'current_waterfall'->'stages'
+  ) AS stages
+FROM skill_runs
+WHERE workspace_id = '4160191d-73bc-414b-97dd-5a1853190378'
+  AND skill_id = 'pipeline-waterfall'
+ORDER BY created_at DESC
+LIMIT 1;
+
+Expected: JSON array with 4-6 stage objects,
+each having stage_normalized, entered_count,
+advanced_count, won_count, avg_duration_days
+
+---
+
+### 3. Are velocity benchmarks populated with P75?
+
+SELECT
+  jsonb_pretty(
+    result_data->'velocity_benchmarks'
+  ) AS benchmarks
+FROM skill_runs
+WHERE workspace_id = '4160191d-73bc-414b-97dd-5a1853190378'
+  AND skill_id = 'pipeline-waterfall'
+ORDER BY created_at DESC
+LIMIT 1;
+
+Expected: each stage has avgDays, medianDays,
+AND p75Days. If p75Days is missing or null
+everywhere, the P75 fix didn't apply.
+
+---
+
+### 4. Is the Sankey chart spec valid?
+
+SELECT
+  jsonb_pretty(
+    result_data->'sankey_chart'
+  ) AS sankey
+FROM skill_runs
+WHERE workspace_id = '4160191d-73bc-414b-97dd-5a1853190378'
+  AND skill_id = 'pipeline-waterfall'
+ORDER BY created_at DESC
+LIMIT 1;
+
+Expected: object with nodes array and links array.
+Each node has id and label.
+Each link has source, target, value.
+Stage order: awareness → evaluation →
+  qualification → decision → negotiation →
+  closed_won / closed_lost
+
+---
+
+### 5. Does the narrative contain real data?
+
+SELECT
+  result_data->>'narrative' AS narrative
+FROM skill_runs
+WHERE workspace_id = '4160191d-73bc-414b-97dd-5a1853190378'
+  AND skill_id = 'pipeline-waterfall'
+ORDER BY created_at DESC
+LIMIT 1;
+
+Check for:
+- At least one specific deal name mentioned
+- At least one stage name mentioned
+- No "[object Object]" anywhere in the text
+- No "{{" handlebars syntax left unresolved
+- Reasonable length (200+ words)
+
+---
+
+### 6. Are stalled deals identified?
+
+SELECT
+  jsonb_pretty(
+    result_data->'stalled_deals'
+  ) AS stalled
+FROM skill_runs
+WHERE workspace_id = '4160191d-73bc-414b-97dd-5a1853190378'
+  AND skill_id = 'pipeline-waterfall'
+ORDER BY created_at DESC
+LIMIT 1;
+
+Expected: array of up to 10 deals, each with
+name, amount, owner, stage_normalized,
+duration_days, benchmark_p75
+
+If empty array: acceptable if no deals currently
+exceed P75 threshold. Verify by checking:
+
+SELECT COUNT(*)
+FROM deal_stage_history dsh
+WHERE dsh.workspace_id = '4160191d-73bc-414b-97dd-5a1853190378'
+  AND dsh.exited_at IS NULL
+  AND dsh.duration_days IS NOT NULL
+  AND dsh.duration_days > 14;
+
+---
+
+## Pass / Fail criteria
+
+PASS if all of:
+1. skill_runs row created with status='completed'
+2. stages array has 4+ stage objects with counts
+3. velocity_benchmarks has p75Days per stage
+4. sankey_chart has nodes and links arrays
+5. narrative is 200+ words with no raw objects
+6. No TypeScript errors in console
+
+FAIL if any of:
+- status = 'failed' (show full error)
+- narrative contains "[object Object]"
+- narrative contains unresolved "{{"
+- stages array is empty
+- sankey is null or missing nodes/links
+- p75Days is null on all benchmarks
+
+Report pass/fail for each check with the
+actual values found.

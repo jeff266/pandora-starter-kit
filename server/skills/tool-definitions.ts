@@ -4241,6 +4241,7 @@ const mergeAnnotationsWithUserStateTool: ToolDefinition = {
 // ============================================================================
 
 import { waterfallAnalysis } from '../analysis/waterfall-analysis.js';
+import { buildSankeyChartData } from '../analysis/sankey-builder.js';
 import {
   getStageTransitionsInWindow,
   getAverageTimeInStage,
@@ -4671,6 +4672,103 @@ const prepareWaterfallSummaryTool: ToolDefinition = {
         dimension_label: ctx.dimension_label,
         calibrated: ctx.calibrated,
       };
+    }, params);
+  },
+};
+
+const buildSankeyChartTool: ToolDefinition = {
+  name: 'buildSankeyChart',
+  description: 'Build Sankey chart spec from waterfall analysis results. Returns nodes and links arrays for pipeline flow visualization.',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('buildSankeyChart', async () => {
+      const currentWaterfall = (context.stepResults as any).current_waterfall;
+      const previousWaterfall = (context.stepResults as any).previous_waterfall;
+
+      if (!currentWaterfall?.stages?.length) {
+        console.log('[buildSankeyChart] No waterfall stages — returning empty chart');
+        return { nodes: [], links: [], conversionRates: [] };
+      }
+
+      const chart = await buildSankeyChartData(
+        context.workspaceId,
+        currentWaterfall,
+        previousWaterfall ?? undefined
+      );
+
+      console.log(`[buildSankeyChart] Built chart: ${chart.nodes?.length ?? 0} nodes, ${chart.links?.length ?? 0} links`);
+      return chart;
+    }, params);
+  },
+};
+
+const stalledDealsAnalysisTool: ToolDefinition = {
+  name: 'stalledDealsAnalysis',
+  description: 'Find open deals currently stuck in a pipeline stage, comparing their duration to P75 velocity benchmarks.',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {
+      minDays: {
+        type: 'number',
+        description: 'Minimum days in current stage to qualify as stalled. Defaults to 14.',
+      },
+    },
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('stalledDealsAnalysis', async () => {
+      const minDays = params?.minDays ?? 14;
+
+      const velocityBenchmarks: any[] = (context.stepResults as any).velocity_benchmarks ?? [];
+      const benchmarkMap = new Map<string, number>(
+        velocityBenchmarks
+          .filter((b: any) => b.stage && b.p75Days != null)
+          .map((b: any) => [b.stage as string, b.p75Days as number])
+      );
+
+      const rows = await query<{
+        name: string;
+        amount: string;
+        owner: string;
+        stage_normalized: string;
+        duration_days: string;
+      }>(
+        `SELECT
+          d.name,
+          COALESCE(d.amount, 0) AS amount,
+          COALESCE(d.owner, '') AS owner,
+          dsh.stage_normalized,
+          ROUND(EXTRACT(EPOCH FROM (NOW() - dsh.entered_at)) / 86400.0, 1) AS duration_days
+         FROM deal_stage_history dsh
+         JOIN deals d ON d.id = dsh.deal_id
+         WHERE dsh.workspace_id = $1
+           AND dsh.exited_at IS NULL
+           AND dsh.entered_at IS NOT NULL
+           AND dsh.stage_normalized NOT IN ('closed_won', 'closed_lost')
+           AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
+           AND EXTRACT(EPOCH FROM (NOW() - dsh.entered_at)) / 86400.0 >= $2
+         ORDER BY duration_days DESC
+         LIMIT 10`,
+        [context.workspaceId, minDays]
+      );
+
+      const stalled = rows.rows.map(r => ({
+        name: r.name,
+        amount: parseFloat(r.amount) || 0,
+        owner: r.owner,
+        stage_normalized: r.stage_normalized,
+        duration_days: parseFloat(r.duration_days) || 0,
+        benchmark_p75: benchmarkMap.get(r.stage_normalized) ?? null,
+      }));
+
+      console.log(`[stalledDealsAnalysis] Found ${stalled.length} stalled deals (>=${minDays}d)`);
+      return stalled;
     }, params);
   },
 };
@@ -9701,6 +9799,8 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['topDealsInMotion', topDealsInMotionTool],
   ['velocityBenchmarks', velocityBenchmarksTool],
   ['prepareWaterfallSummary', prepareWaterfallSummaryTool],
+  ['buildSankeyChart', buildSankeyChartTool],
+  ['stalledDealsAnalysis', stalledDealsAnalysisTool],
   ['checkDataAvailability', checkDataAvailabilityTool],
   ['loadVelocityBenchmarks', loadVelocityBenchmarks],
   ['repScorecardCompute', repScorecardComputeTool],
