@@ -856,6 +856,18 @@ export async function initialSync(
     totalStored = dealsStored + contactsStored + accountsStored + activitiesStored;
     console.log(`[HubSpot Sync] Stored ${dealsStored} deals, ${contactsStored} contacts, ${accountsStored} accounts, ${activitiesStored} activities`);
 
+    // Owner name backfill — resolve any raw numeric IDs that slipped through transform
+    // (e.g. contacts added after the owner was removed, or new owners not yet in the map)
+    if (ownerMap.size > 0) {
+      backfillOwnerNames(workspaceId, ownerMap)
+        .then(count => {
+          if (count > 0) console.log(`[HubSpot Sync] Backfilled ${count} raw owner ID(s) after initial sync`);
+        })
+        .catch(err => {
+          console.warn(`[HubSpot Sync] Owner name backfill failed (non-fatal):`, err instanceof Error ? err.message : err);
+        });
+    }
+
     // Scope inference + stamping — run after deals are written
     // Non-blocking: don't delay sync completion on inference errors
     if (dealsStored > 0) {
@@ -1146,6 +1158,17 @@ export async function incrementalSync(
     console.log(`[HubSpot Incremental Sync] Stored ${activitiesStored} activities`);
 
     totalStored = dealsStored + contactsStored + accountsStored + activitiesStored;
+
+    // Owner name backfill — resolve any raw numeric IDs for this sync's records
+    if (ownerMap.size > 0) {
+      backfillOwnerNames(workspaceId, ownerMap)
+        .then(count => {
+          if (count > 0) console.log(`[HubSpot Sync] Backfilled ${count} raw owner ID(s) after incremental sync`);
+        })
+        .catch(err => {
+          console.warn(`[HubSpot Sync] Owner name backfill failed (non-fatal):`, err instanceof Error ? err.message : err);
+        });
+    }
 
     // Scope stamping — re-stamp only the deals touched in this incremental sync
     // Do NOT re-run inference on incremental (scopes are already configured)
