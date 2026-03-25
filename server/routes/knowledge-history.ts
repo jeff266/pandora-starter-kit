@@ -192,22 +192,27 @@ async function replaySnapshot(
     case 'data_dictionary': {
       await dbQuery(
         `INSERT INTO data_dictionary
-           (workspace_id, term, definition, sql_definition, source, is_active, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+           (workspace_id, term, definition, sql_definition, technical_definition,
+            source, is_active, last_referenced_at, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          ON CONFLICT (workspace_id, term)
          DO UPDATE SET
-           definition     = EXCLUDED.definition,
-           sql_definition = EXCLUDED.sql_definition,
-           source         = EXCLUDED.source,
-           is_active      = EXCLUDED.is_active,
-           updated_at     = NOW()`,
+           definition          = EXCLUDED.definition,
+           sql_definition      = EXCLUDED.sql_definition,
+           technical_definition = EXCLUDED.technical_definition,
+           source              = EXCLUDED.source,
+           is_active           = EXCLUDED.is_active,
+           last_referenced_at  = EXCLUDED.last_referenced_at,
+           updated_at          = NOW()`,
         [
           workspaceId,
           snap.term,
           snap.definition ?? null,
           snap.sql_definition ?? null,
+          snap.technical_definition ?? null,
           snap.source ?? 'reverted',
           snap.is_active ?? true,
+          snap.last_referenced_at ?? null,
           snap.created_at ?? new Date().toISOString(),
         ]
       );
@@ -217,20 +222,23 @@ async function replaySnapshot(
     case 'workspace_knowledge': {
       await dbQuery(
         `INSERT INTO workspace_knowledge
-           (workspace_id, key, value, source, confidence, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6)
+           (workspace_id, key, value, source, confidence, used_count, last_used_at, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          ON CONFLICT (workspace_id, key)
          DO UPDATE SET
            value        = EXCLUDED.value,
            source       = EXCLUDED.source,
            confidence   = EXCLUDED.confidence,
-           last_used_at = NOW()`,
+           used_count   = EXCLUDED.used_count,
+           last_used_at = EXCLUDED.last_used_at`,
         [
           workspaceId,
           snap.key,
           snap.value,
-          snap.source ?? 'reverted',
+          snap.source ?? 'conversation',
           snap.confidence ?? 0.7,
+          snap.used_count ?? 0,
+          snap.last_used_at ?? null,
           snap.created_at ?? new Date().toISOString(),
         ]
       );
