@@ -4,7 +4,6 @@ import { colors, fonts } from '../styles/theme';
 import Skeleton from '../components/Skeleton';
 import SectionErrorBoundary from '../components/SectionErrorBoundary';
 import { useDemoMode } from '../contexts/DemoModeContext';
-import SlackSetupNudge from '../components/SlackSetupNudge';
 import { usePermissions } from '../hooks/usePermissions';
 
 interface PlaybookStats {
@@ -216,8 +215,6 @@ export default function Playbooks() {
           {toast.message}
         </div>
       )}
-
-      <SlackSetupNudge variant="playbooks" layout="card" />
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
         <div>

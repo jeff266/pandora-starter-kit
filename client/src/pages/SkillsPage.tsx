@@ -5,7 +5,6 @@ import { colors, fonts } from '../styles/theme';
 import { formatTimeAgo, formatSchedule } from '../lib/format';
 import Skeleton from '../components/Skeleton';
 import IntelligenceNav from '../components/IntelligenceNav';
-import SlackSetupNudge from '../components/SlackSetupNudge';
 import { usePermissions } from '../hooks/usePermissions';
 
 interface SkillStats {
@@ -444,8 +443,6 @@ export default function SkillsPage() {
           {toast.message}
         </div>
       )}
-
-      <SlackSetupNudge variant="skills" layout="card" />
 
       {/* Metrics Row */}
       <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
