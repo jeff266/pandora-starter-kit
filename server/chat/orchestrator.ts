@@ -459,17 +459,27 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
   // Run before every branch (calibration, intent classification, Pandora agent)
   // so all paths see the same up-to-date analytical inference chain.
   //
-  // Cadence: fires at most once every 3 turns when conversation > 6 messages.
+  // Turn vs message count:
+  //   One conversation turn = 1 user message + 1 assistant message = 2 message objects.
+  //   All thresholds below use message-object counts to avoid a separate turn index.
+  //
+  // Cadence (in message objects):
+  //   REASONING_MIN_MSGS  = 12 (6 turns × 2) — short sessions ≤6 turns unaffected
+  //   REASONING_STALE_MSGS = 6 (3 turns × 2) — recompute at most once every 3 turns
+  //
   // Always advances reasoningThreadTurn on each compression attempt (even null
   // output) so the cadence guard is always honoured regardless of model output.
   // Persisted via updateContext() for consistency with the rest of context writes.
+  const REASONING_MIN_MSGS = 12;    // >6 turns before any compression runs
+  const REASONING_STALE_MSGS = 6;   // recompute after 3+ stale turns (6 messages)
+
   const _allMessages = (state.messages || []) as (ConversationMessage & { tool_trace?: unknown[] })[];
-  const _currentTurnCount: number = _allMessages.length;
-  const _threadComputedAtTurn: number = state.context.reasoningThreadTurn ?? 0;
+  const _currentMsgCount: number = _allMessages.length;
+  const _threadComputedAtMsg: number = state.context.reasoningThreadTurn ?? 0;
 
   let activeReasoningThread: string | null = state.context.reasoningThread ?? null;
 
-  if (_currentTurnCount > 6 && (_currentTurnCount - _threadComputedAtTurn >= 3)) {
+  if (_currentMsgCount > REASONING_MIN_MSGS && (_currentMsgCount - _threadComputedAtMsg >= REASONING_STALE_MSGS)) {
     try {
       const freshThread = await compressReasoningThread(_allMessages, workspaceId);
       // Always update activeReasoningThread: use new thread if non-null, otherwise
@@ -477,11 +487,11 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
       if (freshThread !== null) {
         activeReasoningThread = freshThread;
       }
-      // Always persist the turn counter so the cadence guard advances even when
-      // the model returns nothing (short conversation, no inferences yet).
+      // Always persist the message-count marker so the cadence guard advances
+      // even when the model returns nothing (short conversation, no inferences yet).
       await updateContext(workspaceId, channelId, threadId, {
         reasoningThread: freshThread !== null ? freshThread : activeReasoningThread,
-        reasoningThreadTurn: _currentTurnCount,
+        reasoningThreadTurn: _currentMsgCount,
       }).catch(err => console.warn('[ReasoningThread] Failed to persist:', err));
     } catch (err) {
       console.warn('[ReasoningThread] Lifecycle failed, continuing:', err instanceof Error ? err.message : String(err));
