@@ -129,9 +129,17 @@ export default function Targets() {
   const [showSetTargetModal, setShowSetTargetModal] = useState(false);
   const [showQuotaModal, setShowQuotaModal] = useState(false);
   const [editingTarget, setEditingTarget] = useState<Target | null>(null);
+  const [repEmailToName, setRepEmailToName] = useState<Record<string, string>>({});
 
   useEffect(() => {
     fetchAll();
+    if (currentWorkspace?.id) {
+      api.get(`/workspaces/${currentWorkspace.id}/sales-reps/roster`).then((res: any) => {
+        const map: Record<string, string> = {};
+        (res.reps || []).forEach((r: any) => { if (r.rep_email && r.rep_name) map[r.rep_email] = r.rep_name; });
+        setRepEmailToName(map);
+      }).catch(() => {});
+    }
   }, []);
 
   const fetchAll = async () => {
@@ -555,7 +563,9 @@ function QuarterlyBreakdown({ targets, anon, onEdit, onDelete }: {
                       textTransform: 'capitalize',
                     }}>
                       {TARGET_TYPE_LABELS[tt]}
-                      {target.assigned_to_email ? ` · ${target.assigned_to_email}` : ''}
+                      {target.assigned_to_email
+                        ? ` · ${repEmailToName[target.assigned_to_email] || target.assigned_to_email}`
+                        : ''}
                     </span>
                   );
                 })()}
@@ -973,37 +983,42 @@ function SetTargetModal({ existingTarget, revenueModel, onClose, onSave, isEditi
           </div>
         </div>
 
-        {/* Assignment — datalist combobox from roster (shown for team and individual) */}
+        {/* Assignment — name dropdown from roster, or email fallback (shown for team and individual) */}
         {showAssignment && (
           <div style={{ marginBottom: 16 }}>
             <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: colors.textMuted, marginBottom: 6 }}>
               Assigned To {targetType === 'team' ? 'Manager' : 'Rep'}
               {isMember && <span style={{ fontSize: 10, marginLeft: 6, color: colors.textMuted }}>(read-only)</span>}
             </label>
-            <input
-              list={isMember ? undefined : "roster-rep-options"}
-              value={assignedToEmail}
-              readOnly={isMember}
-              onChange={e => !isMember && setAssignedToEmail(e.target.value)}
-              placeholder={
-                isMember
-                  ? user?.email || 'your-email@company.com'
-                  : (filteredRosterReps.length > 0
-                      ? `Type or select ${targetType === 'team' ? 'a manager' : 'a rep'}...`
-                      : targetType === 'team' ? 'manager@company.com' : 'rep@company.com')
-              }
-              style={isMember ? { ...readonlyInput, background: colors.surfaceRaised } : editableInput}
-            />
-            <datalist id="roster-rep-options">
-              {filteredRosterReps.map(r => (
-                <option key={r.id} value={r.rep_email}>
-                  {r.rep_name}{r.pandora_role === 'manager' || r.is_manager ? ' (Manager)' : ''}
-                </option>
-              ))}
-            </datalist>
+            {filteredRosterReps.length > 0 && !isMember ? (
+              <select
+                value={assignedToEmail}
+                onChange={e => setAssignedToEmail(e.target.value)}
+                style={{ ...editableInput, appearance: 'auto' as any }}
+              >
+                <option value="">— select a {targetType === 'team' ? 'manager' : 'rep'} —</option>
+                {filteredRosterReps.map(r => (
+                  <option key={r.id} value={r.rep_email}>
+                    {r.rep_name || r.rep_email}{r.pandora_role === 'manager' || r.is_manager ? ' (Manager)' : ''}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                value={assignedToEmail}
+                readOnly={isMember}
+                onChange={e => !isMember && setAssignedToEmail(e.target.value)}
+                placeholder={
+                  isMember
+                    ? user?.email || 'your-email@company.com'
+                    : targetType === 'team' ? 'manager@company.com' : 'rep@company.com'
+                }
+                style={isMember ? { ...readonlyInput, background: colors.surfaceRaised } : editableInput}
+              />
+            )}
             <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 4 }}>
               {filteredRosterReps.length > 0
-                ? `${filteredRosterReps.length} roster ${targetType === 'team' ? 'manager(s)' : 'rep(s)'} available — or type any email`
+                ? `${filteredRosterReps.length} ${targetType === 'team' ? 'manager(s)' : 'rep(s)'} on your roster`
                 : 'Email address from your CRM — controls whose pipeline this target applies to'}
             </div>
           </div>
