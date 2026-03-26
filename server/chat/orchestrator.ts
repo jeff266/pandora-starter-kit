@@ -617,11 +617,28 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
           answer = await buildCompletionSummary(workspaceId);
 
         } else if (CALIBRATION_START_OVER.test(message)) {
-          // User wants to reset — clear state and restart from stage mapping
+          // User wants to reset — clear state and restart from stage mapping.
+          // resetInterviewState() deletes calibration-sourced stage_mappings rows
+          // so getUnmappedStages() reflects the true state of the CRM stages.
           await resetInterviewState(workspaceId);
           const freshStages = await getUnmappedStages(workspaceId);
-          console.log('[Calibration] Start-over requested — reset complete');
-          answer = `Resetting your calibration. Let's start fresh from the beginning.\n\n${buildStageMappingTablePrompt(freshStages)}`;
+          console.log('[Calibration] Start-over requested — reset complete, freshStages:', freshStages.length);
+
+          if (freshStages.length > 0) {
+            // Stage mapping step: show the table so user can re-confirm
+            answer = `Resetting your calibration. Let's start fresh from the beginning.\n\n${buildStageMappingTablePrompt(freshStages)}`;
+          } else {
+            // No unmapped stages (Setup Interview already mapped them via non-calibration source).
+            // Auto-advance past stage_mapping and begin at the first dimension step.
+            const nextStep = await advanceInterview(workspaceId, 'stage_mapping');
+            console.log('[Calibration] No stages to map after reset — auto-advancing to:', nextStep);
+            if (nextStep === 'complete') {
+              answer = await buildCompletionSummary(workspaceId);
+            } else {
+              const firstQuestion = await buildInterviewPrompt(workspaceId, nextStep);
+              answer = `Resetting your calibration. Stage mappings are already set up — let's start fresh with the dimension interview.\n\n${firstQuestion}`;
+            }
+          }
 
         } else if (isResumptionEntry) {
           // New-chat resumption — show completed steps checklist and next step

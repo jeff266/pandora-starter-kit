@@ -146,17 +146,29 @@ export async function resetInterviewState(workspaceId: string): Promise<void> {
     last_updated_at: now,
   };
 
-  await query(
-    `UPDATE workspaces
-     SET workspace_config = COALESCE(workspace_config, '{}'::jsonb)
-         || jsonb_build_object(
-              'calibration',
-              COALESCE(workspace_config->'calibration', '{}'::jsonb)
-              || jsonb_build_object('interview_state', $2::jsonb)
-            )
-     WHERE id = $1`,
-    [workspaceId, JSON.stringify(emptyState)]
-  );
+  await Promise.all([
+    // Reset interview_state and stage_mappings in workspace_config
+    query(
+      `UPDATE workspaces
+       SET workspace_config = COALESCE(workspace_config, '{}'::jsonb)
+           || jsonb_build_object(
+                'calibration',
+                COALESCE(workspace_config->'calibration', '{}'::jsonb)
+                || jsonb_build_object(
+                     'interview_state',  $2::jsonb,
+                     'stage_mappings',   '{}'::jsonb
+                   )
+              )
+       WHERE id = $1`,
+      [workspaceId, JSON.stringify(emptyState)]
+    ),
+    // Remove calibration-sourced rows from stage_mappings table so
+    // getUnmappedStages() returns all stages again after a fresh start.
+    query(
+      `DELETE FROM stage_mappings WHERE workspace_id = $1 AND source = 'calibration'`,
+      [workspaceId]
+    ),
+  ]);
 
   await updateCalibrationStatus(workspaceId, 'not_started');
 }
