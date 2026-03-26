@@ -3088,11 +3088,20 @@ export async function buildConversationHistory(
 
   let compressionNote = extractCompressionFacts(older);
 
-  // Calibration step enrichment: always attempt to fetch persisted completed steps
-  // when a workspaceId is available. We key off the DB state (not just message content)
-  // so enrichment is reliable even when calibration content has already scrolled
-  // out of the compressed window. Only adds to the note when steps are actually complete.
-  if (opts?.workspaceId) {
+  // Calibration step enrichment: append persisted completed steps when calibration
+  // content is detected anywhere in the thread (older + recent), not just older.
+  // Scanning all messages makes detection reliable even when the step prompts
+  // have scrolled out of the older window. Only fires for workspaces with
+  // calibration-related conversation history — not all long chats.
+  const allMessageText = messages
+    .map(m => (typeof m.content === 'string' ? m.content : ''))
+    .join('\n');
+  const hasCalibrationContent =
+    COMPRESSION_PATTERNS.calibStep.test(allMessageText) ||
+    /stage[\s_]map(?:ping)?|map(?:ping)?[\s_]stage|active\s+pipeline\s+(?:definition|is|means?|includes?)|pipeline\s+coverage|win[\s_]rate\s+benchmark|at[\s-]risk\s+definition|commit\s+definition|step\s+\d+\s+of\s+6|calibrat/i
+      .test(allMessageText);
+
+  if (hasCalibrationContent && opts?.workspaceId) {
     try {
       const interviewState = await getInterviewState(opts.workspaceId);
       if (interviewState.completed_steps.length > 0) {
