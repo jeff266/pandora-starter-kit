@@ -17,6 +17,10 @@ export interface ConversationContext {
     rep_email?: string;
   };
   sessionContext?: SessionContext;
+  /** LLM-compressed analytical inference chain (hypotheses, conclusions, open questions). */
+  reasoningThread?: string | null;
+  /** Message count at which reasoningThread was last computed. Used to enforce 3-turn cadence. */
+  reasoningThreadTurn?: number;
 }
 
 export interface ConversationState {
@@ -150,6 +154,14 @@ export async function updateContext(
     ],
     filters_active: updates.filters_active ?? current.filters_active ?? null,
     last_scope: updates.last_scope ?? current.last_scope,
+    // Reasoning thread fields — only overwrite when explicitly provided in updates.
+    // undefined means "no change"; null means "clear the thread".
+    ...(Object.prototype.hasOwnProperty.call(updates, 'reasoningThread')
+      ? { reasoningThread: updates.reasoningThread ?? null }
+      : {}),
+    ...(Object.prototype.hasOwnProperty.call(updates, 'reasoningThreadTurn')
+      ? { reasoningThreadTurn: updates.reasoningThreadTurn }
+      : {}),
   };
 
   await query(

@@ -454,11 +454,38 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
     }
   }
 
-  // ── Reasoning thread: read persisted value for early-branch use ─────────────
-  // Compression lifecycle runs at Step 3.9 (before intent classification).
-  // We read the stored value here so calibration branches have access to it
-  // without waiting for the compression pass.
+  // ── Reasoning thread lifecycle ───────────────────────────────────────────────
+  // Run before every branch (calibration, intent classification, Pandora agent)
+  // so all paths see the same up-to-date analytical inference chain.
+  //
+  // Cadence: fires at most once every 3 turns when conversation > 6 messages.
+  // Always advances reasoningThreadTurn on each compression attempt (even null
+  // output) so the cadence guard is always honoured regardless of model output.
+  // Persisted via updateContext() for consistency with the rest of context writes.
+  const _allMessages = state.messages || [] as any;
+  const _currentTurnCount: number = _allMessages.length;
+  const _threadComputedAtTurn: number = (state.context as any).reasoningThreadTurn ?? 0;
+
   let activeReasoningThread: string | null = (state.context as any).reasoningThread ?? null;
+
+  if (_currentTurnCount > 6 && (_currentTurnCount - _threadComputedAtTurn >= 3)) {
+    try {
+      const freshThread = await compressReasoningThread(_allMessages, workspaceId);
+      // Always update activeReasoningThread: use new thread if non-null, otherwise
+      // keep the previous value (freshThread null = "no reasoning yet", don't erase).
+      if (freshThread !== null) {
+        activeReasoningThread = freshThread;
+      }
+      // Always persist the turn counter so the cadence guard advances even when
+      // the model returns nothing (short conversation, no inferences yet).
+      await updateContext(workspaceId, channelId, threadId, {
+        reasoningThread: freshThread !== null ? freshThread : activeReasoningThread,
+        reasoningThreadTurn: _currentTurnCount,
+      } as any).catch(err => console.warn('[ReasoningThread] Failed to persist:', err));
+    } catch (err) {
+      console.warn('[ReasoningThread] Lifecycle failed, continuing:', err instanceof Error ? err.message : String(err));
+    }
+  }
 
   // ── Calibration Interview Routing ────────────────────────────────────────────
   // The state machine owns the question sequence. The LLM never decides what to
@@ -848,42 +875,6 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
           rate_limited: true,
         };
       }
-    }
-  }
-
-  // ── Step 3.9: Reasoning thread lifecycle ────────────────────────────────────
-  // Every 3 turns when the conversation exceeds 6 messages, run a cheap LLM
-  // compression pass (DeepSeek) to extract the analytical inference chain —
-  // hypotheses, challenges, conclusions, open questions, contradictions.
-  // Persisted in context JSONB and reused across turns without re-running.
-  // Passed into buildConversationHistory and runPandoraAgent so the model
-  // can continue analytical arguments started earlier in the session.
-  // NOTE: activeReasoningThread was initialised from persisted state above
-  // (before the calibration block). We update it here with a fresh compression.
-  const allMessages = state.messages || [] as any;
-  const currentTurnCount: number = allMessages.length;
-  const threadComputedAtTurn: number = (state.context as any).reasoningThreadTurn ?? 0;
-
-  if (currentTurnCount > 6 && (currentTurnCount - threadComputedAtTurn >= 3)) {
-    try {
-      const freshThread = await compressReasoningThread(allMessages, workspaceId);
-      if (freshThread) {
-        activeReasoningThread = freshThread;
-        // Persist to context JSONB using targeted jsonb_set — avoids clobbering
-        // other context fields that updateContext() manages separately.
-        query(
-          `UPDATE conversation_state
-           SET context = jsonb_set(
-             jsonb_set(context, '{reasoningThread}', $4::jsonb, true),
-             '{reasoningThreadTurn}', $5::jsonb, true
-           ),
-           updated_at = now()
-           WHERE workspace_id = $1 AND channel_id = $2 AND thread_ts = $3`,
-          [workspaceId, channelId, threadId, JSON.stringify(freshThread), JSON.stringify(currentTurnCount)]
-        ).catch(err => console.warn('[ReasoningThread] Failed to persist to context:', err));
-      }
-    } catch (err) {
-      console.warn('[ReasoningThread] Lifecycle failed, continuing without fresh thread:', err instanceof Error ? err.message : String(err));
     }
   }
 
