@@ -202,18 +202,31 @@ app.use((_req, res, next) => {
 
 const globalLimiter = rateLimit({
   windowMs: 60_000,
-  max: 100,
+  max: 500,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { ip: false, trustProxy: false, xForwardedForHeader: false },
+  keyGenerator: (req: any): string => {
+    return req.params?.workspaceId
+      ?? req.path.match(/\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i)?.[1]
+      ?? 'global';
+  },
   message: { error: 'Too many requests, please try again later' },
 });
 app.use('/api/', globalLimiter);
 
 const authLimiter = rateLimit({
   windowMs: 60_000,
-  max: 10,
+  max: 60,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { ip: false, trustProxy: false, xForwardedForHeader: false },
+  keyGenerator: (req: any): string => {
+    // OAuth callbacks are state-token protected; key by workspace when possible
+    return req.params?.workspaceId
+      ?? req.path.match(/\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i)?.[1]
+      ?? 'global';
+  },
   message: { error: 'Too many auth attempts, please try again later' },
 });
 app.use('/api/auth/', authLimiter);
