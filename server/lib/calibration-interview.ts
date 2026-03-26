@@ -398,20 +398,11 @@ export async function buildCompletionSummary(workspaceId: string): Promise<strin
     lines.push('');
   }
 
-  const stepLabels: Partial<Record<string, string>> = {
-    active_pipeline:   'Active Pipeline',
-    pipeline_coverage: 'Pipeline Coverage',
-    win_rate:          'Win Rate',
-    at_risk:           'At-Risk Deals',
-    commit:            'Commit / Forecast',
-    forecast_rollup:   'Forecast Rollup',
-  };
-
   const completed = stateResult.completed_steps.filter(s => s !== 'stage_mapping' && s !== 'complete');
   if (completed.length > 0) {
     lines.push(`**Confirmed Definitions**`);
     for (const step of completed) {
-      const label = stepLabels[step] ?? step;
+      const label = STEP_LABELS[step as InterviewStep] ?? step;
       const dim = dimensions[step];
       if (dim?.confirmed_value !== undefined) {
         const val = dim.confirmed_value >= 1_000_000

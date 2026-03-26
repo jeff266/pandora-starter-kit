@@ -603,6 +603,16 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
         const step = interviewState.current_step;
         console.log('[Calibration] interviewState step:', step, '| completed:', interviewState.completed_steps?.join(',') ?? 'none');
 
+        // Detect a genuine new-chat resumption entry: no prior assistant turns and
+        // calibration is in_progress with at least one completed step.  This must be
+        // checked BEFORE the inCalibrationSession active-session branch so that the
+        // first message in a new conversation always shows the resumption checklist
+        // rather than being misrouted through intent classification.
+        const isResumptionEntry =
+          hasNoAssistantHistory &&
+          calStatus.status === 'in_progress' &&
+          interviewState.completed_steps.length > 0;
+
         if (step === 'complete') {
           answer = await buildCompletionSummary(workspaceId);
 
@@ -612,6 +622,15 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
           const freshStages = await getUnmappedStages(workspaceId);
           console.log('[Calibration] Start-over requested — reset complete');
           answer = `Resetting your calibration. Let's start fresh from the beginning.\n\n${buildStageMappingTablePrompt(freshStages)}`;
+
+        } else if (isResumptionEntry) {
+          // New-chat resumption — show completed steps checklist and next step
+          const completedLabels = interviewState.completed_steps
+            .map(s => `- ✓ ${STEP_LABELS[s] ?? s}`)
+            .join('\n');
+          const nextLabel = STEP_LABELS[step] ?? step;
+          console.log('[Calibration] Resumption prompt (new chat) — completed:', interviewState.completed_steps.join(','), '| next:', step);
+          answer = `Welcome back! Here's where your Pandora calibration left off:\n\n${completedLabels}\n\n**Next up: ${nextLabel}**\n\nSay **"continue"** to pick up where you left off, or **"start over"** to reset and begin fresh.`;
 
         } else if (inCalibrationSession && step !== 'stage_mapping') {
           // If the previous turn was a resumption prompt and user says "continue" / "ready",
@@ -687,17 +706,8 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
           }
           }  // closes resumption-check else block
 
-        } else if (calStatus.status === 'in_progress' && interviewState.completed_steps.length > 0) {
-          // Resumption prompt — calibration was interrupted; offer to continue or start over
-          const completedLabels = interviewState.completed_steps
-            .map(s => `- ✓ ${STEP_LABELS[s] ?? s}`)
-            .join('\n');
-          const nextLabel = STEP_LABELS[step] ?? step;
-          console.log('[Calibration] Resumption prompt — completed:', interviewState.completed_steps.join(','), '| next:', step);
-          answer = `Welcome back! Here's where your Pandora calibration left off:\n\n${completedLabels}\n\n**Next up: ${nextLabel}**\n\nSay **"continue"** to pick up where you left off, or **"start over"** to reset and begin fresh.`;
-
         } else {
-          // Fresh calibration trigger — show current step question
+          // Fresh calibration trigger (not a resumption entry) — show current step question
           answer = await buildInterviewPrompt(workspaceId, step);
         }
 
