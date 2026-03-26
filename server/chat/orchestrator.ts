@@ -68,8 +68,10 @@ function classifyCalibrationInput(message: string): 'question' | 'confirmation' 
   if (trimmed.endsWith('?')) return 'question';
 
   // ── SAFETY PASS 1: Uncertainty / hedging ─────────────────────────────────
-  // User is not confident — hold on the current step and ask for clarification
-  if (/\b(not sure|i think|maybe|i guess|perhaps|unsure|unclear|i'm not sure|i am not sure|i don't think)\b/i.test(lower)) return 'question';
+  // User is not confident — hold on current step and ask for clarification.
+  // These match anywhere in the sentence so "for win rate, I'm not sure about trailing"
+  // is correctly held rather than advancing on the 'trailing' keyword.
+  if (/\b(not sure|i think|maybe|i guess|perhaps|unsure|unclear|i'm not sure|i am not sure|i don't think|i don't understand|i'm confused|confused|can you explain|tell me more|i don't know|not sure what)\b/i.test(lower)) return 'question';
 
   // ── SAFETY PASS 2: Correction / pushback ─────────────────────────────────
   // User wants to revisit or change something — never advance on these
@@ -90,9 +92,9 @@ function classifyCalibrationInput(message: string): 'question' | 'confirmation' 
   if (wordCount < 10 && /\d+(\.\d+)?\s*(x|%|k|m|days?|weeks?)?/i.test(lower)) return 'answer';
 
   // ── NAMED / DEFINITIONAL KEYWORDS ────────────────────────────────────────
-  // Clear, unambiguous definitional terms — "no" and "none" removed because they
-  // appear frequently in pushback ("no wait") and their isolated forms are handled below.
-  if (/\b(global|per.?pipeline|by pipeline|all pipelines|count.?based|value.?based|dollar.?based|trailing|rolling|quarterly|annual|best.?case|forecast.?category|no activity|inactivity|stage.?name|custom.?field|renewal|expansion)\b/i.test(lower)) return 'answer';
+  // Clear, unambiguous definitional terms. "commit" alone is excluded (too common
+  // in ordinary sentences) but specific compound phrases like "commit only" are kept.
+  if (/\b(global|per.?pipeline|by pipeline|all pipelines|count.?based|value.?based|dollar.?based|trailing|rolling|quarterly|annual|best.?case|forecast.?category|no activity|inactivity|stage.?name|custom.?field|renewal|expansion|commit.?only|commit\s*\+|full.?pipeline|adjusted.*win.?rate)\b/i.test(lower)) return 'answer';
 
   // Explicit skip / exclude signals — "no, skip" or "none, skip this" are caught here
   if (/\b(skip|exclude|include)\b/i.test(lower)) return 'answer';
