@@ -45,6 +45,7 @@ import { buildConversationContext } from '../context/build-conversation-context.
 import { PandoraResponseBuilder } from '../lib/pandora-response-builder.js';
 import { getCalibrationStatus } from '../lib/data-dictionary.js';
 import { getInterviewState, buildInterviewPrompt, advanceInterview, advanceAndConfirmStep, buildCompletionSummary, STEP_LABELS, resetInterviewState } from '../lib/calibration-interview.js';
+import type { InterviewStep } from '../lib/calibration-interview.js';
 import { getUnmappedStages, buildStageMappingResponse, buildStageMappingTablePrompt, confirmStageMapping, isStageMappingComplete } from '../lib/stage-mapping-interview.js';
 import type { NormalizedStage } from '../lib/stage-mapping-interview.js';
 
@@ -54,6 +55,10 @@ const CALIBRATION_START_OVER = /\b(start over|start fresh|reset calibration|begi
 /**
  * Classifies whether a mid-calibration message is a clarifying question,
  * an explicit confirmation, or a substantive answer that should advance the step.
+ *
+ * Safety passes run first and short-circuit to 'question' even when answer
+ * keywords are present, preventing aggressive step advancement on pushback,
+ * corrections, or hedged/uncertain responses.
  */
 function classifyCalibrationInput(message: string): 'question' | 'confirmation' | 'answer' {
   const trimmed = message.trim();
@@ -62,20 +67,80 @@ function classifyCalibrationInput(message: string): 'question' | 'confirmation' 
   // Ends with '?' → definitely a question
   if (trimmed.endsWith('?')) return 'question';
 
-  // Starts with a question word → clarifying question
-  if (/^(is|are|does|do|will|should|can|how|what|why|when|which)\b/i.test(trimmed)) return 'question';
+  // ── SAFETY PASS 1: Uncertainty / hedging ─────────────────────────────────
+  // User is not confident — hold on the current step and ask for clarification
+  if (/\b(not sure|i think|maybe|i guess|perhaps|unsure|unclear|i'm not sure|i am not sure|i don't think)\b/i.test(lower)) return 'question';
 
+  // ── SAFETY PASS 2: Correction / pushback ─────────────────────────────────
+  // User wants to revisit or change something — never advance on these
+  if (/\b(wait|actually|i meant|let me change|go back|change that|wrong|no wait|hold on|never mind|nevermind|back up|i need to correct|i want to change|can we go back)\b/i.test(lower)) return 'question';
+
+  // ── QUESTION DETECTION ────────────────────────────────────────────────────
+  // Starts with a question word, explanation request, or self-description of confusion
+  if (/^(is|are|does|do|will|should|can|how|what|why|when|which|tell|explain|help|i don't|i'm not|not sure|can you)\b/i.test(trimmed)) return 'question';
+
+  // ── CONFIRMATION ──────────────────────────────────────────────────────────
   // Explicit affirmative confirmations → advance
   if (/\b(yes|correct|right|confirmed|looks good|that'?s? right|sounds right|sounds good|perfect|ok|okay|agree|works for me|go ahead|proceed)\b/i.test(lower)) return 'confirmation';
 
-  // Numeric values — quota, threshold, percentage, multiplier, day count → advance
-  if (/\d+(\.\d+)?\s*(x|%|k|m|days?|weeks?)?/i.test(lower)) return 'answer';
+  // ── NUMERIC ANSWERS (short messages only) ─────────────────────────────────
+  // Only treat a number as a direct answer when the message is brief (<10 words).
+  // Longer messages with numbers are more likely expressing context or uncertainty.
+  const wordCount = trimmed.split(/\s+/).length;
+  if (wordCount < 10 && /\d+(\.\d+)?\s*(x|%|k|m|days?|weeks?)?/i.test(lower)) return 'answer';
 
-  // Named/definitional values that are substantive answers → advance
-  if (/\b(global|per.?pipeline|by pipeline|all pipelines|count.?based|value.?based|dollar.?based|trailing|rolling|quarterly|annual|commit|best.?case|forecast.?category|no activity|inactivity|stage.?name|custom.?field|renewal|expansion|no|none|skip|exclude|include)\b/i.test(lower)) return 'answer';
+  // ── NAMED / DEFINITIONAL KEYWORDS ────────────────────────────────────────
+  // Clear, unambiguous definitional terms — "no" and "none" removed because they
+  // appear frequently in pushback ("no wait") and their isolated forms are handled below.
+  if (/\b(global|per.?pipeline|by pipeline|all pipelines|count.?based|value.?based|dollar.?based|trailing|rolling|quarterly|annual|best.?case|forecast.?category|no activity|inactivity|stage.?name|custom.?field|renewal|expansion)\b/i.test(lower)) return 'answer';
+
+  // Explicit skip / exclude signals (and "no"/"none" only when clearly standalone or paired with skip intent)
+  if (/\b(skip|exclude|include)\b/i.test(lower)) return 'answer';
+  if (/^(no|none)[,.\s]*$/.test(lower)) return 'answer'; // standalone "no" / "none" only
 
   // Default: treat as a question — never silently advance on ambiguous input
   return 'question';
+}
+
+/**
+ * Generates a brief, deterministic one-sentence echo of what was captured
+ * before advancing to the next calibration step. No LLM call needed.
+ */
+function buildAnswerEcho(step: InterviewStep, message: string): string {
+  const lower = message.toLowerCase().trim();
+  switch (step) {
+    case 'active_pipeline':
+      return 'Got it — confirmed your active pipeline definition.';
+    case 'pipeline_coverage': {
+      const isPerPipeline = /\b(per.?pipeline|by pipeline|separate|each pipeline)\b/i.test(lower);
+      return isPerPipeline
+        ? 'Got it — I\'ll track pipeline coverage separately per pipeline.'
+        : 'Got it — I\'ll track pipeline coverage globally across all pipelines.';
+    }
+    case 'win_rate': {
+      if (/\b(value|dollar|amount)\b/i.test(lower)) return 'Got it — calculating win rate by deal value (not deal count).';
+      if (/\b(annual|yearly|full.?year)\b/i.test(lower)) return 'Got it — using a full-year win rate window.';
+      if (/\b(quarterly|last quarter)\b/i.test(lower)) return 'Got it — using last-quarter win rate.';
+      return 'Got it — using trailing 90-day, count-based win rate.';
+    }
+    case 'at_risk': {
+      const dayMatch = lower.match(/(\d+)\s*days?/);
+      if (dayMatch) return `Got it — flagging deals with no activity in the last ${dayMatch[1]} days as at-risk.`;
+      return 'Got it — confirmed your at-risk deal definition.';
+    }
+    case 'commit': {
+      if (/\b(stage|negotiat|contract)\b/i.test(lower)) return 'Got it — using stage name to identify Commit deals.';
+      if (/\b(custom|field)\b/i.test(lower)) return 'Got it — using a custom field to identify Commit deals.';
+      return 'Got it — using forecast category (Commit / Best Case) to define your Commit number.';
+    }
+    case 'forecast_rollup': {
+      if (/\b(commit.?only|conservative)\b/i.test(lower)) return 'Got it — forecast rollup = Commit only.';
+      if (/\b(best.?case|commit\s*\+)\b/i.test(lower)) return 'Got it — forecast rollup = Commit + Best Case weighting.';
+      return 'Got it — confirmed your forecast rollup method.';
+    }
+    default:
+      return 'Got it — confirmed.';
+  }
 }
 
 export interface ConversationTurnInput {
@@ -743,7 +808,9 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
             console.log('[Calibration] Answered question, staying on step:', step);
 
           } else {
-            // Confirmed answer or named value — save scope if pipeline_coverage, then advance
+            // Confirmed answer or named value — echo what was captured, then advance
+            const echo = buildAnswerEcho(step, message);
+
             if (step === 'pipeline_coverage') {
               const isPerPipeline = /\b(per.?pipeline|by pipeline|separate|each pipeline)\b/i.test(message);
               const scope = isPerPipeline ? 'per_pipeline' : 'global';
@@ -763,11 +830,10 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
             const nextStep = await advanceAndConfirmStep(workspaceId, step);
             console.log('[Calibration] Advanced+confirmed:', step, '→', nextStep);
 
-            if (nextStep === 'complete') {
-              answer = await buildCompletionSummary(workspaceId);
-            } else {
-              answer = await buildInterviewPrompt(workspaceId, nextStep);
-            }
+            const nextContent = nextStep === 'complete'
+              ? await buildCompletionSummary(workspaceId)
+              : await buildInterviewPrompt(workspaceId, nextStep);
+            answer = `${echo}\n\n${nextContent}`;
           }
           }  // closes resumption-check else block
 
