@@ -26,7 +26,7 @@ import { detectFeedback } from './feedback-detector.js';
 import { recordFeedbackSignal } from '../feedback/signals.js';
 import { createAnnotation, getActiveAnnotations } from '../feedback/annotations.js';
 import { randomUUID } from 'crypto';
-import { runPandoraAgent, buildConversationHistory } from './pandora-agent.js';
+import { runPandoraAgent, buildConversationHistory, compressReasoningThread } from './pandora-agent.js';
 import { classifyDeliberationMode } from './intent-classifier.js';
 import { extractWorkspaceKnowledge } from './workspace-knowledge.js';
 import { detectMetricAssertion, getComputedMetric, buildComparisonResponse } from './metric-assertion.js';
@@ -454,6 +454,12 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
     }
   }
 
+  // ── Reasoning thread: read persisted value for early-branch use ─────────────
+  // Compression lifecycle runs at Step 3.9 (before intent classification).
+  // We read the stored value here so calibration branches have access to it
+  // without waiting for the compression pass.
+  let activeReasoningThread: string | null = (state.context as any).reasoningThread ?? null;
+
   // ── Calibration Interview Routing ────────────────────────────────────────────
   // The state machine owns the question sequence. The LLM never decides what to
   // ask next — it only receives the structured output as the answer string.
@@ -669,7 +675,7 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
             // User asked a clarifying question — answer it via LLM and re-ask the current step
             // so inCalibrationSession stays true for the next message
             const currentStepQuestion = await buildInterviewPrompt(workspaceId, step);
-            const { messages: convHistory } = await buildConversationHistory(state.messages || [], { workspaceId });
+            const { messages: convHistory } = await buildConversationHistory(state.messages || [], { workspaceId, reasoningThread: activeReasoningThread });
             const llmResponse = await callLLM(workspaceId, 'reason', {
               systemPrompt: `You are Pandora, a revenue intelligence AI running a calibration interview.
 The user is currently on this calibration step:
@@ -845,6 +851,42 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
     }
   }
 
+  // ── Step 3.9: Reasoning thread lifecycle ────────────────────────────────────
+  // Every 3 turns when the conversation exceeds 6 messages, run a cheap LLM
+  // compression pass (DeepSeek) to extract the analytical inference chain —
+  // hypotheses, challenges, conclusions, open questions, contradictions.
+  // Persisted in context JSONB and reused across turns without re-running.
+  // Passed into buildConversationHistory and runPandoraAgent so the model
+  // can continue analytical arguments started earlier in the session.
+  // NOTE: activeReasoningThread was initialised from persisted state above
+  // (before the calibration block). We update it here with a fresh compression.
+  const allMessages = state.messages || [] as any;
+  const currentTurnCount: number = allMessages.length;
+  const threadComputedAtTurn: number = (state.context as any).reasoningThreadTurn ?? 0;
+
+  if (currentTurnCount > 6 && (currentTurnCount - threadComputedAtTurn >= 3)) {
+    try {
+      const freshThread = await compressReasoningThread(allMessages, workspaceId);
+      if (freshThread) {
+        activeReasoningThread = freshThread;
+        // Persist to context JSONB using targeted jsonb_set — avoids clobbering
+        // other context fields that updateContext() manages separately.
+        query(
+          `UPDATE conversation_state
+           SET context = jsonb_set(
+             jsonb_set(context, '{reasoningThread}', $4::jsonb, true),
+             '{reasoningThreadTurn}', $5::jsonb, true
+           ),
+           updated_at = now()
+           WHERE workspace_id = $1 AND channel_id = $2 AND thread_ts = $3`,
+          [workspaceId, channelId, threadId, JSON.stringify(freshThread), JSON.stringify(currentTurnCount)]
+        ).catch(err => console.warn('[ReasoningThread] Failed to persist to context:', err));
+      }
+    } catch (err) {
+      console.warn('[ReasoningThread] Lifecycle failed, continuing without fresh thread:', err instanceof Error ? err.message : String(err));
+    }
+  }
+
   // ── Step 4.0: Intent Classification (in_app + slack_dm) ─────────────────────
   // Pre-dispatch routing to catch advisory questions before expensive tool calls.
   // Falls through to Pandora Agent for data_query or ambiguous categories.
@@ -857,7 +899,7 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
   let intentClassification: Awaited<ReturnType<typeof classifyIntent>> | null = null;
   if (!answer && (surface === 'in_app' || surface === 'slack_dm')) {
     try {
-      const { messages: conversationHistory } = await buildConversationHistory(state.messages || [] as any, { workspaceId });
+      const { messages: conversationHistory } = await buildConversationHistory(state.messages || [] as any, { workspaceId, reasoningThread: activeReasoningThread });
       const ctxForClassifier = await getWorkspaceContext(workspaceId).catch(() => null);
       intentClassification = await classifyIntent(message, conversationHistory, workspaceId, ctxForClassifier);
 
@@ -956,7 +998,7 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
         intentClassification.confidence >= 0.75 &&
         !entityId
       ) {
-        const { messages: conversationHistory } = await buildConversationHistory(state.messages || [] as any, { workspaceId });
+        const { messages: conversationHistory } = await buildConversationHistory(state.messages || [] as any, { workspaceId, reasoningThread: activeReasoningThread });
         return await handleAdvisoryResponse(
           message,
           workspaceId,
@@ -1007,7 +1049,7 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
 
       // Handle user responding "best practice" to a gating question
       if (isGatingResponse(message, conversationHistory) && prefersBestPractice(message)) {
-        const { messages: conversationHistory } = await buildConversationHistory(state.messages || [] as any, { workspaceId });
+        const { messages: conversationHistory } = await buildConversationHistory(state.messages || [] as any, { workspaceId, reasoningThread: activeReasoningThread });
         return await handleAdvisoryResponse(
           message,
           workspaceId,
@@ -1026,7 +1068,7 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
         intentClassification.confidence >= 0.75
       ) {
         try {
-          const { messages: history } = await buildConversationHistory(state.messages || [] as any, { workspaceId });
+          const { messages: history } = await buildConversationHistory(state.messages || [] as any, { workspaceId, reasoningThread: activeReasoningThread });
           const workspaceContext = await getWorkspaceContext(workspaceId);
 
           let chatResponse: string;
@@ -1074,6 +1116,7 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
               {
                 complexity: isComplex ? 'high' : 'standard',
                 enablePlanning: isComplex,
+                reasoningThread: activeReasoningThread,
               }
             );
             chatResponse = pandoraResult.answer;
@@ -1171,7 +1214,7 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
   // runScopedAnalysis is NOT a fallback for in_app or slack_dm.
   if (!answer && (surface === 'in_app' || surface === 'slack_dm')) {
     try {
-      const { messages: history } = await buildConversationHistory(state.messages || [] as any, { workspaceId });
+      const { messages: history } = await buildConversationHistory(state.messages || [] as any, { workspaceId, reasoningThread: activeReasoningThread });
 
       // Inject entity scope so deal/account page questions have context.
       // e.g. "What are the risks?" on a deal page needs to know which deal.
@@ -1317,6 +1360,7 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
         {
           complexity: isComplex ? 'high' : 'standard',
           enablePlanning: isComplex,
+          reasoningThread: activeReasoningThread,
         }
       );
 

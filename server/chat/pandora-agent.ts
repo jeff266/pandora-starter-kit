@@ -1809,7 +1809,7 @@ export async function runPandoraAgent(
   onToolCall?: (toolName: string, label: string) => void,
   sessionContext?: SessionContext,
   sse?: (event: any) => void,
-  options?: { complexity?: 'high' | 'standard'; enablePlanning?: boolean }
+  options?: { complexity?: 'high' | 'standard'; enablePlanning?: boolean; reasoningThread?: string | null }
 ): Promise<PandoraResponse> {
   const startTime = Date.now();
   const toolTrace: PandoraToolCall[] = [];
@@ -1899,9 +1899,16 @@ Continue using this scope unless the user explicitly changes it.`;
   const productCatalogPresent = contextBlock.includes('PRODUCT CATALOG');
   console.log(`[PandoraAgent] ws=${workspaceId} product_catalog_in_context=${productCatalogPresent}`);
 
+  // Reasoning thread: analytical inference chain from this session, pre-compressed
+  // by the orchestrator. Placed after workspace context (substrate) so the model
+  // reads confirmed workspace config before ingesting the analytical thread.
+  const reasoningThreadBlock = options?.reasoningThread
+    ? `\n\n<reasoning_thread>\n${options.reasoningThread}\n</reasoning_thread>`
+    : '';
+
   let effectiveSystemPrompt = contextBlock
-    ? `${PANDORA_SYSTEM_PROMPT}\n\n${contextBlock}\n\n${memoryBlock}${dictionaryContext}${toolContext}${scopeContextBlock}`
-    : `${PANDORA_SYSTEM_PROMPT}\n\n${memoryBlock}${dictionaryContext}${toolContext}${scopeContextBlock}`;
+    ? `${PANDORA_SYSTEM_PROMPT}\n\n${contextBlock}${reasoningThreadBlock}\n\n${memoryBlock}${dictionaryContext}${toolContext}${scopeContextBlock}`
+    : `${PANDORA_SYSTEM_PROMPT}${reasoningThreadBlock}\n\n${memoryBlock}${dictionaryContext}${toolContext}${scopeContextBlock}`;
 
   // ── Temporal context injection — resolve time-period references to exact dates ──
   const temporalCtx = resolveTemporalContext(message);
@@ -2908,8 +2915,12 @@ function extractCitedRecords(toolTrace: PandoraToolCall[]): PandoraCitedRecord[]
 
 // ─── Conversation history builder (for follow-ups) ────────────────────────────
 
-/** Sliding window size — full-fidelity turns kept. */
-const HISTORY_WINDOW = 10;
+/**
+ * Sliding window size — full-fidelity turns kept verbatim.
+ * Reduced to 3 because the reasoning thread now carries analytical continuity
+ * for longer sessions, keeping total assembled context roughly constant.
+ */
+const HISTORY_WINDOW = 3;
 
 /** Regex patterns used for fact extraction from older turns. */
 const COMPRESSION_PATTERNS = {
@@ -3036,6 +3047,86 @@ function extractCompressionFacts(
   return facts.length > 0 ? facts.join('\n') : '';
 }
 
+// ─── Reasoning thread compression ────────────────────────────────────────────
+
+/**
+ * Exact system prompt prescribed by design spec — use verbatim.
+ * Targets analytical inferences only; explicitly forbids event-log summaries.
+ */
+const REASONING_THREAD_SYSTEM_PROMPT = `You are extracting the analytical reasoning thread from a RevOps conversation.
+
+EXTRACT ONLY:
+- Hypotheses formed ("coverage looks healthy but...")
+- Assumptions challenged ("we questioned whether...")
+- Conclusions reached ("we established that...")
+- Open questions remaining ("still unclear whether...")
+- Contradictions or tensions identified
+
+DO NOT extract:
+- Facts (those live in the database)
+- What questions were asked
+- What data was retrieved
+- Summaries of what Pandora said
+
+Output: 3-5 sentences maximum. Dense. Inference-only.
+If no analytical reasoning has occurred yet, output nothing.`;
+
+/**
+ * Uses a cheap LLM (DeepSeek via the `compress` route) to extract the
+ * analytical inference chain from a conversation — hypotheses, challenges,
+ * conclusions, open questions, contradictions.
+ *
+ * Returns the thread string (~300 tokens), or null if no analytical reasoning
+ * has occurred yet (the model outputs nothing).
+ *
+ * Called by the orchestrator every 3 turns when conversation length > 6.
+ * Never called from within buildConversationHistory to avoid double-billing.
+ */
+export async function compressReasoningThread(
+  messages: (ConversationMessage & { tool_trace?: any[] })[],
+  workspaceId: string
+): Promise<string | null> {
+  if (!messages?.length) return null;
+
+  const conversationText = messages
+    .filter(m => m.role === 'user' || m.role === 'assistant')
+    .map(m => {
+      const content = typeof m.content === 'string' ? m.content : '';
+      if (!content.trim()) return null;
+      return `${m.role === 'user' ? 'User' : 'Pandora'}: ${content}`;
+    })
+    .filter(Boolean)
+    .join('\n\n');
+
+  if (!conversationText.trim()) return null;
+
+  try {
+    const response = await callLLM(workspaceId, 'compress', {
+      systemPrompt: REASONING_THREAD_SYSTEM_PROMPT,
+      messages: [{ role: 'user', content: conversationText }],
+      maxTokens: 400,
+      temperature: 0,
+      _tracking: {
+        workspaceId,
+        phase: 'compression',
+        stepName: 'reasoning-thread',
+      },
+    });
+
+    const thread = response.content?.trim();
+    if (!thread) return null;
+
+    console.log(`[ReasoningThread] Compressed ${messages.length} turns → ${thread.length} chars`);
+    return thread;
+  } catch (err) {
+    console.warn(
+      '[ReasoningThread] Compression failed, continuing without thread:',
+      err instanceof Error ? err.message : String(err)
+    );
+    return null;
+  }
+}
+
 /**
  * Converts stored conversation_state messages into the history format
  * runPandoraAgent() expects. Prior tool calls are summarized as text
@@ -3048,7 +3139,7 @@ function extractCompressionFacts(
  */
 export async function buildConversationHistory(
   messages: (ConversationMessage & { tool_trace?: any[]; cited_records?: any[] })[],
-  opts?: { workspaceId?: string }
+  opts?: { workspaceId?: string; reasoningThread?: string | null }
 ): Promise<{ messages: Array<{ role: 'user' | 'assistant'; content: any }>, wasCompressed: boolean }> {
   if (!messages?.length) return { messages: [], wasCompressed: false };
 
@@ -3126,12 +3217,24 @@ export async function buildConversationHistory(
 
   // Inject as a pseudo user/assistant exchange at the start of history.
   // This format is well-supported by all Anthropic Claude models.
-  const pseudoExchange: Array<{ role: 'user' | 'assistant'; content: any }> = [
+  const factExchange: Array<{ role: 'user' | 'assistant'; content: any }> = [
     { role: 'user',      content: `[Context from earlier in this conversation:]\n${compressionNote}` },
     { role: 'assistant', content: 'Understood, I have that context.' },
   ];
 
-  return { messages: [...pseudoExchange, ...recentHistory], wasCompressed: true };
+  // If a reasoning thread (analytical inference chain) was pre-computed by the
+  // orchestrator, inject it as a second distinct pseudo-exchange — separated from
+  // the fact block so the model knows these are inferences, not confirmed values.
+  const reasoningThread = opts?.reasoningThread;
+  if (reasoningThread) {
+    const threadExchange: Array<{ role: 'user' | 'assistant'; content: any }> = [
+      { role: 'user',      content: `[Analytical reasoning thread from this session:]\n${reasoningThread}` },
+      { role: 'assistant', content: 'Understood, I will continue from where this analysis left off.' },
+    ];
+    return { messages: [...factExchange, ...threadExchange, ...recentHistory], wasCompressed: true };
+  }
+
+  return { messages: [...factExchange, ...recentHistory], wasCompressed: true };
 }
 
 function extractFindings(content: string): any[] {
