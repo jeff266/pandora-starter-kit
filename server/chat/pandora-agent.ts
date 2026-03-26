@@ -1900,15 +1900,24 @@ Continue using this scope unless the user explicitly changes it.`;
   console.log(`[PandoraAgent] ws=${workspaceId} product_catalog_in_context=${productCatalogPresent}`);
 
   // Reasoning thread: analytical inference chain from this session, pre-compressed
-  // by the orchestrator. Placed after workspace context (substrate) so the model
-  // reads confirmed workspace config before ingesting the analytical thread.
+  // by the orchestrator. Placed BETWEEN workspace context and system persona
+  // instructions per spec Task 4: "between the workspace context block and the
+  // system persona instructions — so the model knows this is analytical context
+  // from this session, not workspace config. Visible before tool instructions
+  // and persona rules."
+  //
+  // Assembled order:
+  //   contextBlock (workspace facts + config)
+  //   <reasoning_thread> (session inference chain) — between context and persona
+  //   PANDORA_SYSTEM_PROMPT (persona + tool instructions)
+  //   memoryBlock / dictionaryContext / toolContext / scopeContextBlock
   const reasoningThreadBlock = options?.reasoningThread
-    ? `\n\n<reasoning_thread>\n${options.reasoningThread}\n</reasoning_thread>`
+    ? `<reasoning_thread>\n${options.reasoningThread}\n</reasoning_thread>\n\n`
     : '';
 
   let effectiveSystemPrompt = contextBlock
-    ? `${PANDORA_SYSTEM_PROMPT}\n\n${contextBlock}${reasoningThreadBlock}\n\n${memoryBlock}${dictionaryContext}${toolContext}${scopeContextBlock}`
-    : `${PANDORA_SYSTEM_PROMPT}${reasoningThreadBlock}\n\n${memoryBlock}${dictionaryContext}${toolContext}${scopeContextBlock}`;
+    ? `${contextBlock}\n\n${reasoningThreadBlock}${PANDORA_SYSTEM_PROMPT}\n\n${memoryBlock}${dictionaryContext}${toolContext}${scopeContextBlock}`
+    : `${reasoningThreadBlock}${PANDORA_SYSTEM_PROMPT}\n\n${memoryBlock}${dictionaryContext}${toolContext}${scopeContextBlock}`;
 
   // ── Temporal context injection — resolve time-period references to exact dates ──
   const temporalCtx = resolveTemporalContext(message);
@@ -3054,10 +3063,24 @@ function extractCompressionFacts(
  * Targets analytical inferences only; explicitly forbids event-log summaries.
  */
 const REASONING_THREAD_SYSTEM_PROMPT =
-`You are extracting the analytical reasoning thread from a RevOps conversation.
-EXTRACT ONLY: Hypotheses formed, Assumptions challenged, Conclusions reached, Open questions remaining, Contradictions or tensions identified
-DO NOT extract: Facts, What questions were asked, What data was retrieved, Summaries of what Pandora said
-Output: 3-5 sentences maximum. Dense. Inference-only. If no analytical reasoning has occurred yet, output nothing.`;
+`You are extracting the analytical reasoning thread
+from a RevOps conversation.
+
+EXTRACT ONLY:
+- Hypotheses formed ("coverage looks healthy but...")
+- Assumptions challenged ("we questioned whether...")
+- Conclusions reached ("we established that...")
+- Open questions remaining ("still unclear whether...")
+- Contradictions or tensions identified
+
+DO NOT extract:
+- Facts (those live in the database)
+- What questions were asked
+- What data was retrieved
+- Summaries of what Pandora said
+
+Output: 3-5 sentences maximum. Dense. Inference-only.
+If no analytical reasoning has occurred yet, output nothing.`;
 
 /**
  * Uses a cheap LLM (DeepSeek via the `compress` route) to extract the
