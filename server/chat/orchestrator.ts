@@ -94,11 +94,12 @@ function classifyCalibrationInput(message: string): 'question' | 'confirmation' 
   // appear frequently in pushback ("no wait") and their isolated forms are handled below.
   if (/\b(global|per.?pipeline|by pipeline|all pipelines|count.?based|value.?based|dollar.?based|trailing|rolling|quarterly|annual|best.?case|forecast.?category|no activity|inactivity|stage.?name|custom.?field|renewal|expansion)\b/i.test(lower)) return 'answer';
 
-  // Explicit skip / exclude signals (and "no"/"none" only when clearly standalone or paired with skip intent)
+  // Explicit skip / exclude signals — "no, skip" or "none, skip this" are caught here
   if (/\b(skip|exclude|include)\b/i.test(lower)) return 'answer';
-  if (/^(no|none)[,.\s]*$/.test(lower)) return 'answer'; // standalone "no" / "none" only
 
   // Default: treat as a question — never silently advance on ambiguous input
+  // Standalone "no" / "none" land here intentionally: they are corrections or rejections,
+  // not answers that should advance the calibration step.
   return 'question';
 }
 
