@@ -1,0 +1,425 @@
+Now the problem is concrete. The 20-turn hard stop was a safety valve because there was no graceful context management — when the context window fills, it just dies. For calibration this is particularly painful because calibration is inherently a multi-turn interview.
+
+**The right fix has two parts:**
+
+**Part 1 — Sliding window with compression (fixes the hard stop)**
+
+Instead of cutting off at 20, compress older turns as the conversation grows. The rolling window already strips tool results from older messages — extend this to also compress early exchanges into a summary paragraph injected as a system note, then drop those turns from the active window.
+
+```
+Turn 1-5:   compressed → "User confirmed: active pipeline 
+             filter, Q2 target $400K, 4 reps"
+Turn 6-10:  compressed → "Stale deal thresholds discussed.
+             User asked to refine by stage."
+Turn 11-20: full fidelity (rolling window)
+```
+
+This keeps the context window bounded without losing continuity. The conversation can run indefinitely.
+
+**Part 2 — Calibration state machine (fixes the specific calibration case)**
+
+Calibration is worse than a regular conversation because it has explicit state — which steps have been completed, which answers have been confirmed. That state should be persisted to the database on every turn, not held in conversation memory. If the session dies at turn 20 mid-calibration, resuming should restore from the last confirmed state, not start over.
+
+The calibration interview already has a step structure. Each confirmed answer should write to `business_dimensions` and `workspace_config` immediately — not wait for completion. Then if the session dies, Pandora can read what's already been confirmed and pick up from the next unanswered step.Logged. Here are the two Claude Code prompts, Fix 2 first:
+
+---
+
+**Fix 2 — Calibration state persistence (send first):**
+
+```
+# Calibration: Persist state on every turn, resume on session death
+
+## Context
+
+Calibration stopped mid-session at the 20-turn
+limit and the user lost all progress. Calibration
+has explicit step state that should be persisted
+to the database on every confirmation — not held
+only in conversation memory.
+
+## Before Starting
+
+1. Show server/lib/calibration-interview.ts in full.
+   What is the step structure? How many steps?
+   What does each step write when confirmed?
+
+2. Show the current write-through behavior. When
+   does calibration actually write to the database?
+   On every confirmation, or only at completion?
+
+3. Show the current calibration state stored in the
+   database — is there a calibration_state or
+   calibration_sessions table?
+   SELECT table_name FROM information_schema.tables
+   WHERE table_schema = 'public'
+     AND table_name ILIKE '%calibrat%';
+
+4. Show what workspace_config currently stores
+   for a mid-calibration Frontera session:
+   SELECT calibration_status, calibration_step,
+          workspace_config
+   FROM workspaces
+   WHERE name ILIKE '%frontera%';
+
+Report findings then build.
+
+---
+
+## Fix A — Write-through on every confirmation
+
+Every time the user confirms an answer during
+calibration, write it to the database IMMEDIATELY.
+Do not wait for the interview to complete.
+
+For each step type, the write-through target:
+
+Stage mapping confirmation:
+→ Write to stage_mappings immediately
+→ Mark confirmed = TRUE on each mapped stage
+
+Business dimension confirmation:
+→ Write to business_dimensions immediately
+→ Mark confirmed = TRUE
+
+Metric definition confirmation (win rate, coverage):
+→ Write to metric_definitions immediately
+→ Mark calibration_source = 'confirmed'
+
+Quota target confirmation:
+→ Write to targets table immediately
+
+Pipeline value field confirmation:
+→ Write to workspace_config immediately
+
+The calibration interview already calls these
+write functions — verify each one actually persists
+on confirmation rather than batching at the end.
+If any writes are deferred, fix them to be immediate.
+
+---
+
+## Fix B — Persist calibration step position
+
+Track which step the user is on in the database
+so the interview can resume if the session dies.
+
+Add or use existing columns in the workspaces table
+(or create a calibration_sessions table):
+
+```sql
+-- If columns don't exist, add via migration:
+ALTER TABLE workspaces
+  ADD COLUMN IF NOT EXISTS
+    calibration_current_step  TEXT,
+  ADD COLUMN IF NOT EXISTS
+    calibration_completed_steps  TEXT[]  DEFAULT '{}',
+  ADD COLUMN IF NOT EXISTS
+    calibration_started_at  TIMESTAMPTZ;
+```
+
+On every step transition:
+```typescript
+await db.query(`
+  UPDATE workspaces
+  SET calibration_current_step = $1,
+      calibration_completed_steps =
+        array_append(calibration_completed_steps, $2),
+      calibration_started_at =
+        COALESCE(calibration_started_at, NOW())
+  WHERE id = $3
+`, [nextStep, completedStep, workspaceId])
+```
+
+---
+
+## Fix C — Resumption detection and prompt
+
+When a calibration session starts, check if a
+previous session was interrupted:
+
+```typescript
+async function checkCalibrationResumption(
+  workspaceId: string,
+  db: any
+): Promise<CalibrationResumption | null> {
+  const result = await db.query(`
+    SELECT
+      calibration_status,
+      calibration_current_step,
+      calibration_completed_steps,
+      calibration_started_at
+    FROM workspaces
+    WHERE id = $1
+  `, [workspaceId])
+
+  const ws = result.rows[0]
+
+  // Mid-calibration = started but not completed
+  if (
+    ws.calibration_status === 'in_progress'
+    && ws.calibration_current_step
+    && ws.calibration_completed_steps?.length > 0
+  ) {
+    return {
+      resumable: true,
+      completedSteps: ws.calibration_completed_steps,
+      currentStep:   ws.calibration_current_step,
+      startedAt:     ws.calibration_started_at,
+    }
+  }
+
+  return null
+}
+```
+
+When resumption is detected, open calibration
+with a context-setting message:
+
+```
+"We were partway through calibration. Here's
+what you've already confirmed:
+
+✓ Stage mappings (17 stages → 6 normalized)
+✓ Active pipeline definition
+✓ Q2 target: $400K
+
+Next up: win rate benchmark. Ready to continue?"
+```
+
+Show the confirmed items as a checklist.
+Offer: [Continue from here] [Start over]
+
+---
+
+## Acceptance Criteria
+
+1. Each calibration step writes to DB immediately
+   on user confirmation — not batched at completion
+2. calibration_current_step updated on every
+   step transition
+3. calibration_completed_steps array grows with
+   each confirmed step
+4. If session dies at step 7 of 12, reopening
+   calibration offers to resume from step 8
+5. Resumption prompt shows confirmed items as
+   a checklist
+6. [Start over] option clears state and restarts
+7. Stage mapping confirmations persist immediately
+   to stage_mappings table
+8. Dimension confirmations persist immediately
+   to business_dimensions
+9. Metric confirmations persist immediately
+   to metric_definitions
+10. Zero TypeScript errors
+```
+
+---
+
+**Fix 1 — Sliding window with compression (send after Fix 2):**
+
+```
+# Conversation: Replace 20-turn hard limit with sliding window compression
+
+## Context
+
+Ask Pandora hard-stops at 20 turns. This cut off
+a calibration session mid-interview. The 20-turn
+limit was a safety valve because there was no
+graceful context management.
+
+Replace with a sliding window that compresses
+older turns into a summary, keeping the context
+window bounded without killing the conversation.
+
+## Before Starting
+
+1. Find where the 20-turn limit is enforced.
+   Search for the number 20 in:
+   - server/chat/orchestrator.ts
+   - server/chat/conversation-history.ts
+   - buildConversationHistory()
+   Show the exact lines.
+
+2. Show buildConversationHistory() in full.
+   How does it currently trim the message list?
+   Does it already strip tool results from older
+   turns?
+
+3. What is the current max_tokens budget for
+   the conversation history portion of the
+   context? Is there a token limit enforced
+   anywhere?
+
+Report findings then build.
+
+---
+
+## The Architecture
+
+Replace hard cutoff with three zones:
+
+```
+Zone 1 — Compressed summary (injected as system note)
+  Source: turns older than the rolling window
+  Format: 2-4 sentence paragraph of key facts
+  Token cost: ~200 tokens
+  Update: regenerated when the rolling window advances
+
+Zone 2 — Rolling window (last 10 turns, full fidelity)
+  Already working — keep as-is
+  Tool results stripped from turns > 3 exchanges old
+  Token cost: ~3,000-5,000 tokens
+
+Zone 3 — Current turn (full fidelity)
+  Always included
+```
+
+---
+
+## Step 1 — Track conversation length
+
+In buildConversationHistory(), count the actual
+number of turns. When count > 10 (the rolling
+window), flag that compression is needed.
+
+```typescript
+interface ConversationHistoryResult {
+  messages:        Message[]
+  compressionNote: string | null  // NEW
+  turnCount:       number
+  wasCompressed:   boolean
+}
+```
+
+---
+
+## Step 2 — Rule-based compression (no LLM)
+
+Do NOT use an LLM call for compression. Use
+rule-based extraction of confirmed facts from
+older messages. This keeps it fast and cheap.
+
+```typescript
+function compressOlderTurns(
+  messages: Message[]
+): string {
+  const facts: string[] = []
+
+  for (const msg of messages) {
+    if (msg.role !== 'assistant') continue
+    const content = msg.content as string
+
+    // Extract confirmed dimension definitions
+    const dimMatch = content.match(
+      /confirmed[:\s]+([^.]+(?:active pipeline|at.risk|commit)[^.]+)/gi
+    )
+    if (dimMatch) facts.push(...dimMatch)
+
+    // Extract confirmed metrics
+    const metricMatch = content.match(
+      /(?:win rate|coverage|quota)[^.]*\d+[%$xk]/gi
+    )
+    if (metricMatch) facts.push(...metricMatch)
+
+    // Extract rep/team confirmations
+    const repMatch = content.match(
+      /(?:confirmed|verified)[^.]*(?:rep|team|roster)[^.]+/gi
+    )
+    if (repMatch) facts.push(...repMatch)
+  }
+
+  if (!facts.length) return ''
+
+  return `Earlier in this conversation: ${
+    facts.slice(0, 5).join('. ')
+  }.`
+}
+```
+
+---
+
+## Step 3 — Inject compression note as system message
+
+When compression is active, inject the compression
+note as a system message at the START of the
+conversation history (before the rolling window):
+
+```typescript
+const history: Message[] = []
+
+if (compressionNote) {
+  history.push({
+    role: 'user',
+    content: `[Context from earlier in this conversation: ${compressionNote}]`
+  })
+  history.push({
+    role: 'assistant',
+    content: 'Understood. I have that context.'
+  })
+}
+
+// Then append the rolling window (last 10 turns)
+history.push(...rollingWindow)
+```
+
+---
+
+## Step 4 — Remove the hard limit
+
+Find the `if (messages.length > 20)` check or
+equivalent. Remove it entirely. The rolling window
+naturally bounds the context — no hard cutoff needed.
+
+If there's a turn counter that triggers an error
+message to the user ("conversation limit reached"),
+remove that too.
+
+---
+
+## Step 5 — Calibration-specific note
+
+During calibration, the compression note should
+also include which calibration steps have been
+completed. The calibration step persistence
+(Fix B from the other prompt) writes this to
+the database. Read it here and include it:
+
+```typescript
+// In calibration conversations:
+if (isCalibrationSession) {
+  const completedSteps = await getCalibrationProgress(
+    workspaceId, db
+  )
+  if (completedSteps.length > 0) {
+    compressionNote += ` Calibration progress: ${
+      completedSteps.join(', ')
+    } confirmed.`
+  }
+}
+```
+
+---
+
+## Acceptance Criteria
+
+1. Hard 20-turn limit removed
+2. Conversation runs indefinitely without cutoff
+3. After turn 10, older turns are compressed
+   into a system note
+4. Compression uses rule-based extraction —
+   no LLM call, no added latency
+5. Compression note injected as pseudo system
+   message at start of history
+6. Rolling window (last 10 turns) still at
+   full fidelity
+7. Tool results still stripped from turns > 3
+   old (existing behavior preserved)
+8. Calibration sessions include step progress
+   in the compression note
+9. Test: start a conversation, send 25 messages,
+   verify it doesn't cut off at 20
+10. Token usage does not increase significantly
+    vs current (compression note ~200 tokens,
+    replaces the stripped older turns)
+11. Zero TypeScript errors
+```
