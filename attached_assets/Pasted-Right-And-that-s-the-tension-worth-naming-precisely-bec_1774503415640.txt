@@ -1,0 +1,71 @@
+Right. And that's the tension worth naming precisely, because the answer isn't one architecture or the other.
+
+A VP RevOps in a meeting does two things simultaneously. They retrieve facts — pulling up a number, referencing a deal, checking a quota. And they reason across time — building a hypothesis across the meeting, challenging an assumption they stated 20 minutes ago, connecting something from the last pipeline review to something happening now.
+
+Those are different cognitive tasks and they need different memory systems.
+
+**What structured state retrieval handles well:**
+
+Facts. Current numbers. Named entities. "What's Nate's pipeline?" → fetch Nate's record. This is correct and fast. A VP doesn't hold all 66 deals in working memory — they pull the file when they need it.
+
+**What it can't handle:**
+
+The reasoning thread. A VP RevOps building a case doesn't just answer discrete questions. They build. "We established that coverage looks healthy. But I want to challenge that — because 82% of that pipeline is one rep's deals. So the real question isn't whether coverage is 3.96x, it's whether the *concentration* risk makes that number misleading."
+
+That's not a state retrieval. That's a chain of inferences built across multiple turns. The model needs to remember not just *what was said* but *what analytical direction was being built*.
+
+**The right architecture is a hybrid:**
+
+```
+Substrate layer (state retrieval, refreshed every turn)
+  Current deal state, rep records, metrics, workspace config
+  Always fresh from DB — no staleness, no token waste
+  
+Reasoning layer (preserved conversation)
+  NOT the raw tool results or full data dumps
+  The analytical chain — hypotheses formed, challenges raised,
+  conclusions reached, contradictions noted
+  Compressed but coherent — "earlier we established X,
+  which now creates tension with Y"
+  
+This turn's question + the reasoning thread
+= what the model actually sees
+```
+
+The compression insight applies here differently. You don't need to preserve "here are the 52 open deals" from turn 3. You need to preserve "we identified that pipeline concentration is the real risk, not coverage ratio." The first is a data dump. The second is an inference — and it's what makes turn 8 feel like a continuation of turn 3 rather than a fresh question.
+
+**What makes a VP RevOps a VP RevOps isn't the data access. It's the accumulated reasoning.**
+
+They walk into a quarterly review having held the thread from the last three reviews. They can say "this is the same concentration problem we flagged in Q1, just shifted from Nate to a different deal set." That's pattern recognition across time — not state retrieval.
+
+For Pandora to behave at that level, the reasoning thread has to persist. Not the raw data. The inferences.Logged. The practical implementation consequence is that the compression prompt matters enormously and needs to be designed carefully.
+
+Wrong compression target: "User asked about coverage. Pandora said 3.96x. User asked about reps. Pandora listed four reps." — This is a log. It has no analytical value.
+
+Right compression target: "We established that 3.96x coverage is misleading because Nate owns 82% of pipeline value. The real risk is concentration, not coverage ratio. We haven't yet examined whether Sara's volume in the $2-10K range can offset Nate slipping." — This is a reasoning thread. Turn 8 can pick this up and go deeper.
+
+The compression step is itself an LLM call — and this is the one place where that cost is justified. A cheap model compressing raw data is fine. Compressing analytical reasoning requires understanding what an inference is versus what a fact is. That's a harder task and worth the inference cost.
+
+The resulting architecture:
+
+```
+Every N turns, run a compression pass:
+  Input:  the last N turns of conversation
+  Task:   extract the analytical chain only —
+          hypotheses, challenges, conclusions,
+          open questions, contradictions
+  Output: a reasoning thread summary (~300 tokens)
+  Model:  DeepSeek or equivalent (cheap, good
+          at extraction)
+
+Each turn assembles:
+  Reasoning thread (~300 tokens)
+  Fresh state for relevant entities (~1,500 tokens)
+  Last 2 turns verbatim (~400 tokens)
+  Current question (~100 tokens)
+  ─────────────────────────────────
+  Total: ~2,300 tokens — constant, regardless
+         of how many turns have passed
+```
+
+That's what gives Pandora the depth of a VP RevOps without the context window dying at turn 20.
