@@ -43,11 +43,12 @@ import { extractSkillContext, formatMethodologyComparisons } from './context-ass
 import { buildConversationContext } from '../context/build-conversation-context.js';
 import { PandoraResponseBuilder } from '../lib/pandora-response-builder.js';
 import { getCalibrationStatus } from '../lib/data-dictionary.js';
-import { getInterviewState, buildInterviewPrompt, advanceInterview, advanceAndConfirmStep, buildCompletionSummary } from '../lib/calibration-interview.js';
+import { getInterviewState, buildInterviewPrompt, advanceInterview, advanceAndConfirmStep, buildCompletionSummary, STEP_LABELS, resetInterviewState } from '../lib/calibration-interview.js';
 import { getUnmappedStages, buildStageMappingResponse, buildStageMappingTablePrompt, confirmStageMapping, isStageMappingComplete } from '../lib/stage-mapping-interview.js';
 import type { NormalizedStage } from '../lib/stage-mapping-interview.js';
 
 const CALIBRATION_TRIGGERS = /\b(calibrat|calibrate|calibration|map.*stage|stage.*map|set up pipeline|define pipeline|what counts as pipeline|define.*at.?risk|define.*commit|define.*win.?rate|setup calibration|start calibration|pipeline definition|interview)\b/i;
+const CALIBRATION_START_OVER = /\b(start over|start fresh|reset calibration|begin again|restart calibration|reset and start)\b/i;
 
 /**
  * Classifies whether a mid-calibration message is a clarifying question,
@@ -313,11 +314,25 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
   const lastAssistantContent = (state.messages || [])
     .filter(m => m.role === 'assistant')
     .pop()?.content ?? '';
+
+  // Pre-fetch calibration status so resumption detection and branch entry can use it
+  // without a second DB round-trip inside the calibration block.
+  let preCalStatus: Awaited<ReturnType<typeof getCalibrationStatus>> | null = null;
+  try { preCalStatus = await getCalibrationStatus(workspaceId); } catch { /* non-fatal */ }
+
+  // A conversation is "in calibration" if the last assistant turn contained calibration
+  // phrasing (live session) OR the persisted status is in_progress and this is the first
+  // assistant turn (mid-session refresh / new conversation continuing an interrupted flow).
+  const hasNoAssistantHistory = lastAssistantContent === '';
   const inCalibrationSession = (
     /\*\*Step \d+ of 6/i.test(lastAssistantContent) ||
     /stage.*map|map.*stage|unmapped stage/i.test(lastAssistantContent) ||
     /does this match.*pipeline|how do you define|how do you map/i.test(lastAssistantContent) ||
-    /looks right.*to confirm all|correct anything that looks wrong/i.test(lastAssistantContent)
+    /looks right.*to confirm all|correct anything that looks wrong/i.test(lastAssistantContent) ||
+    // Resumption prompt — user seeing "where your Pandora calibration left off"
+    /pandora calibration left off/i.test(lastAssistantContent) ||
+    /next up:.*pipeline|next up:.*win rate|next up:.*at.?risk|next up:.*commit|next up:.*forecast/i.test(lastAssistantContent) ||
+    (hasNoAssistantHistory && preCalStatus?.status === 'in_progress')
   );
 
   if (feedback && feedback.type !== 'correct' && !inCalibrationSession) {
@@ -451,7 +466,7 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
   if (!answer && (CALIBRATION_TRIGGERS.test(message) || inCalibrationSession)) {
     console.log('[Calibration] Branch entered — trigger:', CALIBRATION_TRIGGERS.test(message), '| inSession:', inCalibrationSession);
     try {
-      const calStatus = await getCalibrationStatus(workspaceId);
+      const calStatus = preCalStatus ?? await getCalibrationStatus(workspaceId);
       console.log('[Calibration] status:', JSON.stringify(calStatus));
 
       // Stage mapping must be complete before dimension calibration
@@ -591,7 +606,25 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
         if (step === 'complete') {
           answer = await buildCompletionSummary(workspaceId);
 
+        } else if (CALIBRATION_START_OVER.test(message)) {
+          // User wants to reset — clear state and restart from stage mapping
+          await resetInterviewState(workspaceId);
+          const freshStages = await getUnmappedStages(workspaceId);
+          console.log('[Calibration] Start-over requested — reset complete');
+          answer = `Resetting your calibration. Let's start fresh from the beginning.\n\n${buildStageMappingTablePrompt(freshStages)}`;
+
         } else if (inCalibrationSession && step !== 'stage_mapping') {
+          // If the previous turn was a resumption prompt and user says "continue" / "ready",
+          // just show the current step question without advancing the state machine.
+          const lastTurnWasResumptionPrompt =
+            /pandora calibration left off/i.test(lastAssistantContent) ||
+            /next up:.*pipeline|next up:.*win rate|next up:.*at.?risk|next up:.*commit|next up:.*forecast/i.test(lastAssistantContent);
+          const isContinueSignal = /\b(continue|ready|let'?s? go|proceed|pick up|resume|yes|ok|okay|sure|sounds good)\b/i.test(message);
+
+          if (lastTurnWasResumptionPrompt && isContinueSignal) {
+            console.log('[Calibration] Resumption continue — showing current step:', step);
+            answer = await buildInterviewPrompt(workspaceId, step);
+          } else {
           // Classify the user's input before deciding whether to advance
           const inputIntent = classifyCalibrationInput(message);
           console.log('[Calibration] Intent:', inputIntent, '| step:', step);
@@ -652,6 +685,16 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
               answer = await buildInterviewPrompt(workspaceId, nextStep);
             }
           }
+          }  // closes resumption-check else block
+
+        } else if (calStatus.status === 'in_progress' && interviewState.completed_steps.length > 0) {
+          // Resumption prompt — calibration was interrupted; offer to continue or start over
+          const completedLabels = interviewState.completed_steps
+            .map(s => `- ✓ ${STEP_LABELS[s] ?? s}`)
+            .join('\n');
+          const nextLabel = STEP_LABELS[step] ?? step;
+          console.log('[Calibration] Resumption prompt — completed:', interviewState.completed_steps.join(','), '| next:', step);
+          answer = `Welcome back! Here's where your Pandora calibration left off:\n\n${completedLabels}\n\n**Next up: ${nextLabel}**\n\nSay **"continue"** to pick up where you left off, or **"start over"** to reset and begin fresh.`;
 
         } else {
           // Fresh calibration trigger — show current step question

@@ -25,6 +25,17 @@ const STEP_ORDER: InterviewStep[] = [
   'complete',
 ];
 
+export const STEP_LABELS: Record<InterviewStep, string> = {
+  stage_mapping:     'Stage mapping',
+  active_pipeline:   'Active pipeline definition',
+  pipeline_coverage: 'Pipeline coverage ratio',
+  win_rate:          'Win rate benchmark',
+  at_risk:           'At-risk deal definition',
+  commit:            'Commit / forecast categories',
+  forecast_rollup:   'Forecast rollup method',
+  complete:          'Complete',
+};
+
 export interface InterviewState {
   workspace_id:    string;
   current_step:    InterviewStep;
@@ -124,6 +135,30 @@ export async function advanceInterview(
   }
 
   return nextStep;
+}
+
+export async function resetInterviewState(workspaceId: string): Promise<void> {
+  const now = new Date().toISOString();
+  const emptyState = {
+    current_step:    'stage_mapping',
+    completed_steps: [] as InterviewStep[],
+    started_at:      now,
+    last_updated_at: now,
+  };
+
+  await query(
+    `UPDATE workspaces
+     SET workspace_config = COALESCE(workspace_config, '{}'::jsonb)
+         || jsonb_build_object(
+              'calibration',
+              COALESCE(workspace_config->'calibration', '{}'::jsonb)
+              || jsonb_build_object('interview_state', $2::jsonb)
+            )
+     WHERE id = $1`,
+    [workspaceId, JSON.stringify(emptyState)]
+  );
+
+  await updateCalibrationStatus(workspaceId, 'not_started');
 }
 
 function formatCurrency(n: number): string {
