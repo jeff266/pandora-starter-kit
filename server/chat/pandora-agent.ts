@@ -2913,6 +2913,7 @@ const HISTORY_WINDOW = 10;
 
 /** Regex patterns used for fact extraction from older turns. */
 const COMPRESSION_PATTERNS = {
+  // Metric benchmarks
   winRate:        /\b(\d{1,3}(?:\.\d+)?)\s*%(?:[^\n]*win\s*rate|(?:.*\n){0,2}.*win\s*rate)/i,
   winRateAlt:     /win\s*rate[^\n]*\b(\d{1,3}(?:\.\d+)?)\s*%/i,
   coverageRatio:  /coverage[^\n]*\b(\d+(?:\.\d+)?)\s*x|\b(\d+(?:\.\d+)?)\s*x[^\n]*coverage/i,
@@ -2920,8 +2921,18 @@ const COMPRESSION_PATTERNS = {
   quotaAmount:    /quota[^\n]*(\$[\d,.]+[km]?)|(\$[\d,.]+[km]?)[^\n]*quota/i,
   atRiskDays:     /at[\s-]*risk[^\n]*(\d+)\+?\s*days|(\d+)\+?\s*days[^\n]*at[\s-]*risk/i,
   commitCategory: /commit[^\n]*(forecast\s*category|custom\s*field|commit\b|best\s*case)/i,
+  // Stage mappings
   stageMapping:   /\b([A-Z][A-Za-z\s]+)\s*[→\-]+\s*(prospecting|qualification|demo|evaluation|proposal|negotiation|closed_won|closed_lost)\b/g,
+  // Calibration step detection
   calibStep:      /\*\*Step\s+\d+\s+of\s+6/i,
+  // Dimension confirmations: explicit yes/confirmed answers to calibration or scoping questions
+  dimensionYes:   /\b(?:yes|confirmed|correct|that'?s?\s+right|use\s+(?:close|create|forecast)\s+date)\b[^.\n]{0,60}(?:close\s*date|create\s*date|forecast\s*date|fiscal\s*(?:year|quarter)|calendar\s*(?:year|quarter))/gi,
+  // Pipeline filter definitions: what "active pipeline" means in this workspace
+  pipelineFilter: /active\s*pipeline\s+(?:is|means?|includes?|excludes?|=)[^\n]{5,80}/gi,
+  pipelineExclude:/(?:exclu(?:de|ding)|filter\s+out)[^\n]{0,30}(?:closed[\s_]lost|churned|cancelled|canceled|stalled|dead)[^\n]*/gi,
+  // Rep / team roster confirmations
+  repRoster:      /(?:my\s+(?:team|reps?)|(?:our|the)\s+(?:sales\s+)?team)\s+(?:is|are|includes?)[^.\n]{5,80}/gi,
+  repNames:       /(?:reps?|account\s+executives?|AEs?)\s*:\s*([A-Z][a-z]+(?:\s*,\s*[A-Z][a-z]+){1,9})/g,
 };
 
 /**
@@ -2979,6 +2990,49 @@ function extractCompressionFacts(
     facts.push(`Stage mappings confirmed: ${stageMappings.join(', ')}`);
   }
 
+  // Dimension confirmations (close date, fiscal year, calendar quarter, etc.)
+  const dimensionConfirms: string[] = [];
+  const dimRe = new RegExp(COMPRESSION_PATTERNS.dimensionYes.source, 'gi');
+  let dimMatch: RegExpExecArray | null;
+  while ((dimMatch = dimRe.exec(allText)) !== null && dimensionConfirms.length < 3) {
+    dimensionConfirms.push(dimMatch[0].trim().slice(0, 80));
+  }
+  if (dimensionConfirms.length > 0) {
+    facts.push(`Dimension confirmations: ${dimensionConfirms.join('; ')}`);
+  }
+
+  // Pipeline filter definitions
+  const pipelineFilters: string[] = [];
+  const pfRe = new RegExp(COMPRESSION_PATTERNS.pipelineFilter.source, 'gi');
+  let pfMatch: RegExpExecArray | null;
+  while ((pfMatch = pfRe.exec(allText)) !== null && pipelineFilters.length < 2) {
+    pipelineFilters.push(pfMatch[0].trim().slice(0, 100));
+  }
+  const peRe = new RegExp(COMPRESSION_PATTERNS.pipelineExclude.source, 'gi');
+  let peMatch: RegExpExecArray | null;
+  while ((peMatch = peRe.exec(allText)) !== null && pipelineFilters.length < 3) {
+    pipelineFilters.push(peMatch[0].trim().slice(0, 100));
+  }
+  if (pipelineFilters.length > 0) {
+    facts.push(`Pipeline filter definitions: ${pipelineFilters.join('; ')}`);
+  }
+
+  // Rep / team roster confirmations
+  const rosterItems: string[] = [];
+  const rrRe = new RegExp(COMPRESSION_PATTERNS.repRoster.source, 'gi');
+  let rrMatch: RegExpExecArray | null;
+  while ((rrMatch = rrRe.exec(allText)) !== null && rosterItems.length < 2) {
+    rosterItems.push(rrMatch[0].trim().slice(0, 100));
+  }
+  const rnRe = new RegExp(COMPRESSION_PATTERNS.repNames.source, 'g');
+  let rnMatch: RegExpExecArray | null;
+  while ((rnMatch = rnRe.exec(allText)) !== null && rosterItems.length < 3) {
+    rosterItems.push(`Rep roster: ${rnMatch[1].trim()}`);
+  }
+  if (rosterItems.length > 0) {
+    facts.push(`Team/rep roster: ${rosterItems.join('; ')}`);
+  }
+
   return facts.length > 0 ? facts.join('\n') : '';
 }
 
@@ -3034,13 +3088,11 @@ export async function buildConversationHistory(
 
   let compressionNote = extractCompressionFacts(older);
 
-  // Calibration step enrichment: if any older message contains calibration content,
-  // append the persisted completed steps so Pandora always knows what was confirmed.
-  const olderText = older.map(m => (typeof m.content === 'string' ? m.content : '')).join('\n');
-  const hasCalibrationContent = COMPRESSION_PATTERNS.calibStep.test(olderText) ||
-    /stage.*map|map.*stage|active\s*pipeline\s*definition|pipeline\s*coverage|win\s*rate\s*benchmark/i.test(olderText);
-
-  if (hasCalibrationContent && opts?.workspaceId) {
+  // Calibration step enrichment: always attempt to fetch persisted completed steps
+  // when a workspaceId is available. We key off the DB state (not just message content)
+  // so enrichment is reliable even when calibration content has already scrolled
+  // out of the compressed window. Only adds to the note when steps are actually complete.
+  if (opts?.workspaceId) {
     try {
       const interviewState = await getInterviewState(opts.workspaceId);
       if (interviewState.completed_steps.length > 0) {
