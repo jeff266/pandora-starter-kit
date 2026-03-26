@@ -3053,23 +3053,11 @@ function extractCompressionFacts(
  * Exact system prompt prescribed by design spec — use verbatim.
  * Targets analytical inferences only; explicitly forbids event-log summaries.
  */
-const REASONING_THREAD_SYSTEM_PROMPT = `You are extracting the analytical reasoning thread from a RevOps conversation.
-
-EXTRACT ONLY:
-- Hypotheses formed ("coverage looks healthy but...")
-- Assumptions challenged ("we questioned whether...")
-- Conclusions reached ("we established that...")
-- Open questions remaining ("still unclear whether...")
-- Contradictions or tensions identified
-
-DO NOT extract:
-- Facts (those live in the database)
-- What questions were asked
-- What data was retrieved
-- Summaries of what Pandora said
-
-Output: 3-5 sentences maximum. Dense. Inference-only.
-If no analytical reasoning has occurred yet, output nothing.`;
+const REASONING_THREAD_SYSTEM_PROMPT =
+`You are extracting the analytical reasoning thread from a RevOps conversation.
+EXTRACT ONLY: Hypotheses formed, Assumptions challenged, Conclusions reached, Open questions remaining, Contradictions or tensions identified
+DO NOT extract: Facts, What questions were asked, What data was retrieved, Summaries of what Pandora said
+Output: 3-5 sentences maximum. Dense. Inference-only. If no analytical reasoning has occurred yet, output nothing.`;
 
 /**
  * Uses a cheap LLM (DeepSeek via the `compress` route) to extract the
@@ -3209,13 +3197,23 @@ export async function buildConversationHistory(
   }
 
   const recentHistory = buildHistory(recent);
+  const reasoningThread = opts?.reasoningThread;
 
   if (!compressionNote) {
-    // Nothing useful found in older turns — return recent window only
+    // No useful facts found in older turns. Still inject reasoning thread if
+    // present — analytical continuity must survive even when there are no
+    // confirmed fact-values to compress from the older window.
+    if (reasoningThread) {
+      const threadExchange: Array<{ role: 'user' | 'assistant'; content: any }> = [
+        { role: 'user',      content: `[Analytical reasoning thread from this session:]\n${reasoningThread}` },
+        { role: 'assistant', content: 'Understood, I will continue from where this analysis left off.' },
+      ];
+      return { messages: [...threadExchange, ...recentHistory], wasCompressed: true };
+    }
     return { messages: recentHistory, wasCompressed: true };
   }
 
-  // Inject as a pseudo user/assistant exchange at the start of history.
+  // Inject fact summary as a pseudo user/assistant exchange at the start of history.
   // This format is well-supported by all Anthropic Claude models.
   const factExchange: Array<{ role: 'user' | 'assistant'; content: any }> = [
     { role: 'user',      content: `[Context from earlier in this conversation:]\n${compressionNote}` },
@@ -3223,9 +3221,9 @@ export async function buildConversationHistory(
   ];
 
   // If a reasoning thread (analytical inference chain) was pre-computed by the
-  // orchestrator, inject it as a second distinct pseudo-exchange — separated from
-  // the fact block so the model knows these are inferences, not confirmed values.
-  const reasoningThread = opts?.reasoningThread;
+  // orchestrator, inject it as a second distinct pseudo-exchange AFTER the fact
+  // block — facts first so confirmed values are established, then inferences
+  // so the model can continue analytical arguments.
   if (reasoningThread) {
     const threadExchange: Array<{ role: 'user' | 'assistant'; content: any }> = [
       { role: 'user',      content: `[Analytical reasoning thread from this session:]\n${reasoningThread}` },

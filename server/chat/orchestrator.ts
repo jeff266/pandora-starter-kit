@@ -21,6 +21,7 @@ import {
   getMessageCount,
   isFollowUpLimitReached,
   type ConversationState,
+  type ConversationMessage,
 } from './conversation-state.js';
 import { detectFeedback } from './feedback-detector.js';
 import { recordFeedbackSignal } from '../feedback/signals.js';
@@ -462,11 +463,11 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
   // Always advances reasoningThreadTurn on each compression attempt (even null
   // output) so the cadence guard is always honoured regardless of model output.
   // Persisted via updateContext() for consistency with the rest of context writes.
-  const _allMessages = state.messages || [] as any;
+  const _allMessages = (state.messages || []) as (ConversationMessage & { tool_trace?: unknown[] })[];
   const _currentTurnCount: number = _allMessages.length;
-  const _threadComputedAtTurn: number = (state.context as any).reasoningThreadTurn ?? 0;
+  const _threadComputedAtTurn: number = state.context.reasoningThreadTurn ?? 0;
 
-  let activeReasoningThread: string | null = (state.context as any).reasoningThread ?? null;
+  let activeReasoningThread: string | null = state.context.reasoningThread ?? null;
 
   if (_currentTurnCount > 6 && (_currentTurnCount - _threadComputedAtTurn >= 3)) {
     try {
@@ -481,7 +482,7 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
       await updateContext(workspaceId, channelId, threadId, {
         reasoningThread: freshThread !== null ? freshThread : activeReasoningThread,
         reasoningThreadTurn: _currentTurnCount,
-      } as any).catch(err => console.warn('[ReasoningThread] Failed to persist:', err));
+      }).catch(err => console.warn('[ReasoningThread] Failed to persist:', err));
     } catch (err) {
       console.warn('[ReasoningThread] Lifecycle failed, continuing:', err instanceof Error ? err.message : String(err));
     }
