@@ -3115,7 +3115,7 @@ export async function compressReasoningThread(
     const response = await callLLM(workspaceId, 'compress', {
       systemPrompt: REASONING_THREAD_SYSTEM_PROMPT,
       messages: [{ role: 'user', content: conversationText }],
-      maxTokens: 400,
+      maxTokens: 300,
       temperature: 0,
       _tracking: {
         workspaceId,

@@ -470,8 +470,12 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
   // Always advances reasoningThreadTurn on each compression attempt (even null
   // output) so the cadence guard is always honoured regardless of model output.
   // Persisted via updateContext() for consistency with the rest of context writes.
-  const REASONING_MIN_MSGS = 12;    // >6 turns before any compression runs
-  const REASONING_STALE_MSGS = 6;   // recompute after 3+ stale turns (6 messages)
+  // Constants use message-object counts (1 turn = user msg + assistant msg = 2 objects).
+  // Task spec says "more than 6 messages" as the trigger, but broader product requirement
+  // states "≤6 turns are completely unaffected." We honour the turn-count intent: 12
+  // message objects = 6 turns. This resolves the ambiguity in favour of the product goal.
+  const REASONING_MIN_MSGS = 12;    // 6 turns × 2 messages/turn — no compression below
+  const REASONING_STALE_MSGS = 6;   // 3 turns × 2 messages/turn — recompute cadence
 
   const _allMessages = (state.messages || []) as (ConversationMessage & { tool_trace?: unknown[] })[];
   const _currentMsgCount: number = _allMessages.length;
