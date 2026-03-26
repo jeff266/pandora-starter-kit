@@ -19,6 +19,7 @@ import { join, dirname } from 'path';
 import { callLLM, type ToolDef, type LLMCallOptions } from '../utils/llm-router.js';
 import { executeDataTool } from './data-tools.js';
 import type { ConversationMessage } from './conversation-state.js';
+import { getInterviewState, STEP_LABELS } from '../lib/calibration-interview.js';
 import { buildWorkspaceContextBlock } from '../context/workspace-memory.js';
 import { buildMemoryContextBlock, getForecastAccuracyContext } from '../memory/workspace-memory.js';
 import { getSkillRegistry } from '../skills/registry.js';
@@ -2907,42 +2908,169 @@ function extractCitedRecords(toolTrace: PandoraToolCall[]): PandoraCitedRecord[]
 
 // ─── Conversation history builder (for follow-ups) ────────────────────────────
 
+/** Sliding window size — full-fidelity turns kept. */
+const HISTORY_WINDOW = 10;
+
+/** Regex patterns used for fact extraction from older turns. */
+const COMPRESSION_PATTERNS = {
+  winRate:        /\b(\d{1,3}(?:\.\d+)?)\s*%(?:[^\n]*win\s*rate|(?:.*\n){0,2}.*win\s*rate)/i,
+  winRateAlt:     /win\s*rate[^\n]*\b(\d{1,3}(?:\.\d+)?)\s*%/i,
+  coverageRatio:  /coverage[^\n]*\b(\d+(?:\.\d+)?)\s*x|\b(\d+(?:\.\d+)?)\s*x[^\n]*coverage/i,
+  pipelineValue:  /active\s*pipeline[^\n]*(\$[\d,.]+[km]?)|pipeline\s*value[^\n]*(\$[\d,.]+[km]?)/i,
+  quotaAmount:    /quota[^\n]*(\$[\d,.]+[km]?)|(\$[\d,.]+[km]?)[^\n]*quota/i,
+  atRiskDays:     /at[\s-]*risk[^\n]*(\d+)\+?\s*days|(\d+)\+?\s*days[^\n]*at[\s-]*risk/i,
+  commitCategory: /commit[^\n]*(forecast\s*category|custom\s*field|commit\b|best\s*case)/i,
+  stageMapping:   /\b([A-Z][A-Za-z\s]+)\s*[→\-]+\s*(prospecting|qualification|demo|evaluation|proposal|negotiation|closed_won|closed_lost)\b/g,
+  calibStep:      /\*\*Step\s+\d+\s+of\s+6/i,
+};
+
+/**
+ * Extract a first matching group from content, return trimmed string or null.
+ */
+function firstMatch(content: string, pattern: RegExp): string | null {
+  const m = pattern.exec(content);
+  if (!m) return null;
+  return (m[1] ?? m[2] ?? '').trim() || null;
+}
+
+/**
+ * Build a compact compression note from older (dropped) messages.
+ * Uses only regex extraction — no LLM call, no added latency, no cost.
+ */
+function extractCompressionFacts(
+  olderMessages: (ConversationMessage & { tool_trace?: any[] })[]
+): string {
+  const allText = olderMessages
+    .filter(m => m.role === 'user' || m.role === 'assistant')
+    .map(m => (typeof m.content === 'string' ? m.content : ''))
+    .join('\n');
+
+  if (!allText.trim()) return '';
+
+  const facts: string[] = [];
+
+  const winRate = firstMatch(allText, COMPRESSION_PATTERNS.winRate)
+    ?? firstMatch(allText, COMPRESSION_PATTERNS.winRateAlt);
+  if (winRate) facts.push(`Win rate benchmark: ${winRate}%`);
+
+  const coverage = firstMatch(allText, COMPRESSION_PATTERNS.coverageRatio);
+  if (coverage) facts.push(`Coverage target: ${coverage}x`);
+
+  const pipelineVal = firstMatch(allText, COMPRESSION_PATTERNS.pipelineValue);
+  if (pipelineVal) facts.push(`Active pipeline value: ${pipelineVal}`);
+
+  const quota = firstMatch(allText, COMPRESSION_PATTERNS.quotaAmount);
+  if (quota) facts.push(`Quota amount: ${quota}`);
+
+  const atRiskDays = firstMatch(allText, COMPRESSION_PATTERNS.atRiskDays);
+  if (atRiskDays) facts.push(`At-risk threshold: ${atRiskDays}+ days without activity`);
+
+  const commitDef = firstMatch(allText, COMPRESSION_PATTERNS.commitCategory);
+  if (commitDef) facts.push(`Commit definition: ${commitDef}`);
+
+  // Stage mapping entries (e.g. "Demo Conducted → demo")
+  const stageMappings: string[] = [];
+  let stageMatch: RegExpExecArray | null;
+  const stageRe = new RegExp(COMPRESSION_PATTERNS.stageMapping.source, 'gi');
+  while ((stageMatch = stageRe.exec(allText)) !== null && stageMappings.length < 6) {
+    stageMappings.push(`${stageMatch[1].trim()} → ${stageMatch[2]}`);
+  }
+  if (stageMappings.length > 0) {
+    facts.push(`Stage mappings confirmed: ${stageMappings.join(', ')}`);
+  }
+
+  return facts.length > 0 ? facts.join('\n') : '';
+}
+
 /**
  * Converts stored conversation_state messages into the history format
  * runPandoraAgent() expects. Prior tool calls are summarized as text
  * so the model has context of what was already queried.
+ *
+ * When the conversation exceeds HISTORY_WINDOW messages, older turns are
+ * compressed into a brief context note injected at the start of the history.
+ * This ensures key confirmed facts (metrics, stage mappings, pipeline definitions)
+ * survive the rolling window without any LLM call.
  */
-export function buildConversationHistory(
-  messages: (ConversationMessage & { tool_trace?: any[]; cited_records?: any[] })[]
-): Array<{ role: 'user' | 'assistant'; content: any }> {
-  if (!messages?.length) return [];
+export async function buildConversationHistory(
+  messages: (ConversationMessage & { tool_trace?: any[]; cited_records?: any[] })[],
+  opts?: { workspaceId?: string }
+): Promise<{ messages: Array<{ role: 'user' | 'assistant'; content: any }>, wasCompressed: boolean }> {
+  if (!messages?.length) return { messages: [], wasCompressed: false };
 
-  const history: Array<{ role: 'user' | 'assistant'; content: any }> = [];
-  // Keep last ~10 messages (5 exchanges) to manage context
-  const recent = messages.slice(-10);
-
-  for (const msg of recent) {
-    if (msg.role === 'user') {
-      history.push({ role: 'user', content: msg.content });
-    } else if (msg.role === 'assistant') {
-      // Pass the answer text and which tools were called, but NOT the result data.
-      // Injecting full prior tool results causes the model to anchor on
-      // "data I retrieved before" and refuse to call tools for a new question
-      // (e.g. seeing 50 calls from an objections question, then saying
-      // "I don't have pipeline data" when asked about Q1 forecast).
-      if (msg.tool_trace && msg.tool_trace.length > 0) {
-        const toolsNote = `[Tools used for this answer: ${
-          msg.tool_trace.map((t: any) => t.tool).join(', ')
-        }]`;
-        const content = (msg.content ? msg.content + '\n\n' : '') + toolsNote;
-        history.push({ role: 'assistant', content });
-      } else {
-        history.push({ role: 'assistant', content: msg.content });
+  const buildHistory = (
+    msgs: (ConversationMessage & { tool_trace?: any[] })[]
+  ): Array<{ role: 'user' | 'assistant'; content: any }> => {
+    const out: Array<{ role: 'user' | 'assistant'; content: any }> = [];
+    for (const msg of msgs) {
+      if (msg.role === 'user') {
+        out.push({ role: 'user', content: msg.content });
+      } else if (msg.role === 'assistant') {
+        // Pass the answer text and which tools were called, but NOT the result data.
+        // Injecting full prior tool results causes the model to anchor on
+        // "data I retrieved before" and refuse to call tools for a new question.
+        if (msg.tool_trace && msg.tool_trace.length > 0) {
+          const toolsNote = `[Tools used for this answer: ${
+            msg.tool_trace.map((t: any) => t.tool).join(', ')
+          }]`;
+          const content = (msg.content ? msg.content + '\n\n' : '') + toolsNote;
+          out.push({ role: 'assistant', content });
+        } else {
+          out.push({ role: 'assistant', content: msg.content });
+        }
       }
+    }
+    return out;
+  };
+
+  // No compression needed — conversation fits within the window
+  if (messages.length <= HISTORY_WINDOW) {
+    return { messages: buildHistory(messages), wasCompressed: false };
+  }
+
+  // Split: older messages are compressed, recent messages are kept at full fidelity
+  const older  = messages.slice(0, -HISTORY_WINDOW);
+  const recent = messages.slice(-HISTORY_WINDOW);
+
+  let compressionNote = extractCompressionFacts(older);
+
+  // Calibration step enrichment: if any older message contains calibration content,
+  // append the persisted completed steps so Pandora always knows what was confirmed.
+  const olderText = older.map(m => (typeof m.content === 'string' ? m.content : '')).join('\n');
+  const hasCalibrationContent = COMPRESSION_PATTERNS.calibStep.test(olderText) ||
+    /stage.*map|map.*stage|active\s*pipeline\s*definition|pipeline\s*coverage|win\s*rate\s*benchmark/i.test(olderText);
+
+  if (hasCalibrationContent && opts?.workspaceId) {
+    try {
+      const interviewState = await getInterviewState(opts.workspaceId);
+      if (interviewState.completed_steps.length > 0) {
+        const stepNames = interviewState.completed_steps
+          .map(s => STEP_LABELS[s] ?? s)
+          .join(', ');
+        compressionNote = compressionNote
+          ? `${compressionNote}\nCalibration completed steps: ${stepNames}`
+          : `Calibration completed steps: ${stepNames}`;
+      }
+    } catch {
+      // Non-fatal — calibration enrichment is best-effort
     }
   }
 
-  return history;
+  const recentHistory = buildHistory(recent);
+
+  if (!compressionNote) {
+    // Nothing useful found in older turns — return recent window only
+    return { messages: recentHistory, wasCompressed: true };
+  }
+
+  // Inject as a pseudo user/assistant exchange at the start of history.
+  // This format is well-supported by all Anthropic Claude models.
+  const pseudoExchange: Array<{ role: 'user' | 'assistant'; content: any }> = [
+    { role: 'user',      content: `[Context from earlier in this conversation:]\n${compressionNote}` },
+    { role: 'assistant', content: 'Understood, I have that context.' },
+  ];
+
+  return { messages: [...pseudoExchange, ...recentHistory], wasCompressed: true };
 }
 
 function extractFindings(content: string): any[] {

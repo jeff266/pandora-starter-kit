@@ -669,7 +669,7 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
             // User asked a clarifying question — answer it via LLM and re-ask the current step
             // so inCalibrationSession stays true for the next message
             const currentStepQuestion = await buildInterviewPrompt(workspaceId, step);
-            const convHistory = buildConversationHistory(state.messages || []);
+            const { messages: convHistory } = await buildConversationHistory(state.messages || [], { workspaceId });
             const llmResponse = await callLLM(workspaceId, 'reason', {
               systemPrompt: `You are Pandora, a revenue intelligence AI running a calibration interview.
 The user is currently on this calibration step:
@@ -857,7 +857,7 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
   let intentClassification: Awaited<ReturnType<typeof classifyIntent>> | null = null;
   if (!answer && (surface === 'in_app' || surface === 'slack_dm')) {
     try {
-      const conversationHistory = buildConversationHistory(state.messages || [] as any);
+      const { messages: conversationHistory } = await buildConversationHistory(state.messages || [] as any, { workspaceId });
       const ctxForClassifier = await getWorkspaceContext(workspaceId).catch(() => null);
       intentClassification = await classifyIntent(message, conversationHistory, workspaceId, ctxForClassifier);
 
@@ -956,7 +956,7 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
         intentClassification.confidence >= 0.75 &&
         !entityId
       ) {
-        const conversationHistory = buildConversationHistory(state.messages || [] as any);
+        const { messages: conversationHistory } = await buildConversationHistory(state.messages || [] as any, { workspaceId });
         return await handleAdvisoryResponse(
           message,
           workspaceId,
@@ -1007,7 +1007,7 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
 
       // Handle user responding "best practice" to a gating question
       if (isGatingResponse(message, conversationHistory) && prefersBestPractice(message)) {
-        const conversationHistory = buildConversationHistory(state.messages || [] as any);
+        const { messages: conversationHistory } = await buildConversationHistory(state.messages || [] as any, { workspaceId });
         return await handleAdvisoryResponse(
           message,
           workspaceId,
@@ -1026,7 +1026,7 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
         intentClassification.confidence >= 0.75
       ) {
         try {
-          const history = buildConversationHistory(state.messages || [] as any);
+          const { messages: history } = await buildConversationHistory(state.messages || [] as any, { workspaceId });
           const workspaceContext = await getWorkspaceContext(workspaceId);
 
           let chatResponse: string;
@@ -1171,7 +1171,7 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
   // runScopedAnalysis is NOT a fallback for in_app or slack_dm.
   if (!answer && (surface === 'in_app' || surface === 'slack_dm')) {
     try {
-      const history = buildConversationHistory(state.messages || [] as any);
+      const { messages: history } = await buildConversationHistory(state.messages || [] as any, { workspaceId });
 
       // Inject entity scope so deal/account page questions have context.
       // e.g. "What are the risks?" on a deal page needs to know which deal.
