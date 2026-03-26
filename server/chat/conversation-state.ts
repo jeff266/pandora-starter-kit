@@ -34,8 +34,8 @@ export interface ConversationState {
 }
 
 const TTL_HOURS = 24;
-const MAX_MESSAGES_PER_THREAD = 20;
-const MAX_FOLLOW_UPS = 10;
+const MAX_MESSAGES_PER_THREAD = 60;
+const MAX_FOLLOW_UPS = 30;
 
 export async function getConversationState(
   workspaceId: string,
