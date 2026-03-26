@@ -647,7 +647,7 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
             .join('\n');
           const nextLabel = STEP_LABELS[step] ?? step;
           console.log('[Calibration] Resumption prompt (new chat) — completed:', interviewState.completed_steps.join(','), '| next:', step);
-          answer = `Welcome back! Here's where your Pandora calibration left off:\n\n${completedLabels}\n\n**Next up: ${nextLabel}**\n\nSay **"continue"** to pick up where you left off, or **"start over"** to reset and begin fresh.`;
+          answer = `Welcome back! Here's where your Pandora calibration left off:\n\n${completedLabels}\n\n**Next up: ${nextLabel}**\n\nSay **"Ready to continue"** to pick up where you left off, or **"Start over"** to reset and begin fresh.`;
 
         } else if (inCalibrationSession && step !== 'stage_mapping') {
           // If the previous turn was a resumption prompt and user says "continue" / "ready",
