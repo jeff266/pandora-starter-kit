@@ -1688,7 +1688,25 @@ interface QuestionClassification {
   tools_likely_needed: string[];
   estimated_complexity: 'low' | 'medium' | 'high';
   token_budget: number;
+  confidence: number;
 }
+
+// ─── Response depth directives ─────────────────────────────────────────────────
+// Injected into the system prompt based on question type to shape response structure.
+
+const RESPONSE_DEPTH_DIRECTIVES: Record<string, string> = {
+  discrete: `RESPONSE MODE — DIRECT ANSWER:
+Answer in 2–3 sentences. No headers. No lists unless the answer is inherently enumerable (e.g. listing multiple named deals). State the number or fact first, then one sentence of supporting context if needed. Do not add sections, analysis, or caveats beyond what was asked.`,
+
+  analytical: `RESPONSE MODE — STRUCTURED ANALYSIS:
+Lead with the direct answer in the first sentence. Then provide supporting evidence and reasoning. Headers and lists are allowed only when they serve clarity — do not add structure for its own sake. Keep sections tight; each one should add a new piece of information, not restate the lead.`,
+
+  strategic: `RESPONSE MODE — STRATEGIC RECOMMENDATION:
+State your analytical approach upfront in one sentence ("I'm going to look at X, Y, and Z to answer this"). Then lead the response with your recommendation or conclusion before laying out the supporting evidence. Evidence and rationale follow the recommendation — do not bury the lead.`,
+
+  ambiguous: `RESPONSE MODE — INTERPRET FIRST:
+The question has multiple plausible interpretations. In your first sentence, name the interpretation you are using ("I'm reading this as a question about net-new pipeline — let me know if you meant total including renewals"). Then answer based on that interpretation. Keep the interpretation statement to one sentence so the user can quickly correct it if needed.`,
+};
 
 const CLASSIFIER_PROMPT = `You are a question classifier for a Revenue Operations data platform. Given a user question, classify it and return a JSON object.
 
@@ -1699,8 +1717,10 @@ Rules:
 
 Available tools: query_deals, query_accounts, query_conversations, get_skill_evidence, compute_metric, query_contacts, query_leads, query_activity_timeline, query_stage_history, compute_stage_benchmarks, query_field_history, compute_metric_segmented, search_transcripts, compute_forecast_accuracy, compute_close_probability, compute_pipeline_creation, compute_inqtr_close_rate, compute_competitive_rates, compute_activity_trend, compute_shrink_rate, infer_contact_role, query_activity_signals
 
+Also include a confidence score (0.0–1.0) reflecting how certain you are of the question_type classification. Use low confidence (below 0.65) when the question is vague, uses ambiguous pronouns, or could reasonably fit multiple types.
+
 Return ONLY valid JSON, no markdown:
-{"question_type":"discrete|analytical|strategic","tools_likely_needed":["tool1","tool2"],"estimated_complexity":"low|medium|high"}`;
+{"question_type":"discrete|analytical|strategic","tools_likely_needed":["tool1","tool2"],"estimated_complexity":"low|medium|high","confidence":0.9}`;
 
 async function classifyQuestion(workspaceId: string, question: string): Promise<QuestionClassification> {
   const COMPLEXITY_TO_BUDGET: Record<string, number> = { low: 2048, medium: 4096, high: 8192 };
@@ -1719,18 +1739,20 @@ async function classifyQuestion(workspaceId: string, question: string): Promise<
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0]);
       const complexity = parsed.estimated_complexity || 'medium';
+      const confidence = typeof parsed.confidence === 'number' ? parsed.confidence : 0.8;
       return {
         question_type: parsed.question_type || 'analytical',
         tools_likely_needed: Array.isArray(parsed.tools_likely_needed) ? parsed.tools_likely_needed : [],
         estimated_complexity: complexity,
         token_budget: COMPLEXITY_TO_BUDGET[complexity] || 4096,
+        confidence,
       };
     }
   } catch (err) {
     console.log(`[PandoraAgent] Classifier failed, defaulting to medium:`, err);
   }
 
-  return { question_type: 'analytical', tools_likely_needed: [], estimated_complexity: 'medium', token_budget: 4096 };
+  return { question_type: 'analytical', tools_likely_needed: [], estimated_complexity: 'medium', token_budget: 4096, confidence: 0.8 };
 }
 
 // ─── Dynamic get_skill_evidence tool builder ──────────────────────────────────
@@ -2109,6 +2131,19 @@ The system will transform raw_annotation into a voice-styled annotation automati
   const classification = await classifyQuestion(workspaceId, message);
   console.log(`[PandoraAgent] classification:`, JSON.stringify(classification));
   const dynamicMaxTokens = classification.token_budget;
+
+  // ── Response Depth Directive — calibrate response structure to question type ──
+  // Low confidence means the question is ambiguous — use the interpret-first directive.
+  const AMBIGUITY_CONFIDENCE_THRESHOLD = 0.65;
+  const depthDirectiveKey =
+    classification.confidence < AMBIGUITY_CONFIDENCE_THRESHOLD
+      ? 'ambiguous'
+      : classification.question_type;
+  const depthDirective = RESPONSE_DEPTH_DIRECTIVES[depthDirectiveKey];
+  if (depthDirective) {
+    effectiveSystemPrompt = `## ${depthDirective}\n\n` + effectiveSystemPrompt;
+    console.log(`[PandoraAgent] Depth directive injected: ${depthDirectiveKey} (confidence=${classification.confidence})`);
+  }
 
   // Detect if arithmetic is needed
   const needsCalculator = requiresCalculator(message);
