@@ -336,17 +336,6 @@ export default function ChatPanel({ isOpen, onClose, scope, initialSessionId, pe
   const stripChartBlocks = (text: string) =>
     text.replace(/```chart_spec[^\n]*\n[\s\S]*?```/g, '').trim();
 
-  const stripActionPayloadBlocks = (text: string) =>
-    text.replace(/```json[^\n]*\n([\s\S]*?)```/g, (match, content) => {
-      if (
-        /"type"\s*:\s*"(?:run_skill|create_crm_tasks|update_forecast_category|update_close_date|run_meddic_coverage|update_data_dictionary|update_workspace_knowledge|confirm_metric_definition|update_calibration|update_stage)"/.test(content) ||
-        /"action_payload"\s*:/.test(content)
-      ) {
-        return '';
-      }
-      return match;
-    });
-
   const loadSession = async (id: string) => {
     try {
       const data = await api.get(`/chat/sessions/${id}`);
@@ -1741,6 +1730,23 @@ function renderTable(tableLines: string[], keyBase: number, onSend?: (msg: strin
 }
 
 /**
+ * Strips ```json``` fenced blocks that contain action payload data from message text.
+ * The LLM occasionally outputs these even though the action panel surfaces them separately.
+ * Used in both loadSession (for history replay) and formatMarkdown (for live messages).
+ */
+function stripActionPayloadBlocks(text: string): string {
+  return text.replace(/```json[^\n]*\n([\s\S]*?)```/g, (match, content) => {
+    if (
+      /"type"\s*:\s*"(?:run_skill|create_crm_tasks|update_forecast_category|update_close_date|run_meddic_coverage|update_data_dictionary|update_workspace_knowledge|confirm_metric_definition|update_calibration|update_stage)"/.test(content) ||
+      /"action_payload"\s*:/.test(content)
+    ) {
+      return '';
+    }
+    return match;
+  });
+}
+
+/**
  * Builds a substantive CoS-style outcome message after an inline action is executed.
  * Covers the action type, what was done, and what to expect next.
  */
@@ -1773,17 +1779,8 @@ function buildActionOutcomeMessage(title: string, actionType: string): string {
 }
 
 function formatMarkdown(text: string, onSend?: (msg: string) => void): React.ReactElement[] {
-  // Strip action payload JSON blocks — the LLM sometimes outputs ` ```json ``` `
-  // blocks containing action payloads even though the action panel surfaces them separately.
-  text = text.replace(/```json[^\n]*\n([\s\S]*?)```/g, (match, content) => {
-    if (
-      /"type"\s*:\s*"(?:run_skill|create_crm_tasks|update_forecast_category|update_close_date|run_meddic_coverage|update_data_dictionary|update_workspace_knowledge|confirm_metric_definition|update_calibration|update_stage)"/.test(content) ||
-      /"action_payload"\s*:/.test(content)
-    ) {
-      return '';
-    }
-    return match;
-  });
+  // Strip action payload JSON blocks using the shared helper.
+  text = stripActionPayloadBlocks(text);
 
   // Pre-pass: rejoin lines where a markdown link's URL was split across lines.
   // The LLM sometimes breaks a long `[label](url)` at the `-` character inside a UUID,
