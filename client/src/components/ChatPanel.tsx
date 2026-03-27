@@ -336,12 +336,23 @@ export default function ChatPanel({ isOpen, onClose, scope, initialSessionId, pe
   const stripChartBlocks = (text: string) =>
     text.replace(/```chart_spec[^\n]*\n[\s\S]*?```/g, '').trim();
 
+  const stripActionPayloadBlocks = (text: string) =>
+    text.replace(/```json[^\n]*\n([\s\S]*?)```/g, (match, content) => {
+      if (
+        /"type"\s*:\s*"(?:run_skill|create_crm_tasks|update_forecast_category|update_close_date|run_meddic_coverage|update_data_dictionary|update_workspace_knowledge|confirm_metric_definition|update_calibration|update_stage)"/.test(content) ||
+        /"action_payload"\s*:/.test(content)
+      ) {
+        return '';
+      }
+      return match;
+    });
+
   const loadSession = async (id: string) => {
     try {
       const data = await api.get(`/chat/sessions/${id}`);
       const mapped = data.messages.map((msg: any) => ({
         role: msg.role,
-        content: stripChartBlocks(msg.content),
+        content: stripActionPayloadBlocks(stripChartBlocks(msg.content)),
         timestamp: msg.created_at,
         responseId: msg.metadata?.response_id,
         feedbackEnabled: msg.metadata?.feedback_enabled,
@@ -1722,6 +1733,18 @@ function renderTable(tableLines: string[], keyBase: number, onSend?: (msg: strin
 }
 
 function formatMarkdown(text: string, onSend?: (msg: string) => void): React.ReactElement[] {
+  // Strip action payload JSON blocks — the LLM sometimes outputs ` ```json ``` `
+  // blocks containing action payloads even though the action panel surfaces them separately.
+  text = text.replace(/```json[^\n]*\n([\s\S]*?)```/g, (match, content) => {
+    if (
+      /"type"\s*:\s*"(?:run_skill|create_crm_tasks|update_forecast_category|update_close_date|run_meddic_coverage|update_data_dictionary|update_workspace_knowledge|confirm_metric_definition|update_calibration|update_stage)"/.test(content) ||
+      /"action_payload"\s*:/.test(content)
+    ) {
+      return '';
+    }
+    return match;
+  });
+
   // Pre-pass: rejoin lines where a markdown link's URL was split across lines.
   // The LLM sometimes breaks a long `[label](url)` at the `-` character inside a UUID,
   // producing a line ending with `(...url-fragment` and the next line starting with `rest)`.
