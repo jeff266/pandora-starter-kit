@@ -1413,10 +1413,37 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
         daysSinceActivity?: number;
         multithreadingScore?: number;
         daysUntilClose?: number;
+        weekOfQuarter?: number;
+        openDealCount?: number;
+        entityRiskScore?: number;
       } = {};
+
+      // Always fetch quarter context for triage auto-trigger (pipeline-scoped messages)
+      try {
+        const { computeTemporalContext } = await import('../context/opening-brief.js');
+        const temporal = await computeTemporalContext(workspaceId).catch(() => null);
+        if (temporal?.weekOfQuarter != null) {
+          dealSignals.weekOfQuarter = temporal.weekOfQuarter;
+        }
+      } catch {
+        // Non-fatal
+      }
+
+      // Fetch open deal count for triage trigger
+      try {
+        const openCountRow = await query<{ cnt: string }>(
+          `SELECT COUNT(*)::text AS cnt FROM deals
+           WHERE workspace_id = $1 AND stage_normalized NOT IN ('closed_won','closed_lost')`,
+          [workspaceId]
+        );
+        dealSignals.openDealCount = parseInt(openCountRow.rows[0]?.cnt ?? '0', 10);
+      } catch {
+        // Non-fatal
+      }
+
       if (scopeType === 'deal' && entityId) {
         try {
-          const [dealRow, medianRow, contactRow] = await Promise.all([
+          const [dealRow, medianRow, contactRow, scoreRow] = await Promise.all([
             query(
               `SELECT
                  days_in_stage,
@@ -1443,6 +1470,13 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
                WHERE dc.deal_id = $2`,
               [workspaceId, entityId]
             ),
+            // Entity risk score from deal_scores (most recent)
+            query(
+              `SELECT score::int FROM deal_scores
+               WHERE deal_id = $1
+               ORDER BY scored_at DESC LIMIT 1`,
+              [entityId]
+            ).catch(() => ({ rows: [] as any[] })),
           ]);
           const d = dealRow.rows[0];
           const median = medianRow.rows[0]?.median_days ?? null;
@@ -1456,6 +1490,10 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
             if (contacts && parseInt(contacts.contacts, 10) > 0) {
               dealSignals.multithreadingScore = Math.min(1, parseInt(contacts.senior_contacts, 10) / Math.max(1, parseInt(contacts.contacts, 10)));
             }
+          }
+          const score = scoreRow.rows[0]?.score;
+          if (score != null) {
+            dealSignals.entityRiskScore = parseInt(score, 10);
           }
         } catch {
           // Non-fatal — proceed without signals
@@ -1532,7 +1570,12 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
           const recentContext = history.slice(-3).map(m => `${m.role}: ${m.content}`).join('\n');
           const context = recentContext || 'No additional context available.';
           const { runProsecutorDefenseDeliberation } = await import('./deliberation-engine.js');
-          deliberationResult = await runProsecutorDefenseDeliberation(workspaceId, message, context);
+          const stressEntityCtx = (scopeType === 'deal' && entityId)
+            ? { dealId: entityId }
+            : undefined;
+          deliberationResult = await runProsecutorDefenseDeliberation(
+            workspaceId, message, context, 'ask_pandora', stressEntityCtx
+          );
           deliberationMode = 'prosecutor_defense';
         } catch (err) {
           console.error('[orchestrator] Prosecutor/Defense deliberation failed:', err);
@@ -1633,6 +1676,22 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
             cta_label: 'Take action',
           });
         }
+      }
+
+      // 3b. Wire Deal Viability suggestedAction as an action card (auto-surfaces without follow-up)
+      if (deliberationResult?.suggestedAction && deliberationMode === 'bull_bear') {
+        const sa = deliberationResult.suggestedAction;
+        builder.addActionCard({
+          severity: sa.priority === 'P1' ? 'critical' : 'warning',
+          title: sa.title,
+          rationale: sa.description,
+          target_entity_type: 'deal',
+          target_entity_id: deliberationResult.dealId ?? undefined,
+          target_entity_name: deliberationResult.dealName ?? undefined,
+          action_id: sa.id,
+          cta_label: 'View Deal',
+          cta_href: deliberationResult.dealId ? `/deals/${deliberationResult.dealId}` : undefined,
+        });
       }
 
       // 4. Record tools used

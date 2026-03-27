@@ -1174,13 +1174,58 @@ export async function runProsecutorDefenseDeliberation(
   workspaceId: string,
   plan: string,
   context: string,
-  triggerSurface: string = 'ask_pandora'
+  triggerSurface: string = 'ask_pandora',
+  entityContext?: {
+    dealId?: string;
+    dealAmount?: number;
+    stageDurationDays?: number;
+    ownerRepId?: string;
+  }
 ): Promise<ProsecutorDefenseResult | null> {
   try {
     // ── Gather historical pattern from deal_outcomes ─────────────────────────
-    // Look for similar recent closed deals to ground the prosecution in evidence.
+    // Filter by similarity when entity context is available:
+    //   - size band: amount within ±50% of the deal's amount
+    //   - stage proxy: stage_duration_days within ±50% of the deal's stage duration
+    //   - rep owner: prefer same owner, but fall back to workspace-wide if too few rows
     let historicalPattern = '';
     try {
+      // If we have entity context, try similarity-filtered query first
+      if (entityContext?.dealId) {
+        // Fetch deal's amount + stage_duration if not provided
+        if (entityContext.dealAmount == null || entityContext.stageDurationDays == null) {
+          const dealFetch = await query(
+            `SELECT amount::numeric AS amount, days_in_stage AS stage_duration
+             FROM deals WHERE id = $1 AND workspace_id = $2`,
+            [entityContext.dealId, workspaceId]
+          ).catch(() => ({ rows: [] as any[] }));
+          const df = dealFetch.rows[0];
+          if (df) {
+            if (entityContext.dealAmount == null && df.amount != null) {
+              entityContext.dealAmount = parseFloat(df.amount);
+            }
+            if (entityContext.stageDurationDays == null && df.stage_duration != null) {
+              entityContext.stageDurationDays = parseInt(df.stage_duration, 10);
+            }
+          }
+        }
+      }
+
+      const useAmount = entityContext?.dealAmount;
+      const useStageDays = entityContext?.stageDurationDays;
+
+      // Build similarity filters for the historical query
+      const simParams: any[] = [workspaceId];
+      let simFilter = '';
+      if (useAmount != null && useAmount > 0) {
+        simParams.push(useAmount * 0.5, useAmount * 1.5);
+        simFilter += ` AND (amount IS NULL OR amount BETWEEN $${simParams.length - 1} AND $${simParams.length})`;
+      }
+      if (useStageDays != null && useStageDays > 0) {
+        simParams.push(Math.max(0, useStageDays * 0.5), useStageDays * 1.5);
+        simFilter += ` AND (stage_duration_days IS NULL OR stage_duration_days BETWEEN $${simParams.length - 1} AND $${simParams.length})`;
+      }
+
       const historicalResult = await query(
         `SELECT
            outcome,
@@ -1191,18 +1236,37 @@ export async function runProsecutorDefenseDeliberation(
          FROM deal_outcomes
          WHERE workspace_id = $1
            AND closed_at > NOW() - INTERVAL '12 months'
+           ${simFilter}
          GROUP BY outcome
          ORDER BY count DESC`,
-        [workspaceId]
+        simParams
       );
 
-      if (historicalResult.rows.length > 0) {
-        const rows = historicalResult.rows;
+      // If similarity filtering yields < 3 outcomes, fall back to workspace-wide
+      const rows = historicalResult.rows.length >= 1 && historicalResult.rows.reduce((s: number, r: any) => s + r.count, 0) >= 3
+        ? historicalResult.rows
+        : (await query(
+            `SELECT
+               outcome,
+               COUNT(*)::int AS count,
+               ROUND(AVG(amount)::numeric, 0)::int AS avg_amount,
+               ROUND(AVG(days_open)::numeric, 0)::int AS avg_days_open,
+               ROUND(AVG(composite_score)::numeric, 1) AS avg_score
+             FROM deal_outcomes
+             WHERE workspace_id = $1
+               AND closed_at > NOW() - INTERVAL '12 months'
+             GROUP BY outcome
+             ORDER BY count DESC`,
+            [workspaceId]
+          ).catch(() => ({ rows: [] as any[] }))).rows;
+
+      if (rows.length > 0) {
         const totalDeals = rows.reduce((s: number, r: any) => s + r.count, 0);
         const winRow = rows.find((r: any) => r.outcome === 'closed_won');
         const lossRow = rows.find((r: any) => r.outcome === 'closed_lost');
         const winRate = winRow ? Math.round((winRow.count / totalDeals) * 100) : 0;
-        historicalPattern = `HISTORICAL CONTEXT (last 12 months): ${totalDeals} deals closed — ${winRate}% win rate.` +
+        const similarityNote = (useAmount != null || useStageDays != null) ? ' (similar-size deals)' : '';
+        historicalPattern = `HISTORICAL CONTEXT (last 12 months${similarityNote}): ${totalDeals} deals closed — ${winRate}% win rate.` +
           (winRow ? ` Won deals: avg $${winRow.avg_amount?.toLocaleString()}, avg ${winRow.avg_days_open}d sales cycle.` : '') +
           (lossRow ? ` Lost deals: avg $${lossRow.avg_amount?.toLocaleString()}, avg ${lossRow.avg_days_open}d sales cycle.` : '');
       }
@@ -1287,13 +1351,14 @@ No preamble. Format as labeled lines.`,
       (verdictResult.usage?.input ?? 0) +
       (verdictResult.usage?.output ?? 0);
 
-    // Write watch metric to standing_hypotheses with 1-week trigger
+    // Write watch metric: standing_hypotheses for alerting + brief_recommendations for 7-day check-in
     if (watchMetric) {
       try {
+        // Standing hypothesis for ongoing metric alerting
         await query(
           `INSERT INTO standing_hypotheses
-             (workspace_id, hypothesis, metric, alert_direction, status)
-           VALUES ($1, $2, $3, 'below', 'active')
+             (workspace_id, hypothesis, metric, alert_direction, status, source)
+           VALUES ($1, $2, $3, 'below', 'active', 'plan_stress_test')
            ON CONFLICT DO NOTHING`,
           [
             workspaceId,
@@ -1303,6 +1368,23 @@ No preamble. Format as labeled lines.`,
         );
       } catch {
         // Non-fatal — standing_hypotheses may have additional required columns
+      }
+
+      try {
+        // brief_recommendations check-in: review this watch metric in 7 days
+        const reviewLabel = `Stress-test watch: ${watchMetric.slice(0, 80)}`;
+        await query(
+          `INSERT INTO brief_recommendations
+             (workspace_id, source, entity_type, entity_id, entity_name, recommendation_text, state_snapshot, check_in_at)
+           VALUES ($1, 'plan_stress_test', NULL, NULL, $2, $3, NULL, NOW() + INTERVAL '7 days')`,
+          [
+            workspaceId,
+            reviewLabel.slice(0, 120),
+            `Review whether the stress-test watch metric "${watchMetric.slice(0, 80)}" has moved: ${plan.slice(0, 120)}`,
+          ]
+        );
+      } catch {
+        // Non-fatal — brief_recommendations write is best-effort
       }
     }
 

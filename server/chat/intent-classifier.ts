@@ -476,6 +476,7 @@ export async function classifyDeliberationMode(
     daysUntilClose?: number;      // negative = past due
     weekOfQuarter?: number;       // 1–13
     openDealCount?: number;       // total open deals in scope (for triage)
+    entityRiskScore?: number;     // 0–100, from deal_scores; low = high risk
   }
 ): Promise<DeliberationClassification> {
   const q = message.toLowerCase().trim();
@@ -497,12 +498,15 @@ export async function classifyDeliberationMode(
     const poorCoverage = (context.multithreadingScore ?? 1) < 0.30;
     const activityGap = (context.daysSinceActivity ?? 0) > 14;
     const urgentClose = typeof context.daysUntilClose === 'number' && context.daysUntilClose >= 0 && context.daysUntilClose < 14;
-    if (overMedian || poorCoverage || activityGap || urgentClose) {
+    // Entity risk score: score < 40 signals a high-risk deal needing viability review
+    const highRiskScore = context.entityRiskScore != null && context.entityRiskScore < 40;
+    if (overMedian || poorCoverage || activityGap || urgentClose || highRiskScore) {
+      const trigger = overMedian ? 'stage_age_over_median' : poorCoverage ? 'low_multithreading' : activityGap ? 'activity_gap' : urgentClose ? 'close_urgency' : 'low_risk_score';
       return {
         mode: 'bull_bear',
         lens: 'deal_viability',
-        confidence: 0.85,
-        rationale: `context signal: ${overMedian ? 'stage_age_over_median' : poorCoverage ? 'low_multithreading' : activityGap ? 'activity_gap' : 'close_urgency'}`,
+        confidence: highRiskScore && !overMedian && !poorCoverage && !activityGap && !urgentClose ? 0.80 : 0.85,
+        rationale: `context signal: ${trigger}`,
       };
     }
   }
