@@ -454,6 +454,31 @@ export async function classifyDeliberationMode(
 ): Promise<DeliberationClassification> {
   const q = message.toLowerCase().trim();
 
+  // Fast-path: socratic questioning (assumption examination)
+  // Checked BEFORE the entity-context guard — socratic mode works from conversation
+  // history alone and does not require a deal entity in scope.
+  const SOCRATIC_PATTERNS = [
+    /\bi (think|believe|feel) (the problem|this)\b/i,
+    /\bdoes this make sense\b/i,
+    /\bwhy (isn't|is|are|aren't)\b/i,
+    /\bam i (right|wrong|missing)\b/i,
+    /\bis (this|that|my) (assumption|hypothesis|theory)\b/i,
+    /\btell me why i('m| am) wrong\b/i,
+    /\bdoes (this|my) reasoning hold\b/i,
+    /\bstress.?test (my|this|our) assumption\b/i,
+    /\bam i missing something\b/i,
+  ];
+
+  for (const pattern of SOCRATIC_PATTERNS) {
+    if (pattern.test(message)) {
+      return {
+        mode: 'socratic',
+        confidence: 1,
+        rationale: 'socratic questioning pattern',
+      };
+    }
+  }
+
   // Fast-path guard: no deliberation if no entity context and message doesn't mention hypothesis/sprint
   if (!context.scopeType && !context.entityId &&
       !/\b(hypothesis|sprint|plan)\b/i.test(message)) {
@@ -497,25 +522,6 @@ export async function classifyDeliberationMode(
         mode: 'boardroom',
         confidence: 1,
         rationale: 'boardroom decision pattern',
-      };
-    }
-  }
-
-  // Fast-path: socratic questioning (assumption examination)
-  const SOCRATIC_PATTERNS = [
-    /\bi (think|believe|feel) (the problem|this)\b/i,
-    /\bdoes this make sense\b/i,
-    /\bwhy (isn't|is|are|aren't)\b/i,
-    /\bam i (right|wrong|missing)\b/i,
-    /\bis (this|that|my) (assumption|hypothesis|theory)\b/i,
-  ];
-
-  for (const pattern of SOCRATIC_PATTERNS) {
-    if (pattern.test(message)) {
-      return {
-        mode: 'socratic',
-        confidence: 1,
-        rationale: 'socratic questioning pattern',
       };
     }
   }
