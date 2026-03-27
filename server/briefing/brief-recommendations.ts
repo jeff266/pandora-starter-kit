@@ -59,9 +59,24 @@ async function fetchEntityState(
 }
 
 /**
+ * Resolves a rep entity_id from the sales_reps table by name.
+ * Returns null if the rep is not found.
+ */
+async function resolveRepId(workspaceId: string, repName: string): Promise<string | null> {
+  const res = await query<{ id: string }>(
+    `SELECT id::text FROM sales_reps WHERE workspace_id = $1 AND rep_name ILIKE $2 LIMIT 1`,
+    [workspaceId, repName]
+  );
+  return res.rows[0]?.id ?? null;
+}
+
+/**
  * Logs a recommendation to the accountability table.
  * Captures state_snapshot at log time for delta comparison at check-in.
- * De-duplicates: skips if the same entity already has a record from the last 7 days.
+ *
+ * Dedup semantics (per source, so brief and chat capture independently):
+ *   - When entity_id is available: skip if same source+entity_type+entity_id exists within 7 days
+ *   - Otherwise: skip if same source+entity_type+entity_name exists within 7 days
  */
 export async function logBriefRecommendation(params: {
   workspaceId: string;
@@ -71,20 +86,43 @@ export async function logBriefRecommendation(params: {
   entityName: string;
   recommendationText: string;
 }): Promise<void> {
-  const { workspaceId, source, entityType, entityId, entityName, recommendationText } = params;
+  const { workspaceId, source, entityType, entityName, recommendationText } = params;
   if (!entityName?.trim() || !recommendationText?.trim()) return;
 
-  const existing = await query<{ id: string }>(
-    `SELECT id FROM brief_recommendations
-     WHERE workspace_id = $1
-       AND entity_name ILIKE $2
-       AND created_at >= NOW() - INTERVAL '7 days'
-     LIMIT 1`,
-    [workspaceId, entityName]
-  );
+  // Resolve rep entity_id from sales_reps if not supplied
+  let entityId = params.entityId ?? null;
+  if (!entityId && entityType === 'rep') {
+    entityId = await resolveRepId(workspaceId, entityName).catch(() => null);
+  }
+
+  // Dedup: scoped per source so brief and chat log independently for the same entity/week
+  let existing: { rows: { id: string }[] };
+  if (entityId) {
+    existing = await query<{ id: string }>(
+      `SELECT id FROM brief_recommendations
+       WHERE workspace_id = $1
+         AND source = $2
+         AND entity_type = $3
+         AND entity_id = $4::uuid
+         AND created_at >= NOW() - INTERVAL '7 days'
+       LIMIT 1`,
+      [workspaceId, source, entityType, entityId]
+    );
+  } else {
+    existing = await query<{ id: string }>(
+      `SELECT id FROM brief_recommendations
+       WHERE workspace_id = $1
+         AND source = $2
+         AND entity_type IS NOT DISTINCT FROM $3
+         AND entity_name ILIKE $4
+         AND created_at >= NOW() - INTERVAL '7 days'
+       LIMIT 1`,
+      [workspaceId, source, entityType ?? null, entityName]
+    );
+  }
   if (existing.rows.length > 0) return;
 
-  const snapshot = await fetchEntityState(workspaceId, entityType, entityId ?? null, entityName).catch(() => null);
+  const snapshot = await fetchEntityState(workspaceId, entityType, entityId, entityName).catch(() => null);
 
   await query(
     `INSERT INTO brief_recommendations
