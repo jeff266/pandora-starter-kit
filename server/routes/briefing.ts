@@ -599,10 +599,13 @@ router.get(
         // Non-fatal — card is suppressed when null
       }
 
-      // Fetch completed accountability check-ins from the last 30 days
+      // Process any due recommendation check-ins and fetch completed items for display.
+      // Running generateCheckInOutcomes() here ensures freshness even for workspaces
+      // that don't trigger regular weekly brief assembly.
       let accountabilityItems: any[] = [];
       try {
-        const { getRecentAccountabilityItems } = await import('../briefing/brief-recommendations.js');
+        const { generateCheckInOutcomes, getRecentAccountabilityItems } = await import('../briefing/brief-recommendations.js');
+        await generateCheckInOutcomes(workspaceId);
         accountabilityItems = await getRecentAccountabilityItems(workspaceId, 3);
       } catch (_) {
         // Non-fatal — section suppressed when empty
