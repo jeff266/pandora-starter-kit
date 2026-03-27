@@ -667,7 +667,12 @@ export default function ChatPanel({ isOpen, onClose, scope, initialSessionId, pe
                 </span>
               </div>
               <div style={styles.messageContent}>
-                {formatMarkdown(anon.text(msg.content), msg.role === 'assistant' ? (text) => sendMessage(text) : undefined)}
+                {formatMarkdown(
+                  msg.role === 'assistant'
+                    ? stripActionPayloadBlocks(anon.text(msg.content))
+                    : anon.text(msg.content),
+                  msg.role === 'assistant' ? (text) => sendMessage(text) : undefined
+                )}
               </div>
               {msg.role === 'assistant' && (() => {
                 const choices = parseChoiceOptions(msg.content);
@@ -1780,9 +1785,6 @@ function buildActionOutcomeMessage(title: string, actionType: string): string {
 }
 
 function formatMarkdown(text: string, onSend?: (msg: string) => void): React.ReactElement[] {
-  // Strip action payload JSON blocks using the shared helper.
-  text = stripActionPayloadBlocks(text);
-
   // Pre-pass: rejoin lines where a markdown link's URL was split across lines.
   // The LLM sometimes breaks a long `[label](url)` at the `-` character inside a UUID,
   // producing a line ending with `(...url-fragment` and the next line starting with `rest)`.
