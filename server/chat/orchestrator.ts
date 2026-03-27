@@ -48,6 +48,7 @@ import { getInterviewState, buildInterviewPrompt, advanceInterview, advanceAndCo
 import type { InterviewStep } from '../lib/calibration-interview.js';
 import { getUnmappedStages, buildStageMappingResponse, buildStageMappingTablePrompt, confirmStageMapping, isStageMappingComplete } from '../lib/stage-mapping-interview.js';
 import type { NormalizedStage } from '../lib/stage-mapping-interview.js';
+import { extractChatInsights, writeChatInsights } from '../memory/workspace-memory.js';
 
 const CALIBRATION_TRIGGERS = /\b(calibrat|calibrate|calibration|map.*stage|stage.*map|set up pipeline|define pipeline|what counts as pipeline|define.*at.?risk|define.*commit|define.*win.?rate|setup calibration|start calibration|pipeline definition|interview)\b/i;
 const CALIBRATION_START_OVER = /\b(start over|start fresh|reset calibration|begin again|restart calibration|reset and start)\b/i;
@@ -237,6 +238,53 @@ function detectComplexRequest(message: string): boolean {
   ];
 
   return COMPLEX_PATTERNS.some(p => p.test(message));
+}
+
+const INSIGHT_EXTRACTION_CADENCE = 4;
+const CALIBRATION_CONTENT_FILTER = /\*\*Step \d+ of 6|stage.*map|map.*stage|unmapped stage|does this match.*pipeline|how do you define|how do you map|pandora calibration left off/i;
+
+function maybeTriggerChatInsightExtraction(
+  workspaceId: string,
+  channelId: string,
+  threadId: string,
+  state: any,
+  message: string,
+  answer: string,
+  inCalibrationSession: boolean,
+): void {
+  try {
+    const prevMessages = (state.messages || []) as Array<{ role: string; content: string }>;
+    const prevUserTurnCount = prevMessages.filter((m: any) => m.role === 'user').length;
+    const totalUserTurnCount = prevUserTurnCount + 1;
+    const lastExtractedAt: number = state.context?.chatInsightsExtractedAtTurn ?? 0;
+    const turnsSinceLastExtraction = totalUserTurnCount - lastExtractedAt;
+    const isCalibrationTurn = inCalibrationSession || CALIBRATION_TRIGGERS.test(message);
+
+    if (totalUserTurnCount < 4 || turnsSinceLastExtraction < INSIGHT_EXTRACTION_CADENCE || isCalibrationTurn) {
+      return;
+    }
+
+    const freshMessages: Array<{ role: string; content: string }> = [
+      ...prevMessages,
+      { role: 'user', content: message },
+      { role: 'assistant', content: answer },
+    ].filter(m => !CALIBRATION_TRIGGERS.test(m.content) && !CALIBRATION_CONTENT_FILTER.test(m.content));
+
+    const filteredUserTurns = freshMessages.filter(m => m.role === 'user').length;
+    if (filteredUserTurns < 4) return;
+
+    extractChatInsights(workspaceId, freshMessages)
+      .then(insights => {
+        if (insights.length > 0) {
+          return writeChatInsights(workspaceId, insights).then(() => {
+            updateContext(workspaceId, channelId, threadId, { chatInsightsExtractedAtTurn: totalUserTurnCount }).catch(() => {});
+          });
+        }
+        updateContext(workspaceId, channelId, threadId, { chatInsightsExtractedAtTurn: totalUserTurnCount }).catch(() => {});
+      })
+      .catch(() => {});
+  } catch {
+  }
 }
 
 export async function handleConversationTurn(input: ConversationTurnInput): Promise<ConversationTurnResult> {
@@ -430,6 +478,8 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
     });
 
     await updateTurnMetrics(workspaceId, channelId, threadId, 0);
+
+    maybeTriggerChatInsightExtraction(workspaceId, channelId, threadId, state, message, ack, inCalibrationSession);
 
     return {
       answer: ack,
@@ -921,6 +971,8 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
         });
         await updateTurnMetrics(workspaceId, channelId, threadId, tokensUsed);
 
+        maybeTriggerChatInsightExtraction(workspaceId, channelId, threadId, state, message, answer, inCalibrationSession);
+
         return {
           answer,
           thread_id: threadId,
@@ -949,8 +1001,10 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
         dataStrategy = 'sql_fallback';
         tokensUsed = 0;
       } else {
+        const rateLimitAnswer = `You've reached the AI analysis limit for this hour (${synthesisLimit}/hr). Simple data lookups still work — try "How many deals?" or "What's our pipeline?"`;
+        maybeTriggerChatInsightExtraction(workspaceId, channelId, threadId, state, message, rateLimitAnswer, inCalibrationSession);
         return {
-          answer: `You've reached the AI analysis limit for this hour (${synthesisLimit}/hr). Simple data lookups still work — try "How many deals?" or "What's our pipeline?"`,
+          answer: rateLimitAnswer,
           thread_id: threadId,
           scope: { type: scopeType, entity_id: entityId, rep_email: repEmail },
           router_decision: 'rate_limited',
@@ -1053,6 +1107,8 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
           last_scope: { type: scopeType, entity_id: entityId, rep_email: repEmail },
         });
 
+        maybeTriggerChatInsightExtraction(workspaceId, channelId, threadId, state, message, gatingAnswer, inCalibrationSession);
+
         return {
           answer: gatingAnswer,
           thread_id: threadId,
@@ -1074,7 +1130,7 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
         !entityId
       ) {
         const { messages: conversationHistory } = await buildConversationHistory(state.messages || [] as any, { workspaceId, reasoningThread: activeReasoningThread });
-        return await handleAdvisoryResponse(
+        const advisoryResult = await handleAdvisoryResponse(
           message,
           workspaceId,
           threadId,
@@ -1084,6 +1140,8 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
           repEmail,
           conversationHistory
         );
+        maybeTriggerChatInsightExtraction(workspaceId, channelId, threadId, state, message, advisoryResult.answer, inCalibrationSession);
+        return advisoryResult;
       }
 
       // Handle retrospective: 3-phase Evidence Harvest → Hypothesis → Targeted Synthesis
@@ -1106,6 +1164,8 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
             timestamp: new Date().toISOString(),
           });
 
+          maybeTriggerChatInsightExtraction(workspaceId, channelId, threadId, state, message, retroResult.answer, inCalibrationSession);
+
           return {
             answer: retroResult.answer,
             thread_id: threadId,
@@ -1125,7 +1185,7 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
       // Handle user responding "best practice" to a gating question
       if (isGatingResponse(message, conversationHistory) && prefersBestPractice(message)) {
         const { messages: conversationHistory } = await buildConversationHistory(state.messages || [] as any, { workspaceId, reasoningThread: activeReasoningThread });
-        return await handleAdvisoryResponse(
+        const advisoryResult = await handleAdvisoryResponse(
           message,
           workspaceId,
           threadId,
@@ -1135,6 +1195,8 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
           repEmail,
           conversationHistory
         );
+        maybeTriggerChatInsightExtraction(workspaceId, channelId, threadId, state, message, advisoryResult.answer, inCalibrationSession);
+        return advisoryResult;
       }
 
       // Handle document_request: mine data then synthesize documents
@@ -1253,6 +1315,8 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
             last_scope: { type: scopeType, entity_id: entityId, rep_email: repEmail },
           });
           await updateTurnMetrics(workspaceId, channelId, threadId, tokensUsed);
+
+          maybeTriggerChatInsightExtraction(workspaceId, channelId, threadId, state, message, formattedAnswer, inCalibrationSession);
 
           return {
             answer: formattedAnswer,
@@ -1612,6 +1676,8 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
 
       const pandoraResponse = builder.build('ask_pandora', workspaceId, tokensUsed);
 
+      maybeTriggerChatInsightExtraction(workspaceId, channelId, threadId, state, message, answer, inCalibrationSession);
+
       return {
         answer,
         thread_id: threadId,
@@ -1733,6 +1799,8 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
                 skills_referenced: [route.skill_id],
               });
 
+              maybeTriggerChatInsightExtraction(workspaceId, channelId, threadId, state, message, answer, inCalibrationSession);
+
               return {
                 answer,
                 thread_id: threadId,
@@ -1832,6 +1900,8 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
 
   // Extract workspace knowledge from user message (non-blocking, fire and forget)
   extractWorkspaceKnowledge(message, workspaceId).catch(() => {});
+
+  maybeTriggerChatInsightExtraction(workspaceId, channelId, threadId, state, message, answer, inCalibrationSession);
 
   return {
     answer,

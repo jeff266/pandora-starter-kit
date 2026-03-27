@@ -21,6 +21,8 @@ export interface ConversationContext {
   reasoningThread?: string | null;
   /** Message count at which reasoningThread was last computed. Used to enforce 3-turn cadence. */
   reasoningThreadTurn?: number;
+  /** User turn count at which chat insights were last extracted. Used to enforce extraction cadence. */
+  chatInsightsExtractedAtTurn?: number;
 }
 
 export interface ConversationState {
@@ -162,6 +164,10 @@ export async function updateContext(
     ...(Object.prototype.hasOwnProperty.call(updates, 'reasoningThreadTurn')
       ? { reasoningThreadTurn: updates.reasoningThreadTurn }
       : {}),
+    // Chat insight extraction turn marker — tracks the last user-turn count at which extraction ran.
+    ...(Object.prototype.hasOwnProperty.call(updates, 'chatInsightsExtractedAtTurn')
+      ? { chatInsightsExtractedAtTurn: updates.chatInsightsExtractedAtTurn }
+      : current.chatInsightsExtractedAtTurn != null ? { chatInsightsExtractedAtTurn: current.chatInsightsExtractedAtTurn } : {}),
   };
 
   await query(
