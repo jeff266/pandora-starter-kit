@@ -49,7 +49,7 @@ const PATTERNS: Array<{
     strategy: 'win_rate_calc',
   },
   {
-    regex: /^(thanks|thank you|that makes sense|got it|ok|okay|cool|great)\b/i,
+    regex: /^(thanks|thank you|that makes sense|got it|ok|okay|cool|great)\s*[!?.]?\s*$/i,
     handler: handleAcknowledgment,
     strategy: 'acknowledgment',
   },
@@ -65,6 +65,11 @@ export async function tryHeuristic(
   message: string
 ): Promise<HeuristicResult> {
   const trimmed = message.trim();
+
+  const wordCount = trimmed.split(/\s+/).length;
+  if (wordCount > 12) {
+    return { matched: false };
+  }
 
   for (const pattern of PATTERNS) {
     const match = trimmed.match(pattern.regex);

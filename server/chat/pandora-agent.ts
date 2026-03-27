@@ -3056,6 +3056,62 @@ function extractCompressionFacts(
   return facts.length > 0 ? facts.join('\n') : '';
 }
 
+const SESSION_INSTRUCTIONS_SYSTEM_PROMPT =
+`You are extracting user-stated preferences, session instructions, and filters from a conversation.
+
+EXTRACT ONLY:
+- Explicit user preferences ("focus on net-new only", "exclude renewals")
+- Session-scoped filters ("only look at Q2", "ignore that rep for now")
+- Custom thresholds or definitions ("use a 45-day at-risk threshold", "count deals over $50K")
+- Analytical framing requests ("compare to last quarter", "break it down by region")
+- Data scope instructions ("for this session, only Enterprise segment")
+
+DO NOT EXTRACT:
+- Questions the user asked (those are not instructions)
+- Data facts, numbers, or metric values (those are captured separately)
+- Pandora's responses or analysis
+- Greetings, acknowledgments, or small talk
+
+Return a bullet list of active instructions. If the user later contradicted or updated an instruction, only include the latest version. If there are no user instructions, return exactly: NONE`;
+
+async function extractSessionInstructions(
+  olderMessages: (ConversationMessage & { tool_trace?: any[] })[],
+  workspaceId: string
+): Promise<string | null> {
+  const conversationText = olderMessages
+    .filter(m => m.role === 'user' || m.role === 'assistant')
+    .map(m => {
+      const content = typeof m.content === 'string' ? m.content : '';
+      if (!content.trim()) return null;
+      return `${m.role === 'user' ? 'User' : 'Pandora'}: ${content}`;
+    })
+    .filter(Boolean)
+    .join('\n\n');
+
+  if (!conversationText.trim()) return null;
+
+  try {
+    const response = await callLLM(workspaceId, 'compress', {
+      systemPrompt: SESSION_INSTRUCTIONS_SYSTEM_PROMPT,
+      messages: [{ role: 'user', content: conversationText }],
+      maxTokens: 300,
+      temperature: 0,
+      _tracking: {
+        workspaceId,
+        phase: 'compression',
+        stepName: 'session-instructions',
+      },
+    });
+
+    const instructions = response.content?.trim();
+    if (!instructions || instructions === 'NONE') return null;
+    return instructions;
+  } catch (err) {
+    console.warn('[PandoraAgent] Session instruction extraction failed:', err);
+    return null;
+  }
+}
+
 // ─── Reasoning thread compression ────────────────────────────────────────────
 
 /**
@@ -3190,6 +3246,11 @@ export async function buildConversationHistory(
 
   let compressionNote = extractCompressionFacts(older);
 
+  let sessionInstructions: string | null = null;
+  if (opts?.workspaceId) {
+    sessionInstructions = await extractSessionInstructions(older, opts.workspaceId);
+  }
+
   // Calibration step enrichment: append persisted completed steps when calibration
   // content is detected anywhere in the thread (older + recent), not just older.
   // Scanning all messages makes detection reliable even when the step prompts
@@ -3222,40 +3283,34 @@ export async function buildConversationHistory(
   const recentHistory = buildHistory(recent);
   const reasoningThread = opts?.reasoningThread;
 
-  if (!compressionNote) {
-    // No useful facts found in older turns. Still inject reasoning thread if
-    // present — analytical continuity must survive even when there are no
-    // confirmed fact-values to compress from the older window.
-    if (reasoningThread) {
-      const threadExchange: Array<{ role: 'user' | 'assistant'; content: any }> = [
-        { role: 'user',      content: `[Analytical reasoning thread from this session:]\n${reasoningThread}` },
-        { role: 'assistant', content: 'Understood, I will continue from where this analysis left off.' },
-      ];
-      return { messages: [...threadExchange, ...recentHistory], wasCompressed: true };
-    }
+  const prefixExchanges: Array<{ role: 'user' | 'assistant'; content: any }> = [];
+
+  if (compressionNote) {
+    prefixExchanges.push(
+      { role: 'user',      content: `[Context from earlier in this conversation:]\n${compressionNote}` },
+      { role: 'assistant', content: 'Understood, I have that context.' },
+    );
+  }
+
+  if (sessionInstructions) {
+    prefixExchanges.push(
+      { role: 'user',      content: `<session_instructions>\nThe user stated these preferences/instructions earlier in this conversation. Honour them for all subsequent answers unless the user explicitly changes them.\n${sessionInstructions}\n</session_instructions>` },
+      { role: 'assistant', content: 'Understood, I will follow those session instructions.' },
+    );
+  }
+
+  if (reasoningThread) {
+    prefixExchanges.push(
+      { role: 'user',      content: `[Analytical reasoning thread from this session:]\n${reasoningThread}` },
+      { role: 'assistant', content: 'Understood, I will continue from where this analysis left off.' },
+    );
+  }
+
+  if (prefixExchanges.length === 0) {
     return { messages: recentHistory, wasCompressed: true };
   }
 
-  // Inject fact summary as a pseudo user/assistant exchange at the start of history.
-  // This format is well-supported by all Anthropic Claude models.
-  const factExchange: Array<{ role: 'user' | 'assistant'; content: any }> = [
-    { role: 'user',      content: `[Context from earlier in this conversation:]\n${compressionNote}` },
-    { role: 'assistant', content: 'Understood, I have that context.' },
-  ];
-
-  // If a reasoning thread (analytical inference chain) was pre-computed by the
-  // orchestrator, inject it as a second distinct pseudo-exchange AFTER the fact
-  // block — facts first so confirmed values are established, then inferences
-  // so the model can continue analytical arguments.
-  if (reasoningThread) {
-    const threadExchange: Array<{ role: 'user' | 'assistant'; content: any }> = [
-      { role: 'user',      content: `[Analytical reasoning thread from this session:]\n${reasoningThread}` },
-      { role: 'assistant', content: 'Understood, I will continue from where this analysis left off.' },
-    ];
-    return { messages: [...factExchange, ...threadExchange, ...recentHistory], wasCompressed: true };
-  }
-
-  return { messages: [...factExchange, ...recentHistory], wasCompressed: true };
+  return { messages: [...prefixExchanges, ...recentHistory], wasCompressed: true };
 }
 
 function extractFindings(content: string): any[] {
