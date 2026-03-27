@@ -183,7 +183,34 @@ interface OpeningBriefData {
   } | null;
   weekly_thesis?: string | null;
   accountability_items?: AccountabilityItem[];
+  accountability_stale?: StaleRecommendation[];
+  triage_allocation?: TriageDeal[];
   [key: string]: unknown;
+}
+
+interface StaleRecommendation {
+  id: string;
+  entity_name: string;
+  entity_type: 'deal' | 'rep' | null;
+  entity_id: string | null;
+  recommendation_text: string;
+  state_snapshot: string | null;
+  days_elapsed: number;
+  current_state: string;
+  updated_action: string;
+}
+
+interface TriageDeal {
+  id: string;
+  name: string;
+  amount: number;
+  stage: string;
+  owner: string;
+  close_date: string | null;
+  close_probability: number;
+  expected_value: number;
+  recommended_action: string;
+  rank: number;
 }
 
 const QUARTER_TABS: { key: QuarterTab; label: string; phase: QuarterPhase }[] = [
@@ -465,6 +492,156 @@ function AccountabilitySection({ items, colors: C }: { items: AccountabilityItem
               {item.entity_name}
             </span>
             {item.outcome_text}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function StaleRecommendationsCard({ items, colors: C, navigate }: { items: StaleRecommendation[]; colors: typeof S; navigate: (path: string) => void }) {
+  if (!items || items.length === 0) return null;
+  return (
+    <div style={{
+      background: 'rgba(234,179,8,0.05)',
+      border: `0.5px solid rgba(234,179,8,0.28)`,
+      borderLeft: `2px solid ${C.yellow}`,
+      borderRadius: 10,
+      padding: '13px 16px',
+      marginBottom: 16,
+      fontFamily: C.font,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 10 }}>
+        <span style={{
+          fontSize: 9, fontWeight: 700, color: C.yellow,
+          background: 'rgba(234,179,8,0.12)',
+          border: `0.5px solid rgba(234,179,8,0.30)`,
+          borderRadius: 99, padding: '2px 8px',
+          textTransform: 'uppercase' as const, letterSpacing: '0.06em',
+        }}>
+          Recommendations Overdue
+        </span>
+        <span style={{ fontSize: 11, color: C.textMuted }}>
+          {items.length} action{items.length !== 1 ? 's' : ''} not taken
+        </span>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {items.map((item) => (
+          <div
+            key={item.id}
+            onClick={() => {
+              if (item.entity_type === 'deal' && item.entity_id) {
+                navigate(`/deals/${item.entity_id}`);
+              }
+            }}
+            style={{
+              paddingBottom: 10,
+              borderBottom: `0.5px solid ${C.border}`,
+              cursor: item.entity_type === 'deal' && item.entity_id ? 'pointer' : 'default',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+              <span style={{
+                fontSize: 9, fontWeight: 600,
+                color: item.entity_type === 'deal' ? C.teal : C.purple,
+                background: item.entity_type === 'deal' ? 'rgba(29,158,117,0.10)' : 'rgba(167,139,250,0.10)',
+                border: `0.5px solid ${item.entity_type === 'deal' ? 'rgba(29,158,117,0.25)' : 'rgba(167,139,250,0.25)'}`,
+                borderRadius: 99, padding: '1px 6px',
+                textTransform: 'uppercase' as const, letterSpacing: '0.04em',
+              }}>
+                {item.entity_name}
+              </span>
+              <span style={{ fontSize: 10, color: C.yellow }}>
+                {item.days_elapsed}d overdue
+              </span>
+            </div>
+            <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 3, fontStyle: 'italic' }}>
+              Was: {item.recommendation_text.length > 80 ? item.recommendation_text.slice(0, 80) + '…' : item.recommendation_text}
+            </div>
+            <div style={{ fontSize: 12.5, color: C.text, fontWeight: 500 }}>
+              {item.updated_action}
+            </div>
+            {item.current_state && (
+              <div style={{ fontSize: 11, color: C.textDim, marginTop: 3 }}>
+                Current: {item.current_state}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function EoQTriageCard({ deals, colors: C, navigate }: { deals: TriageDeal[]; colors: typeof S; navigate: (path: string) => void }) {
+  if (!deals || deals.length < 3) return null;
+  const totalExpected = deals.reduce((s, d) => s + d.expected_value, 0);
+  const fmtProbPct = (p: number) => `${Math.round(p * 100)}%`;
+  const amber = '#f59e0b';
+  return (
+    <div style={{
+      background: 'rgba(245,158,11,0.04)',
+      border: `0.5px solid rgba(245,158,11,0.25)`,
+      borderLeft: `2px solid ${amber}`,
+      borderRadius: 10,
+      padding: '13px 16px',
+      marginBottom: 16,
+      fontFamily: C.font,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 4 }}>
+        <span style={{
+          fontSize: 9, fontWeight: 700, color: amber,
+          background: 'rgba(245,158,11,0.12)',
+          border: `0.5px solid rgba(245,158,11,0.28)`,
+          borderRadius: 99, padding: '2px 8px',
+          textTransform: 'uppercase' as const, letterSpacing: '0.06em',
+        }}>
+          Quarter-End Triage
+        </span>
+        <span style={{ fontSize: 10, color: C.textMuted }}>
+          {fmtCurrency(totalExpected)} expected value at stake
+        </span>
+      </div>
+      <div style={{ fontSize: 11, color: C.textDim, marginBottom: 10 }}>
+        Ranked by expected close value. Focus where it matters most.
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+        {deals.map((deal) => (
+          <div
+            key={deal.id}
+            onClick={() => navigate(`/deals/${deal.id}`)}
+            style={{
+              paddingBottom: 9,
+              borderBottom: `0.5px solid ${C.border}`,
+              cursor: 'pointer',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+              <span style={{
+                fontSize: 10, fontWeight: 700, color: C.textDim,
+                minWidth: 16,
+              }}>#{deal.rank}</span>
+              <span style={{ fontSize: 13, fontWeight: 500, color: C.text, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
+                {deal.name}
+              </span>
+              <span style={{ fontSize: 11, color: C.teal, fontWeight: 600, flexShrink: 0 }}>
+                {fmtCurrency(deal.amount)}
+              </span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
+              <span style={{ fontSize: 10, color: C.textMuted }}>{deal.stage}</span>
+              {deal.owner && (
+                <>
+                  <span style={{ fontSize: 10, color: C.textDim }}>·</span>
+                  <span style={{ fontSize: 10, color: C.textMuted }}>{deal.owner}</span>
+                </>
+              )}
+              <span style={{ fontSize: 10, color: C.textDim }}>·</span>
+              <span style={{ fontSize: 10, color: amber }}>{fmtProbPct(deal.close_probability)} close prob</span>
+            </div>
+            <div style={{ fontSize: 12, color: C.textSub, lineHeight: 1.45 }}>
+              {deal.recommended_action}
+            </div>
           </div>
         ))}
       </div>
@@ -1408,9 +1585,19 @@ export default function ConciergeView() {
             )}
 
 
+            {/* RECOMMENDATIONS OVERDUE — stale unactioned recommendations */}
+            {brief.accountability_stale && brief.accountability_stale.length > 0 && (
+              <StaleRecommendationsCard items={brief.accountability_stale as StaleRecommendation[]} colors={S} navigate={navigate} />
+            )}
+
             {/* PANDORA'S TAKE — weekly thesis card */}
             {brief.weekly_thesis && (
               <PandoraThesisCard thesis={brief.weekly_thesis} colors={S} />
+            )}
+
+            {/* QUARTER-END TRIAGE — EoQ ranked close-plan deals */}
+            {brief.triage_allocation && (brief.triage_allocation as TriageDeal[]).length >= 3 && (
+              <EoQTriageCard deals={brief.triage_allocation as TriageDeal[]} colors={S} navigate={navigate} />
             )}
 
             {/* SINCE LAST WEEK — recommendation accountability check-ins */}

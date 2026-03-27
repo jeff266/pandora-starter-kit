@@ -12,6 +12,31 @@ export interface AccountabilityItem {
   checked_in_at: string;
 }
 
+export interface StaleRecommendation {
+  id: string;
+  entity_name: string;
+  entity_type: 'deal' | 'rep' | null;
+  entity_id: string | null;
+  recommendation_text: string;
+  state_snapshot: string | null;
+  days_elapsed: number;
+  current_state: string;
+  updated_action: string;
+}
+
+export interface TriageDeal {
+  id: string;
+  name: string;
+  amount: number;
+  stage: string;
+  owner: string;
+  close_date: string | null;
+  close_probability: number;
+  expected_value: number;
+  recommended_action: string;
+  rank: number;
+}
+
 interface EntityStateSnapshot {
   label: string;
 }
@@ -208,7 +233,7 @@ ${deltaText}
 Write the one-sentence outcome now.`;
 
   try {
-    const raw = await callLLM(workspaceId, 'lite', {
+    const raw = await callLLM(workspaceId, 'generate', {
       systemPrompt,
       messages: [{ role: 'user', content: userPrompt }],
       temperature: 0.2,
@@ -261,4 +286,231 @@ export async function getRecentAccountabilityItems(
     created_at: r.created_at,
     checked_in_at: r.checked_in_at,
   }));
+}
+
+/**
+ * Identifies recommendations older than 5 days where the underlying entity
+ * has not advanced. Returns a structured list ready for brief injection.
+ *
+ * "Not advanced" for deals: stage_normalized is still the same as state_snapshot
+ * (heuristic: if the snapshot label starts with "in <stage>" and the current state
+ * also starts with "in <stage>", the deal has not moved).
+ * Non-fatal on all sub-queries — returns only what succeeds.
+ */
+export async function checkStaleRecommendations(
+  workspaceId: string
+): Promise<StaleRecommendation[]> {
+  const candidatesRes = await query<{
+    id: string;
+    entity_type: string | null;
+    entity_id: string | null;
+    entity_name: string;
+    recommendation_text: string;
+    state_snapshot: string | null;
+    created_at: string;
+    check_in_at: string;
+    checked_in_at: string | null;
+  }>(
+    `SELECT id, entity_type, entity_id, entity_name, recommendation_text, state_snapshot,
+            created_at::text, check_in_at::text, checked_in_at::text
+     FROM brief_recommendations
+     WHERE workspace_id = $1
+       AND created_at <= NOW() - INTERVAL '5 days'
+       AND checked_in_at IS NULL
+     ORDER BY created_at ASC
+     LIMIT 10`,
+    [workspaceId]
+  );
+
+  if (candidatesRes.rows.length === 0) return [];
+
+  const stale: StaleRecommendation[] = [];
+
+  for (const row of candidatesRes.rows) {
+    try {
+      const currentState = await fetchEntityState(workspaceId, row.entity_type, row.entity_id, row.entity_name);
+      const currentLabel = currentState.label;
+      const priorLabel = row.state_snapshot ?? '';
+
+      // Determine if stale: same stage prefix or metric has not improved
+      const extractStageKey = (label: string): string => {
+        const m = label.match(/^in ([^$]+)/i);
+        return m ? m[1].trim().toLowerCase() : label.toLowerCase().slice(0, 30);
+      };
+
+      const priorKey = extractStageKey(priorLabel);
+      const currentKey = extractStageKey(currentLabel);
+      const isStale =
+        currentLabel.toLowerCase().includes('closed won') ? false :
+        priorLabel === '' ? true :
+        priorKey === currentKey;
+
+      if (!isStale) continue;
+
+      const daysElapsed = Math.floor((Date.now() - new Date(row.created_at).getTime()) / (1000 * 60 * 60 * 24));
+
+      // Generate an updated recommended action using the LLM
+      const updatedAction = await generateUpdatedAction(
+        workspaceId,
+        row.recommendation_text,
+        row.entity_name,
+        priorLabel,
+        currentLabel,
+        daysElapsed
+      );
+
+      stale.push({
+        id: row.id,
+        entity_name: row.entity_name,
+        entity_type: row.entity_type as 'deal' | 'rep' | null,
+        entity_id: row.entity_id,
+        recommendation_text: row.recommendation_text,
+        state_snapshot: priorLabel || null,
+        days_elapsed: daysElapsed,
+        current_state: currentLabel,
+        updated_action: updatedAction,
+      });
+    } catch (err) {
+      console.warn('[brief-recommendations] Stale check failed for', row.id, ':', (err as Error).message);
+    }
+  }
+
+  return stale;
+}
+
+async function generateUpdatedAction(
+  workspaceId: string,
+  originalRecommendation: string,
+  entityName: string,
+  priorState: string,
+  currentState: string,
+  daysElapsed: number
+): Promise<string> {
+  const systemPrompt = `You are Pandora, a Chief of Staff AI. A recommendation was made ${daysElapsed} days ago and the entity has not advanced.
+Write ONE action sentence: what should be done RIGHT NOW given the stall.
+FORMAT: Start with an imperative verb (e.g., "Escalate", "Re-engage", "Review").
+Rules: No markdown. No line breaks. Under 25 words. Be specific.`;
+
+  const userPrompt = `Original recommendation: "${originalRecommendation}"
+Entity: ${entityName}
+State ${daysElapsed} days ago: ${priorState || 'unknown'}
+Current state: ${currentState}
+
+Write the updated action now.`;
+
+  try {
+    const raw = await callLLM(workspaceId, 'generate', {
+      systemPrompt,
+      messages: [{ role: 'user', content: userPrompt }],
+      temperature: 0.2,
+      maxTokens: 60,
+      _tracking: { workspaceId, phase: 'briefing', stepName: 'generate-updated-action' },
+    });
+    const text = typeof raw === 'string' ? raw : (typeof raw === 'object' && raw !== null && 'content' in raw ? String((raw as { content: unknown }).content) : '');
+    const trimmed = text.trim().replace(/^["']|["']$/g, '');
+    return trimmed.length > 10 ? trimmed : `Re-engage on ${entityName} — original action stalled after ${daysElapsed} days.`;
+  } catch {
+    return `Re-engage on ${entityName} — original action stalled after ${daysElapsed} days.`;
+  }
+}
+
+/**
+ * Builds a ranked EoQ triage list when daysRemainingInQuarter <= 14 and there
+ * are ≥ 3 deals in close-plan stages. Returns empty array when conditions not met.
+ *
+ * Ranks by expected_value = amount × close_probability (estimated from stage).
+ */
+export async function buildEoQTriageBlock(
+  workspaceId: string,
+  wonLostStages: string[]
+): Promise<TriageDeal[]> {
+  const wonLostSet = new Set(wonLostStages.map((s: string) => s.toLowerCase()));
+
+  // Close-plan stage heuristics
+  const closePlanKeywords = ['negotiat', 'contract', 'closing', 'verbal', 'commit', 'review', 'legal'];
+
+  const dealsRes = await query<{
+    id: string;
+    name: string;
+    amount: string;
+    stage: string;
+    stage_normalized: string;
+    owner: string;
+    close_date: string | null;
+  }>(
+    `SELECT id::text, name, COALESCE(amount, 0)::text as amount, stage,
+            COALESCE(stage_normalized, '') as stage_normalized,
+            COALESCE(owner, '') as owner, close_date::text
+     FROM deals
+     WHERE workspace_id = $1
+       AND stage_normalized NOT IN ('closed_won', 'closed_lost')
+       AND COALESCE(amount, 0) > 0
+     ORDER BY amount DESC
+     LIMIT 50`,
+    [workspaceId]
+  );
+
+  // Filter to close-plan deals
+  const closePlanDeals = dealsRes.rows.filter(d => {
+    const s = (d.stage || '').toLowerCase();
+    if (wonLostSet.has(s)) return false;
+    return closePlanKeywords.some(kw => s.includes(kw));
+  });
+
+  if (closePlanDeals.length < 3) return [];
+
+  // Estimate close probability from stage name
+  const estimateProb = (stage: string): number => {
+    const s = stage.toLowerCase();
+    if (s.includes('commit') || s.includes('verbal')) return 0.85;
+    if (s.includes('contract') || s.includes('legal') || s.includes('review')) return 0.75;
+    if (s.includes('negotiat') || s.includes('closing')) return 0.65;
+    return 0.55;
+  };
+
+  // Rank by expected value
+  const ranked = closePlanDeals
+    .map(d => {
+      const amount = parseFloat(d.amount);
+      const prob = estimateProb(d.stage);
+      return {
+        id: d.id,
+        name: d.name,
+        amount,
+        stage: d.stage,
+        owner: d.owner,
+        close_date: d.close_date,
+        close_probability: prob,
+        expected_value: amount * prob,
+      };
+    })
+    .sort((a, b) => b.expected_value - a.expected_value)
+    .slice(0, 6);
+
+  // Generate recommended action for each deal (batched LLM calls would be ideal but
+  // we keep it simple — call sequentially with short timeouts)
+  const results: TriageDeal[] = [];
+  for (let i = 0; i < ranked.length; i++) {
+    const d = ranked[i];
+    let recommendedAction = `${d.owner ? `${d.owner}: ` : ''}Confirm close plan and remove final blockers on ${d.name}.`;
+
+    try {
+      const raw = await callLLM(workspaceId, 'generate', {
+        systemPrompt: `You are a Chief of Staff AI. Write ONE specific action to close this deal by quarter-end. Under 20 words. Start with an imperative verb. No markdown.`,
+        messages: [{ role: 'user', content: `Deal: ${d.name}, Amount: ${formatCompact(d.amount)}, Stage: ${d.stage}, Owner: ${d.owner || 'unassigned'}, Close date: ${d.close_date ?? 'unknown'}. What should the rep do this week?` }],
+        temperature: 0.2,
+        maxTokens: 50,
+        _tracking: { workspaceId, phase: 'briefing', stepName: 'eoq-triage-action' },
+      });
+      const text = typeof raw === 'string' ? raw : (typeof raw === 'object' && raw !== null && 'content' in raw ? String((raw as { content: unknown }).content) : '');
+      const trimmed = text.trim().replace(/^["']|["']$/g, '');
+      if (trimmed.length > 10) recommendedAction = trimmed;
+    } catch {
+      // Use default action
+    }
+
+    results.push({ ...d, recommended_action: recommendedAction, rank: i + 1 });
+  }
+
+  return results;
 }

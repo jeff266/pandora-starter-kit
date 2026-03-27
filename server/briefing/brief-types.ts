@@ -119,6 +119,8 @@ export interface AiBlurbs {
   close_plan?: string;
   claims?: AiBlurbClaim[];
   weekly_thesis?: string | null;
+  accountability_stale?: any[];
+  triage_allocation?: any[];
 }
 
 export interface WeeklyBriefRow {

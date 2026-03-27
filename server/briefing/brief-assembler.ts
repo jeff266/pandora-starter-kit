@@ -429,9 +429,9 @@ async function assembleMondaySetup(workspaceId: string, now: Date, briefType: Br
     console.warn('[brief-assembler] Weekly thesis generation failed (non-fatal):', (thesisErr as Error)?.message);
   }
 
-  // Recommendation accountability loop — log blurb entities, generate due check-in outcomes
+  // Recommendation accountability loop — log blurb entities, generate due check-in outcomes, check stale
   try {
-    const { logBriefRecommendation, generateCheckInOutcomes } = await import('./brief-recommendations.js');
+    const { logBriefRecommendation, generateCheckInOutcomes, checkStaleRecommendations } = await import('./brief-recommendations.js');
     if (aiBlurbs.deal_recommendation) {
       const deal = deals.items.find(d => d.name && aiBlurbs.deal_recommendation!.toLowerCase().includes(d.name.toLowerCase()));
       if (deal) {
@@ -445,6 +445,10 @@ async function assembleMondaySetup(workspaceId: string, now: Date, briefType: Br
       }
     }
     await generateCheckInOutcomes(workspaceId);
+    const staleItems = await checkStaleRecommendations(workspaceId);
+    if (staleItems.length > 0) {
+      aiBlurbs.accountability_stale = staleItems;
+    }
   } catch (recErr) {
     console.warn('[brief-assembler] Recommendation accountability failed (non-fatal):', (recErr as Error)?.message);
   }
@@ -592,9 +596,9 @@ async function assembleFridayRecap(workspaceId: string, now: Date, briefType: Br
     console.warn('[brief-assembler] Weekly thesis generation failed (non-fatal):', (thesisErr as Error)?.message);
   }
 
-  // Recommendation accountability loop — log blurb entities, generate due check-in outcomes
+  // Recommendation accountability loop — log blurb entities, generate due check-in outcomes, check stale
   try {
-    const { logBriefRecommendation, generateCheckInOutcomes } = await import('./brief-recommendations.js');
+    const { logBriefRecommendation, generateCheckInOutcomes, checkStaleRecommendations, buildEoQTriageBlock } = await import('./brief-recommendations.js');
     if (aiBlurbs.deal_recommendation) {
       const deal = deals.items.find(d => d.name && aiBlurbs.deal_recommendation!.toLowerCase().includes(d.name.toLowerCase()));
       if (deal) {
@@ -608,6 +612,17 @@ async function assembleFridayRecap(workspaceId: string, now: Date, briefType: Br
       }
     }
     await generateCheckInOutcomes(workspaceId);
+    const staleItems = await checkStaleRecommendations(workspaceId);
+    if (staleItems.length > 0) {
+      aiBlurbs.accountability_stale = staleItems;
+    }
+    // EoQ triage: inject when ≤ 14 days remain and ≥ 3 close-plan deals exist
+    if (theNumber.days_remaining <= 14) {
+      const triageDeals = await buildEoQTriageBlock(workspaceId, wonLostStages);
+      if (triageDeals.length >= 3) {
+        aiBlurbs.triage_allocation = triageDeals;
+      }
+    }
   } catch (recErr) {
     console.warn('[brief-assembler] Recommendation accountability failed (non-fatal):', (recErr as Error)?.message);
   }

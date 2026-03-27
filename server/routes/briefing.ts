@@ -611,8 +611,31 @@ router.get(
         // Non-fatal — section suppressed when empty
       }
 
+      // Extract proactive CoS sections from ai_blurbs (written during brief assembly)
+      let accountabilityStale: any[] = [];
+      let triageAllocation: any[] = [];
+      try {
+        const aiBlurbsRow = await query<{ ai_blurbs: string | null }>(
+          `SELECT ai_blurbs
+           FROM weekly_briefs
+           WHERE workspace_id = $1
+             AND brief_type IN ('monday_setup', 'friday_recap', 'quarter_close')
+             AND status IN ('ready', 'sent', 'edited')
+           ORDER BY generated_at DESC LIMIT 1`,
+          [workspaceId]
+        );
+        const blurbs = aiBlurbsRow.rows[0]?.ai_blurbs;
+        if (blurbs) {
+          const parsed = typeof blurbs === 'string' ? JSON.parse(blurbs) : blurbs;
+          if (Array.isArray(parsed.accountability_stale)) accountabilityStale = parsed.accountability_stale;
+          if (Array.isArray(parsed.triage_allocation)) triageAllocation = parsed.triage_allocation;
+        }
+      } catch (_) {
+        // Non-fatal — sections suppressed when unavailable
+      }
+
       res.json({
-        brief: { ...brief, targets: { ...brief.targets, hasTarget }, weekly_thesis: weeklyThesis, accountability_items: accountabilityItems },
+        brief: { ...brief, targets: { ...brief.targets, hasTarget }, weekly_thesis: weeklyThesis, accountability_items: accountabilityItems, accountability_stale: accountabilityStale, triage_allocation: triageAllocation },
         temporal,
         overnightSummary,
         generatedAt: new Date().toISOString(),

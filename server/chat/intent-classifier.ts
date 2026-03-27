@@ -162,8 +162,27 @@ export type DeliberationMode =
   | 'prosecutor_defense'
   | 'none';
 
+export type DeliberationLens =
+  | 'deal_viability'
+  | 'data_challenge'
+  | 'triage_allocation'
+  | 'plan_stress_test'
+  | 'red_team'
+  | 'none';
+
+// Maps modes to their CoS lens names
+const MODE_TO_LENS: Record<DeliberationMode, DeliberationLens> = {
+  bull_bear: 'deal_viability',
+  boardroom: 'triage_allocation',
+  socratic: 'data_challenge',
+  prosecutor_defense: 'plan_stress_test',
+  red_team: 'red_team',
+  none: 'none',
+};
+
 export interface DeliberationClassification {
   mode: DeliberationMode;
+  lens: DeliberationLens;
   confidence: number;
   rationale: string;
 }
@@ -447,152 +466,177 @@ function timeoutPromise(ms: number): Promise<never> {
 export async function classifyDeliberationMode(
   message: string,
   context: {
-    scopeType?: string;      // 'deal' | 'pipeline' | etc
+    scopeType?: string;           // 'deal' | 'pipeline' | etc
     entityId?: string;
     recentMessages?: string[];
+    // Context signals for auto-triggering without phrase patterns
+    stageAgeVsMedian?: number;    // days over median stage age (positive = slow)
+    daysSinceActivity?: number;   // days since last recorded activity
+    multithreadingScore?: number; // 0–1; low = poor stakeholder coverage
+    daysUntilClose?: number;      // negative = past due
+    weekOfQuarter?: number;       // 1–13
+    openDealCount?: number;       // total open deals in scope (for triage)
   }
 ): Promise<DeliberationClassification> {
   const q = message.toLowerCase().trim();
 
-  // Fast-path: socratic questioning (assumption examination)
-  // Checked BEFORE the entity-context guard — socratic mode works from conversation
-  // history alone and does not require a deal entity in scope.
-  const SOCRATIC_PATTERNS = [
-    /\bi (think|believe|feel) (the problem|this)\b/i,
-    /\bdoes this make sense\b/i,
-    /\bwhy (isn't|is|are|aren't)\b/i,
-    /\bam i (right|wrong|missing)\b/i,
-    /\bis (this|that|my) (assumption|hypothesis|theory)\b/i,
-    /\btell me why i('m| am) wrong\b/i,
-    /\bdoes (this|my) reasoning hold\b/i,
-    /\bstress.?test (my|this|our) assumption\b/i,
-    /\bam i missing something\b/i,
+  // ── Negative guard — data questions never warrant deliberation ───────────────
+  const DATA_QUESTION_PREFIXES = [
+    'show me', 'what is the current', 'what are the contacts',
+    'how many', 'when did', 'what stage', 'who is', 'list', 'summarize',
   ];
+  if (DATA_QUESTION_PREFIXES.some(prefix => q.startsWith(prefix))) {
+    return { mode: 'none', lens: 'none', confidence: 1, rationale: 'data lookup question' };
+  }
 
-  for (const pattern of SOCRATIC_PATTERNS) {
-    if (pattern.test(message)) {
+  // ── Context-signal auto-triggers ────────────────────────────────────────────
+  // These fire when entity context is deal-scoped and risk signals are present,
+  // even if the user's message doesn't use deliberation phrases.
+  if (context.scopeType === 'deal' && context.entityId) {
+    const overMedian = (context.stageAgeVsMedian ?? 0) > 10;
+    const poorCoverage = (context.multithreadingScore ?? 1) < 0.30;
+    const activityGap = (context.daysSinceActivity ?? 0) > 14;
+    const urgentClose = typeof context.daysUntilClose === 'number' && context.daysUntilClose >= 0 && context.daysUntilClose < 14;
+    if (overMedian || poorCoverage || activityGap || urgentClose) {
       return {
-        mode: 'socratic',
-        confidence: 1,
-        rationale: 'socratic questioning pattern',
+        mode: 'bull_bear',
+        lens: 'deal_viability',
+        confidence: 0.85,
+        rationale: `context signal: ${overMedian ? 'stage_age_over_median' : poorCoverage ? 'low_multithreading' : activityGap ? 'activity_gap' : 'close_urgency'}`,
       };
     }
   }
 
-  // Fast-path guard: no deliberation if no entity context and message doesn't mention hypothesis/sprint
-  if (!context.scopeType && !context.entityId &&
-      !/\b(hypothesis|sprint|plan)\b/i.test(message)) {
+  // Triage allocation auto-trigger: late quarter with multiple open deals
+  if ((context.weekOfQuarter ?? 0) >= 9 && (context.openDealCount ?? 0) >= 3) {
     return {
-      mode: 'none',
-      confidence: 1,
-      rationale: 'no entity context',
+      mode: 'boardroom',
+      lens: 'triage_allocation',
+      confidence: 0.80,
+      rationale: 'context signal: late_quarter_triage',
     };
   }
 
-  // Fast-path: obvious bull_bear patterns (no LLM call needed)
-  const BULL_BEAR_PATTERNS = [
+  // ── Data challenge patterns (replaces socratic) ──────────────────────────────
+  // Fires before entity guard — data challenge works from message alone.
+  // Triggers on assertive claims that can be verified against live data.
+  const DATA_CHALLENGE_PATTERNS = [
+    /\bi (think|believe|feel) (the problem|this|that)\b/i,
+    /\bthe (problem|issue|root cause|reason) is\b/i,
+    /\bour (pipeline|win rate|coverage|close rate|attainment|conversion) (is|looks|seems|appears)\b/i,
+    /\bwe (have|had) (good|great|strong|weak|poor|enough|plenty of) (pipeline|coverage|deals|activity)/i,
+    /\bwe('re| are) (on track|behind|ahead|healthy|struggling|doing well|in good shape)/i,
+    /\bdoes this make sense\b/i,
+    /\bam i (right|wrong|missing|off)\b/i,
+    /\bis (this|that|my) (assumption|hypothesis|theory|read)\b/i,
+    /\btell me why i('m| am) wrong\b/i,
+    /\bdoes (this|my) reasoning hold\b/i,
+    /\bstress.?test (my|this|our) (assumption|thesis|view)\b/i,
+    /\bam i missing something\b/i,
+    /\bwe should (focus|prioritize|invest|hire|cut|double down|push|stop)\b/i,
+    /\bthe (real|underlying|main|biggest|core) (issue|problem|challenge|risk) (is|here)\b/i,
+  ];
+
+  for (const pattern of DATA_CHALLENGE_PATTERNS) {
+    if (pattern.test(message)) {
+      return {
+        mode: 'socratic',
+        lens: 'data_challenge',
+        confidence: 0.90,
+        rationale: 'data challenge pattern — assertive claim detected',
+      };
+    }
+  }
+
+  // ── Fast-path guard: no deliberation if no entity context ────────────────────
+  if (!context.scopeType && !context.entityId &&
+      !/\b(hypothesis|sprint|plan)\b/i.test(message)) {
+    return { mode: 'none', lens: 'none', confidence: 1, rationale: 'no entity context' };
+  }
+
+  // ── Fast-path: deal viability patterns ──────────────────────────────────────
+  const DEAL_VIABILITY_PATTERNS = [
     /\bwill (this|the) deal close\b/i,
     /\b(probability|chance|likelihood) of (closing|winning)\b/i,
     /\bshould (i|we) (pursue|walk away|drop|kill)\b/i,
     /\bclose probability\b/i,
   ];
 
-  for (const pattern of BULL_BEAR_PATTERNS) {
+  for (const pattern of DEAL_VIABILITY_PATTERNS) {
     if (pattern.test(message)) {
       return {
         mode: 'bull_bear',
+        lens: 'deal_viability',
         confidence: 1,
-        rationale: 'high-confidence pattern match',
+        rationale: 'deal viability phrase match',
       };
     }
   }
 
-  // Fast-path: boardroom deliberation (multi-stakeholder decision)
-  const BOARDROOM_PATTERNS = [
+  // ── Fast-path: triage allocation patterns ────────────────────────────────────
+  const TRIAGE_PATTERNS = [
     /\bwhat should (we|the team) do\b/i,
     /\bhow should (we|i) handle\b/i,
     /\bwe('re| are) considering\b/i,
     /\bprioritize\b.*\bor\b/i,
     /\btrade.?off\b/i,
+    /\bwhich deals? (should|do) (we|i) (focus|prioritize|work|chase|pursue)\b/i,
+    /\bwhere (should|do) (we|i) (spend|put|focus)\b.*(time|effort|energy)\b/i,
   ];
 
-  for (const pattern of BOARDROOM_PATTERNS) {
+  for (const pattern of TRIAGE_PATTERNS) {
     if (pattern.test(message)) {
       return {
         mode: 'boardroom',
+        lens: 'triage_allocation',
         confidence: 1,
-        rationale: 'boardroom decision pattern',
+        rationale: 'triage allocation phrase match',
       };
     }
   }
 
-  // Fast-path: prosecutor/defense (plan stress-testing)
-  const PROSECUTOR_PATTERNS = [
+  // ── Fast-path: plan stress-test patterns ─────────────────────────────────────
+  const PLAN_STRESS_PATTERNS = [
     /\bwe('re| are) planning (to|on)\b/i,
     /\bwe (decided|decided to)\b/i,
     /\bour (plan|strategy|approach) is\b/i,
     /\bwe('re| are) going to\b/i,
   ];
 
-  for (const pattern of PROSECUTOR_PATTERNS) {
+  for (const pattern of PLAN_STRESS_PATTERNS) {
     if (pattern.test(message)) {
       return {
         mode: 'prosecutor_defense',
+        lens: 'plan_stress_test',
         confidence: 1,
-        rationale: 'plan stress-testing pattern',
+        rationale: 'plan stress-test phrase match',
       };
     }
   }
 
-  // Negative guard — these are data questions, not deliberation
-  const DATA_QUESTION_PREFIXES = [
-    'show me',
-    'what is the current',
-    'what are the contacts',
-    'how many',
-    'when did',
-    'what stage',
-    'who is',
-    'list',
-    'summarize',
-  ];
-
-  if (DATA_QUESTION_PREFIXES.some(prefix => q.startsWith(prefix))) {
-    return {
-      mode: 'none',
-      confidence: 1,
-      rationale: 'data lookup question',
-    };
-  }
-
-  // DeepSeek fallback for ambiguous cases
-  // Only call if scopeType is 'deal' or message mentions hypothesis/sprint
+  // ── DeepSeek fallback for ambiguous cases ────────────────────────────────────
   if (context.scopeType !== 'deal' &&
       !/\b(hypothesis|sprint|plan)\b/i.test(message)) {
-    return {
-      mode: 'none',
-      confidence: 0.9,
-      rationale: 'not a deal context, no hypothesis keywords',
-    };
+    return { mode: 'none', lens: 'none', confidence: 0.9, rationale: 'not a deal context, no hypothesis keywords' };
   }
 
   try {
     const response = await callLLM('system', 'intent_classify', {
       systemPrompt: `Classify whether this RevOps question warrants deliberation analysis.
 
-bull_bear: Question about whether a specific deal will close, its risk vs. upside, close probability, or whether to pursue/drop it.
+deal_viability (mode: bull_bear): Question about whether a specific deal will close, its risk vs. upside, close probability, or whether to pursue/drop it.
 Examples: "will this deal close?", "should we walk away?", "what's the probability this lands in Q1?"
 
-red_team: Question about validating a hypothesis, sprint plan, or whether a proposed action is sufficient.
+red_team (mode: red_team): Question about validating a hypothesis, sprint plan, or whether a proposed action is sufficient.
 Examples: "will this sprint work?", "is this hypothesis right?", "does this plan address the root cause?"
 
-boardroom: Question requiring multi-stakeholder perspective (CEO/CFO/VP Sales). What should we do? How should we handle this? Trade-offs between options.
-Examples: "what should we do about pipeline coverage?", "how should we prioritize these deals?", "should we invest in outbound or product?"
+triage_allocation (mode: boardroom): Question about which deals or priorities to focus on. Trade-offs between options, rep capacity, quarter close potential.
+Examples: "what should we do about pipeline coverage?", "how should we prioritize these deals?", "which deals should we focus on?"
 
-socratic: User is stating an assumption or belief and wants it examined/challenged. "I think...", "Does this make sense?", "Am I right?"
-Examples: "I think the problem is lack of discovery", "does it make sense to focus on enterprise?", "am I missing something?"
+data_challenge (mode: socratic): User is making an assertive claim about pipeline state, metrics, or root cause that can be verified against live data. "I think...", "Our pipeline is...", "We have good coverage..."
+Examples: "I think the problem is lack of discovery", "our pipeline is healthy", "we're on track for the quarter"
 
-prosecutor_defense: User is stating a plan and wants it stress-tested. "We're planning to...", "Our strategy is...", "We decided to..."
+plan_stress_test (mode: prosecutor_defense): User is stating a plan and wants it stress-tested. "We're planning to...", "Our strategy is...", "We decided to..."
 Examples: "we're planning to hire 5 SDRs", "our strategy is to target healthcare", "we decided to cut prices 20%"
 
 none: Everything else — data lookups, pipeline questions, rep questions, general advice, list requests.
@@ -613,8 +657,10 @@ Respond ONLY with JSON:
     if (jsonMatch) {
       try {
         const parsed = JSON.parse(jsonMatch[0]);
+        const mode: DeliberationMode = parsed.mode || 'none';
         return {
-          mode: parsed.mode || 'none',
+          mode,
+          lens: MODE_TO_LENS[mode] ?? 'none',
           confidence: parsed.confidence || 0.5,
           rationale: parsed.rationale || 'classifier response',
         };
@@ -626,12 +672,7 @@ Respond ONLY with JSON:
     console.error('[classifyDeliberationMode] error:', err);
   }
 
-  // Fallback: no deliberation on error
-  return {
-    mode: 'none',
-    confidence: 1,
-    rationale: 'classifier error',
-  };
+  return { mode: 'none', lens: 'none', confidence: 1, rationale: 'classifier error' };
 }
 
 export async function classifyIntent(

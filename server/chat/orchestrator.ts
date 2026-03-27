@@ -1407,10 +1407,66 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
       }
 
       // Deliberation classification — check if this warrants bull/bear analysis
+      // If deal-scoped, fetch quick context signals to auto-trigger without phrase patterns
+      let dealSignals: {
+        stageAgeVsMedian?: number;
+        daysSinceActivity?: number;
+        multithreadingScore?: number;
+        daysUntilClose?: number;
+      } = {};
+      if (scopeType === 'deal' && entityId) {
+        try {
+          const [dealRow, medianRow, contactRow] = await Promise.all([
+            query(
+              `SELECT
+                 days_in_stage,
+                 EXTRACT(DAY FROM close_date - NOW())::int AS days_until_close,
+                 EXTRACT(DAY FROM NOW() - last_activity_date)::int AS days_since_activity
+               FROM deals WHERE id = $1 AND workspace_id = $2`,
+              [entityId, workspaceId]
+            ),
+            query(
+              `SELECT COALESCE(AVG(days_in_stage), NULL)::int AS median_days
+               FROM deals
+               WHERE workspace_id = $1
+                 AND stage_normalized = (SELECT stage_normalized FROM deals WHERE id = $2 AND workspace_id = $1)
+                 AND stage_normalized NOT IN ('closed_won','closed_lost')
+                 AND id != $2`,
+              [workspaceId, entityId]
+            ),
+            query(
+              `SELECT
+                 COUNT(DISTINCT dc.contact_id)::int AS contacts,
+                 COUNT(DISTINCT CASE WHEN c.seniority IN ('vp','c_suite','director') THEN dc.contact_id END)::int AS senior_contacts
+               FROM deal_contacts dc
+               LEFT JOIN contacts c ON c.id = dc.contact_id AND c.workspace_id = $1
+               WHERE dc.deal_id = $2`,
+              [workspaceId, entityId]
+            ),
+          ]);
+          const d = dealRow.rows[0];
+          const median = medianRow.rows[0]?.median_days ?? null;
+          const contacts = contactRow.rows[0];
+          if (d) {
+            dealSignals.daysUntilClose = d.days_until_close != null ? parseInt(d.days_until_close, 10) : undefined;
+            dealSignals.daysSinceActivity = d.days_since_activity != null ? parseInt(d.days_since_activity, 10) : undefined;
+            if (median != null && d.days_in_stage != null) {
+              dealSignals.stageAgeVsMedian = parseInt(d.days_in_stage, 10) - median;
+            }
+            if (contacts && parseInt(contacts.contacts, 10) > 0) {
+              dealSignals.multithreadingScore = Math.min(1, parseInt(contacts.senior_contacts, 10) / Math.max(1, parseInt(contacts.contacts, 10)));
+            }
+          }
+        } catch {
+          // Non-fatal — proceed without signals
+        }
+      }
+
       const classifierStart = Date.now();
       const deliberationClassification = await classifyDeliberationMode(message, {
         scopeType,
         entityId,
+        ...dealSignals,
       });
       const classifierMs = Date.now() - classifierStart;
 
@@ -1428,7 +1484,7 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
           deliberationClassification.confidence >= 0.70 &&
           entityId) {
         try {
-          console.log(`[orchestrator] Running bull/bear deliberation for deal ${entityId}`);
+          console.log(`[orchestrator] Running deal viability deliberation for deal ${entityId} (lens: ${deliberationClassification.lens})`);
           deliberationResult = await runDeliberation(workspaceId, entityId, message);
           deliberationMode = 'bull_bear';
         } catch (err) {
@@ -1437,11 +1493,11 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
         }
       }
 
-      // Boardroom deliberation
+      // Triage Allocation deliberation
       if (deliberationClassification.mode === 'boardroom' &&
           deliberationClassification.confidence >= 0.70) {
         try {
-          console.log(`[orchestrator] Running boardroom deliberation`);
+          console.log(`[orchestrator] Running triage allocation deliberation (lens: ${deliberationClassification.lens})`);
           // Assemble context from recent history
           const recentContext = history.slice(-3).map(m => `${m.role}: ${m.content}`).join('\n');
           const context = recentContext || 'No additional context available.';
@@ -1453,18 +1509,18 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
         }
       }
 
-      // Socratic deliberation
+      // Data Challenge deliberation (data-verifies assertive claims)
       if (deliberationClassification.mode === 'socratic' &&
           deliberationClassification.confidence >= 0.70) {
         try {
-          console.log(`[orchestrator] Running socratic deliberation`);
+          console.log(`[orchestrator] Running data challenge deliberation (lens: ${deliberationClassification.lens})`);
           const recentContext = history.slice(-3).map(m => `${m.role}: ${m.content}`).join('\n');
           const context = recentContext || 'No additional context available.';
-          const { runSocraticDeliberation } = await import('./deliberation-engine.js');
-          deliberationResult = await runSocraticDeliberation(workspaceId, message, context);
+          const { runDataChallengeDeliberation } = await import('./deliberation-engine.js');
+          deliberationResult = await runDataChallengeDeliberation(workspaceId, message, context);
           deliberationMode = 'socratic';
         } catch (err) {
-          console.error('[orchestrator] Socratic deliberation failed:', err);
+          console.error('[orchestrator] Data challenge deliberation failed:', err);
         }
       }
 
@@ -1472,7 +1528,7 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
       if (deliberationClassification.mode === 'prosecutor_defense' &&
           deliberationClassification.confidence >= 0.70) {
         try {
-          console.log(`[orchestrator] Running prosecutor/defense deliberation`);
+          console.log(`[orchestrator] Running plan stress-test deliberation (lens: ${deliberationClassification.lens})`);
           const recentContext = history.slice(-3).map(m => `${m.role}: ${m.content}`).join('\n');
           const context = recentContext || 'No additional context available.';
           const { runProsecutorDefenseDeliberation } = await import('./deliberation-engine.js');
@@ -1586,6 +1642,12 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
 
       // 5. Add deliberation block based on mode
       if (deliberationResult && deliberationMode === 'bull_bear') {
+        // Deal Viability lens — enrich synthesis with close prob delta if available
+        const bullSummary = deliberationResult.perspectives?.bull?.output ?? '';
+        const bearSummary = deliberationResult.perspectives?.bear?.output ?? '';
+        const probDeltaNote = deliberationResult.currentCloseProbability != null
+          ? `Close probability: ${deliberationResult.currentCloseProbability}%${deliberationResult.actionDeltaProbability ? ` → ${deliberationResult.currentCloseProbability + deliberationResult.actionDeltaProbability}% if actioned` : ''}. ${deliberationResult.reevaluationSignal ? `Watch for: ${deliberationResult.reevaluationSignal}` : ''}`
+          : '';
         builder.addDeliberation({
           mode: 'bull_bear',
           run_id: deliberationResult.id ?? undefined,
@@ -1593,25 +1655,28 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
           panels: [
             {
               role: 'Bull',
-              summary: deliberationResult.perspectives?.bull?.output ?? '',
+              summary: bullSummary,
               key_points: [],
               confidence: (deliberationResult.perspectives?.bull?.closeProbability ?? 50) / 100,
               color_hint: 'bull',
             },
             {
               role: 'Bear',
-              summary: deliberationResult.perspectives?.bear?.output ?? '',
+              summary: bearSummary,
               key_points: [],
               confidence: (deliberationResult.perspectives?.bear?.closeProbability ?? 50) / 100,
               color_hint: 'bear',
             },
           ],
-          synthesis: deliberationResult.verdict?.rawOutput ?? '',
-          verdict: deliberationResult.verdict?.recommendedAction ?? undefined,
+          synthesis: probDeltaNote
+            ? `${probDeltaNote}\n\n${deliberationResult.verdict?.rawOutput ?? ''}`
+            : (deliberationResult.verdict?.rawOutput ?? ''),
+          verdict: deliberationResult.highestLeverageAction ?? deliberationResult.verdict?.recommendedAction ?? undefined,
         });
       }
 
       if (deliberationResult && deliberationMode === 'boardroom') {
+        // Triage Allocation lens
         builder.addDeliberation({
           mode: 'boardroom' as any,
           hypothesis: message,
@@ -1627,23 +1692,27 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
       }
 
       if (deliberationResult && deliberationMode === 'socratic') {
+        // Data Challenge lens — show claim, live data evidence, verdict
+        const verdictLabel = deliberationResult.dataVerdict === 'verified' ? 'Claim: Verified' :
+          deliberationResult.dataVerdict === 'contradicted' ? 'Claim: Contradicted' :
+          deliberationResult.dataVerdict === 'partial' ? 'Claim: Partially Supported' : 'Claim Under Review';
         builder.addDeliberation({
           mode: 'socratic' as any,
           hypothesis: message,
           panels: [
             {
-              role: 'Assumption',
+              role: verdictLabel,
               summary: deliberationResult.assumption,
-              key_points: [deliberationResult.probing_questions],
-              confidence: 0.5,
-              color_hint: 'bear',
+              key_points: deliberationResult.probing_questions ? [deliberationResult.probing_questions] : [],
+              confidence: deliberationResult.dataVerdict === 'verified' ? 0.85 : deliberationResult.dataVerdict === 'contradicted' ? 0.15 : 0.5,
+              color_hint: deliberationResult.dataVerdict === 'verified' ? 'bull' : 'bear',
             },
             {
-              role: 'Counter-Hypothesis',
+              role: 'Evidence',
               summary: deliberationResult.counter_hypothesis,
               key_points: [],
-              confidence: 0.5,
-              color_hint: 'bull',
+              confidence: 0.8,
+              color_hint: 'synthesis',
             },
           ],
           synthesis: deliberationResult.synthesis,
@@ -1651,14 +1720,19 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
       }
 
       if (deliberationResult && deliberationMode === 'prosecutor_defense') {
+        // Plan Stress-Test lens — include watch metric in synthesis
+        const stressTestSynthesis = [
+          deliberationResult.verdict,
+          deliberationResult.watchMetric ? `Watch metric: ${deliberationResult.watchMetric}` : '',
+        ].filter(Boolean).join('\n\n');
         builder.addDeliberation({
           mode: 'prosecutor_defense' as any,
           hypothesis: message,
           panels: [
             {
-              role: 'Prosecutor',
+              role: 'Prosecution',
               summary: deliberationResult.prosecution,
-              key_points: [],
+              key_points: deliberationResult.historicalPattern ? [deliberationResult.historicalPattern] : [],
               confidence: 1 - deliberationResult.confidence,
               color_hint: 'prosecutor',
             },
@@ -1670,7 +1744,7 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
               color_hint: 'defense',
             },
           ],
-          synthesis: deliberationResult.verdict,
+          synthesis: stressTestSynthesis,
         });
       }
 
