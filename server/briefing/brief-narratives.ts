@@ -15,6 +15,99 @@ import {
 
 type QuarterPhase = 'early' | 'mid' | 'late' | 'final_week';
 
+function getThesisFocusHint(phase: QuarterPhase): string {
+  switch (phase) {
+    case 'early':      return 'The quarter is young. The diagnosis should focus on pipeline build and coverage.';
+    case 'mid':        return 'Mid-quarter. The diagnosis should focus on deal velocity and rep execution gaps.';
+    case 'late':       return 'Late quarter. The diagnosis should focus on close plan rigor and which deals are real.';
+    case 'final_week': return 'Final week. The diagnosis must name exactly what must close and what will slip.';
+  }
+}
+
+export async function generateWeeklyThesis(
+  workspaceId: string,
+  findings: Array<{ severity: string; message: string; skillName?: string; dealName?: string }>,
+  theNumber: { attainment_pct?: number | null; coverage_ratio?: number | null; pipeline_total?: number; deal_count?: number; days_remaining?: number; gap?: number },
+  quarterPhase: QuarterPhase,
+  weekOfQuarter?: number
+): Promise<string | null> {
+  if (!findings || findings.length < 3) return null;
+
+  const focusHint = getThesisFocusHint(quarterPhase);
+  const topFindings = findings
+    .filter(f => f.severity === 'critical' || f.severity === 'high' || f.severity === 'warning')
+    .slice(0, 5);
+  if (topFindings.length < 3) {
+    const allSlice = findings.slice(0, 5);
+    if (allSlice.length < 3) return null;
+    topFindings.push(...allSlice.slice(topFindings.length));
+  }
+
+  const findingLines = topFindings.map((f, i) =>
+    `${i + 1}. [${f.severity}] ${f.message}${f.dealName ? ` (${f.dealName})` : ''}`
+  ).join('\n');
+
+  const attainmentStr = theNumber.attainment_pct != null
+    ? `${theNumber.attainment_pct.toFixed(0)}% attainment`
+    : null;
+  const coverageStr = theNumber.coverage_ratio != null
+    ? `${theNumber.coverage_ratio.toFixed(1)}× coverage`
+    : null;
+  const daysStr = theNumber.days_remaining != null
+    ? `${theNumber.days_remaining} days remaining in quarter`
+    : null;
+  const situationParts = [attainmentStr, coverageStr, daysStr].filter(Boolean).join(', ');
+
+  const systemPrompt = `${PANDORA_VOICE_STANDARD}
+
+You are Pandora, a Chief of Staff AI for a B2B sales leadership team. Write a concise opening thesis for this week's revenue brief. Your output is the first thing the CRO reads — it must earn their attention in three short paragraphs.
+
+TONE: Direct. No hedging. No filler. Write like a trusted advisor who has done the analysis and arrived at a clear view.
+
+FORMAT RULES:
+- Return a plain string. No JSON, no markdown, no bullet points, no headers.
+- Three paragraphs separated by a single blank line.
+- Each paragraph is 1-3 sentences.
+- Total output under 120 words.
+- Never start a sentence with "I".
+- Do not use the word "critical", "alarming", "urgent", or "important".
+
+PARAGRAPH STRUCTURE:
+1. Theme/Diagnosis: What is the single most important thing happening in this business right now? Name the pattern across the findings. Be specific.
+2. Situation: What does the attainment and pipeline data say? What happens if nothing changes?
+3. Recommendation: What is the one thing the team must do this week? Name the action precisely — deal, rep, or move.
+
+${focusHint}`;
+
+  const userPrompt = `Week ${weekOfQuarter ?? '?'} of ${quarterPhase} phase.
+${situationParts ? `Metrics: ${situationParts}.` : ''}
+
+Top findings this week:
+${findingLines}
+
+Write the three-paragraph thesis now.`;
+
+  try {
+    const raw = await callLLM(workspaceId, 'reason', {
+      systemPrompt,
+      messages: [{ role: 'user', content: userPrompt }],
+      temperature: 0.3,
+      maxTokens: 300,
+      _tracking: {
+        workspaceId,
+        phase: 'briefing',
+        stepName: 'generate-weekly-thesis',
+      },
+    });
+    const text = typeof raw === 'string' ? raw : (raw as any)?.content || '';
+    const trimmed = text.trim();
+    return trimmed.length > 20 ? trimmed : null;
+  } catch (err) {
+    console.error('[brief-narratives] generateWeeklyThesis failed:', err);
+    return null;
+  }
+}
+
 function getTemporalFocus(phase: QuarterPhase): string {
   switch (phase) {
     case 'early':     return 'Focus: pipeline build and qualification. Coverage ratio is the leading indicator.';

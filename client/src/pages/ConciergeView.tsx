@@ -171,6 +171,7 @@ interface OpeningBriefData {
     suppressTopics: string[];
     cell?: string;
   } | null;
+  weekly_thesis?: string | null;
   [key: string]: unknown;
 }
 
@@ -368,6 +369,46 @@ function SkeletonCard() {
       <div style={{ height: 10, width: '40%', background: S.border2, borderRadius: 4, marginBottom: 10 }} />
       <div style={{ height: 13, width: '80%', background: S.border2, borderRadius: 4, marginBottom: 8 }} />
       <div style={{ height: 11, width: '60%', background: S.border2, borderRadius: 4 }} />
+    </div>
+  );
+}
+
+function PandoraThesisCard({ thesis, colors: C }: { thesis: string; colors: typeof S }) {
+  const paragraphs = thesis.split(/\n\n+/).map(p => p.trim()).filter(Boolean);
+  return (
+    <div style={{
+      background: 'rgba(29,158,117,0.05)',
+      border: `0.5px solid rgba(29,158,117,0.25)`,
+      borderLeft: `2px solid ${C.teal}`,
+      borderRadius: 10,
+      padding: '14px 16px',
+      marginBottom: 16,
+      fontFamily: C.font,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 10 }}>
+        <span style={{
+          fontSize: 9, fontWeight: 700, color: C.teal,
+          background: 'rgba(29,158,117,0.12)',
+          border: `0.5px solid rgba(29,158,117,0.3)`,
+          borderRadius: 99, padding: '2px 8px',
+          textTransform: 'uppercase' as const, letterSpacing: '0.06em',
+        }}>
+          Pandora's Take
+        </span>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {paragraphs.map((para, i) => (
+          <p key={i} style={{
+            margin: 0,
+            fontSize: 13,
+            color: i === 0 ? C.text : C.textSub,
+            lineHeight: 1.6,
+            fontWeight: i === 0 ? 500 : 400,
+          }}>
+            {para}
+          </p>
+        ))}
+      </div>
     </div>
   );
 }
@@ -1307,6 +1348,11 @@ export default function ConciergeView() {
               </div>
             )}
 
+
+            {/* PANDORA'S TAKE — weekly thesis card */}
+            {brief.weekly_thesis && (
+              <PandoraThesisCard thesis={brief.weekly_thesis} colors={S} />
+            )}
 
             {/* BRIEF ITEMS */}
             {(() => {

@@ -581,8 +581,23 @@ router.get(
         });
       }
 
+      // Fetch weekly_thesis from most recent weekly brief (stored in ai_blurbs JSONB)
+      let weeklyThesis: string | null = null;
+      try {
+        const thesisRow = await query<{ weekly_thesis: string | null }>(
+          `SELECT ai_blurbs->>'weekly_thesis' as weekly_thesis
+           FROM weekly_briefs
+           WHERE workspace_id = $1 AND status IN ('ready','sent','edited')
+           ORDER BY generated_at DESC LIMIT 1`,
+          [workspaceId]
+        );
+        weeklyThesis = thesisRow.rows[0]?.weekly_thesis ?? null;
+      } catch (_thesisErr) {
+        // Non-fatal — thesis is optional
+      }
+
       res.json({
-        brief: { ...brief, targets: { ...brief.targets, hasTarget } },
+        brief: { ...brief, targets: { ...brief.targets, hasTarget }, weekly_thesis: weeklyThesis },
         temporal,
         overnightSummary,
         generatedAt: new Date().toISOString(),

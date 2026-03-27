@@ -118,6 +118,7 @@ export interface AiBlurbs {
   quarter_situation?: string;
   close_plan?: string;
   claims?: AiBlurbClaim[];
+  weekly_thesis?: string | null;
 }
 
 export interface WeeklyBriefRow {
