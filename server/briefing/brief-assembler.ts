@@ -8,7 +8,7 @@ import {
   getCurrentQuota, formatCompact, ordinal, buildOpenFilter,
 } from './brief-utils.js';
 import { determineBriefType, determineEditorialFocus } from './editorial-engine.js';
-import { generateBriefNarratives, generateWeeklyThesis } from './brief-narratives.js';
+import { generateBriefNarratives } from './brief-narratives.js';
 import { annotateBriefNarrative } from './brief-annotator.js';
 import { computeTemporalContext } from '../context/opening-brief.js';
 import { buildComparison, formatComparisonBlock } from '../documents/comparator.js';
@@ -402,15 +402,6 @@ async function assembleMondaySetup(workspaceId: string, now: Date, briefType: Br
   const rawBlurbs = await generateBriefNarratives(workspaceId, briefType, theNumber, whatChanged, reps.items, deals.items, editorialFocus, temporal?.weekOfQuarter, temporal?.quarterPhase as any, temporal?.pctQuarterComplete);
   const aiBlurbs = await annotateBriefNarrative(workspaceId, rawBlurbs, { theNumber, whatChanged, reps: reps.items, deals: deals.items });
 
-  const weeklyThesis = await generateWeeklyThesis(
-    workspaceId,
-    deals.items,
-    theNumber,
-    (temporal?.quarterPhase as any) ?? 'mid',
-    temporal?.weekOfQuarter
-  ).catch(() => null);
-  if (weeklyThesis) aiBlurbs.weekly_thesis = weeklyThesis;
-
   // Trigger partial accuracy write
   const periodLabel = getCurrentPeriodLabel();
   await writeQuarterlyForecastAccuracy(workspaceId, periodLabel).catch(err => console.error('Failed to write forecast accuracy:', err));
@@ -518,15 +509,6 @@ async function assembleFridayRecap(workspaceId: string, now: Date, briefType: Br
   emitter.toolCall('brief-assembler', 'generateNarrative', 'Synthesizing brief narrative');
   const rawBlurbs = await generateBriefNarratives(workspaceId, briefType, theNumber, whatChanged, reps.items, deals.items, editorialFocus, temporal?.weekOfQuarter, temporal?.quarterPhase as any, temporal?.pctQuarterComplete);
   const aiBlurbs = await annotateBriefNarrative(workspaceId, rawBlurbs, { theNumber, whatChanged, reps: reps.items, deals: deals.items });
-
-  const weeklyThesis = await generateWeeklyThesis(
-    workspaceId,
-    deals.items,
-    theNumber,
-    (temporal?.quarterPhase as any) ?? 'mid',
-    temporal?.weekOfQuarter
-  ).catch(() => null);
-  if (weeklyThesis) aiBlurbs.weekly_thesis = weeklyThesis;
 
   // Trigger partial accuracy write
   const periodLabel = getCurrentPeriodLabel();

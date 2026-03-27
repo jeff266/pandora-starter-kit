@@ -18,6 +18,31 @@ import {
 } from '../context/opening-brief.js';
 import { requireWorkspaceAccess } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/permissions.js';
+import { generateWeeklyThesis } from '../briefing/brief-narratives.js';
+
+// ===== WEEKLY THESIS CACHE =====
+// Workspace-keyed 1-hour cache so the thesis LLM call is not made on every
+// Concierge poll (which runs every 5 minutes). Regenerates when findings change
+// (cache key includes finding count + top severity to detect stale state).
+interface ThesisCacheEntry { thesis: string | null; key: string; expiresAt: number }
+const thesisCache = new Map<string, ThesisCacheEntry>();
+const THESIS_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+function pruneThesisCache(): void {
+  const now = Date.now();
+  for (const [k, v] of thesisCache) {
+    if (v.expiresAt < now) thesisCache.delete(k);
+  }
+}
+
+function buildThesisCacheKey(
+  workspaceId: string,
+  findingCount: number,
+  topSeverity: string,
+  quarterPhase: string
+): string {
+  return `${workspaceId}:${findingCount}:${topSeverity}:${quarterPhase}`;
+}
 
 const router = Router();
 
@@ -581,17 +606,32 @@ router.get(
         });
       }
 
-      // Fetch weekly_thesis from most recent weekly brief (stored in ai_blurbs JSONB)
+      // Generate weekly thesis from current findings — cached 1 hour per workspace
       let weeklyThesis: string | null = null;
       try {
-        const thesisRow = await query<{ weekly_thesis: string | null }>(
-          `SELECT ai_blurbs->>'weekly_thesis' as weekly_thesis
-           FROM weekly_briefs
-           WHERE workspace_id = $1 AND status IN ('ready','sent','edited')
-           ORDER BY generated_at DESC LIMIT 1`,
-          [workspaceId]
-        );
-        weeklyThesis = thesisRow.rows[0]?.weekly_thesis ?? null;
+        const topFindings = brief.findings?.topFindings ?? [];
+        const findingCount = topFindings.length;
+        const topSeverity = topFindings[0]?.severity ?? 'none';
+        const qPhase = temporal.quarterPhase ?? 'mid';
+        const cacheKey = buildThesisCacheKey(workspaceId, findingCount, topSeverity, qPhase);
+        pruneThesisCache();
+        const cached = thesisCache.get(workspaceId);
+        if (cached && cached.key === cacheKey && cached.expiresAt > Date.now()) {
+          weeklyThesis = cached.thesis;
+        } else {
+          weeklyThesis = await generateWeeklyThesis(
+            workspaceId,
+            topFindings,
+            {
+              attainment_pct: brief.targets?.pctAttained ?? null,
+              coverage_ratio: brief.pipeline?.coverageRatio ?? null,
+              days_remaining: temporal.daysRemainingInQuarter ?? undefined,
+            },
+            qPhase as any,
+            temporal.weekOfQuarter as number | undefined
+          ).catch(() => null);
+          thesisCache.set(workspaceId, { thesis: weeklyThesis, key: cacheKey, expiresAt: Date.now() + THESIS_TTL_MS });
+        }
       } catch (_thesisErr) {
         // Non-fatal — thesis is optional
       }

@@ -396,13 +396,13 @@ function PandoraThesisCard({ thesis, colors: C }: { thesis: string; colors: type
           Pandora's Take
         </span>
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
         {paragraphs.map((para, i) => (
           <p key={i} style={{
             margin: 0,
-            fontSize: 13,
+            fontSize: i === 0 ? 14 : 13,
             color: i === 0 ? C.text : C.textSub,
-            lineHeight: 1.6,
+            lineHeight: 1.65,
             fontWeight: i === 0 ? 500 : 400,
           }}>
             {para}
