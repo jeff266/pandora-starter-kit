@@ -348,7 +348,7 @@ router.post(
 
       // Return success with CRM record URL if available
       const crmRecordUrl = action.deal_source === 'hubspot'
-        ? `https://app.hubspot.com/contacts/${action.execution_payload?.portal_id || ''}/deal/${action.execution_payload?.deal_external_id || ''}`
+        ? `https://app.hubspot.com/contacts/${action.execution_payload?.portal_id || ''}/record/0-3/${action.execution_payload?.deal_external_id || ''}`
         : action.deal_source === 'salesforce'
         ? `https://${action.execution_payload?.instance_url || 'login.salesforce.com'}/${action.execution_payload?.deal_external_id || ''}`
         : undefined;

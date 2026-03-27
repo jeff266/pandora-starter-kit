@@ -424,7 +424,7 @@ router.get('/:workspaceId/action-items/:actionId/preview-execution', async (req:
     if (crmSource === 'hubspot') {
       const portalId = await (client as any).getPortalId();
       if (portalId) {
-        crmUrl = `https://app.hubspot.com/contacts/${portalId}/deal/${externalId}`;
+        crmUrl = `https://app.hubspot.com/contacts/${portalId}/record/0-3/${externalId}`;
       }
     } else if (crmSource === 'salesforce') {
       crmUrl = `${credentials.instance_url || credentials.instanceUrl}/${externalId}`;

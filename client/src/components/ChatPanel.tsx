@@ -1722,7 +1722,24 @@ function renderTable(tableLines: string[], keyBase: number, onSend?: (msg: strin
 }
 
 function formatMarkdown(text: string, onSend?: (msg: string) => void): React.ReactElement[] {
-  const lines = text.split('\n');
+  // Pre-pass: rejoin lines where a markdown link's URL was split across lines.
+  // The LLM sometimes breaks a long `[label](url)` at the `-` character inside a UUID,
+  // producing a line ending with `(...url-fragment` and the next line starting with `rest)`.
+  // Detect: line contains `](` but has no matching `)` after the last `(`.
+  const rawLines = text.split('\n');
+  const lines: string[] = [];
+  for (let i = 0; i < rawLines.length; i++) {
+    const line = rawLines[i];
+    // Check if the line has an open markdown link paren that isn't closed
+    const lastOpenParen = line.lastIndexOf('](');
+    if (lastOpenParen !== -1 && !line.includes(')', lastOpenParen + 2) && i + 1 < rawLines.length) {
+      // Join this line with the next to reassemble the broken URL
+      lines.push(line + rawLines[i + 1]);
+      i++;
+    } else {
+      lines.push(line);
+    }
+  }
   const elements: React.ReactElement[] = [];
   let i = 0;
 
@@ -1797,7 +1814,7 @@ function resolveLink(href: string): { url: string; external: boolean } {
   if (href.startsWith('hubspot://deals/')) {
     const sourceId = href.replace('hubspot://deals/', '');
     if (_hubspotPortalId) {
-      return { url: `https://app.hubspot.com/contacts/${_hubspotPortalId}/deal/${sourceId}`, external: true };
+      return { url: `https://app.hubspot.com/contacts/${_hubspotPortalId}/record/0-3/${sourceId}`, external: true };
     }
     return { url: href, external: true };
   }

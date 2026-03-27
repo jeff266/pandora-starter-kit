@@ -11,7 +11,7 @@ import { useIsMobile } from '../hooks/useIsMobile';
 function buildCrmUrl(crm: string | null, portalId: number | null, instanceUrl: string | null, sourceId: string | null, dealSource: string | null): string | null {
   if (!crm || !sourceId) return null;
   if (crm === 'hubspot' && dealSource === 'hubspot' && portalId) {
-    return `https://app.hubspot.com/contacts/${portalId}/deal/${sourceId}`;
+    return `https://app.hubspot.com/contacts/${portalId}/record/0-3/${sourceId}`;
   }
   if (crm === 'salesforce' && dealSource === 'salesforce' && instanceUrl) {
     const host = instanceUrl.replace(/^https?:\/\//, '');

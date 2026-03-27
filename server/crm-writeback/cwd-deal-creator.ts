@@ -212,7 +212,7 @@ async function createHubSpotDeal(request: CreateDealRequest): Promise<any> {
 
   return {
     deal_crm_id: dealId,
-    deal_url: `https://app.hubspot.com/contacts/${creds.portalId || ''}/deal/${dealId}`,
+    deal_url: `https://app.hubspot.com/contacts/${creds.portalId || ''}/record/0-3/${dealId}`,
     contacts_created: contactsCreated,
     contacts_associated: contactsAssociated,
   };

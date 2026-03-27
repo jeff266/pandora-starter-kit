@@ -36,7 +36,7 @@ export function buildDealCrmUrl(
   if (!crm || !sourceId) return null;
 
   if (crm === 'hubspot' && dealSource === 'hubspot' && portalId) {
-    return `https://app.hubspot.com/contacts/${portalId}/deal/${sourceId}`;
+    return `https://app.hubspot.com/contacts/${portalId}/record/0-3/${sourceId}`;
   }
 
   if (crm === 'salesforce' && dealSource === 'salesforce' && instanceUrl) {
@@ -60,7 +60,7 @@ export function buildAccountCrmUrl(
   if (!crm || !sourceId) return null;
 
   if (crm === 'hubspot' && accountSource === 'hubspot' && portalId) {
-    return `https://app.hubspot.com/contacts/${portalId}/company/${sourceId}`;
+    return `https://app.hubspot.com/contacts/${portalId}/record/0-2/${sourceId}`;
   }
 
   if (crm === 'salesforce' && accountSource === 'salesforce' && instanceUrl) {
