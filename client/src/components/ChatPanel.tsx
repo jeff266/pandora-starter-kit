@@ -1736,10 +1736,11 @@ function renderTable(tableLines: string[], keyBase: number, onSend?: (msg: strin
  */
 function stripActionPayloadBlocks(text: string): string {
   return text.replace(/```json[^\n]*\n([\s\S]*?)```/g, (match, content) => {
-    if (
-      /"type"\s*:\s*"(?:run_skill|create_crm_tasks|update_forecast_category|update_close_date|run_meddic_coverage|update_data_dictionary|update_workspace_knowledge|confirm_metric_definition|update_calibration|update_stage)"/.test(content) ||
-      /"action_payload"\s*:/.test(content)
-    ) {
+    const hasKnownActionType =
+      /"type"\s*:\s*"(?:run_skill|create_crm_tasks|update_forecast_category|update_close_date|run_meddic_coverage|update_data_dictionary|update_workspace_knowledge|confirm_metric_definition|update_calibration|update_stage|update_deal_stage|next_step)"/.test(content);
+    const hasActionPayloadWithType =
+      /"action_payload"\s*:/.test(content) && /"type"\s*:/.test(content);
+    if (hasKnownActionType || hasActionPayloadWithType) {
       return '';
     }
     return match;
