@@ -18,7 +18,6 @@ import {
 } from '../context/opening-brief.js';
 import { requireWorkspaceAccess } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/permissions.js';
-import { getOrGenerateThesis } from '../briefing/concierge-thesis.js';
 
 const router = Router();
 
@@ -582,18 +581,23 @@ router.get(
         });
       }
 
-      // Generate weekly thesis from current findings — content-hash cached in concierge-thesis module
-      const weeklyThesis = await getOrGenerateThesis({
-        workspaceId,
-        topFindings: brief.findings?.topFindings ?? [],
-        metrics: {
-          attainment_pct: brief.targets?.pctAttained ?? null,
-          coverage_ratio: brief.pipeline?.coverageRatio ?? null,
-          days_remaining: temporal.daysRemainingInQuarter ?? null,
-        },
-        quarterPhase: temporal.quarterPhase,
-        weekOfQuarter: temporal.weekOfQuarter,
-      }).catch(() => null);
+      // Fetch weekly_thesis stored in ai_blurbs during brief assembly.
+      // Filtered to monday_setup/friday_recap — the only types that generate a thesis.
+      let weeklyThesis: string | null = null;
+      try {
+        const thesisRow = await query<{ weekly_thesis: string | null }>(
+          `SELECT ai_blurbs->>'weekly_thesis' as weekly_thesis
+           FROM weekly_briefs
+           WHERE workspace_id = $1
+             AND brief_type IN ('monday_setup', 'friday_recap')
+             AND status IN ('ready', 'sent', 'edited')
+           ORDER BY generated_at DESC LIMIT 1`,
+          [workspaceId]
+        );
+        weeklyThesis = thesisRow.rows[0]?.weekly_thesis ?? null;
+      } catch (_thesisErr) {
+        // Non-fatal — card is suppressed when null
+      }
 
       res.json({
         brief: { ...brief, targets: { ...brief.targets, hasTarget }, weekly_thesis: weeklyThesis },

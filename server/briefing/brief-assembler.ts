@@ -8,7 +8,7 @@ import {
   getCurrentQuota, formatCompact, ordinal, buildOpenFilter,
 } from './brief-utils.js';
 import { determineBriefType, determineEditorialFocus } from './editorial-engine.js';
-import { generateBriefNarratives } from './brief-narratives.js';
+import { generateBriefNarratives, generateWeeklyThesis } from './brief-narratives.js';
 import { annotateBriefNarrative } from './brief-annotator.js';
 import { computeTemporalContext } from '../context/opening-brief.js';
 import { buildComparison, formatComparisonBlock } from '../documents/comparator.js';
@@ -402,6 +402,33 @@ async function assembleMondaySetup(workspaceId: string, now: Date, briefType: Br
   const rawBlurbs = await generateBriefNarratives(workspaceId, briefType, theNumber, whatChanged, reps.items, deals.items, editorialFocus, temporal?.weekOfQuarter, temporal?.quarterPhase as any, temporal?.pctQuarterComplete);
   const aiBlurbs = await annotateBriefNarrative(workspaceId, rawBlurbs, { theNumber, whatChanged, reps: reps.items, deals: deals.items });
 
+  // Generate Chief of Staff weekly thesis from live findings
+  try {
+    const findingsRows = await query<{ severity: string; message: string; entity_name: string | null }>(
+      `SELECT severity, message, entity_name
+       FROM findings
+       WHERE workspace_id = $1 AND resolved_at IS NULL AND severity IN ('act', 'notable')
+       ORDER BY CASE severity WHEN 'act' THEN 1 ELSE 2 END, created_at DESC
+       LIMIT 10`,
+      [workspaceId]
+    );
+    const thesisFindings = findingsRows.rows.map(f => ({
+      severity: f.severity === 'act' ? 'critical' : 'warning',
+      message: f.message,
+      dealName: f.entity_name ?? undefined,
+    }));
+    const weeklyThesis = await generateWeeklyThesis(
+      workspaceId,
+      thesisFindings,
+      { attainment_pct: theNumber.attainment_pct, coverage_ratio: theNumber.coverage_ratio ?? null, days_remaining: theNumber.days_remaining },
+      (temporal?.quarterPhase ?? 'mid') as 'early' | 'mid' | 'late' | 'final_week',
+      temporal?.weekOfQuarter
+    );
+    if (weeklyThesis) aiBlurbs.weekly_thesis = weeklyThesis;
+  } catch (thesisErr) {
+    console.warn('[brief-assembler] Weekly thesis generation failed (non-fatal):', (thesisErr as Error)?.message);
+  }
+
   // Trigger partial accuracy write
   const periodLabel = getCurrentPeriodLabel();
   await writeQuarterlyForecastAccuracy(workspaceId, periodLabel).catch(err => console.error('Failed to write forecast accuracy:', err));
@@ -509,6 +536,33 @@ async function assembleFridayRecap(workspaceId: string, now: Date, briefType: Br
   emitter.toolCall('brief-assembler', 'generateNarrative', 'Synthesizing brief narrative');
   const rawBlurbs = await generateBriefNarratives(workspaceId, briefType, theNumber, whatChanged, reps.items, deals.items, editorialFocus, temporal?.weekOfQuarter, temporal?.quarterPhase as any, temporal?.pctQuarterComplete);
   const aiBlurbs = await annotateBriefNarrative(workspaceId, rawBlurbs, { theNumber, whatChanged, reps: reps.items, deals: deals.items });
+
+  // Generate Chief of Staff weekly thesis from live findings
+  try {
+    const findingsRows = await query<{ severity: string; message: string; entity_name: string | null }>(
+      `SELECT severity, message, entity_name
+       FROM findings
+       WHERE workspace_id = $1 AND resolved_at IS NULL AND severity IN ('act', 'notable')
+       ORDER BY CASE severity WHEN 'act' THEN 1 ELSE 2 END, created_at DESC
+       LIMIT 10`,
+      [workspaceId]
+    );
+    const thesisFindings = findingsRows.rows.map(f => ({
+      severity: f.severity === 'act' ? 'critical' : 'warning',
+      message: f.message,
+      dealName: f.entity_name ?? undefined,
+    }));
+    const weeklyThesis = await generateWeeklyThesis(
+      workspaceId,
+      thesisFindings,
+      { attainment_pct: theNumber.attainment_pct, coverage_ratio: theNumber.coverage_ratio ?? null, days_remaining: theNumber.days_remaining },
+      (temporal?.quarterPhase ?? 'mid') as 'early' | 'mid' | 'late' | 'final_week',
+      temporal?.weekOfQuarter
+    );
+    if (weeklyThesis) aiBlurbs.weekly_thesis = weeklyThesis;
+  } catch (thesisErr) {
+    console.warn('[brief-assembler] Weekly thesis generation failed (non-fatal):', (thesisErr as Error)?.message);
+  }
 
   // Trigger partial accuracy write
   const periodLabel = getCurrentPeriodLabel();
