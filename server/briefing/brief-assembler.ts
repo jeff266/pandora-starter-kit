@@ -439,9 +439,9 @@ async function assembleMondaySetup(workspaceId: string, now: Date, briefType: Br
       }
     }
     if (aiBlurbs.rep_conversation) {
-      const rep = reps.items.find((r: any) => r.name && aiBlurbs.rep_conversation!.toLowerCase().includes(r.name.toLowerCase()));
+      const rep = reps.items.find(r => r.name && aiBlurbs.rep_conversation!.toLowerCase().includes(r.name.toLowerCase()));
       if (rep) {
-        await logBriefRecommendation({ workspaceId, source: 'brief', entityType: 'rep', entityId: undefined, entityName: (rep as any).name, recommendationText: aiBlurbs.rep_conversation });
+        await logBriefRecommendation({ workspaceId, source: 'brief', entityType: 'rep', entityId: undefined, entityName: rep.name, recommendationText: aiBlurbs.rep_conversation });
       }
     }
     await generateCheckInOutcomes(workspaceId);
@@ -510,6 +510,14 @@ async function assemblePulse(workspaceId: string, now: Date, briefType: BriefTyp
   emitter.toolCall('brief-assembler', 'generateNarrative', 'Synthesizing brief narrative');
   const rawBlurbs = await generateBriefNarratives(workspaceId, briefType, theNumber, whatChanged, reps.items, deals.items, editorialFocus, temporal?.weekOfQuarter, temporal?.quarterPhase as any, temporal?.pctQuarterComplete);
   const aiBlurbs = await annotateBriefNarrative(workspaceId, rawBlurbs, { theNumber, whatChanged, reps: reps.items, deals: deals.items });
+
+  // Generate due check-in outcomes for any recommendations logged from prior briefs or chat
+  try {
+    const { generateCheckInOutcomes } = await import('./brief-recommendations.js');
+    await generateCheckInOutcomes(workspaceId);
+  } catch (recErr) {
+    console.warn('[brief-assembler] Recommendation check-ins failed (non-fatal):', (recErr as Error)?.message);
+  }
 
   // Trigger partial accuracy write
   const periodLabel = getCurrentPeriodLabel();
@@ -594,9 +602,9 @@ async function assembleFridayRecap(workspaceId: string, now: Date, briefType: Br
       }
     }
     if (aiBlurbs.rep_conversation) {
-      const rep = reps.items.find((r: any) => r.name && aiBlurbs.rep_conversation!.toLowerCase().includes(r.name.toLowerCase()));
+      const rep = reps.items.find(r => r.name && aiBlurbs.rep_conversation!.toLowerCase().includes(r.name.toLowerCase()));
       if (rep) {
-        await logBriefRecommendation({ workspaceId, source: 'brief', entityType: 'rep', entityId: undefined, entityName: (rep as any).name, recommendationText: aiBlurbs.rep_conversation });
+        await logBriefRecommendation({ workspaceId, source: 'brief', entityType: 'rep', entityId: undefined, entityName: rep.name, recommendationText: aiBlurbs.rep_conversation });
       }
     }
     await generateCheckInOutcomes(workspaceId);
@@ -612,6 +620,7 @@ async function assembleFridayRecap(workspaceId: string, now: Date, briefType: Br
 
   return saveBrief(workspaceId, briefType, now, { theNumber, whatChanged, segments, reps, deals, aiBlurbs, editorialFocus, startTime, forecastAccuracyNote });
 }
+
 
 async function assembleQuarterClose(workspaceId: string, now: Date, briefType: BriefType, startTime: number, emitter: BriefSSEEmitter): Promise<AssembledBrief> {
   emitter.agentThinking('brief-assembler');

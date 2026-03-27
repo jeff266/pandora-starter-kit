@@ -12,8 +12,55 @@ export interface AccountabilityItem {
   checked_in_at: string;
 }
 
+interface EntityStateSnapshot {
+  label: string;
+}
+
+async function fetchEntityState(
+  workspaceId: string,
+  entityType: string | null,
+  entityId: string | null,
+  entityName: string
+): Promise<EntityStateSnapshot> {
+  if (entityType === 'deal') {
+    const dealRes = entityId
+      ? await query<{ stage: string; amount: string; stage_normalized: string }>(
+          `SELECT stage, COALESCE(amount, 0)::text as amount, COALESCE(stage_normalized,'') as stage_normalized
+           FROM deals WHERE workspace_id = $1 AND id = $2::uuid LIMIT 1`,
+          [workspaceId, entityId]
+        )
+      : await query<{ stage: string; amount: string; stage_normalized: string }>(
+          `SELECT stage, COALESCE(amount, 0)::text as amount, COALESCE(stage_normalized,'') as stage_normalized
+           FROM deals WHERE workspace_id = $1 AND name ILIKE $2 LIMIT 1`,
+          [workspaceId, entityName]
+        );
+    const deal = dealRes.rows[0];
+    if (!deal) return { label: 'the deal could not be found (may have been removed or renamed)' };
+    const sn = deal.stage_normalized;
+    if (sn === 'closed_won') return { label: `closed won at ${formatCompact(parseFloat(deal.amount))}` };
+    if (sn === 'closed_lost') return { label: `closed lost` };
+    return { label: `in ${deal.stage} at ${formatCompact(parseFloat(deal.amount))}` };
+  }
+
+  if (entityType === 'rep') {
+    const repRes = await query<{ closed: string; pipeline: string }>(
+      `SELECT
+         COALESCE(SUM(amount) FILTER (WHERE stage_normalized = 'closed_won'), 0)::text as closed,
+         COALESCE(SUM(amount) FILTER (WHERE stage_normalized NOT IN ('closed_won','closed_lost')), 0)::text as pipeline
+       FROM deals WHERE workspace_id = $1 AND owner ILIKE $2`,
+      [workspaceId, entityName]
+    );
+    const rep = repRes.rows[0];
+    if (!rep) return { label: 'rep data unavailable' };
+    return { label: `${formatCompact(parseFloat(rep.closed))} closed won, ${formatCompact(parseFloat(rep.pipeline))} open pipeline` };
+  }
+
+  return { label: 'no entity state available' };
+}
+
 /**
  * Logs a recommendation to the accountability table.
+ * Captures state_snapshot at log time for delta comparison at check-in.
  * De-duplicates: skips if the same entity already has a record from the last 7 days.
  */
 export async function logBriefRecommendation(params: {
@@ -37,20 +84,23 @@ export async function logBriefRecommendation(params: {
   );
   if (existing.rows.length > 0) return;
 
+  const snapshot = await fetchEntityState(workspaceId, entityType, entityId ?? null, entityName).catch(() => null);
+
   await query(
     `INSERT INTO brief_recommendations
-       (workspace_id, source, entity_type, entity_id, entity_name, recommendation_text, check_in_at)
-     VALUES ($1, $2, $3, $4, $5, $6, NOW() + INTERVAL '7 days')`,
-    [workspaceId, source, entityType ?? null, entityId ?? null, entityName, recommendationText]
+       (workspace_id, source, entity_type, entity_id, entity_name, recommendation_text, state_snapshot, check_in_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, NOW() + INTERVAL '7 days')`,
+    [workspaceId, source, entityType ?? null, entityId ?? null, entityName, recommendationText, snapshot?.label ?? null]
   );
 }
 
 /**
  * For each due check-in (check_in_at <= now, checked_in_at IS NULL), fetch the
  * current state of the referenced entity and generate a one-sentence outcome
- * statement. Marks checked_in_at and stores outcome_text.
+ * statement comparing the state_snapshot (then) vs current state (now).
+ * Marks checked_in_at and stores outcome_text.
  *
- * Called during brief assembly (7 AM cron) for monday_setup and friday_recap.
+ * Safe to call from any brief assembly path — idempotent per record.
  */
 export async function generateCheckInOutcomes(workspaceId: string): Promise<void> {
   const dueRows = await query<{
@@ -59,8 +109,9 @@ export async function generateCheckInOutcomes(workspaceId: string): Promise<void
     entity_id: string | null;
     entity_name: string;
     recommendation_text: string;
+    state_snapshot: string | null;
   }>(
-    `SELECT id, entity_type, entity_id, entity_name, recommendation_text
+    `SELECT id, entity_type, entity_id, entity_name, recommendation_text, state_snapshot
      FROM brief_recommendations
      WHERE workspace_id = $1
        AND check_in_at <= NOW()
@@ -73,8 +124,14 @@ export async function generateCheckInOutcomes(workspaceId: string): Promise<void
 
   for (const row of dueRows.rows) {
     try {
-      const entityState = await fetchEntityState(workspaceId, row.entity_type, row.entity_id, row.entity_name);
-      const outcomeText = await generateOutcomeStatement(workspaceId, row.recommendation_text, row.entity_name, entityState);
+      const currentState = await fetchEntityState(workspaceId, row.entity_type, row.entity_id, row.entity_name);
+      const outcomeText = await generateOutcomeStatement(
+        workspaceId,
+        row.recommendation_text,
+        row.entity_name,
+        row.state_snapshot,
+        currentState.label
+      );
 
       await query(
         `UPDATE brief_recommendations SET checked_in_at = NOW(), outcome_text = $1 WHERE id = $2`,
@@ -86,64 +143,29 @@ export async function generateCheckInOutcomes(workspaceId: string): Promise<void
   }
 }
 
-async function fetchEntityState(
-  workspaceId: string,
-  entityType: string | null,
-  entityId: string | null,
-  entityName: string
-): Promise<string> {
-  if (entityType === 'deal') {
-    const dealRes = entityId
-      ? await query<{ stage: string; amount: string; stage_normalized: string }>(
-          `SELECT stage, COALESCE(amount, 0)::text as amount, COALESCE(stage_normalized,'') as stage_normalized
-           FROM deals WHERE workspace_id = $1 AND id = $2::uuid LIMIT 1`,
-          [workspaceId, entityId]
-        )
-      : await query<{ stage: string; amount: string; stage_normalized: string }>(
-          `SELECT stage, COALESCE(amount, 0)::text as amount, COALESCE(stage_normalized,'') as stage_normalized
-           FROM deals WHERE workspace_id = $1 AND name ILIKE $2 LIMIT 1`,
-          [workspaceId, entityName]
-        );
-    const deal = dealRes.rows[0];
-    if (!deal) return 'the deal could not be found (may have been removed or renamed)';
-    const sn = deal.stage_normalized;
-    if (sn === 'closed_won') return `the deal closed won at ${formatCompact(parseFloat(deal.amount))}`;
-    if (sn === 'closed_lost') return `the deal closed lost`;
-    return `the deal is now in ${deal.stage} at ${formatCompact(parseFloat(deal.amount))}`;
-  }
-
-  if (entityType === 'rep') {
-    const repRes = await query<{ closed: string; pipeline: string }>(
-      `SELECT
-         COALESCE(SUM(amount) FILTER (WHERE stage_normalized = 'closed_won'), 0)::text as closed,
-         COALESCE(SUM(amount) FILTER (WHERE stage_normalized NOT IN ('closed_won','closed_lost')), 0)::text as pipeline
-       FROM deals WHERE workspace_id = $1 AND owner ILIKE $2`,
-      [workspaceId, entityName]
-    );
-    const rep = repRes.rows[0];
-    if (!rep) return 'rep data unavailable';
-    return `the rep has ${formatCompact(parseFloat(rep.closed))} closed won and ${formatCompact(parseFloat(rep.pipeline))} in open pipeline`;
-  }
-
-  return 'no entity state available';
-}
-
 async function generateOutcomeStatement(
   workspaceId: string,
   recommendationText: string,
   entityName: string,
-  entityState: string
+  priorStateLabel: string | null,
+  currentStateLabel: string
 ): Promise<string> {
-  const systemPrompt = `You are Pandora, a Chief of Staff AI for B2B sales leadership.
-Write ONE sentence summarizing what was recommended and what happened since.
+  const priorText = priorStateLabel ?? 'state unknown at time of recommendation';
+  const deltaText = priorStateLabel
+    ? `Then: ${priorStateLabel}. Now: ${currentStateLabel}.`
+    : `Current state: ${currentStateLabel}.`;
 
-FORMAT: Start with "Last week:" then a brief paraphrase of the recommendation (5–10 words), then " — " then what happened.
+  const systemPrompt = `You are Pandora, a Chief of Staff AI for B2B sales leadership.
+Write ONE sentence summarizing what was recommended and what changed since.
+
+FORMAT: Start with "Last week:" then a brief paraphrase of the recommendation (5–10 words), then " — " then the change.
 EXAMPLE: "Last week: push BASS on the pilot discussion — the deal advanced to Negotiation ($84K, Q2 close)."
-Rules: No markdown. No line breaks. Under 30 words total. Be specific with dollar amounts and stages.`;
+Rules: No markdown. No line breaks. Under 30 words total. Be specific with stages and dollar amounts.
+If "then" and "now" are the same, note it moved no further.`;
 
   const userPrompt = `Recommendation: "${recommendationText}"
 Entity: ${entityName}
-What happened: ${entityState}
+${deltaText}
 
 Write the one-sentence outcome now.`;
 
@@ -155,11 +177,11 @@ Write the one-sentence outcome now.`;
       maxTokens: 80,
       _tracking: { workspaceId, phase: 'briefing', stepName: 'generate-outcome-statement' },
     });
-    const text = typeof raw === 'string' ? raw : (raw as any)?.content || '';
+    const text = typeof raw === 'string' ? raw : (typeof raw === 'object' && raw !== null && 'content' in raw ? String((raw as { content: unknown }).content) : '');
     const trimmed = text.trim().replace(/^["']|["']$/g, '');
-    return trimmed.length > 10 ? trimmed : `Last week: ${recommendationText.slice(0, 60)} — ${entityState}.`;
+    return trimmed.length > 10 ? trimmed : `Last week: ${recommendationText.slice(0, 60)} — ${priorText} → ${currentStateLabel}.`;
   } catch {
-    return `Last week: ${recommendationText.slice(0, 60)} — ${entityState}.`;
+    return `Last week: ${recommendationText.slice(0, 60)} — ${priorText} → ${currentStateLabel}.`;
   }
 }
 

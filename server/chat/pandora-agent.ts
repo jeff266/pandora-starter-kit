@@ -2511,7 +2511,9 @@ The system will transform raw_annotation into a voice-styled annotation automati
                 recommendationText: rec.action,
               });
             }
-          } catch (_) {}
+          } catch (briefRecErr) {
+            console.warn('[pandora-agent] Brief recommendation logging failed:', (briefRecErr as Error)?.message);
+          }
         })();
       }
 
