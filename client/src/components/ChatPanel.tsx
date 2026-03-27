@@ -1776,7 +1776,7 @@ function formatMarkdown(text: string, onSend?: (msg: string) => void): React.Rea
       content = <div key={i} style={{ fontSize: 16, fontWeight: 600, color: '#e2e8f0', marginTop: 12, marginBottom: 6 }}>{formatInlineMarkdown(line.slice(3))}</div>;
     } else if (line.startsWith('# ')) {
       content = <div key={i} style={{ fontSize: 18, fontWeight: 700, color: '#f1f5f9', marginTop: 14, marginBottom: 8 }}>{formatInlineMarkdown(line.slice(2))}</div>;
-    } else if (line.startsWith('**') && line.endsWith('**')) {
+    } else if (line.startsWith('**') && line.endsWith('**') && line.indexOf('**', 2) === line.length - 2) {
       content = <strong key={i}>{line.slice(2, -2)}</strong>;
     } else if (line.startsWith('• ') || line.startsWith('- ') || line.startsWith('* ')) {
       content = <div key={i} style={{ paddingLeft: 12, marginBottom: 2 }}>• {formatInlineMarkdown(line.slice(2))}</div>;
@@ -1830,7 +1830,11 @@ function resolveLink(href: string): { url: string; external: boolean } {
 
 function formatInlineMarkdown(text: string): (string | React.ReactElement)[] {
   const parts: (string | React.ReactElement)[] = [];
-  const regex = /\*\*(.*?)\*\*|\[([^\]]+)\]\(([^)]+)\)/g;
+  // URL group: matches non-space non-) characters, and also allows balanced parens
+  // e.g. hubspot://deals/uuid or https://en.wikipedia.org/wiki/Cat_(animal)
+  // The balanced-paren suffix `(?:\([^)]*\))*` handles URLs like Wikipedia links
+  // without consuming a trailing `) (27 days)` or `) **bold**` in the same line.
+  const regex = /\*\*(.*?)\*\*|\[([^\]]+)\]\(([^\s)]+(?:\([^)]*\))*)\)/g;
   let last = 0;
   let match;
 
