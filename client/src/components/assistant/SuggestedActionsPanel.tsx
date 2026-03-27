@@ -7,9 +7,10 @@ import { colors, fonts } from '../../styles/theme';
 interface SuggestedActionsPanelProps {
   actions: SuggestedAction[];
   onDismissAll: () => void;
+  onActionExecuted?: (title: string, actionType: string) => void;
 }
 
-export default function SuggestedActionsPanel({ actions, onDismissAll }: SuggestedActionsPanelProps) {
+export default function SuggestedActionsPanel({ actions, onDismissAll, onActionExecuted }: SuggestedActionsPanelProps) {
   const [cards, setCards] = useState<ActionCardItem[]>([]);
   const [syncing, setSyncing] = useState(true);
   const [syncError, setSyncError] = useState(false);
@@ -111,6 +112,7 @@ export default function SuggestedActionsPanel({ actions, onDismissAll }: Suggest
             key={card.id}
             item={card}
             onRemove={removeCard}
+            onExecuted={onActionExecuted}
           />
         ))}
       </div>

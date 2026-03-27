@@ -17,6 +17,7 @@ interface ActionCardProps {
   item: ActionCardItem;
   crmSource?: string;
   onRemove: (id: string) => void;
+  onExecuted?: (title: string, actionType: string) => void;
 }
 
 const PRIORITY_META: Record<string, { bg: string; color: string }> = {
@@ -137,7 +138,7 @@ function isFieldWriteType(actionType?: string) {
   return actionType === 'update_forecast_category' || actionType === 'update_close_date';
 }
 
-export function ActionCard({ item, crmSource, onRemove }: ActionCardProps) {
+export function ActionCard({ item, crmSource, onRemove, onExecuted }: ActionCardProps) {
   const [inFlight, setInFlight] = useState<InFlight>(null);
   const [error, setError] = useState<string | null>(null);
   const [reviewing, setReviewing] = useState(false);
@@ -174,6 +175,7 @@ export function ActionCard({ item, crmSource, onRemove }: ActionCardProps) {
           user_id: 'rep',
         });
       }
+      onExecuted?.(item.title, item.action_type || 'task_create');
       onRemove(item.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Action failed');
@@ -190,6 +192,7 @@ export function ActionCard({ item, crmSource, onRemove }: ActionCardProps) {
         mode: 'field_write',
         user_id: 'rep',
       });
+      onExecuted?.(item.title, item.action_type || 'field_write');
       onRemove(item.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Action failed');
@@ -207,6 +210,7 @@ export function ActionCard({ item, crmSource, onRemove }: ActionCardProps) {
         mode: 'note_create',
         user_id: 'rep',
       });
+      onExecuted?.(item.title, 'note_create');
       onRemove(item.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Action failed');

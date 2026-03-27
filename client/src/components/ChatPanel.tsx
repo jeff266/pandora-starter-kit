@@ -900,6 +900,14 @@ export default function ChatPanel({ isOpen, onClose, scope, initialSessionId, pe
               <SuggestedActionsPanel
                 actions={chatSuggestedActions}
                 onDismissAll={() => setChatSuggestedActions([])}
+                onActionExecuted={(title, actionType) => {
+                  const outcomeMsg = buildActionOutcomeMessage(title, actionType);
+                  setMessages(prev => [...prev, {
+                    role: 'assistant',
+                    content: outcomeMsg,
+                    timestamp: new Date().toISOString(),
+                  }]);
+                }}
               />
             </div>
           )}
@@ -1730,6 +1738,38 @@ function renderTable(tableLines: string[], keyBase: number, onSend?: (msg: strin
       </table>
     </div>
   );
+}
+
+/**
+ * Builds a substantive CoS-style outcome message after an inline action is executed.
+ * Covers the action type, what was done, and what to expect next.
+ */
+function buildActionOutcomeMessage(title: string, actionType: string): string {
+  switch (actionType) {
+    case 'run_skill':
+    case 'run_meddic_coverage':
+      return `Queued: **${title}**. The skill will run in the background and surface results as findings in the action queue. Check back in 30–60 seconds for output.`;
+    case 'create_crm_tasks':
+      return `Done: **${title}**. Tasks have been created in your CRM. They will appear in your rep task lists within a few seconds.`;
+    case 'update_forecast_category':
+      return `Updated: **${title}**. The forecast category change has been written to your CRM. The forecast rollup will reflect this on the next run.`;
+    case 'update_close_date':
+      return `Updated: **${title}**. The close date change has been written to your CRM. Pipeline coverage calculations will update on the next refresh.`;
+    case 'update_data_dictionary':
+      return `Saved: **${title}**. The definition has been written to your workspace data dictionary and will apply to future analyses.`;
+    case 'update_workspace_knowledge':
+      return `Saved: **${title}**. This context has been added to workspace memory and will inform future responses in this workspace.`;
+    case 'confirm_metric_definition':
+      return `Confirmed: **${title}**. This metric definition is now locked as the official benchmark for this workspace.`;
+    case 'update_calibration':
+      return `Applied: **${title}**. The calibration threshold has been updated and will be used in future stage velocity analyses.`;
+    case 'note_create':
+      return `Done: **${title}**. A note has been logged to the deal record in your CRM.`;
+    case 'field_write':
+      return `Updated: **${title}**. The field change has been written to your CRM record.`;
+    default:
+      return `Done: **${title}**. The action completed successfully.`;
+  }
 }
 
 function formatMarkdown(text: string, onSend?: (msg: string) => void): React.ReactElement[] {
