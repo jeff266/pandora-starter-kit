@@ -429,6 +429,26 @@ async function assembleMondaySetup(workspaceId: string, now: Date, briefType: Br
     console.warn('[brief-assembler] Weekly thesis generation failed (non-fatal):', (thesisErr as Error)?.message);
   }
 
+  // Recommendation accountability loop — log blurb entities, generate due check-in outcomes
+  try {
+    const { logBriefRecommendation, generateCheckInOutcomes } = await import('./brief-recommendations.js');
+    if (aiBlurbs.deal_recommendation) {
+      const deal = deals.items.find(d => d.name && aiBlurbs.deal_recommendation!.toLowerCase().includes(d.name.toLowerCase()));
+      if (deal) {
+        await logBriefRecommendation({ workspaceId, source: 'brief', entityType: 'deal', entityId: deal.id, entityName: deal.name, recommendationText: aiBlurbs.deal_recommendation });
+      }
+    }
+    if (aiBlurbs.rep_conversation) {
+      const rep = reps.items.find((r: any) => r.name && aiBlurbs.rep_conversation!.toLowerCase().includes(r.name.toLowerCase()));
+      if (rep) {
+        await logBriefRecommendation({ workspaceId, source: 'brief', entityType: 'rep', entityId: undefined, entityName: (rep as any).name, recommendationText: aiBlurbs.rep_conversation });
+      }
+    }
+    await generateCheckInOutcomes(workspaceId);
+  } catch (recErr) {
+    console.warn('[brief-assembler] Recommendation accountability failed (non-fatal):', (recErr as Error)?.message);
+  }
+
   // Trigger partial accuracy write
   const periodLabel = getCurrentPeriodLabel();
   await writeQuarterlyForecastAccuracy(workspaceId, periodLabel).catch(err => console.error('Failed to write forecast accuracy:', err));
@@ -562,6 +582,26 @@ async function assembleFridayRecap(workspaceId: string, now: Date, briefType: Br
     if (weeklyThesis) aiBlurbs.weekly_thesis = weeklyThesis;
   } catch (thesisErr) {
     console.warn('[brief-assembler] Weekly thesis generation failed (non-fatal):', (thesisErr as Error)?.message);
+  }
+
+  // Recommendation accountability loop — log blurb entities, generate due check-in outcomes
+  try {
+    const { logBriefRecommendation, generateCheckInOutcomes } = await import('./brief-recommendations.js');
+    if (aiBlurbs.deal_recommendation) {
+      const deal = deals.items.find(d => d.name && aiBlurbs.deal_recommendation!.toLowerCase().includes(d.name.toLowerCase()));
+      if (deal) {
+        await logBriefRecommendation({ workspaceId, source: 'brief', entityType: 'deal', entityId: deal.id, entityName: deal.name, recommendationText: aiBlurbs.deal_recommendation });
+      }
+    }
+    if (aiBlurbs.rep_conversation) {
+      const rep = reps.items.find((r: any) => r.name && aiBlurbs.rep_conversation!.toLowerCase().includes(r.name.toLowerCase()));
+      if (rep) {
+        await logBriefRecommendation({ workspaceId, source: 'brief', entityType: 'rep', entityId: undefined, entityName: (rep as any).name, recommendationText: aiBlurbs.rep_conversation });
+      }
+    }
+    await generateCheckInOutcomes(workspaceId);
+  } catch (recErr) {
+    console.warn('[brief-assembler] Recommendation accountability failed (non-fatal):', (recErr as Error)?.message);
   }
 
   // Trigger partial accuracy write

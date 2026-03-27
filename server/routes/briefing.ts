@@ -599,8 +599,17 @@ router.get(
         // Non-fatal — card is suppressed when null
       }
 
+      // Fetch completed accountability check-ins from the last 30 days
+      let accountabilityItems: any[] = [];
+      try {
+        const { getRecentAccountabilityItems } = await import('../briefing/brief-recommendations.js');
+        accountabilityItems = await getRecentAccountabilityItems(workspaceId, 3);
+      } catch (_) {
+        // Non-fatal — section suppressed when empty
+      }
+
       res.json({
-        brief: { ...brief, targets: { ...brief.targets, hasTarget }, weekly_thesis: weeklyThesis },
+        brief: { ...brief, targets: { ...brief.targets, hasTarget }, weekly_thesis: weeklyThesis, accountability_items: accountabilityItems },
         temporal,
         overnightSummary,
         generatedAt: new Date().toISOString(),

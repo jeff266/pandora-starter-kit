@@ -2492,6 +2492,27 @@ The system will transform raw_annotation into a voice-styled annotation automati
             }).catch(err => console.error('[pandora-agent] Failed to persist recommendation:', err));
           }
         }
+
+        // Also log to brief_recommendations for accountability check-ins (fire-and-forget)
+        (async () => {
+          try {
+            const { logBriefRecommendation } = await import('../briefing/brief-recommendations.js');
+            for (const rec of currentSessionContext.sessionRecommendations) {
+              if (typeof rec !== 'object' || !rec.action) continue;
+              const entityName: string | undefined = rec.deal_name ?? rec.rep_name ?? undefined;
+              if (!entityName) continue;
+              const entityType: 'deal' | 'rep' = rec.deal_name ? 'deal' : 'rep';
+              await logBriefRecommendation({
+                workspaceId,
+                source: 'chat',
+                entityType,
+                entityId: rec.deal_id || undefined,
+                entityName,
+                recommendationText: rec.action,
+              });
+            }
+          } catch (_) {}
+        })();
       }
 
       // ── Chart Intelligence for response ───────────────────────────────────

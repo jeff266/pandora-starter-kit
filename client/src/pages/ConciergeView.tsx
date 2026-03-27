@@ -92,6 +92,16 @@ interface PendingAction {
   hitl_reason?: string | null;
 }
 
+interface AccountabilityItem {
+  id: string;
+  entity_name: string;
+  entity_type: 'deal' | 'rep' | null;
+  recommendation_text: string;
+  outcome_text: string;
+  created_at: string;
+  checked_in_at: string;
+}
+
 interface OpeningBriefData {
   temporal: TemporalContext;
   user: { name: string; email: string; pandoraRole: string; workspaceRole: string };
@@ -172,6 +182,7 @@ interface OpeningBriefData {
     cell?: string;
   } | null;
   weekly_thesis?: string | null;
+  accountability_items?: AccountabilityItem[];
   [key: string]: unknown;
 }
 
@@ -407,6 +418,54 @@ function PandoraThesisCard({ thesis, colors: C }: { thesis: string; colors: type
           }}>
             {para}
           </p>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function AccountabilitySection({ items, colors: C }: { items: AccountabilityItem[]; colors: typeof S }) {
+  if (!items || items.length === 0) return null;
+  return (
+    <div style={{
+      background: 'rgba(55,138,221,0.04)',
+      border: `0.5px solid rgba(55,138,221,0.2)`,
+      borderLeft: `2px solid ${C.blue}`,
+      borderRadius: 10,
+      padding: '13px 16px',
+      marginBottom: 16,
+      fontFamily: C.font,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 10 }}>
+        <span style={{
+          fontSize: 9, fontWeight: 700, color: C.blue,
+          background: 'rgba(55,138,221,0.10)',
+          border: `0.5px solid rgba(55,138,221,0.25)`,
+          borderRadius: 99, padding: '2px 8px',
+          textTransform: 'uppercase' as const, letterSpacing: '0.06em',
+        }}>
+          Since last week
+        </span>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {items.map((item) => (
+          <div key={item.id} style={{
+            fontSize: 13, color: C.textSub, lineHeight: 1.55,
+            paddingBottom: 7,
+            borderBottom: `0.5px solid ${C.border}`,
+          }}>
+            <span style={{
+              display: 'inline-block', fontSize: 9, fontWeight: 600,
+              color: item.entity_type === 'deal' ? C.teal : C.purple,
+              background: item.entity_type === 'deal' ? 'rgba(29,158,117,0.10)' : 'rgba(167,139,250,0.10)',
+              border: `0.5px solid ${item.entity_type === 'deal' ? 'rgba(29,158,117,0.25)' : 'rgba(167,139,250,0.25)'}`,
+              borderRadius: 99, padding: '1px 6px',
+              textTransform: 'uppercase' as const, letterSpacing: '0.04em', marginRight: 7, verticalAlign: 'middle',
+            }}>
+              {item.entity_name}
+            </span>
+            {item.outcome_text}
+          </div>
         ))}
       </div>
     </div>
@@ -1352,6 +1411,11 @@ export default function ConciergeView() {
             {/* PANDORA'S TAKE — weekly thesis card */}
             {brief.weekly_thesis && (
               <PandoraThesisCard thesis={brief.weekly_thesis} colors={S} />
+            )}
+
+            {/* SINCE LAST WEEK — recommendation accountability check-ins */}
+            {brief.accountability_items && brief.accountability_items.length > 0 && (
+              <AccountabilitySection items={brief.accountability_items} colors={S} />
             )}
 
             {/* BRIEF ITEMS */}
