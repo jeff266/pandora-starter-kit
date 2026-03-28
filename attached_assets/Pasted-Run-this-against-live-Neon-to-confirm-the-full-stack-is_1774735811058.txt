@@ -1,0 +1,41 @@
+Run this against live Neon to confirm the full stack is wired correctly end to end:
+bashnpx tsx -e "
+import { resolveWorkspaceIntelligence } from './server/lib/workspace-intelligence.js';
+import { getSkillManifest, evaluateSkillGate } from './server/lib/skill-manifests.js';
+
+const FRONTERA = '4160191d-73bc-414b-97dd-5a1853190378';
+const wi = await resolveWorkspaceIntelligence(FRONTERA);
+
+console.log('=== WorkspaceIntelligence Summary ===');
+console.log('Metrics seeded:', Object.keys(wi.metrics).length);
+console.log('Active stages:', wi.pipeline.active_stages);
+console.log('Coverage targets:', wi.pipeline.coverage_targets);
+console.log('Coverage requires segmentation:', wi.pipeline.coverage_requires_segmentation);
+console.log('Segmentation dimensions:', Object.keys(wi.segmentation.dimensions));
+console.log('Taxonomy land values:', wi.taxonomy.land_values);
+console.log('Taxonomy expand values:', wi.taxonomy.expand_values);
+console.log('Overall readiness:', wi.readiness.overall_score);
+console.log('Blocking gaps:', wi.readiness.blocking_gaps.length);
+console.log('');
+console.log('=== Skill Gates (priority skills) ===');
+console.log('pipeline-waterfall:', wi.readiness.skill_gates['pipeline-waterfall']);
+console.log('pipeline-coverage:', wi.readiness.skill_gates['pipeline-coverage']);
+console.log('rep-scorecard:', wi.readiness.skill_gates['rep-scorecard']);
+console.log('forecast-rollup:', wi.readiness.skill_gates['forecast-rollup']);
+console.log('');
+console.log('=== Gate Evaluation (pipeline-waterfall) ===');
+const manifest = getSkillManifest('pipeline-waterfall');
+const gate = evaluateSkillGate(manifest, [], wi);
+console.log('Gate:', gate.gate);
+console.log('Missing required:', gate.missing_required);
+console.log('Missing preferred:', gate.missing_preferred);
+console.log('Warnings:', gate.warnings);
+"
+Then confirm server starts clean:
+bashnpm run dev &
+sleep 5
+curl -s http://localhost:5000/api/health
+kill %1
+Paste full output. If everything is green, commit with:
+bashgit add -A && git commit -m "feat: phase 9 complete — skill gate checks + WI refs wired to priority skills"
+git push origin main

@@ -346,9 +346,12 @@ export function evaluateSkillGate(
 ): SkillGateResult {
   const checklistMap = new Map(checklist.map((c) => [c.question_id, c.status]));
 
+  // CONFIRMED = full credit; INFERRED = CRM-scanned answer, counts as satisfied
+  const PASSING_STATUSES = new Set(['CONFIRMED', 'INFERRED']);
+
   const missing_required = manifest.required_checklist_items.filter((qid) => {
     const status = checklistMap.get(qid);
-    return !status || status !== 'CONFIRMED';
+    return !status || !PASSING_STATUSES.has(status);
   });
 
   const missing_preferred = manifest.preferred_checklist_items.filter((qid) => {

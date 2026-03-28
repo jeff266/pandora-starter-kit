@@ -354,16 +354,33 @@ async function resolvePipeline(
     const pipelines = config?.pipelines || [];
     const firstPipeline = pipelines[0];
 
+    // Closed phases that are excluded from active pipeline
+    const CLOSED_PHASES = new Set(['closed_won', 'closed_lost']);
+
     // Build active_stages from workspace_config
     const active_stages: string[] = [];
     const excluded_stages: string[] = [];
 
     if (firstPipeline?.stage_probabilities) {
+      // Primary source: pipelines[0].stage_probabilities
       for (const [stage, prob] of Object.entries(
         firstPipeline.stage_probabilities
       )) {
         if (typeof prob === 'number' && prob > 0) {
           active_stages.push(stage);
+        }
+      }
+    } else if (config?.calibration?.stage_mappings) {
+      // Fallback: calibration.stage_mappings (used by HubSpot workspaces)
+      for (const [stageName, phase] of Object.entries(
+        config.calibration.stage_mappings as Record<string, string>
+      )) {
+        const cleaned = stageName.trim();
+        if (!cleaned) continue;
+        if (CLOSED_PHASES.has(phase)) {
+          excluded_stages.push(cleaned);
+        } else {
+          active_stages.push(cleaned);
         }
       }
     }
@@ -384,8 +401,8 @@ async function resolvePipeline(
     }
 
     return {
-      active_stages,
-      excluded_stages,
+      active_stages: [...new Set(active_stages)],
+      excluded_stages: [...new Set(excluded_stages)],
       coverage_targets,
       weighted: Boolean(firstPipeline?.weighted),
       coverage_requires_segmentation: Boolean(
