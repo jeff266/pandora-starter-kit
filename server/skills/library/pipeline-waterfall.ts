@@ -224,6 +224,10 @@ Respond with ONLY a JSON object: { "dealClassifications": [...], "anomalyClassif
 ⚠️ DATA FRESHNESS: {{dataFreshness.staleCaveat}}
 {{/if}}
 
+{{#if gateResult}}{{#if (eq gateResult.gate "DRAFT")}}
+⚠️ DRAFT MODE: This analysis is operating with incomplete calibration. Missing: {{#each gateResult.missing_preferred}}{{this}}{{#unless @last}}, {{/unless}}{{/each}}. Results may not reflect confirmed business rules.
+{{/if}}{{/if}}
+
 {{#unless dataFreshness.hasStageHistory}}
 NOTE: Stage history not available (file import workspace). Waterfall analysis requires stage transition history to track deal progression. Re-upload deals weekly to build stage movement tracking over time.
 

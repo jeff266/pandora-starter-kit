@@ -247,6 +247,10 @@ Each classification should be:
 Note: Coverage calculations based on data imported {{dataFreshness.daysSinceUpdate}} days ago.
 {{/if}}
 
+{{#if gateResult}}{{#if (eq gateResult.gate "DRAFT")}}
+⚠️ DRAFT MODE: This analysis is operating with incomplete calibration. Missing: {{#each gateResult.missing_preferred}}{{this}}{{#unless @last}}, {{/unless}}{{/each}}. Results may not reflect confirmed business rules.
+{{/if}}{{/if}}
+
 REPORT PERIOD: {{time_windows.analysisRange.quarter}}
 
 {{coverage_summary.quotaNote}}

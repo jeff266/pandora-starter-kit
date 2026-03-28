@@ -8,6 +8,7 @@
 import { query } from '../db.js';
 import { getStageTransitionsInWindow, getStageConversionRates, getAverageTimeInStage } from './stage-history-queries.js';
 import { getScopeWhereClause, type ActiveScope } from '../config/scope-loader.js';
+import { resolveWorkspaceIntelligence } from '../lib/workspace-intelligence.js';
 
 export interface WaterfallStageFlow {
   stage: string;
@@ -321,7 +322,17 @@ export async function waterfallAnalysis(
   const raw = filterParams?.raw ?? false;
 
   // 1. Get ordered stages (raw or normalized depending on mode)
-  const orderedStages = await getStageOrdering(workspaceId, raw, filterParams?.pipeline);
+  // Phase 9: Use WI active_stages when available, fall back to getStageOrdering
+  const wi = await resolveWorkspaceIntelligence(workspaceId);
+  const wiStages = wi.pipeline.active_stages;
+  const orderedStages = wiStages.length > 0 && !raw
+    ? wiStages
+    : await getStageOrdering(workspaceId, raw, filterParams?.pipeline);
+
+  // Phase 9: Log if segmentation is required but not yet auto-injected
+  if (wi.pipeline.coverage_requires_segmentation && wi.segmentation.default_dimensions.length > 0) {
+    console.log(`[waterfall] Segmentation required but not yet auto-injected — WI dimension: ${wi.segmentation.default_dimensions[0]}`);
+  }
 
   // 2. Get deals at start and end of period
   const dealsAtStartRaw = await getDealsAtTimestamp(workspaceId, periodStart, raw);

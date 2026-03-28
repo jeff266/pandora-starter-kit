@@ -256,6 +256,10 @@ Note: {{dataFreshness.staleCaveat}}
 Note: Forecast based on file-imported data, not live CRM sync.
 {{/if}}
 
+{{#if gateResult}}{{#if (eq gateResult.gate "DRAFT")}}
+⚠️ DRAFT MODE: This analysis is operating with incomplete calibration. Missing: {{#each gateResult.missing_preferred}}{{this}}{{#unless @last}}, {{/unless}}{{/each}}. Results may not reflect confirmed business rules.
+{{/if}}{{/if}}
+
 {{forecast_summary.quotaNote}}
 
 {{#if forecast_summary.pipelineAttainment}}
@@ -511,6 +515,10 @@ Return ONLY a JSON array with no other text.`,
       tier: 'claude',
       dependsOn: ['classify-annotations', 'compute-annotations'],
       claudePrompt: `You're a senior RevOps analyst writing annotation narratives for the forecast dashboard.
+
+{{#if gateResult}}{{#if (eq gateResult.gate "DRAFT")}}
+⚠️ DRAFT MODE: This analysis is operating with incomplete calibration. Missing: {{#each gateResult.missing_preferred}}{{this}}{{#unless @last}}, {{/unless}}{{/each}}. Results may not reflect confirmed business rules.
+{{/if}}{{/if}}
 
 CONTEXT:
 - Period: {{time_windows.analysisRange.quarter}}

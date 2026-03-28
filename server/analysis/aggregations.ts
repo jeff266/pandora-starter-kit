@@ -1,6 +1,7 @@
 import { query } from '../db.js';
 import { configLoader } from '../config/workspace-config-loader.js';
 import type { SurvivalCurve } from './survival-curve.js';
+import { resolveWorkspaceIntelligence } from '../lib/workspace-intelligence.js';
 
 interface GroupStats {
   count: number;
@@ -1350,7 +1351,19 @@ export async function coverageByRep(
   scopeId?: string
 ): Promise<CoverageByRep> {
   // Load workspace config
-  const configCoverageTarget = coverageTarget ?? await configLoader.getCoverageTarget(workspaceId);
+  // Phase 9: Use WI coverage target if confirmed, fall back to existing source
+  const wi = await resolveWorkspaceIntelligence(workspaceId);
+
+  let wiTarget: number | null = null;
+  if (scopeId && scopeId !== 'default' && wi.pipeline.coverage_targets[scopeId] !== undefined) {
+    // Use segment-specific target if available
+    wiTarget = wi.pipeline.coverage_targets[scopeId];
+  } else if (wi.pipeline.coverage_targets['default'] !== undefined) {
+    // Use default target if available
+    wiTarget = wi.pipeline.coverage_targets['default'];
+  }
+
+  const configCoverageTarget = coverageTarget ?? (wiTarget !== null ? wiTarget : await configLoader.getCoverageTarget(workspaceId));
   const staleThreshold = await configLoader.getStaleThreshold(workspaceId);
 
   const params: any[] = [workspaceId, quarterStart, quarterEnd];
