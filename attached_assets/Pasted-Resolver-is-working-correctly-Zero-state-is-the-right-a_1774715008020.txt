@@ -1,0 +1,230 @@
+Resolver is working correctly. Zero state is the right answer for an uncalibrated workspace. Proceed to Phase 4.
+
+---
+
+**PANDORA: Phase 4 — Query Compiler**
+
+**Pre-read before writing anything:**
+```
+server/types/workspace-intelligence.ts — full file, focus on QueryDefinition, Condition, ConditionSource, CompiledQuery types
+server/lib/workspace-intelligence.ts — full file, understand the WI object structure
+server/db/queries/ — read all files, understand parameterized query patterns used in existing skills
+server/skills/pipeline-waterfall.ts — full file
+server/skills/ — read any compute file that builds a SQL query directly
+```
+
+**What you are building**
+
+`server/lib/query-compiler.ts` — exports `compileQuery(definition: QueryDefinition, wi: WorkspaceIntelligence): CompiledQuery`.
+
+This is a pure function. No DB calls. No async. Takes a structured QueryDefinition and a resolved WorkspaceIntelligence object, returns parameterized SQL.
+
+---
+
+**Entity table mapping**
+
+```typescript
+const ENTITY_TABLE: Record<string, string> = {
+  deal: 'deals',
+  company: 'companies',
+  contact: 'contacts',
+  activity: 'activities',
+  deal_stage_history: 'deal_stage_history',
+};
+```
+
+---
+
+**ConditionSource resolution**
+
+Build a private function `resolveConditionSource(source: ConditionSource, wi: WorkspaceIntelligence): { value: unknown; confidence: ConfidenceLevel; resolved: boolean }`.
+
+```typescript
+// literal → value as-is, confidence CONFIRMED, resolved true
+// config_ref → traverse WI object by dot-path string
+//   e.g. 'pipeline.active_stages' → wi.pipeline.active_stages
+//   if path resolves to null/undefined/empty array → resolved false, confidence UNKNOWN
+//   if path resolves to a value → resolved true
+//   confidence = infer from domain:
+//     pipeline.* → wi.readiness.by_domain.pipeline > 50 ? CONFIRMED : INFERRED
+//     segmentation.* → wi.readiness.by_domain.segmentation > 50 ? CONFIRMED : INFERRED
+//     taxonomy.* → wi.readiness.by_domain.taxonomy > 50 ? CONFIRMED : INFERRED
+//     metrics.* → look up wi.metrics[key].confidence
+//     otherwise → INFERRED
+// metric_ref → wi.metrics[metric_key].last_computed_value
+//   if null → resolved false, confidence UNKNOWN
+//   if present → resolved true, confidence = wi.metrics[metric_key].confidence
+// date_scope → convert to { start: Date, end: Date } based on current date
+//   current_period → start of current quarter to today
+//   prior_period → full prior quarter
+//   rolling_30/60/90 → today minus N days
+//   ytd → Jan 1 of current year to today
+//   resolved always true, confidence CONFIRMED
+```
+
+Use a dot-path resolver utility — do not hardcode every possible path:
+
+```typescript
+function resolveDotPath(obj: unknown, path: string): unknown {
+  return path.split('.').reduce((acc, key) => {
+    if (acc === null || acc === undefined) return undefined;
+    return (acc as Record<string, unknown>)[key];
+  }, obj);
+}
+```
+
+---
+
+**SQL building logic**
+
+Private function `buildSQL(definition: QueryDefinition, resolvedConditions: ResolvedCondition[], wi: WorkspaceIntelligence): { sql: string; params: unknown[] }`.
+
+```typescript
+// 1. Start params array with workspaceId as $1 — always first
+// 2. SELECT clause: build from aggregation.fn and aggregation.field
+//    COUNT(*) → SELECT COUNT(*)
+//    SUM(amount) → SELECT SUM(amount)
+//    AVG(close_date - create_date) → special case for days calculation
+// 3. FROM clause: ENTITY_TABLE[definition.entity] aliased as primary table
+// 4. JOIN clauses: from definition.joins if present
+//    ALSO: auto-inject company join if:
+//      wi.pipeline.coverage_requires_segmentation = true
+//      AND entity = 'deal'
+//      AND no company join already defined
+//      AND definition.group_by is not already set
+// 5. WHERE clause:
+//    Always first condition: workspace_id = $1
+//    Then each resolved condition as additional AND clauses
+//    Use $N parameterized placeholders, increment for each param
+//    operator mapping:
+//      eq → = $N
+//      neq → != $N
+//      in → = ANY($N) — pass array as single param
+//      not_in → != ALL($N) — pass array as single param
+//      gt/lt/gte/lte → >/</>=/<= $N
+//      is_null → IS NULL (no param)
+//      not_null → IS NOT NULL (no param)
+// 6. GROUP BY clause: from definition.group_by if present
+//    If auto-injected company join: add company segment field to GROUP BY
+//    The segment field = wi.segmentation.dimensions[first confirmed dimension].crm_field
+// 7. date_scope: add to WHERE as additional date range condition
+//    field from definition.date_scope.field, values from resolved date_scope
+```
+
+---
+
+**Confidence propagation**
+
+Track confidence across all resolved sources:
+
+```typescript
+function mergeConfidence(levels: ConfidenceLevel[]): ConfidenceLevel {
+  if (levels.includes('UNKNOWN')) return 'UNKNOWN';
+  if (levels.includes('INFERRED')) return 'INFERRED';
+  return 'CONFIRMED';
+}
+```
+
+Overall query confidence = merge of all condition source confidences.
+
+---
+
+**CompiledQuery output**
+
+```typescript
+return {
+  sql: sql,                    // null if any required ref unresolved
+  params: params,
+  confidence: mergeConfidence(allConfidenceLevels),
+  unresolved_refs: unresolvedPaths,   // config_ref paths that returned undefined
+  fallback_used: unresolvedPaths.length > 0,
+  warnings: warnings,          // human readable strings e.g. "pipeline.active_stages is empty — no stage filter applied"
+};
+```
+
+If any `config_ref` is unresolved AND the condition is required (not optional) → set `sql = null`. A skill receiving `sql: null` must not execute the query.
+
+Mark a condition as optional by wrapping in `{ optional: true, ...condition }` — extend the Condition type if needed.
+
+---
+
+**Auto-inject logic for Frontera**
+
+This is the specific bug fix. When:
+- `definition.entity === 'deal'`
+- `wi.pipeline.coverage_requires_segmentation === true`
+- No join to `company` already in `definition.joins`
+
+Then:
+1. Auto-inject: `JOIN companies ON deals.company_id = companies.id`
+2. Find the first confirmed dimension in `wi.segmentation.dimensions` where `entity === 'company'`
+3. Auto-inject that dimension's `crm_field` into `GROUP BY`
+4. Add warning: `"Segmentation auto-injected: Frontera requires pipeline broken down by segment"`
+
+---
+
+**Test cases — write these as inline test functions and run them, then delete**
+
+```typescript
+// Test 1: literal conditions compile cleanly
+const winRateNumerator: QueryDefinition = {
+  entity: 'deal',
+  aggregation: { fn: 'COUNT', field: null },
+  conditions: [
+    { field: 'stage', operator: 'eq', value: { type: 'literal', value: 'closed_won' } }
+  ],
+  date_scope: { field: 'close_date', scope: 'current_period' }
+};
+// Expected: SELECT COUNT(*) FROM deals WHERE workspace_id = $1 AND stage = $2 AND close_date >= $3 AND close_date <= $4
+// confidence: CONFIRMED
+
+// Test 2: config_ref resolves from WI
+const pipelineNumerator: QueryDefinition = {
+  entity: 'deal',
+  aggregation: { fn: 'SUM', field: 'amount' },
+  conditions: [
+    { field: 'stage', operator: 'in', value: { type: 'config_ref', path: 'pipeline.active_stages' } }
+  ]
+};
+// With Frontera WI where active_stages = [] → unresolved_refs: ['pipeline.active_stages'], fallback_used: true
+// With a seeded WI where active_stages = ['Qualified', 'Proposal'] → SQL with = ANY($2), confidence: INFERRED or CONFIRMED
+
+// Test 3: auto-inject for coverage_requires_segmentation
+// Same pipelineNumerator with wi.pipeline.coverage_requires_segmentation = true
+// Expected: SQL includes JOIN companies and GROUP BY companies.{segment_field}
+// Warning present about auto-injection
+
+// Test 4: unresolvable metric_ref
+const coverageDenominator: QueryDefinition = {
+  entity: 'deal',
+  aggregation: { fn: 'SUM', field: null },
+  conditions: [],
+  // metric_ref to quota_remaining which has no last_computed_value
+};
+// Expected: sql = null, unresolved_refs includes 'quota_remaining', confidence: UNKNOWN
+```
+
+---
+
+**Exports**
+
+```typescript
+export { compileQuery };
+export type { CompiledQuery }; // re-export for convenience
+```
+
+Do not export internal helpers.
+
+---
+
+**Acceptance criteria**
+
+1. Compiles without TypeScript errors
+2. Test 1 passes — literal conditions produce correct parameterized SQL
+3. Test 2 passes — empty `active_stages` from Frontera produces `fallback_used: true` and `unresolved_refs` populated
+4. Test 3 passes — `coverage_requires_segmentation` auto-injects company JOIN and GROUP BY
+5. Test 4 passes — unresolvable `metric_ref` returns `sql: null`
+6. `workspace_id = $1` is always the first WHERE condition in every compiled query
+7. No DB calls anywhere in this file — pure function only
+
+**Deliver:** Completed file + test output showing all 4 test cases passing. Flag any edge case discovered during implementation.
