@@ -167,7 +167,7 @@ const PIPELINE_QUESTIONS: CalibrationQuestion[] = [
   {
     question_id: 'push_threshold',
     domain: 'pipeline',
-    question: 'How many times can a close date be pushed before it's considered a red flag?',
+    question: 'How many times can a close date be pushed before it\'s considered a red flag?',
     description: 'Number of close date changes that trigger deal health concerns. Used for at-risk detection.',
     answer_type: 'number',
     options: [],
