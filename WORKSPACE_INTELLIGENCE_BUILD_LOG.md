@@ -352,14 +352,60 @@ Build `server/lib/standard-metrics.ts`:
 
 ---
 
-### Phase 8: Forward Deploy Seeder (NOT STARTED)
-Build `server/lib/forward-deploy-seeder.ts`:
-- `seedWorkspaceForForwardDeploy(workspaceId): Promise<SeedResult>`
-- Seeds metric_definitions from STANDARD_METRIC_LIBRARY
-- Inserts calibration_checklist questions for workspace
-- Pre-populates from existing workspace_config, business_dimensions, workspace_knowledge
-- Returns SeedResult with counts
-- Endpoint: `POST /api/admin/forward-deploy/seed/:workspaceId` (admin only, idempotent)
+### ✅ Phase 8: Forward Deploy Seeder (COMPLETE)
+
+**server/lib/forward-deploy-seeder.ts** (NEW FILE — 350 lines)
+
+**Functions:**
+- `seedWorkspaceForForwardDeploy(workspaceId): Promise<WorkspaceSeedResult>`
+  - Seeds 15 standard metrics via seedStandardMetrics()
+  - Seeds 108 calibration checklist questions (status = UNKNOWN, confidence = 0.5)
+  - Pre-populates from existing workspace_config and business_dimensions
+  - Invalidates WorkspaceIntelligence cache after seeding
+  - Idempotent - safe to run multiple times
+
+- `seedAllExistingWorkspaces(): Promise<WorkspaceSeedResult[]>`
+  - Seeds all workspaces in database
+  - Returns summary table of metrics/checklist/pre-populated counts per workspace
+
+**Pre-population Mappings:**
+- `workspace_config.pipelines[0].stages` → pipeline_active_stages
+- `workspace_config.pipelines[0].coverageTarget` → pipeline_coverage_target
+- `workspace_config.win_rate.method` → win_rate_denominator
+- `workspace_config.thresholds.atRisk` → at_risk_definition
+- `business_dimensions` (confirmed) → segmentation_field, segmentation_values, segmentation_entity
+
+**server/routes/forward-deploy.ts** (NEW FILE — 75 lines)
+
+**Admin Endpoints:**
+- `POST /api/admin/forward-deploy/seed/:workspaceId`
+  - Requires admin permission (config.view)
+  - Calls seedWorkspaceForForwardDeploy(workspaceId)
+  - Returns WorkspaceSeedResult JSON
+  - Idempotent
+
+- `POST /api/admin/forward-deploy/seed-all`
+  - Requires admin permission (config.view)
+  - Calls seedAllExistingWorkspaces()
+  - Returns array of WorkspaceSeedResult
+
+**server/scripts/test-phase8.ts** (NEW FILE — 180 lines)
+
+**Test Script validates:**
+1. seedWorkspaceForForwardDeploy inserts 108 checklist rows on first run
+2. Second run: 0 inserted, 108 skipped (idempotency)
+3. Pre-populated questions have status = INFERRED, answer_source = CRM_SCAN
+4. Checklist row count = 108 in database
+5. WorkspaceIntelligence.readiness.overall_score computed
+6. WorkspaceIntelligence.readiness.blocking_gaps populated
+7. WorkspaceIntelligence.readiness.skill_gates computed (38 skills)
+
+**Local Test Results:**
+- ✓ Compiles without TypeScript errors
+- ✓ Routes properly imported with requirePermission
+- ⏳ Runtime testing requires Replit (database queries)
+
+---
 
 ### Phase 9: Skill Integration (NOT STARTED) — **RISKIEST**
 Modify existing skills:
@@ -405,15 +451,20 @@ Build `server/routes/forward-deploy.ts`:
 - ✅ `server/lib/skill-manifests.ts` — Phase 6 skill manifests (38 skills)
 - ✅ `test-phase6.mjs` — Phase 6 test script (deleted after verification)
 - ✅ `server/lib/calibration-questions.ts` — Phase 7 calibration questions (108 questions)
-- ✅ `test-phase7.mjs` — Phase 7 test script
+- ✅ `test-phase7.mjs` — Phase 7 test script (deleted after verification)
+- ✅ `server/lib/forward-deploy-seeder.ts` — Phase 8 forward deploy seeder
+- ✅ `server/routes/forward-deploy.ts` — Phase 8 admin endpoints
+- ✅ `server/scripts/test-phase8.ts` — Phase 8 test script
 
 ### Modified Files:
 - ✅ `server/types/workspace-config.ts` — added BusinessConfig interface
 - ✅ `migrations/117_imubit_historical_stage_configs.sql` — wrapped INSERT in DO block with workspace existence check
 - ✅ `server/lib/workspace-intelligence.ts` — Phase 6: added skill_gates computation to resolveReadiness
+- ✅ `server/index.ts` — Phase 8: added forwardDeployRouter import and mount
 
-### Pending Files (Phase 8-10):
-- ⏳ `server/lib/forward-deploy-seeder.ts`
+### Pending Files (Phase 9-10):
+- ⏳ Phase 9: Skill Integration (riskiest phase - modifies existing skills)
+- ⏳ Phase 10: API Endpoints (remaining endpoints for WorkspaceIntelligence CRUD)
 - ⏳ `server/routes/forward-deploy.ts`
 - ⏳ 16 skill files (gate checks + WI refs)
 
