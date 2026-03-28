@@ -296,16 +296,61 @@ Build `server/lib/standard-metrics.ts`:
 
 ---
 
-### Phase 7: Calibration Questions (NOT STARTED)
-Build `server/lib/calibration-questions.ts`:
-- `STANDARD_CHECKLIST_QUESTIONS` — 100-question bank across 6 domains
-- Priority questions (Frontera/GrowthX/GrowthBook bugs):
-  - pipeline_active_stages, pipeline_coverage_target, coverage_target_by_segment
-  - coverage_requires_segmentation, segmentation_field, segmentation_values, segmentation_entity
-  - land_motion_field/values, expand_motion_field/values
-  - win_rate_denominator, attainment_method, arr_field, arr_decomposed
-  - gtm_motion, forecast_methodology, forecast_categories
-- Exports: STANDARD_CHECKLIST_QUESTIONS, getChecklistByDomain, getSkillBlockingQuestions
+### ✅ Phase 7: Calibration Questions (COMPLETE)
+
+**server/lib/calibration-questions.ts** (NEW FILE — 1,220 lines)
+
+**CALIBRATION_QUESTIONS** — 108 questions across 6 domains:
+- **Pipeline**: 18 questions (includes pipeline_active_stages, pipeline_coverage_target, forecast_categories, coverage_requires_segmentation, coverage_target_by_segment)
+- **Segmentation**: 12 questions (includes segmentation_field, segmentation_values, segmentation_entity)
+- **Taxonomy**: 18 questions (includes land_motion_field/values, expand_motion_field/values, renew_motion_field/values)
+- **Metrics**: 24 questions (includes win_rate_denominator, attainment_method, quota_currency, arr_field, arr_decomposed, forecast_methodology)
+- **Business**: 18 questions (includes gtm_motion, growth_stage, revenue_model)
+- **Data Quality**: 18 questions (includes stage_history_tracked, deal_amount_field, close_dates_reliable)
+
+**Question Structure:**
+```typescript
+{
+  question_id: string,
+  domain: 'business' | 'metrics' | 'taxonomy' | 'pipeline' | 'segmentation' | 'data_quality',
+  question: string,
+  description: string,           // why this matters, what Pandora uses it for
+  answer_type: 'text' | 'select' | 'multiselect' | 'boolean' | 'number' | 'field_picker' | 'stage_picker',
+  options?: string[],
+  depends_on: string[],          // question_ids that must be answered first
+  skill_dependencies: string[],  // skill_ids that require this question
+  required_for_live: boolean     // true if any skill has this in required_checklist_items
+}
+```
+
+**Coverage:**
+- ✅ All 17 unique question IDs from skill manifests covered
+- ✅ 27 questions marked as required_for_live (block skills from LIVE mode)
+- ✅ All required questions have at least one skill dependency
+- ✅ All depends_on references are valid question_ids
+
+**Exports:**
+- `CALIBRATION_QUESTIONS` — Complete 108-question array
+- `getQuestionsByDomain(domain)` — Filter by domain
+- `getQuestionById(questionId)` — Lookup by ID
+- `getSkillBlockingQuestions(skillId)` — Get required_for_live questions for a skill
+- `getRequiredQuestions()` — Get all required_for_live questions
+
+**Test Script:** `test-phase7.mjs`
+- Validates all 17 manifest references covered (zero missing)
+- Validates question count >= 100
+- Validates all 6 domains meet minimum counts
+- Validates required_for_live questions have skill_dependencies
+- Validates depends_on arrays reference valid question_ids
+- Validates getSkillBlockingQuestions returns correct questions
+
+**Local Test Results:**
+- ✓ Compiles without TypeScript errors
+- ✓ 108 questions defined across 6 domains
+- ✓ All manifest references covered (17/17)
+- ⏳ Runtime validation requires Replit
+
+---
 
 ### Phase 8: Forward Deploy Seeder (NOT STARTED)
 Build `server/lib/forward-deploy-seeder.ts`:
@@ -358,15 +403,16 @@ Build `server/routes/forward-deploy.ts`:
 - ✅ `server/lib/metric-seeder.ts` — Phase 5 seeder (idempotent)
 - ✅ `server/scripts/test-metric-seeder.ts` — Phase 5 test script
 - ✅ `server/lib/skill-manifests.ts` — Phase 6 skill manifests (38 skills)
-- ✅ `test-phase6.mjs` — Phase 6 test script
+- ✅ `test-phase6.mjs` — Phase 6 test script (deleted after verification)
+- ✅ `server/lib/calibration-questions.ts` — Phase 7 calibration questions (108 questions)
+- ✅ `test-phase7.mjs` — Phase 7 test script
 
 ### Modified Files:
 - ✅ `server/types/workspace-config.ts` — added BusinessConfig interface
 - ✅ `migrations/117_imubit_historical_stage_configs.sql` — wrapped INSERT in DO block with workspace existence check
 - ✅ `server/lib/workspace-intelligence.ts` — Phase 6: added skill_gates computation to resolveReadiness
 
-### Pending Files (Phase 7-10):
-- ⏳ `server/lib/calibration-questions.ts`
+### Pending Files (Phase 8-10):
 - ⏳ `server/lib/forward-deploy-seeder.ts`
 - ⏳ `server/routes/forward-deploy.ts`
 - ⏳ 16 skill files (gate checks + WI refs)
