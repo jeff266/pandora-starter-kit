@@ -1,0 +1,100 @@
+Final verification on Replit before closing the build. Send this:
+
+---
+
+**PANDORA: Phase 10 Live Verification**
+
+```bash
+git pull origin main
+npm run dev &
+sleep 8
+```
+
+Run each endpoint against live Neon. Replace `YOUR_AUTH_TOKEN` with a valid session token from the Frontera workspace:
+
+```bash
+FRONTERA="4160191d-73bc-414b-97dd-5a1853190378"
+AUTH="YOUR_AUTH_TOKEN"
+BASE="http://localhost:5000"
+
+# 1. Full WI object
+echo "=== GET intelligence ==="
+curl -s -H "Authorization: Bearer $AUTH" \
+  "$BASE/api/workspaces/$FRONTERA/intelligence" | jq '{
+    metrics_count: (.data.metrics | keys | length),
+    active_stages_count: (.data.pipeline.active_stages | length),
+    readiness_score: .data.readiness.overall_score,
+    blocking_gaps: (.data.readiness.blocking_gaps | length),
+    pipeline_waterfall_gate: .data.readiness.skill_gates["pipeline-waterfall"]
+  }'
+
+# 2. Readiness only
+echo "=== GET intelligence/readiness ==="
+curl -s -H "Authorization: Bearer $AUTH" \
+  "$BASE/api/workspaces/$FRONTERA/intelligence/readiness" | jq '.data.by_domain'
+
+# 3. Calibration checklist
+echo "=== GET calibration ==="
+curl -s -H "Authorization: Bearer $AUTH" \
+  "$BASE/api/workspaces/$FRONTERA/calibration" | jq '{
+    overall_score: .data.overall_score,
+    domains: (.data.domains | keys),
+    pipeline_total: .data.domains.pipeline.total,
+    pipeline_confirmed: .data.domains.pipeline.confirmed,
+    pipeline_inferred: .data.domains.pipeline.inferred
+  }'
+
+# 4. PATCH a checklist answer — confirm pipeline_coverage_target
+echo "=== PATCH calibration/pipeline_coverage_target ==="
+curl -s -X PATCH \
+  -H "Authorization: Bearer $AUTH" \
+  -H "Content-Type: application/json" \
+  -d '{"answer": {"value": 3.0}, "status": "CONFIRMED", "confirmed_by": "jeff@revopsimpact.us"}' \
+  "$BASE/api/workspaces/$FRONTERA/calibration/pipeline_coverage_target" | jq '{
+    success: .success,
+    status: .data.status,
+    answer: .data.answer,
+    confirmed_by: .data.confirmed_by
+  }'
+
+# 5. Re-check readiness after PATCH — blocking_gaps should shrink
+echo "=== GET readiness after PATCH ==="
+curl -s -H "Authorization: Bearer $AUTH" \
+  "$BASE/api/workspaces/$FRONTERA/intelligence/readiness" | jq '{
+    overall_score: .data.overall_score,
+    blocking_gaps_count: (.data.blocking_gaps | length),
+    pipeline_waterfall_gate: .data.skill_gates["pipeline-waterfall"]
+  }'
+
+# 6. Metrics list
+echo "=== GET metrics ==="
+curl -s -H "Authorization: Bearer $AUTH" \
+  "$BASE/api/workspaces/$FRONTERA/metrics" | jq '{
+    total: (.data | length),
+    sample: [.data[] | {key: .metric_key, confidence: .confidence}] | .[0:3]
+  }'
+
+# 7. Unauthenticated request — should return 401 not 500
+echo "=== Unauthenticated request ==="
+curl -s -o /dev/null -w "%{http_code}" \
+  "$BASE/api/workspaces/$FRONTERA/intelligence"
+
+kill %1
+```
+
+**Expected:**
+- Endpoint 1: `metrics_count: 15`, `active_stages_count: 10`, `readiness_score: 3`, `pipeline-waterfall: DRAFT`
+- Endpoint 3: all 6 domains present, `pipeline_total: 18`, `pipeline_inferred >= 1`
+- Endpoint 4: `success: true`, `status: CONFIRMED`, `answer: {value: 3}`
+- Endpoint 5: `blocking_gaps_count` one less than before, `pipeline-waterfall` moves to LIVE if `pipeline_active_stages` was already INFERRED and coverage_target was the last missing required item
+- Endpoint 6: 15 metrics, all `confidence: INFERRED`
+- Endpoint 7: HTTP 401
+
+Paste full output. If all pass, commit and close the build:
+
+```bash
+git add -A && git commit -m "feat: phase 10 complete — forward deployment API endpoints live"
+git push origin main
+```
+
+That closes all 10 phases. The WorkspaceIntelligence architecture is done.
