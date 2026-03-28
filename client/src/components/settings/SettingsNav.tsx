@@ -46,6 +46,7 @@ const NAV_SECTIONS: NavSection[] = [
     label: 'Configure',
     items: [
       { key: 'setup',            label: 'Setup Guide',     icon: '✦',            adminOnly: true },
+      { key: 'forward-deploy',   label: 'Forward Deploy',  icon: '🚀',            adminOnly: true },
       { key: 'calibration',      label: 'Calibration',     icon: 'target',       adminOnly: true },
       { key: 'sales-roster',     label: 'Sales Roster',    icon: 'network',      adminOnly: true },
       { key: 'pipeline-config',  label: 'Pipeline Config', icon: 'chart-growth', adminOnly: true },
