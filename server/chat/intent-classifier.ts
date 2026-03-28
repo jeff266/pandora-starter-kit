@@ -511,14 +511,23 @@ export async function classifyDeliberationMode(
     }
   }
 
-  // Triage allocation auto-trigger: late quarter with multiple open deals
+  // Triage allocation auto-trigger: late quarter + open deals + message shows prioritization/focus intent
+  // Requires explicit allocation intent signal — not just timing — to avoid firing on unrelated messages
   if ((context.weekOfQuarter ?? 0) >= 9 && (context.openDealCount ?? 0) >= 3) {
-    return {
-      mode: 'boardroom',
-      lens: 'triage_allocation',
-      confidence: 0.80,
-      rationale: 'context signal: late_quarter_triage',
-    };
+    const LATE_QUARTER_INTENT_SIGNALS = [
+      /\b(focus|prioritize|push|chase|which|where|what).{0,30}(deal|opp|pipeline|close)\b/i,
+      /\b(end.?of.?quarter|close.?the.?quarter|eoq|eog|quarter.?end)\b/i,
+      /\b(behind|at.?risk|short|gap|pace|on.?track|miss|make.?the.?number|hit.?quota)\b/i,
+      /\b(capacity|coverage|allocation|rep.?load|workload)\b/i,
+    ];
+    if (LATE_QUARTER_INTENT_SIGNALS.some(p => p.test(message))) {
+      return {
+        mode: 'boardroom',
+        lens: 'triage_allocation',
+        confidence: 0.75,
+        rationale: 'context signal: late_quarter_triage + intent confirmed',
+      };
+    }
   }
 
   // ── Data challenge patterns (replaces socratic) ──────────────────────────────

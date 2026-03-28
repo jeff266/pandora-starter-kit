@@ -1189,16 +1189,29 @@ export async function runProsecutorDefenseDeliberation(
     //   - stage proxy: stage_duration_days within ±50% of the deal's stage duration
     //   - rep owner: prefer same owner, but fall back to workspace-wide if too few rows
     let historicalPattern = '';
+    // Typed row shapes for the historical deal_outcomes query
+    interface DealOutcomeRow {
+      outcome: 'won' | 'lost';
+      count: number;
+      avg_amount: number | null;
+      avg_days_open: number | null;
+      avg_score: number | null;
+    }
+    interface DealAmountRow {
+      amount: string | null;
+      stage_duration: string | null;
+    }
+
     try {
       // If we have entity context, try similarity-filtered query first
       if (entityContext?.dealId) {
         // Fetch deal's amount + stage_duration if not provided
         if (entityContext.dealAmount == null || entityContext.stageDurationDays == null) {
-          const dealFetch = await query(
+          const dealFetch = await query<DealAmountRow>(
             `SELECT amount::numeric AS amount, days_in_stage AS stage_duration
              FROM deals WHERE id = $1 AND workspace_id = $2`,
             [entityContext.dealId, workspaceId]
-          ).catch(() => ({ rows: [] as any[] }));
+          ).catch(() => ({ rows: [] as DealAmountRow[] }));
           const df = dealFetch.rows[0];
           if (df) {
             if (entityContext.dealAmount == null && df.amount != null) {
@@ -1215,7 +1228,7 @@ export async function runProsecutorDefenseDeliberation(
       const useStageDays = entityContext?.stageDurationDays;
 
       // Build similarity filters for the historical query
-      const simParams: any[] = [workspaceId];
+      const simParams: (string | number)[] = [workspaceId];
       let simFilter = '';
       if (useAmount != null && useAmount > 0) {
         simParams.push(useAmount * 0.5, useAmount * 1.5);
@@ -1226,7 +1239,7 @@ export async function runProsecutorDefenseDeliberation(
         simFilter += ` AND (stage_duration_days IS NULL OR stage_duration_days BETWEEN $${simParams.length - 1} AND $${simParams.length})`;
       }
 
-      const historicalResult = await query(
+      const historicalResult = await query<DealOutcomeRow>(
         `SELECT
            outcome,
            COUNT(*)::int AS count,
@@ -1243,9 +1256,9 @@ export async function runProsecutorDefenseDeliberation(
       );
 
       // If similarity filtering yields < 3 outcomes, fall back to workspace-wide
-      const rows = historicalResult.rows.length >= 1 && historicalResult.rows.reduce((s: number, r: any) => s + r.count, 0) >= 3
+      const rows: DealOutcomeRow[] = historicalResult.rows.length >= 1 && historicalResult.rows.reduce((s, r) => s + r.count, 0) >= 3
         ? historicalResult.rows
-        : (await query(
+        : (await query<DealOutcomeRow>(
             `SELECT
                outcome,
                COUNT(*)::int AS count,
@@ -1258,12 +1271,12 @@ export async function runProsecutorDefenseDeliberation(
              GROUP BY outcome
              ORDER BY count DESC`,
             [workspaceId]
-          ).catch(() => ({ rows: [] as any[] }))).rows;
+          ).catch(() => ({ rows: [] as DealOutcomeRow[] }))).rows;
 
       if (rows.length > 0) {
-        const totalDeals = rows.reduce((s: number, r: any) => s + r.count, 0);
-        const winRow = rows.find((r: any) => r.outcome === 'won');
-        const lossRow = rows.find((r: any) => r.outcome === 'lost');
+        const totalDeals = rows.reduce((s, r) => s + r.count, 0);
+        const winRow = rows.find(r => r.outcome === 'won');
+        const lossRow = rows.find(r => r.outcome === 'lost');
         const winRate = winRow ? Math.round((winRow.count / totalDeals) * 100) : 0;
         const similarityNote = (useAmount != null || useStageDays != null) ? ' (similar-size deals)' : '';
         historicalPattern = `HISTORICAL CONTEXT (last 12 months${similarityNote}): ${totalDeals} deals closed — ${winRate}% win rate.` +
@@ -1359,8 +1372,8 @@ No preamble. Format as labeled lines.`,
         // alert_threshold=0: alert when metric drops to zero (watch metric is positive by definition)
         await query(
           `INSERT INTO standing_hypotheses
-             (workspace_id, hypothesis, metric, alert_direction, alert_threshold, status, source)
-           VALUES ($1, $2, $3, 'below', 0, 'active', 'pre_mortem')`,
+             (workspace_id, hypothesis, metric, alert_direction, alert_threshold, status, source, review_date)
+           VALUES ($1, $2, $3, 'below', 0, 'active', 'pre_mortem', CURRENT_DATE + INTERVAL '7 days')`,
           [
             workspaceId,
             `Plan stress-test watch: ${plan.slice(0, 200)}`,
