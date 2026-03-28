@@ -56,6 +56,68 @@ Created 3 SQL migration files following naming convention:
 
 **server/lib/workspace-intelligence.ts** (NEW FILE — 625 lines)
 
+---
+
+### ✅ Phase 5: Standard Metrics Library + Seeder (COMPLETE)
+
+**server/lib/standard-metrics.ts** (NEW FILE — 450+ lines)
+
+**15 Standard Metrics Defined:**
+1. **win_rate** - Closed won / (won + lost), ratio metric with numerator/denominator queries
+2. **pipeline_coverage** - Pipeline / quota_remaining, auto-segments when coverage_requires_segmentation=true
+3. **attainment** - Closed won amount, segmented by owner by default
+4. **average_deal_size** - AVG(amount) for closed won deals
+5. **sales_cycle** - AVG days from create to close for won deals
+6. **expansion_rate** - Closed won from expand deal types (uses taxonomy.expand_values)
+7. **pipeline_created** - Total pipeline created in current period
+8. **pipeline_velocity** - Derived metric (pipeline × win_rate × avg_deal_size / sales_cycle), sentinel QueryDefinition
+9. **stage_conversion** - Deal progression rate between stages (requires per-stage config)
+10. **mql_to_sql** - Marketing to Sales qualified lead conversion (contact-based)
+11. **quota_remaining** - Quota minus closed won (requires targets table)
+12. **calls_per_meeting** - Activity efficiency metric (call count / meeting count)
+13. **attainment_distribution** - % of reps hitting quota thresholds (derived metric, sentinel QueryDefinition)
+14. **nrr** - Net Revenue Retention (multi-component, requires ARR decomposition)
+15. **pipeline_at_risk** - Pipeline with no activity in 30 days
+
+**Query Definition Structure:**
+- All metrics use ConditionSource types: `literal`, `config_ref`, `metric_ref`, `date_scope`
+- Config refs resolve from WorkspaceIntelligence paths (e.g., `pipeline.active_stages`, `taxonomy.expand_values`)
+- Date scopes: `current_period`, `prior_period`, `rolling_30/60/90`, `ytd`, `custom`
+- All metrics include detailed descriptions noting dependencies and limitations
+
+**server/lib/metric-seeder.ts** (NEW FILE — 120 lines)
+
+**Seeding Functions:**
+- `seedStandardMetrics(workspaceId)` - Idempotent seeding for single workspace
+  - Checks existence before insert (never overwrites)
+  - Inserts with `source='SYSTEM'`, `confidence='INFERRED'`
+  - Numerator/denominator stored as JSONB
+  - Catches per-row errors (one failure doesn't abort rest)
+  - Invalidates WorkspaceIntelligence cache after inserts
+  - Returns SeedResult with inserted/skipped/errors arrays
+
+- `seedAllWorkspaces()` - Bulk seeding for all workspaces
+  - Queries all workspace IDs
+  - Calls seedStandardMetrics for each
+  - Logs summary statistics
+
+**Test Script:** `server/scripts/test-metric-seeder.ts`
+- Tests first seed (15 inserted, 0 skipped)
+- Tests second seed (0 inserted, 15 skipped - idempotency)
+- Tests WorkspaceIntelligence resolution (15 metrics present)
+- Tests win_rate structure (confidence=INFERRED, numerator/denominator correct)
+
+**Local Test Results:**
+- ✓ Compiles without TypeScript errors
+- ✓ All 15 metrics defined with non-empty descriptions
+- ⏳ Data testing requires Replit (migrations 217-219 present)
+
+---
+
+### ⏳ Phase 4: Query Compiler (COMPLETE - BUILT ON REPLIT)
+
+**server/lib/query-compiler.ts** (438 lines) - pulled from origin/main
+
 **Core Resolver:**
 - `resolveWorkspaceIntelligence(workspaceId)` — Main async function that resolves all 7 domains in parallel
 - Returns complete `WorkspaceIntelligence` object with 5-minute cache TTL
@@ -242,14 +304,16 @@ Build `server/routes/forward-deploy.ts`:
 - ✅ `server/types/workspace-intelligence.ts`
 - ✅ `server/lib/workspace-intelligence.ts` — Phase 3 resolver
 - ✅ `server/scripts/test-workspace-intelligence.ts` — Phase 3 test script
+- ✅ `server/lib/query-compiler.ts` — Phase 4 compiler (built on Replit)
+- ✅ `server/lib/standard-metrics.ts` — Phase 5 metric library (15 metrics)
+- ✅ `server/lib/metric-seeder.ts` — Phase 5 seeder (idempotent)
+- ✅ `server/scripts/test-metric-seeder.ts` — Phase 5 test script
 
 ### Modified Files:
 - ✅ `server/types/workspace-config.ts` — added BusinessConfig interface
 - ✅ `migrations/117_imubit_historical_stage_configs.sql` — wrapped INSERT in DO block with workspace existence check
 
-### Pending Files (Phase 4-10):
-- ⏳ `server/lib/query-compiler.ts`
-- ⏳ `server/lib/standard-metrics.ts`
+### Pending Files (Phase 6-10):
 - ⏳ `server/lib/skill-manifests.ts`
 - ⏳ `server/lib/calibration-questions.ts`
 - ⏳ `server/lib/forward-deploy-seeder.ts`
