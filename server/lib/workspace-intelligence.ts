@@ -18,6 +18,7 @@ import type {
   CalibrationChecklistRow,
 } from '../types/workspace-intelligence.js';
 import { SKILL_MANIFESTS, evaluateSkillGate } from './skill-manifests.js';
+import { ensureCalibrationChecklist } from './calibration-seeder.js';
 
 // ============================================================
 // CACHING
@@ -55,6 +56,9 @@ export async function resolveWorkspaceIntelligence(
   if (cached && Date.now() < cached.expires) {
     return cached.data;
   }
+
+  // Ensure calibration checklist is seeded (Phase 8 — idempotent, best-effort)
+  await ensureCalibrationChecklist(workspaceId);
 
   // Resolve all domains in parallel
   const [
@@ -536,7 +540,11 @@ async function resolveReadiness(
       if (domainCounts[domain]) {
         domainCounts[domain].total++;
         if (row.status === 'CONFIRMED') {
-          domainCounts[domain].confirmed++;
+          // Full credit for human-confirmed answers
+          domainCounts[domain].confirmed += 1.0;
+        } else if (row.status === 'INFERRED') {
+          // Half credit for CRM-scanned / AI-inferred answers
+          domainCounts[domain].confirmed += 0.5;
         }
 
         // Blocking gap = UNKNOWN status + has skill_dependencies
@@ -550,7 +558,7 @@ async function resolveReadiness(
       }
     }
 
-    // Calculate scores (confirmed / total) for each domain
+    // Calculate scores (weighted confirmed / total) for each domain
     const by_domain = {
       business:
         domainCounts.business.total > 0
