@@ -297,8 +297,9 @@ function buildSQL(
     }
   }
 
-  // WHERE clause — workspace_id always first
-  const whereClauses: string[] = ['workspace_id = $1'];
+  // WHERE clause — table-qualified workspace_id always first to avoid
+  // ambiguity when joins bring in other tables that also have workspace_id
+  const whereClauses: string[] = [`${table}.workspace_id = $1`];
   for (const cond of readyConditions) {
     const { clause, hasParam } = operatorToSQL(cond.operator, cond.field, paramIdx);
     whereClauses.push(clause);
