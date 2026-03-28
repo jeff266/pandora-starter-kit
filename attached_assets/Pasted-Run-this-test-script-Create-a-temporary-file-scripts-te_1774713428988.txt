@@ -1,0 +1,58 @@
+Run this test script
+Create a temporary file scripts/test-wi-resolver.ts and run it:
+typescriptimport { resolveWorkspaceIntelligence, invalidateWorkspaceIntelligence } from '../server/lib/workspace-intelligence';
+
+const FRONTERA_ID = '4160191d-73bc-414b-97dd-5a1853190378';
+
+async function test() {
+  console.log('--- CALL 1: Cold resolution ---');
+  const t1 = Date.now();
+  const wi = await resolveWorkspaceIntelligence(FRONTERA_ID);
+  console.log(`Resolved in ${Date.now() - t1}ms`);
+
+  // Domain checks
+  console.log('\n--- BUSINESS ---');
+  console.log(JSON.stringify(wi.business, null, 2));
+
+  console.log('\n--- PIPELINE ---');
+  console.log('active_stages:', wi.pipeline.active_stages);
+  console.log('coverage_targets:', wi.pipeline.coverage_targets);
+  console.log('coverage_requires_segmentation:', wi.pipeline.coverage_requires_segmentation);
+
+  console.log('\n--- SEGMENTATION ---');
+  console.log('default_dimensions:', wi.segmentation.default_dimensions);
+  console.log('dimension keys:', Object.keys(wi.segmentation.dimensions));
+
+  console.log('\n--- TAXONOMY ---');
+  console.log('land_field:', wi.taxonomy.land_field);
+  console.log('expand_field:', wi.taxonomy.expand_field);
+  console.log('custom_aliases:', wi.taxonomy.custom_aliases);
+
+  console.log('\n--- METRICS ---');
+  console.log('metric keys:', Object.keys(wi.metrics));
+
+  console.log('\n--- KNOWLEDGE ---');
+  console.log('domains:', Object.keys(wi.knowledge));
+  console.log('total entries:', Object.values(wi.knowledge).flat().length);
+
+  console.log('\n--- DATA QUALITY ---');
+  console.log('stage_history_available:', wi.data_quality.stage_history_available);
+  console.log('close_dates_reliable:', wi.data_quality.close_dates_reliable);
+  console.log('field count:', Object.keys(wi.data_quality.fields).length);
+
+  console.log('\n--- READINESS ---');
+  console.log(JSON.stringify(wi.readiness, null, 2));
+
+  console.log('\n--- CALL 2: Cache hit ---');
+  const t2 = Date.now();
+  await resolveWorkspaceIntelligence(FRONTERA_ID);
+  console.log(`Resolved in ${Date.now() - t2}ms (should be ~0ms)`);
+
+  console.log('\n--- CALL 3: After invalidation ---');
+  invalidateWorkspaceIntelligence(FRONTERA_ID);
+  const t3 = Date.now();
+  await resolveWorkspaceIntelligence(FRONTERA_ID);
+  console.log(`Resolved in ${Date.now() - t3}ms (should be >0ms, re-queried DB)`);
+}
+
+test().catch(console.error);

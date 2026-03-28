@@ -1,0 +1,63 @@
+Good checkpoint. Before running migrations, you need Replit to verify actual column names. Here's the prompt:
+
+---
+
+**PANDORA: Schema Verification — Pre-Migration Check**
+
+Do not run any migrations yet. Read only.
+
+I need to verify actual column names in Neon before running migrations 138, 139, 140. Claude Code wrote these against assumed schema — I need to confirm the real structure matches before executing.
+
+**Run these queries against the live Neon DB:**
+
+```sql
+-- 1. workspace_knowledge actual columns
+SELECT column_name, data_type, is_nullable, column_default
+FROM information_schema.columns
+WHERE table_name = 'workspace_knowledge'
+ORDER BY ordinal_position;
+
+-- 2. business_dimensions actual columns
+SELECT column_name, data_type, is_nullable, column_default
+FROM information_schema.columns
+WHERE table_name = 'business_dimensions'
+ORDER BY ordinal_position;
+
+-- 3. data_dictionary actual columns
+SELECT column_name, data_type, is_nullable, column_default
+FROM information_schema.columns
+WHERE table_name = 'data_dictionary'
+ORDER BY ordinal_position;
+
+-- 4. standing_hypotheses actual columns
+SELECT column_name, data_type, is_nullable, column_default
+FROM information_schema.columns
+WHERE table_name = 'standing_hypotheses'
+ORDER BY ordinal_position;
+
+-- 5. targets actual columns
+SELECT column_name, data_type, is_nullable, column_default
+FROM information_schema.columns
+WHERE table_name = 'targets'
+ORDER BY ordinal_position;
+
+-- 6. workspaces table — confirm workspace_config column exists and type
+SELECT column_name, data_type
+FROM information_schema.columns
+WHERE table_name = 'workspaces'
+ORDER BY ordinal_position;
+
+-- 7. Confirm metric_definitions and calibration_checklist do NOT yet exist
+SELECT table_name
+FROM information_schema.tables
+WHERE table_name IN ('metric_definitions', 'calibration_checklist');
+
+-- 8. Check existing migration numbers to confirm 138/139/140 are safe
+SELECT filename FROM migrations ORDER BY filename DESC LIMIT 10;
+```
+
+**Deliver:** A table showing expected column name (from migration) vs actual column name (from DB) for every ALTER TABLE statement in migrations 138–140. Flag any mismatch. Do not run migrations until I review.
+
+---
+
+Once Replit returns that report, bring it back here and we'll review before executing anything.
