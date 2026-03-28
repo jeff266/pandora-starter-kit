@@ -12,14 +12,14 @@
 
 Created 3 SQL migration files following naming convention:
 
-**138_workspace_intelligence_extend_tables.sql**
+**217_workspace_intelligence_extend_tables.sql**
 - Extends workspace_knowledge: adds `domain` column + `structured_ref` UUID
 - Extends business_dimensions: adds `entity`, `crm_field`, `crm_values` columns
 - Extends data_dictionary: adds trust scoring (`completion_rate`, `trust_score`, `trust_reason`, `last_audited`, `is_trusted_for_reporting`)
 - Extends standing_hypotheses: adds `metric_definition_id` FK placeholder
 - Extends targets: adds `segment_scope`, `deal_type_scope` columns
 
-**139_metric_definitions.sql**
+**218_metric_definitions.sql**
 - Creates metric_definitions table with:
   - Identity: metric_key, label, description
   - Calculation: numerator (JSONB), denominator (JSONB), aggregation_method, unit
@@ -27,8 +27,9 @@ Created 3 SQL migration files following naming convention:
   - Confirmation: confidence, confirmed_by, confirmed_at, confirmed_value, last_computed_value
   - Source tracking: SYSTEM | FORWARD_DEPLOY | INFERRED | USER
 - Adds FK from standing_hypotheses.metric_definition_id → metric_definitions.id
+- Uses DROP TABLE CASCADE then CREATE TABLE (no IF NOT EXISTS) per user instructions
 
-**140_calibration_checklist.sql**
+**219_calibration_checklist.sql**
 - Creates calibration_checklist table with:
   - Question identity: question_id, domain, question
   - Answer: answer (JSONB), answer_source, status, confidence
@@ -37,7 +38,8 @@ Created 3 SQL migration files following naming convention:
 - Indexes: workspace, domain, status, skill_dependencies (GIN)
 
 **Status:** ⚠️ **READY FOR REPLIT VERIFICATION** before running migrations
-- All migrations follow convention from migrations 136-137
+- Migration numbers updated to 217-219 (highest existing migration is 216)
+- Migration 117 fixed with DO block to check workspace existence before INSERT
 - All new columns have COMMENT documentation
 - Ratio convention: stored as 0-1 (display multiplies ×100)
 - All constraints use CHECK and FK appropriately
@@ -185,13 +187,14 @@ Build `server/routes/forward-deploy.ts`:
 ## Files Created
 
 ### New Files:
-- ✅ `server/migrations/138_workspace_intelligence_extend_tables.sql`
-- ✅ `server/migrations/139_metric_definitions.sql`
-- ✅ `server/migrations/140_calibration_checklist.sql`
+- ✅ `migrations/217_workspace_intelligence_extend_tables.sql`
+- ✅ `migrations/218_metric_definitions.sql`
+- ✅ `migrations/219_calibration_checklist.sql`
 - ✅ `server/types/workspace-intelligence.ts`
 
 ### Modified Files:
 - ✅ `server/types/workspace-config.ts` — added BusinessConfig interface
+- ✅ `migrations/117_imubit_historical_stage_configs.sql` — wrapped INSERT in DO block with workspace existence check
 
 ### Pending Files (Phase 3-10):
 - ⏳ `server/lib/workspace-intelligence.ts`
@@ -249,8 +252,8 @@ Build `server/routes/forward-deploy.ts`:
 
 ## Recommended Next Steps for Continuation
 
-1. **Replit Schema Verification:** Verify migrations 138-140 against actual Neon schema before running
-2. **Run Migrations:** Execute all 3 migrations on Neon database
+1. **Replit Schema Verification:** Verify migrations 217-219 against actual Neon schema before running
+2. **Run Migrations:** Execute all 3 migrations (217, 218, 219) on Neon database
 3. **Build Phase 3 (Resolver):** Core WorkspaceIntelligence resolution logic
 4. **Build Phase 4 (Query Compiler):** QueryDefinition → SQL compilation
 5. **Build Phase 5 (Standard Metrics):** 15 standard metric definitions + seeder

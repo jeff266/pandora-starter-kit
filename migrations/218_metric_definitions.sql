@@ -2,41 +2,31 @@
 -- Stores structured metric calculation definitions with numerator/denominator
 -- Part of Phase 1 of WorkspaceIntelligence architecture
 
-CREATE TABLE IF NOT EXISTS metric_definitions (
+-- Drop old formula-based placeholder (one stub row, formula = '{}', safe to discard)
+DROP TABLE IF EXISTS metric_definitions CASCADE;
+
+CREATE TABLE metric_definitions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-
-  -- Identity
-  metric_key TEXT NOT NULL,        -- canonical: 'win_rate', 'pipeline_coverage', 'attainment'
-  label TEXT NOT NULL,             -- display: 'Win Rate', 'Pipeline Coverage'
+  metric_key TEXT NOT NULL,
+  label TEXT NOT NULL,
   description TEXT,
-
-  -- Calculation structure
-  numerator JSONB NOT NULL,        -- QueryDefinition
-  denominator JSONB,               -- QueryDefinition | null (null for non-ratio metrics)
+  numerator JSONB NOT NULL,
+  denominator JSONB,
   aggregation_method TEXT NOT NULL CHECK (aggregation_method IN ('ratio', 'sum', 'count', 'avg', 'days')),
   unit TEXT NOT NULL CHECK (unit IN ('ratio', 'currency', 'count', 'days', 'percentage')),
-
-  -- Segmentation
-  segmentation_defaults TEXT[],    -- always break by these dimensions when running
-
-  -- Confirmation state
+  segmentation_defaults TEXT[],
   confidence TEXT NOT NULL DEFAULT 'INFERRED'
     CHECK (confidence IN ('CONFIRMED', 'INFERRED', 'UNKNOWN')),
   confirmed_by TEXT,
   confirmed_at TIMESTAMPTZ,
-  confirmed_value NUMERIC,         -- what they said it should be (from confirmation loop)
-  last_computed_value NUMERIC,     -- what Pandora calculated most recently
+  confirmed_value NUMERIC,
+  last_computed_value NUMERIC,
   last_computed_at TIMESTAMPTZ,
-
-  -- Source
   source TEXT NOT NULL DEFAULT 'SYSTEM'
     CHECK (source IN ('SYSTEM', 'FORWARD_DEPLOY', 'INFERRED', 'USER')),
-
-  -- Timestamps
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
-
   UNIQUE (workspace_id, metric_key)
 );
 
