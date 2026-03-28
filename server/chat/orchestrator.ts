@@ -1471,12 +1471,12 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
               [workspaceId, entityId]
             ),
             // Entity risk score from deal_scores (most recent)
-            query(
+            query<{ score: number | null }>(
               `SELECT score::int FROM deal_scores
                WHERE deal_id = $1
                ORDER BY scored_at DESC LIMIT 1`,
               [entityId]
-            ).catch(() => ({ rows: [] as any[] })),
+            ).catch(() => ({ rows: [] as { score: number | null }[] })),
           ]);
           const d = dealRow.rows[0];
           const median = medianRow.rows[0]?.median_days ?? null;
@@ -1493,7 +1493,7 @@ Answer their clarifying question briefly and accurately (2–3 sentences). Then 
           }
           const score = scoreRow.rows[0]?.score;
           if (score != null) {
-            dealSignals.entityRiskScore = parseInt(score, 10);
+            dealSignals.entityRiskScore = Math.trunc(score);
           }
         } catch {
           // Non-fatal — proceed without signals

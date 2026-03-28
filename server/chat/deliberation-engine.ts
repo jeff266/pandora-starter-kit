@@ -1200,15 +1200,16 @@ export async function runProsecutorDefenseDeliberation(
     interface DealAmountRow {
       amount: string | null;
       stage_duration: string | null;
+      owner: string | null;
     }
 
     try {
       // If we have entity context, try similarity-filtered query first
       if (entityContext?.dealId) {
-        // Fetch deal's amount + stage_duration if not provided
-        if (entityContext.dealAmount == null || entityContext.stageDurationDays == null) {
+        // Fetch deal's amount + stage_duration + owner if not provided
+        if (entityContext.dealAmount == null || entityContext.stageDurationDays == null || entityContext.ownerRepId == null) {
           const dealFetch = await query<DealAmountRow>(
-            `SELECT amount::numeric AS amount, days_in_stage AS stage_duration
+            `SELECT amount::numeric AS amount, days_in_stage AS stage_duration, owner
              FROM deals WHERE id = $1 AND workspace_id = $2`,
             [entityContext.dealId, workspaceId]
           ).catch(() => ({ rows: [] as DealAmountRow[] }));
@@ -1220,14 +1221,21 @@ export async function runProsecutorDefenseDeliberation(
             if (entityContext.stageDurationDays == null && df.stage_duration != null) {
               entityContext.stageDurationDays = parseInt(df.stage_duration, 10);
             }
+            if (entityContext.ownerRepId == null && df.owner != null) {
+              entityContext.ownerRepId = df.owner;
+            }
           }
         }
       }
 
       const useAmount = entityContext?.dealAmount;
       const useStageDays = entityContext?.stageDurationDays;
+      // Rep owner: filter to deals owned by the same rep via subquery join
+      // Empty string sentinel = no filter (owner unknown)
+      const useOwner = entityContext?.ownerRepId ?? '';
 
       // Build similarity filters for the historical query
+      // Params: $1 = workspaceId (always), then amount/stage/owner params
       const simParams: (string | number)[] = [workspaceId];
       let simFilter = '';
       if (useAmount != null && useAmount > 0) {
@@ -1238,6 +1246,9 @@ export async function runProsecutorDefenseDeliberation(
         simParams.push(Math.max(0, useStageDays * 0.5), useStageDays * 1.5);
         simFilter += ` AND (stage_duration_days IS NULL OR stage_duration_days BETWEEN $${simParams.length - 1} AND $${simParams.length})`;
       }
+      // Rep similarity: prefer deals from same owner (empty string = skip filter)
+      simParams.push(useOwner);
+      simFilter += ` AND ($${simParams.length} = '' OR deal_id IN (SELECT id FROM deals WHERE workspace_id = $1 AND owner = $${simParams.length}))`;
 
       const historicalResult = await query<DealOutcomeRow>(
         `SELECT
