@@ -241,11 +241,60 @@ Build `server/lib/standard-metrics.ts`:
   - nrr, pipeline_at_risk
 - `seedStandardMetrics(workspaceId): Promise<void>` — idempotent seeder
 
-### Phase 6: Skill Manifests (NOT STARTED)
-Build `server/lib/skill-manifests.ts`:
-- `SKILL_MANIFESTS: Record<string, SkillManifest>` — all 16 live skills
-- Priority manifests: pipeline_waterfall, rep_scorecard, forecast_rollup, pipeline_coverage
-- `getSkillManifest(skillId): SkillManifest | null` export
+### ✅ Phase 6: Skill Manifests (COMPLETE)
+
+**server/lib/skill-manifests.ts** (NEW FILE — 406 lines)
+
+**SKILL_MANIFESTS** — All 38 skills with dependency declarations:
+- **6 Priority Skills** (active bugs): pipeline-waterfall, pipeline-coverage, rep-scorecard, forecast-rollup, stage-velocity-benchmarks, pipeline-conversion-rate
+- **6 Pipeline Skills**: pipeline-progression, pipeline-hygiene, pipeline-movement, pipeline-goals, pipeline-gen-forecast, pipeline-contribution-forecast
+- **3 Forecasting Skills**: forecast-model, forecast-accuracy-tracking, monte-carlo-forecast
+- **5 Deal Analysis Skills**: deal-risk-review, deal-scoring-model, deal-rfm-scoring, single-thread-alert, stage-mismatch-detector
+- **5 Strategy Skills**: strategy-insights, gtm-health-diagnostic, quarterly-pre-mortem, weekly-recap, project-recap
+- **3 Conversation Skills**: conversation-intelligence, competitive-intelligence, voice-pattern-extraction
+- **2 Coaching Skills**: coaching, behavioral-winning-path
+- **5 Discovery Skills**: icp-discovery, icp-taxonomy-builder, custom-field-discovery, workspace-config-audit, data-quality-audit
+- **2 Scoring Skills**: lead-scoring, contact-role-resolution
+- **1 Analysis Skill**: bowtie-analysis
+
+**Manifest Structure:**
+```typescript
+{
+  skill_id: string,
+  required_checklist_items: string[],      // Must be CONFIRMED for LIVE
+  preferred_checklist_items: string[],     // Should not be UNKNOWN
+  required_metric_keys: string[],          // Must exist in wi.metrics
+  fallback_behavior: 'draft_mode' | 'warn' | 'block'
+}
+```
+
+**Functions:**
+- `evaluateSkillGate(manifest, checklist, wi): SkillGateResult` — Returns LIVE/DRAFT/BLOCKED based on dependencies
+  - Checks required checklist items are CONFIRMED
+  - Checks preferred items are not UNKNOWN
+  - Checks required metrics exist in wi.metrics
+  - Returns gate status with missing_required, missing_preferred, warnings arrays
+- `getSkillManifest(skillId): SkillManifest | null` — Gets manifest by ID
+
+**Integration:**
+- Updated `server/lib/workspace-intelligence.ts` to compute skill_gates in resolveReadiness
+- All 38 skills now have gate status computed on every WorkspaceIntelligence resolution
+- Gate status used by skill runtime to determine if skill can run in LIVE mode
+
+**Test Script:** `test-phase6.mjs`
+- Tests all 38 skills have valid manifests
+- Tests 6 priority skills are present
+- Tests evaluateSkillGate returns LIVE when dependencies met
+- Tests evaluateSkillGate returns DRAFT when checklist empty
+- Tests resolveReadiness computes skill_gates for all 38 skills
+
+**Local Test Results:**
+- ✓ Compiles without TypeScript errors
+- ✓ All 38 skills have valid manifests with required fields
+- ✓ evaluateSkillGate function logic correct
+- ⏳ Runtime testing requires Replit (migrations 217-219 + data present)
+
+---
 
 ### Phase 7: Calibration Questions (NOT STARTED)
 Build `server/lib/calibration-questions.ts`:
@@ -302,19 +351,21 @@ Build `server/routes/forward-deploy.ts`:
 - ✅ `migrations/218_metric_definitions.sql`
 - ✅ `migrations/219_calibration_checklist.sql`
 - ✅ `server/types/workspace-intelligence.ts`
-- ✅ `server/lib/workspace-intelligence.ts` — Phase 3 resolver
+- ✅ `server/lib/workspace-intelligence.ts` — Phase 3 resolver (updated in Phase 6)
 - ✅ `server/scripts/test-workspace-intelligence.ts` — Phase 3 test script
 - ✅ `server/lib/query-compiler.ts` — Phase 4 compiler (built on Replit)
 - ✅ `server/lib/standard-metrics.ts` — Phase 5 metric library (15 metrics)
 - ✅ `server/lib/metric-seeder.ts` — Phase 5 seeder (idempotent)
 - ✅ `server/scripts/test-metric-seeder.ts` — Phase 5 test script
+- ✅ `server/lib/skill-manifests.ts` — Phase 6 skill manifests (38 skills)
+- ✅ `test-phase6.mjs` — Phase 6 test script
 
 ### Modified Files:
 - ✅ `server/types/workspace-config.ts` — added BusinessConfig interface
 - ✅ `migrations/117_imubit_historical_stage_configs.sql` — wrapped INSERT in DO block with workspace existence check
+- ✅ `server/lib/workspace-intelligence.ts` — Phase 6: added skill_gates computation to resolveReadiness
 
-### Pending Files (Phase 6-10):
-- ⏳ `server/lib/skill-manifests.ts`
+### Pending Files (Phase 7-10):
 - ⏳ `server/lib/calibration-questions.ts`
 - ⏳ `server/lib/forward-deploy-seeder.ts`
 - ⏳ `server/routes/forward-deploy.ts`

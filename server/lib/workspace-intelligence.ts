@@ -17,6 +17,7 @@ import type {
   TargetRow,
   CalibrationChecklistRow,
 } from '../types/workspace-intelligence.js';
+import { SKILL_MANIFESTS, evaluateSkillGate } from './skill-manifests.js';
 
 // ============================================================
 // CACHING
@@ -589,11 +590,48 @@ async function resolveReadiness(
         100
     );
 
+    // Compute skill gates for all skills (Phase 6)
+    const skill_gates: Record<string, 'LIVE' | 'DRAFT' | 'BLOCKED'> = {};
+    const checklistRows = result.rows.map((r) => ({
+      question_id: r.question_id,
+      status: r.status,
+    }));
+
+    // Assemble partial WorkspaceIntelligence for gate evaluation
+    const partialWi: WorkspaceIntelligence = {
+      workspace_id: workspaceId,
+      resolved_at: new Date(),
+      cache_ttl_seconds: 300,
+      business: domains.business,
+      metrics: domains.metrics,
+      segmentation: domains.segmentation,
+      taxonomy: domains.taxonomy,
+      pipeline: domains.pipeline,
+      data_quality: domains.data_quality,
+      knowledge: {
+        hypotheses: [],
+        recent_findings: [],
+        skill_evidence: [],
+      },
+      readiness: {
+        overall_score,
+        by_domain,
+        blocking_gaps,
+        skill_gates: {},
+      },
+    };
+
+    // Evaluate gate status for all skills
+    for (const [skillId, manifest] of Object.entries(SKILL_MANIFESTS)) {
+      const gateResult = evaluateSkillGate(manifest, checklistRows, partialWi);
+      skill_gates[skillId] = gateResult.gate;
+    }
+
     return {
       overall_score,
       by_domain,
       blocking_gaps,
-      skill_gates: {}, // Populated in Phase 6 when skill manifests exist
+      skill_gates,
     };
   } catch (err) {
     console.error('[WorkspaceIntelligence] resolveReadiness failed', {
