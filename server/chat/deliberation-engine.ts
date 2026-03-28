@@ -802,8 +802,8 @@ export async function runBoardroomDeliberation(
            d.id, d.name, d.amount, d.stage, d.stage_normalized,
            d.owner, d.close_date, d.days_in_stage, d.forecast_category,
            EXTRACT(DAY FROM d.close_date - NOW())::int AS days_until_close,
-           COUNT(conv.id)::int AS call_count,
-           COUNT(dc.contact_id)::int AS contact_count
+           COUNT(DISTINCT conv.id)::int AS call_count,
+           COUNT(DISTINCT dc.contact_id)::int AS contact_count
          FROM deals d
          LEFT JOIN conversations conv ON conv.deal_id = d.id AND conv.workspace_id = d.workspace_id
          LEFT JOIN deal_contacts dc ON dc.deal_id = d.id
@@ -1024,7 +1024,7 @@ export async function runDataChallengeDeliberation(
             [workspaceId]
           ),
           query(
-            `SELECT COALESCE(target_amount, 0) AS quota
+            `SELECT COALESCE(amount, 0) AS quota
              FROM targets
              WHERE workspace_id = $1
                AND period_label = to_char(date_trunc('quarter', NOW()), 'YYYY-"Q"Q')
@@ -1262,8 +1262,8 @@ export async function runProsecutorDefenseDeliberation(
 
       if (rows.length > 0) {
         const totalDeals = rows.reduce((s: number, r: any) => s + r.count, 0);
-        const winRow = rows.find((r: any) => r.outcome === 'closed_won');
-        const lossRow = rows.find((r: any) => r.outcome === 'closed_lost');
+        const winRow = rows.find((r: any) => r.outcome === 'won');
+        const lossRow = rows.find((r: any) => r.outcome === 'lost');
         const winRate = winRow ? Math.round((winRow.count / totalDeals) * 100) : 0;
         const similarityNote = (useAmount != null || useStageDays != null) ? ' (similar-size deals)' : '';
         historicalPattern = `HISTORICAL CONTEXT (last 12 months${similarityNote}): ${totalDeals} deals closed — ${winRate}% win rate.` +
@@ -1355,19 +1355,20 @@ No preamble. Format as labeled lines.`,
     if (watchMetric) {
       try {
         // Standing hypothesis for ongoing metric alerting
+        // source='pre_mortem' per CHECK constraint (pre_mortem, stack_trace, user_confirmed, concierge_recommendation, monte_carlo)
+        // alert_threshold=0: alert when metric drops to zero (watch metric is positive by definition)
         await query(
           `INSERT INTO standing_hypotheses
-             (workspace_id, hypothesis, metric, alert_direction, status, source)
-           VALUES ($1, $2, $3, 'below', 'active', 'plan_stress_test')
-           ON CONFLICT DO NOTHING`,
+             (workspace_id, hypothesis, metric, alert_direction, alert_threshold, status, source)
+           VALUES ($1, $2, $3, 'below', 0, 'active', 'pre_mortem')`,
           [
             workspaceId,
             `Plan stress-test watch: ${plan.slice(0, 200)}`,
             watchMetric.slice(0, 100),
           ]
         );
-      } catch {
-        // Non-fatal — standing_hypotheses may have additional required columns
+      } catch (err) {
+        console.error('[deliberation-engine] Failed to persist stress-test watch metric to standing_hypotheses', { workspaceId, watchMetric, err });
       }
 
       try {
