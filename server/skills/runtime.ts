@@ -51,6 +51,8 @@ import { buildQueryScope } from '../context/query-scope.js';
 import { getMethodologyConfigResolver } from '../methodology/config-resolver.js';
 import crypto from 'crypto';
 import { PANDORA_VOICE_STANDARD } from '../lib/voice-standard.js';
+import { resolveWorkspaceIntelligence } from '../lib/workspace-intelligence.js';
+import { getSkillManifest, evaluateSkillGate } from '../lib/skill-manifests.js';
 
 // ============================================================================
 // Skill Runtime
@@ -142,6 +144,46 @@ export class SkillRuntime {
     const startTime = Date.now();
 
     console.log(`[Skill Runtime] Starting ${skill.id} for workspace ${workspaceId}, runId: ${runId}`);
+
+    // Phase 9: Gate check - evaluate if skill can run based on WorkspaceIntelligence
+    let gateResult: any = null;
+    try {
+      const wi = await resolveWorkspaceIntelligence(workspaceId);
+      const manifest = getSkillManifest(skill.id);
+      if (manifest) {
+        // Pass empty checklist array for now - Phase 10 will wire in live checklist data
+        gateResult = evaluateSkillGate(manifest, [], wi);
+
+        if (gateResult.gate === 'BLOCKED') {
+          console.log(`[Skill Runtime] Skill ${skill.id} BLOCKED: ${gateResult.missing_required.join(', ')}`);
+          return {
+            runId,
+            skillId: skill.id,
+            workspaceId,
+            status: 'blocked',
+            output: null,
+            outputFormat: skill.outputFormat,
+            steps: [],
+            totalDuration_ms: Date.now() - startTime,
+            totalTokenUsage: { promptTokens: 0, completionTokens: 0, totalCost: 0 },
+            completedAt: new Date(),
+            errors: [{
+              step: 'gate_check',
+              error: `Required configuration missing: ${gateResult.missing_required.join(', ')}. Workspace readiness: ${wi.readiness.overall_score}%`
+            }],
+            gateStatus: 'BLOCKED',
+            missingRequired: gateResult.missing_required,
+            workspaceReadiness: wi.readiness.overall_score,
+          } as any;
+        }
+
+        if (gateResult.gate === 'DRAFT') {
+          console.log(`[Skill Runtime] Skill ${skill.id} running in DRAFT mode: ${gateResult.missing_required.join(', ')}`);
+        }
+      }
+    } catch (err) {
+      console.warn(`[Skill Runtime] Gate check failed for ${skill.id}, continuing execution:`, err);
+    }
 
     const [contextData, dataFreshness, activeTargetsResult, workspaceContextBlock, queryScope, workspaceConfig] = await Promise.all([
       getContext(workspaceId),
@@ -421,6 +463,7 @@ export class SkillRuntime {
       scopeFilters,
       queryScope,
       pipelineConfig,
+      gateResult: gateResult || null, // Phase 9: Store gate result for synthesize prompts
       metadata: {
         startedAt: new Date(),
         tokenUsage: {

@@ -200,6 +200,9 @@ export interface SkillExecutionContext {
    *  is set, so scoped runs automatically use the correct field. */
   pipelineConfig: import('../types/workspace-config.js').PipelineConfig;
 
+  /** Phase 9: Gate check result for skill execution */
+  gateResult?: any | null;
+
   /** Execution metadata */
   metadata: {
     startedAt: Date;
