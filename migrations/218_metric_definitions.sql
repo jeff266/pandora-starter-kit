@@ -34,11 +34,19 @@ CREATE INDEX IF NOT EXISTS idx_metric_definitions_workspace ON metric_definition
 CREATE INDEX IF NOT EXISTS idx_metric_definitions_confidence ON metric_definitions(workspace_id, confidence);
 
 -- Now add FK from standing_hypotheses to metric_definitions
-ALTER TABLE standing_hypotheses
-  ADD CONSTRAINT IF NOT EXISTS fk_metric_definition
-  FOREIGN KEY (metric_definition_id)
-  REFERENCES metric_definitions(id)
-  ON DELETE SET NULL;
+-- Wrap in DO block since IF NOT EXISTS is not supported with ADD CONSTRAINT
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'fk_metric_definition'
+  ) THEN
+    ALTER TABLE standing_hypotheses
+      ADD CONSTRAINT fk_metric_definition
+      FOREIGN KEY (metric_definition_id)
+      REFERENCES metric_definitions(id)
+      ON DELETE SET NULL;
+  END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_standing_hypotheses_metric_def ON standing_hypotheses(metric_definition_id);
 
