@@ -197,12 +197,31 @@ export interface WorkspaceConfig {
 
   /** System character avatar overrides (Pandora, Bull Case, Bear Case) */
   system_avatars?: SystemAvatarsConfig;
+
+  /** Business configuration — WHO THEY ARE (WorkspaceIntelligence) */
+  business?: BusinessConfig;
 }
 
 export interface SystemAvatarsConfig {
   pandora?: string;
   bull?: string;
   bear?: string;
+}
+
+// ===== BUSINESS CONFIG — WHO THEY ARE =====
+
+export interface BusinessConfig {
+  gtm_motion: 'new_logo' | 'expansion' | 'hybrid' | null;
+  growth_stage: 'early' | 'scaling' | 'mature' | null;
+  revenue_model: 'arr' | 'bookings' | 'usage' | null;
+  board_metrics: string[];
+  cro_primary_concern: string | null;
+  sells_multiple_products: boolean;
+  products: string[];
+  forecast_methodology: 'bottom_up' | 'top_down' | 'category_based' | null;
+  quota_currency: 'arr' | 'bookings' | null;
+  multi_year_reporting: 'tcv' | 'acv' | null;
+  nrr_tracked: boolean;
 }
 
 // ===== VOICE CONFIG =====
