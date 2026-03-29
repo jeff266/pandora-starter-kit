@@ -437,6 +437,9 @@ export default function App() {
             <Route path="/onboarding" element={<OnboardingFlow />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/settings/dimensions" element={<DimensionBuilder />} />
+            <Route path="/settings/integrations" element={<Navigate to="/settings/connectors" replace />} />
+            <Route path="/settings/quotas" element={<Navigate to="/targets" replace />} />
+            <Route path="/settings/llm-config" element={<Navigate to="/settings/claude" replace />} />
             <Route path="/settings/:tab" element={<SettingsPage />} />
             <Route path="/icp-profile" element={<IcpProfilePage />} />
             <Route path="/pipeline-mechanics" element={<PipelineMechanicsPage />} />

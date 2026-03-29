@@ -1118,7 +1118,7 @@ agentsWorkspaceRouter.post('/:workspaceId/reports/:reportId/export/google-docs',
       return res.status(400).json({
         error: 'google_drive_not_connected',
         message: 'Connect Google Drive in Settings → Integrations first.',
-        settings_url: '/settings/integrations',
+        settings_url: '/settings/connectors',
       });
     }
 

@@ -1,0 +1,126 @@
+Send this to Replit:
+
+---
+
+**PANDORA: Settings Nav Simplification — Two-Section Layout**
+
+**Pre-read before touching anything:**
+```
+client/src/components/settings/SettingsNav.tsx — full file
+client/src/App.tsx — settings route definitions
+client/src/SettingsPage.tsx (or equivalent) — how tabs render
+```
+
+**What you are building**
+
+Collapse 26 nav items across 4 sections into two sections: Active and Advanced. Active is visible by default. Advanced is collapsed by default with a "Show advanced settings" toggle.
+
+---
+
+**Active section — always visible, 7 items**
+
+```
+Active
+  Forward Deploy       /settings/forward-deploy
+  Calibration          /settings/calibration     (relabel to "AI Knowledge")
+  Pipeline Config      /settings/pipeline-config
+  Segments             /settings/segments
+  Sales Roster         /settings/sales-roster
+  Connectors           /settings/connectors
+  Notifications        /settings/notifications
+```
+
+---
+
+**Advanced section — collapsed by default, everything else**
+
+```
+Advanced  ▾  (click to expand)
+  Connect
+    Connector Health   /settings/connectors-health
+    CRM Sync           /settings/crm-sync
+    Deal Fields        /settings/deal-fields
+    Webhooks           /settings/webhooks
+    Claude             /settings/claude
+
+  Configure
+    Onboarding         /settings/setup
+    Methodology        /settings/methodology
+    Automations        /settings/automations
+    Agentic Actions    /settings/agentic-actions
+
+  Manage
+    Members            /settings/members
+    Roles              /settings/roles
+    Features           /settings/features
+    AI Keys            /settings/ai-keys
+    Token Usage        /settings/token-usage
+    Billing            /settings/billing
+
+  Account
+    Profile            /settings/profile
+    Security           /settings/security
+    Preferences        /settings/preferences
+    Workspaces         /settings/workspaces
+```
+
+Advanced auto-expands when the current route is inside it — user navigating directly to `/settings/members` sees Advanced expanded with Members highlighted.
+
+---
+
+**Ghost route fixes — do these in the same pass**
+
+```typescript
+// In App.tsx or router file, add these redirects:
+/settings/integrations  → /settings/connectors
+/settings/quotas        → /settings/targets (or wherever quota targets live)
+/settings/llm-config    → /settings/claude
+```
+
+In `server/routes/agents.ts` line 1121 — change:
+```typescript
+settings_url: '/settings/integrations'
+// to:
+settings_url: '/settings/connectors'
+```
+
+---
+
+**Collapsed state behavior**
+
+- Default: Advanced collapsed
+- Persist expanded/collapsed state in localStorage key `pandora_settings_nav_advanced`
+- Auto-expand when active route is in Advanced section
+- Chevron rotates on expand/collapse
+- No animation required — simple show/hide
+
+---
+
+**Relabeling**
+
+- "Calibration" → "AI Knowledge" (nav label only, route stays `/settings/calibration`)
+- "Setup Guide" → "Onboarding" (nav label only, route stays `/settings/setup`)
+
+---
+
+**No other changes**
+
+- All routes stay identical — no redirects needed for the restructure itself
+- All component files untouched
+- Only `SettingsNav.tsx` changes for the restructure
+- Ghost route fixes touch `App.tsx` and `server/routes/agents.ts` only
+
+---
+
+**Acceptance criteria**
+
+1. Settings nav shows 7 items in Active section on load
+2. Advanced section is collapsed by default, expands on click
+3. Navigating directly to an Advanced route auto-expands the section
+4. Collapsed state persists across page refreshes via localStorage
+5. All 26 items still reachable — nothing removed
+6. Ghost routes redirect correctly (test `/settings/integrations` → lands on Connectors)
+7. `agents.ts` returns `/settings/connectors` not `/settings/integrations`
+8. No console errors, no broken navigation
+
+**Deliver:** Screenshot of the nav in collapsed state and expanded state. Confirm ghost route redirects work.
