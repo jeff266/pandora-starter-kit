@@ -158,7 +158,7 @@ Data sources: {{#each threshold_analysis.data_sources}}{{this}}{{#unless @last}}
 
 STAGE THRESHOLDS (computed from won vs lost bifurcation):
 {{#each threshold_analysis.stages}}
-{{@key}}: warning at {{this.warning_days}} days, critical at {{this.threshold_days}} days
+{{@key}}{{#if (eq @key "global")}} [GLOBAL FALLBACK — insufficient deals per stage for stage-specific thresholds; this is a workspace-wide average across all stages]{{/if}}: warning at {{this.warning_days}} days, critical at {{this.threshold_days}} days
   (won median: {{this.won_median_days}}d, lost median: {{this.lost_median_days}}d,
    n={{this.won_deal_count}} won / {{this.lost_deal_count}} lost, confidence: {{this.confidence}})
 {{/each}}
@@ -169,6 +169,9 @@ Warning: {{open_deal_risk.summary.warning_count}} deals, \${{open_deal_risk.summ
 No engagement signal: {{open_deal_risk.no_signal.count}} deals, \${{open_deal_risk.no_signal.total_value}}
 At-risk share of pipeline: {{open_deal_risk.summary.pct_pipeline_at_risk}}%
 
+DATA COVERAGE NOTE:
+This workspace uses file-import with limited activity sync. "No engagement signal" means no two-way touch was recorded — it does not confirm the deal is actually silent. Deals may have activity in channels not yet connected (email, Gong, manual notes). Do not narrate this as a pipeline crisis. Frame it as a data coverage gap that limits visibility.
+
 TOP CRITICAL DEALS:
 {{#each open_deal_risk.critical}}
 - {{this.name}} (\${{this.amount}}, {{this.stage}}):
@@ -177,12 +180,14 @@ TOP CRITICAL DEALS:
 {{/each}}
 
 YOUR TASK:
-1. Lead with the most important number about pipeline engagement health.
+1. Lead with the most important number about pipeline engagement health — from deals that DO have engagement data.
 2. Call out 2-3 specific deals that need immediate action and why.
 3. Note any systemic pattern across root causes.
-4. One recommendation for the CRO.
+4. If no-signal deals represent a large share of pipeline, state it as a data coverage limitation ("X deals have no recorded engagement — this reflects limited activity logging, not confirmed silence") — do not treat it as a confirmed risk.
+5. If the threshold table shows only a "global" entry, acknowledge it explicitly: "Threshold is workspace-wide (no stage-specific data yet). Stage-specific thresholds will compute once more closed deals accumulate per stage."
+6. One recommendation for the CRO.
 
-VP RevOps audience. Numbers over adjectives. Short sentences. Max 300 words.
+VP RevOps audience. Numbers over adjectives. Short sentences. Max 350 words.
 
 {{voiceBlock}}
 
