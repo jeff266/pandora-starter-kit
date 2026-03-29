@@ -2254,9 +2254,15 @@ Cap tables at 10 rows — add "... and N more" if there are additional results.`
     : 'not set';
 
   const repLines = workspaceContext.sales_reps.length > 0
-    ? workspaceContext.sales_reps.map(r =>
-        `  ${r.name} (${r.role})`
-      ).join('\n')
+    ? workspaceContext.sales_reps.map(r => {
+        const parts: string[] = [r.name];
+        const attrs: string[] = [];
+        if (r.role) attrs.push(r.role);
+        if (r.is_manager) attrs.push('Manager');
+        if (attrs.length) parts.push(`(${attrs.join(' · ')})`);
+        if (r.email) parts.push(`<${r.email}>`);
+        return `  ${parts.join(' ')}`;
+      }).join('\n')
     : '  No sales roster configured';
 
   const dimLines = workspaceContext.confirmed_dimensions.length > 0

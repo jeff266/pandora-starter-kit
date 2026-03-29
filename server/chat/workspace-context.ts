@@ -44,8 +44,9 @@ export interface ActiveTarget {
 
 export interface SalesRep {
   name: string;
-  email: string;
-  role: string;
+  email: string | null;
+  role: string | null;
+  is_manager: boolean;
 }
 
 export interface ConfirmedDimension {
@@ -430,13 +431,14 @@ async function loadSalesReps(workspaceId: string): Promise<SalesRep[]> {
   try {
     const result = await query<{
       name: string;
-      email: string;
-      role: string;
+      email: string | null;
+      role: string | null;
+      is_manager: boolean;
     }>(
-      `SELECT rep_name AS name, rep_email AS email, pandora_role AS role
+      `SELECT rep_name AS name, rep_email AS email, pandora_role AS role, is_manager
        FROM sales_reps
        WHERE workspace_id = $1
-       ORDER BY rep_name ASC`,
+       ORDER BY is_manager DESC, rep_name ASC`,
       [workspaceId]
     );
 
