@@ -568,3 +568,64 @@ async function loadDataDictionaryTerms(workspaceId: string): Promise<DataDiction
     return [];
   }
 }
+
+// ============================================================================
+// WorkspaceIntelligence Block Builder (for Ask Pandora system prompt)
+// ============================================================================
+
+/**
+ * Builds the WorkspaceIntelligence context block for Ask Pandora.
+ * Injects between WORKSPACE CONFIGURATION and DATA DICTIONARY blocks.
+ *
+ * Returns formatted block with confirmed business rules, metrics, and calibration status.
+ * Null/empty fields render as "not configured". Low readiness scores (<20%) add cautionary note.
+ */
+export async function buildWorkspaceIntelligenceBlock(workspaceId: string): Promise<string> {
+  try {
+    const { resolveWorkspaceIntelligence } = await import('../lib/workspace-intelligence.js');
+    const wi = await resolveWorkspaceIntelligence(workspaceId);
+
+    const fmt = (val: string | null | undefined): string =>
+      (val && val.trim()) ? val : 'not configured';
+
+    const fmtArr = (arr: string[] | null | undefined): string =>
+      (arr && arr.length > 0) ? arr.join(', ') : 'not configured';
+
+    const readinessWarning = wi.readiness.overall_score < 20
+      ? `\n⚠️ Low calibration (${wi.readiness.overall_score}% complete) — answers may rely on defaults until Forward Deployment completes.`
+      : '';
+
+    return `
+WORKSPACEINTELLIGENCE (Confirmed Business Rules):
+
+GTM Motion: ${fmt(wi.business.gtm_motion)}
+Revenue Model: ${fmt(wi.business.revenue_model)}
+Growth Stage: ${fmt(wi.business.growth_stage)}
+Board Metrics: ${fmtArr(wi.business.board_metrics)}
+
+Pipeline Active Stages: ${fmtArr(wi.pipeline.active_stages)}
+Pipeline Weighted: ${wi.pipeline.weighted ? 'yes' : 'no'}
+Coverage Targets: ${Object.keys(wi.pipeline.coverage_targets).length > 0
+  ? Object.entries(wi.pipeline.coverage_targets).map(([k,v]) => `${k}=${v}x`).join(', ')
+  : 'not configured'}
+
+Land/Expand Taxonomy:
+  Land field: ${fmt(wi.taxonomy.land_field)}
+  Land values: ${fmtArr(wi.taxonomy.land_values)}
+  Expand field: ${fmt(wi.taxonomy.expand_field)}
+  Expand values: ${fmtArr(wi.taxonomy.expand_values)}
+
+Default Segmentation Dimensions: ${fmtArr(wi.segmentation.default_dimensions)}
+
+Calibration Readiness: ${wi.readiness.overall_score}% (business: ${Math.round(wi.readiness.by_domain.business*100)}%, pipeline: ${Math.round(wi.readiness.by_domain.pipeline*100)}%, metrics: ${Math.round(wi.readiness.by_domain.metrics*100)}%)${readinessWarning}
+
+USAGE RULE: When answering questions about pipeline stages, GTM motion, deal taxonomy, or coverage targets, use the WorkspaceIntelligence values above as the authoritative source. Do NOT make tool calls for these — they are pre-resolved configuration. Only call tools for live deal data, activity metrics, or computed aggregations not present above.
+`;
+  } catch (err) {
+    console.error('[WorkspaceContext] buildWorkspaceIntelligenceBlock failed:', err);
+    return `
+WORKSPACEINTELLIGENCE (Confirmed Business Rules):
+[Failed to load — using tool-based fallbacks]
+`;
+  }
+}

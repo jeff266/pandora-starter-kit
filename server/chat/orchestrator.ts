@@ -35,7 +35,7 @@ import { runDeliberation, type DeliberationResult } from './deliberation-engine.
 import { logChatMessage } from '../lib/chat-logger.js';
 import { estimateTokens } from './token-estimator.js';
 import { callLLM } from '../utils/llm-router.js';
-import { getWorkspaceContext, type WorkspaceContext } from './workspace-context.js';
+import { getWorkspaceContext, buildWorkspaceIntelligenceBlock, type WorkspaceContext } from './workspace-context.js';
 import { synthesizeDocuments, formatDocumentResponse } from './document-synthesizer.js';
 import { formatCurrency } from '../utils/format-currency.js';
 import { runRetroPipeline } from '../retro/pipeline.js';
@@ -2145,7 +2145,7 @@ function prefersBestPractice(message: string): boolean {
   );
 }
 
-function buildAdvisorySystemPrompt(workspaceContext: WorkspaceContext | null): string {
+async function buildAdvisorySystemPrompt(workspaceContext: WorkspaceContext | null, workspaceId: string): Promise<string> {
   const today = new Date().toISOString().split('T')[0];
   const base = `You are Pandora, an AI RevOps advisor for B2B SaaS companies.
 You have deep expertise in pipeline management, forecasting, ICP development,
@@ -2392,7 +2392,10 @@ Known skill_ids and when to recommend them:
 - pipeline-hygiene: when data quality issues are identified in deal fields
 `;
 
-  return `${base}${contextSection}${caveatSection}${workspaceConfigBlock}${terminologyBlock}${knowledgeBlock}${methodologyRule}${internalActionDetection}
+  // Inject WorkspaceIntelligence block (between WORKSPACE CONFIGURATION and DATA DICTIONARY)
+  const wiBlock = await buildWorkspaceIntelligenceBlock(workspaceId);
+
+  return `${base}${contextSection}${caveatSection}${workspaceConfigBlock}${wiBlock}${terminologyBlock}${knowledgeBlock}${methodologyRule}${internalActionDetection}
 
 Tailor your recommendations to this company's specific profile.
 For example, objection handling for a $150K ACV enterprise product looks very different
@@ -2418,7 +2421,7 @@ async function handleAdvisoryResponse(
   const workspaceContext = await getWorkspaceContext(workspaceId);
 
   // Step 2: Build advisory prompt with workspace context
-  const systemPrompt = buildAdvisorySystemPrompt(workspaceContext);
+  const systemPrompt = await buildAdvisorySystemPrompt(workspaceContext, workspaceId);
 
   // Step 3: Call Claude (always Claude for final user-facing advisory answers)
   const response = await callLLM(workspaceId, 'reason', {
