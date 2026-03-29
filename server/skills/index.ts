@@ -50,6 +50,7 @@ import { pipelineConversionRateSkill } from './library/pipeline-conversion-rate.
 import { pipelineProgressionSkill } from './library/pipeline-progression.js';
 import { gtmHealthDiagnosticSkill } from './library/gtm-health-diagnostic.js';
 import { quarterlyPreMortemSkill } from './library/quarterly-pre-mortem.js';
+import { engagementDropoffAnalysisSkill } from './library/engagement-dropoff-analysis.js';
 
 // Types
 export type {
@@ -133,6 +134,7 @@ export { monteCarloForecastSkill } from './library/monte-carlo-forecast.js';
 export { pipelineContributionForecastSkill } from './library/pipeline-contribution-forecast.js';
 export { stageMismatchDetectorSkill } from './library/stage-mismatch-detector.js';
 export { behavioralWinningPathSkill } from './library/behavioral-winning-path.js';
+export { engagementDropoffAnalysisSkill } from './library/engagement-dropoff-analysis.js';
 
 // Formatters
 export {

@@ -329,6 +329,19 @@ export const SKILL_MANIFESTS: Record<string, SkillManifest> = {
     required_metric_keys: ['expansion_rate', 'nrr'],
     fallback_behavior: 'warn',
   },
+
+  // ENGAGEMENT CATEGORY
+  'engagement-dropoff-analysis': {
+    skill_id: 'engagement-dropoff-analysis',
+    required_checklist_items: ['pipeline_active_stages'],
+    preferred_checklist_items: [
+      'segmentation_field',
+      'land_motion_field',
+      'expand_motion_field',
+    ],
+    required_metric_keys: [],
+    fallback_behavior: 'draft_mode',
+  },
 };
 
 // ============================================================

@@ -9763,6 +9763,76 @@ const persistVoicePatternsTool: ToolDefinition = {
 };
 
 // ============================================================================
+// Engagement Drop-Off Analysis Tools
+// ============================================================================
+
+const analyzeEngagementThresholds: ToolDefinition = {
+  name: 'analyzeEngagementThresholds',
+  description: 'Analyze historical engagement thresholds from closed deals (won vs lost bifurcation)',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {
+      lookbackMonths: { type: 'number', description: 'Months of closed deal history to analyze', default: 18 },
+      minDealsPerCell: { type: 'number', description: 'Minimum deals per stage/outcome cell', default: 5 },
+    },
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('analyzeEngagementThresholds', async () => {
+      const { analyzeEngagementThresholds } = await import('../analysis/engagement-analysis.js');
+      return await analyzeEngagementThresholds(
+        context.workspaceId,
+        params.lookbackMonths || 18,
+        params.minDealsPerCell || 5
+      );
+    });
+  },
+};
+
+const computeOpenDealRisk: ToolDefinition = {
+  name: 'computeOpenDealRisk',
+  description: 'Compute open deal risk against computed engagement thresholds',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {
+      maxCriticalDeals: { type: 'number', description: 'Max critical deals to return for classification', default: 20 },
+    },
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('computeOpenDealRisk', async () => {
+      const { computeOpenDealRisk } = await import('../analysis/engagement-analysis.js');
+      const thresholds = context.stepResults['analyze-thresholds']?.stages || {};
+      return await computeOpenDealRisk(
+        context.workspaceId,
+        thresholds,
+        params.maxCriticalDeals || 20
+      );
+    });
+  },
+};
+
+const writeThresholdsToSystem: ToolDefinition = {
+  name: 'writeThresholdsToSystem',
+  description: 'Write computed engagement thresholds to calibration_checklist',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('writeThresholdsToSystem', async () => {
+      const { writeThresholdsToSystem } = await import('../analysis/engagement-analysis.js');
+      const thresholds = context.stepResults['analyze-thresholds']?.stages || {};
+      return await writeThresholdsToSystem(context.workspaceId, thresholds);
+    });
+  },
+};
+
+// ============================================================================
 
 export const toolRegistry = new Map<string, ToolDefinition>([
   ['queryDeals', queryDeals],
@@ -11012,6 +11082,11 @@ export const toolRegistry = new Map<string, ToolDefinition>([
       };
     }, _params),
   } as unknown as ToolDefinition],
+
+  // Engagement Drop-Off Analysis
+  ['analyzeEngagementThresholds', analyzeEngagementThresholds],
+  ['computeOpenDealRisk', computeOpenDealRisk],
+  ['writeThresholdsToSystem', writeThresholdsToSystem],
 ]);
 
 // ============================================================================
