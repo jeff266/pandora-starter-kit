@@ -9804,7 +9804,7 @@ const computeOpenDealRisk: ToolDefinition = {
   execute: async (params, context) => {
     return safeExecute('computeOpenDealRisk', async () => {
       const { computeOpenDealRisk } = await import('../analysis/engagement-analysis.js');
-      const thresholds = context.stepResults['analyze-thresholds']?.stages || {};
+      const thresholds = context.stepResults['threshold_analysis']?.stages || {};
       return await computeOpenDealRisk(
         context.workspaceId,
         thresholds,
@@ -9826,7 +9826,7 @@ const writeThresholdsToSystem: ToolDefinition = {
   execute: async (params, context) => {
     return safeExecute('writeThresholdsToSystem', async () => {
       const { writeThresholdsToSystem } = await import('../analysis/engagement-analysis.js');
-      const thresholds = context.stepResults['analyze-thresholds']?.stages || {};
+      const thresholds = context.stepResults['threshold_analysis']?.stages || {};
       return await writeThresholdsToSystem(context.workspaceId, thresholds);
     });
   },

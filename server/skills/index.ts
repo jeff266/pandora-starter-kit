@@ -204,6 +204,7 @@ export function registerBuiltInSkills(): void {
   registry.register(pipelineProgressionSkill);
   registry.register(gtmHealthDiagnosticSkill);
   registry.register(quarterlyPreMortemSkill);
+  registry.register(engagementDropoffAnalysisSkill);
 
   // Register evidence builders for "Show the Work" evidence assembly
   registerAllEvidenceBuilders();

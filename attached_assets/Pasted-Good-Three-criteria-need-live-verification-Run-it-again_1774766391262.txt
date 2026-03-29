@@ -1,0 +1,74 @@
+Good. Three criteria need live verification. Run it against Frontera now:
+
+---
+
+**PANDORA: Engagement Drop-Off Skill — Live Verification**
+
+```bash
+git pull origin main
+```
+
+Run the skill against Frontera workspace directly:
+
+```bash
+npx tsx -e "
+import { executeSkill } from './server/skills/runtime.js';
+
+const result = await executeSkill({
+  skillId: 'engagement-dropoff-analysis',
+  workspaceId: '4160191d-73bc-414b-97dd-5a1853190378',
+  userId: 'system',
+  params: {}
+});
+
+console.log('Status:', result.status);
+console.log('Gate:', result.gate);
+
+if (result.status === 'blocked') {
+  console.log('Blocked reason:', result.reason);
+  process.exit(0);
+}
+
+const compute = result.stepResults?.['analyze-engagement-dropoff'];
+if (compute) {
+  console.log('\n=== THRESHOLD TABLE ===');
+  console.log(JSON.stringify(compute.threshold_analysis?.stages, null, 2));
+  console.log('\nTotal closed deals analyzed:', compute.threshold_analysis?.total_closed_deals_analyzed);
+  console.log('Data sources:', compute.threshold_analysis?.data_sources);
+}
+
+const risk = result.stepResults?.['compute-open-deal-risk'];
+if (risk) {
+  console.log('\n=== OPEN DEAL RISK ===');
+  console.log('Critical:', risk.open_deal_risk?.summary?.critical_count, 'deals');
+  console.log('Critical value: \$', risk.open_deal_risk?.summary?.critical_value);
+  console.log('Warning:', risk.open_deal_risk?.summary?.warning_count, 'deals');
+  console.log('\nCritical deals (first 3):');
+  risk.open_deal_risk?.critical?.slice(0, 3).forEach(d => {
+    console.log(' -', d.name, '\$'+d.amount, d.stage, d.days_since_two_way+'d');
+  });
+}
+" 2>&1 | tail -60
+```
+
+Then verify thresholds were written to calibration_checklist:
+
+```sql
+SELECT question_id, status, answer_source, confidence, answer
+FROM calibration_checklist
+WHERE workspace_id = '4160191d-73bc-414b-97dd-5a1853190378'
+AND question_id LIKE 'stale_threshold_%'
+ORDER BY question_id;
+```
+
+**Expected:**
+- Threshold table: at least 3 stages with won/lost medians
+- Action Behavior Centers ($150K, Proposal Reviewed, 99 days) in critical list
+- calibration_checklist rows with `answer_source = 'COMPUTED'`
+
+Paste full output. If Action Behavior Centers appears and thresholds are written, commit and close:
+
+```bash
+git add -A && git commit -m "feat: engagement-dropoff-analysis skill — stage-specific silence thresholds + open deal risk"
+git push origin main
+```

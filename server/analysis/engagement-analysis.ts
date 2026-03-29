@@ -4,6 +4,13 @@
  * Analyzes closed deals to find stage-specific engagement thresholds.
  * Bifurcates by outcome (won vs lost) to detect the silence point that
  * correlates with losses.
+ *
+ * Stage grouping strategy:
+ * - First attempt: group by raw d.stage name (works when multiple pipeline stages
+ *   appear as the closing stage, e.g. won at "Proposal" and lost at "Proposal").
+ * - Fallback: when all won deals are in "Closed Won" and all lost are in "Closed Lost"
+ *   (the common case), compute a single GLOBAL threshold comparing all won vs all lost
+ *   silence durations. Stored as stages['global'].
  */
 
 import { query } from '../db.js';
@@ -53,43 +60,10 @@ interface OpenDealRiskResult {
 }
 
 /**
- * Analyze historical engagement thresholds from closed deals.
- *
- * Uses corrected column names:
- * - conversations.call_date (not started_at)
- * - conversations.resolved_participants (not participants)
- * - activities.timestamp (not occurred_at)
- * - stage_normalized IN ('closed_won', 'closed_lost') for outcome
+ * Build the two-way touches CTE fragment (shared between analysis and risk queries).
  */
-export async function analyzeEngagementThresholds(
-  workspaceId: string,
-  lookbackMonths: number = 18,
-  minDealsPerCell: number = 5
-): Promise<ThresholdAnalysisResult> {
-  const lookbackDate = new Date();
-  lookbackDate.setMonth(lookbackDate.getMonth() - lookbackMonths);
-
-  // Check if activity_signals has sufficient data
-  const signalCountResult = await query(
-    `SELECT COUNT(*) as signal_count
-     FROM activity_signals asig
-     WHERE asig.activity_id IN (
-       SELECT id FROM activities WHERE workspace_id = $1
-     )
-     AND asig.speaker_type IN ('prospect', 'rep')`,
-    [workspaceId]
-  );
-
-  const signalCount = parseInt(signalCountResult.rows[0]?.signal_count || '0', 10);
-  const useEmailTrack = signalCount >= 100; // Threshold for email track inclusion
-
-  const dataSources: string[] = ['call_engagement'];
-  if (useEmailTrack) {
-    dataSources.push('email_engagement');
-  }
-
-  // Build two-way engagement CTE with workspace-specific tracks
-  let twoWayTouchesCTE = `
+function buildTwoWayCTE(useEmailTrack: boolean): string {
+  let cte = `
     WITH two_way_touches AS (
       -- Call-based engagement (conversations with external participants)
       SELECT c.deal_id, MAX(c.call_date) as touch_at, 'call' as touch_type
@@ -101,7 +75,7 @@ export async function analyzeEngagementThresholds(
   `;
 
   if (useEmailTrack) {
-    twoWayTouchesCTE += `
+    cte += `
       UNION ALL
 
       -- Email-based engagement (activities with prospect signals)
@@ -118,13 +92,90 @@ export async function analyzeEngagementThresholds(
     `;
   }
 
-  twoWayTouchesCTE += `
+  cte += `
     ),
     last_two_way AS (
       SELECT deal_id, MAX(touch_at) as last_two_way_at
       FROM two_way_touches
       GROUP BY deal_id
-    ),
+    )
+  `;
+
+  return cte;
+}
+
+/**
+ * Check if activity_signals has sufficient data for email track inclusion.
+ */
+async function checkEmailTrackAvailability(workspaceId: string): Promise<boolean> {
+  const signalCountResult = await query(
+    `SELECT COUNT(*) as signal_count
+     FROM activity_signals asig
+     WHERE asig.activity_id IN (
+       SELECT id FROM activities WHERE workspace_id = $1
+     )
+     AND asig.speaker_type IN ('prospect', 'rep')`,
+    [workspaceId]
+  );
+  const signalCount = parseInt(signalCountResult.rows[0]?.signal_count || '0', 10);
+  return signalCount >= 100;
+}
+
+/**
+ * Compute confidence level based on sample sizes.
+ */
+function computeConfidence(
+  wonCount: number,
+  lostCount: number,
+  useEmailTrack: boolean
+): 'HIGH' | 'MEDIUM' | 'LOW' {
+  let confidence: 'HIGH' | 'MEDIUM' | 'LOW';
+  if (wonCount >= 10 && lostCount >= 10) {
+    confidence = 'HIGH';
+  } else if (wonCount >= 5 && lostCount >= 5) {
+    confidence = 'MEDIUM';
+  } else {
+    confidence = 'LOW';
+  }
+  // Cap at MEDIUM when email track is unavailable (call-only data is less complete)
+  if (!useEmailTrack && confidence === 'HIGH') {
+    confidence = 'MEDIUM';
+  }
+  return confidence;
+}
+
+/**
+ * Analyze historical engagement thresholds from closed deals.
+ *
+ * Uses corrected column names:
+ * - conversations.call_date (not started_at)
+ * - conversations.resolved_participants with role:'external' (not participants.affiliation)
+ * - activities.timestamp (not occurred_at)
+ * - stage_normalized IN ('closed_won', 'closed_lost') for outcome
+ *
+ * Stage grouping:
+ * - Primary: group by raw d.stage (works for workspaces where deals close at various stages)
+ * - Fallback global: when raw stage grouping yields no won/lost overlap (because all
+ *   won deals have stage='Closed Won' and all lost have stage='Closed Lost'), compute
+ *   one global threshold comparing ALL won vs ALL lost silence durations.
+ *   Stored under the key 'global' in the returned stages map.
+ */
+export async function analyzeEngagementThresholds(
+  workspaceId: string,
+  lookbackMonths: number = 18,
+  minDealsPerCell: number = 5
+): Promise<ThresholdAnalysisResult> {
+  const lookbackDate = new Date();
+  lookbackDate.setMonth(lookbackDate.getMonth() - lookbackMonths);
+
+  const useEmailTrack = await checkEmailTrackAvailability(workspaceId);
+  const dataSources: string[] = ['call_engagement'];
+  if (useEmailTrack) dataSources.push('email_engagement');
+
+  const cteBase = buildTwoWayCTE(useEmailTrack);
+
+  // ── Primary: per-raw-stage analysis ──────────────────────────────────────
+  const stageQuery = cteBase + `,
     closed_deals AS (
       SELECT
         d.id,
@@ -138,7 +189,7 @@ export async function analyzeEngagementThresholds(
           ELSE NULL
         END as outcome,
         lt.last_two_way_at,
-        EXTRACT(EPOCH FROM (d.close_date - lt.last_two_way_at)) / 86400
+        EXTRACT(EPOCH FROM (d.close_date::timestamp - lt.last_two_way_at)) / 86400
           AS days_silence_before_close
       FROM deals d
       LEFT JOIN last_two_way lt ON lt.deal_id = d.id
@@ -165,29 +216,20 @@ export async function analyzeEngagementThresholds(
     ORDER BY stage, outcome
   `;
 
-  const result = await query(twoWayTouchesCTE, [
+  const stageResult = await query(stageQuery, [
     workspaceId,
     lookbackDate.toISOString(),
     minDealsPerCell,
   ]);
 
-  // Group by stage and compute thresholds
+  // Group by stage and find buckets with both won + lost
   const stageData: Record<string, { won?: any; lost?: any }> = {};
-
-  for (const row of result.rows) {
-    const stage = row.stage;
-    if (!stageData[stage]) {
-      stageData[stage] = {};
-    }
-
-    if (row.outcome === 'won') {
-      stageData[stage].won = row;
-    } else if (row.outcome === 'lost') {
-      stageData[stage].lost = row;
-    }
+  for (const row of stageResult.rows) {
+    if (!stageData[row.stage]) stageData[row.stage] = {};
+    if (row.outcome === 'won') stageData[row.stage].won = row;
+    else if (row.outcome === 'lost') stageData[row.stage].lost = row;
   }
 
-  // Compute thresholds for stages with both won and lost data
   const stages: Record<string, EngagementThreshold> = {};
   let totalClosedDeals = 0;
 
@@ -200,33 +242,92 @@ export async function analyzeEngagementThresholds(
 
       totalClosedDeals += wonCount + lostCount;
 
-      const thresholdDays = Math.round(lostMedian);
-      const warningDays = Math.round(lostMedian * 0.75);
-
-      // Determine confidence based on sample size
-      let confidence: 'HIGH' | 'MEDIUM' | 'LOW';
-      if (wonCount >= 10 && lostCount >= 10) {
-        confidence = 'HIGH';
-      } else if (wonCount >= 5 && lostCount >= 5) {
-        confidence = 'MEDIUM';
-      } else {
-        confidence = 'LOW';
-      }
-
-      // Cap confidence at MEDIUM if email track unavailable
-      if (!useEmailTrack && confidence === 'HIGH') {
-        confidence = 'MEDIUM';
-      }
-
       stages[stage] = {
         stage,
         won_median_days: Math.round(wonMedian),
         lost_median_days: Math.round(lostMedian),
-        threshold_days: thresholdDays,
-        warning_days: warningDays,
+        threshold_days: Math.round(lostMedian),
+        warning_days: Math.round(lostMedian * 0.75),
         won_deal_count: wonCount,
         lost_deal_count: lostCount,
-        confidence,
+        confidence: computeConfidence(wonCount, lostCount, useEmailTrack),
+      };
+    }
+  }
+
+  // ── Fallback: global threshold when no stage-level won/lost overlap ──────
+  // This happens when all won deals carry stage='Closed Won' and all lost
+  // carry stage='Closed Lost' — the final CRM stage, not an intermediate stage.
+  // In this case we compare ALL won silence vs ALL lost silence globally.
+  if (Object.keys(stages).length === 0) {
+    const globalQuery = cteBase + `,
+      closed_deals AS (
+        SELECT
+          d.id,
+          d.stage_normalized,
+          d.amount,
+          d.close_date,
+          CASE
+            WHEN d.stage_normalized = 'closed_won' THEN 'won'
+            WHEN d.stage_normalized = 'closed_lost' THEN 'lost'
+            ELSE NULL
+          END as outcome,
+          EXTRACT(EPOCH FROM (d.close_date::timestamp - lt.last_two_way_at)) / 86400
+            AS days_silence_before_close
+        FROM deals d
+        LEFT JOIN last_two_way lt ON lt.deal_id = d.id
+        WHERE d.workspace_id = $1
+          AND d.stage_normalized IN ('closed_won', 'closed_lost')
+          AND d.close_date >= $2
+          AND lt.last_two_way_at IS NOT NULL
+      )
+      SELECT
+        outcome,
+        COUNT(*) as deal_count,
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY days_silence_before_close)
+          AS median_silence_days,
+        PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY days_silence_before_close)
+          AS p25_silence_days,
+        PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY days_silence_before_close)
+          AS p75_silence_days,
+        AVG(amount) AS avg_deal_size
+      FROM closed_deals
+      WHERE outcome IS NOT NULL
+        AND days_silence_before_close >= 0
+      GROUP BY outcome
+      HAVING COUNT(*) >= $3
+      ORDER BY outcome
+    `;
+
+    const globalResult = await query(globalQuery, [
+      workspaceId,
+      lookbackDate.toISOString(),
+      Math.max(3, Math.floor(minDealsPerCell / 2)),
+    ]);
+
+    const globalData: { won?: any; lost?: any } = {};
+    for (const row of globalResult.rows) {
+      if (row.outcome === 'won') globalData.won = row;
+      else if (row.outcome === 'lost') globalData.lost = row;
+    }
+
+    if (globalData.won && globalData.lost) {
+      const wonMedian = parseFloat(globalData.won.median_silence_days);
+      const lostMedian = parseFloat(globalData.lost.median_silence_days);
+      const wonCount = parseInt(globalData.won.deal_count, 10);
+      const lostCount = parseInt(globalData.lost.deal_count, 10);
+
+      totalClosedDeals = wonCount + lostCount;
+
+      stages['global'] = {
+        stage: 'global',
+        won_median_days: Math.round(wonMedian),
+        lost_median_days: Math.round(lostMedian),
+        threshold_days: Math.round(lostMedian),
+        warning_days: Math.round(lostMedian * 0.75),
+        won_deal_count: wonCount,
+        lost_deal_count: lostCount,
+        confidence: computeConfidence(wonCount, lostCount, useEmailTrack),
       };
     }
   }
@@ -241,60 +342,23 @@ export async function analyzeEngagementThresholds(
 
 /**
  * Compute open deal risk against computed thresholds.
+ *
+ * Threshold lookup order:
+ * 1. Exact match on deal's raw stage name (stage-specific threshold)
+ * 2. 'global' key (fallback global threshold for all stages)
+ * 3. No threshold → counted as healthy (no signal to assess)
  */
 export async function computeOpenDealRisk(
   workspaceId: string,
   thresholds: Record<string, EngagementThreshold>,
   maxCriticalDeals: number = 20
 ): Promise<OpenDealRiskResult> {
-  // Check signal availability
-  const signalCountResult = await query(
-    `SELECT COUNT(*) as signal_count
-     FROM activity_signals asig
-     WHERE asig.activity_id IN (
-       SELECT id FROM activities WHERE workspace_id = $1
-     )
-     AND asig.speaker_type IN ('prospect', 'rep')`,
-    [workspaceId]
-  );
+  const useEmailTrack = await checkEmailTrackAvailability(workspaceId);
+  const globalThreshold = thresholds['global'] ?? null;
 
-  const signalCount = parseInt(signalCountResult.rows[0]?.signal_count || '0', 10);
-  const useEmailTrack = signalCount >= 100;
+  const cteBase = buildTwoWayCTE(useEmailTrack);
 
-  // Build two-way engagement CTE for open deals
-  let twoWayTouchesCTE = `
-    WITH two_way_touches AS (
-      SELECT c.deal_id, MAX(c.call_date) as touch_at
-      FROM conversations c
-      WHERE c.workspace_id = $1
-        AND c.deal_id IS NOT NULL
-        AND c.resolved_participants @> '[{"role":"external"}]'
-      GROUP BY c.deal_id
-  `;
-
-  if (useEmailTrack) {
-    twoWayTouchesCTE += `
-      UNION ALL
-
-      SELECT a.deal_id, MAX(a.timestamp) as touch_at
-      FROM activities a
-      WHERE a.workspace_id = $1
-        AND a.deal_id IS NOT NULL
-        AND EXISTS (
-          SELECT 1 FROM activity_signals s
-          WHERE s.activity_id = a.id AND s.speaker_type = 'prospect'
-        )
-      GROUP BY a.deal_id
-    `;
-  }
-
-  twoWayTouchesCTE += `
-    ),
-    last_two_way AS (
-      SELECT deal_id, MAX(touch_at) as last_two_way_at
-      FROM two_way_touches
-      GROUP BY deal_id
-    ),
+  const openQuery = cteBase + `,
     open_deals AS (
       SELECT
         d.id,
@@ -317,7 +381,7 @@ export async function computeOpenDealRisk(
     ORDER BY amount DESC NULLS LAST
   `;
 
-  const result = await query(twoWayTouchesCTE, [workspaceId]);
+  const result = await query(openQuery, [workspaceId]);
 
   const critical: DealAtRisk[] = [];
   const warning: DealAtRisk[] = [];
@@ -327,17 +391,16 @@ export async function computeOpenDealRisk(
   let healthyValue = 0;
 
   for (const row of result.rows) {
-    const stage = row.stage;
-    const threshold = thresholds[stage];
-
-    // No engagement signal
+    // No engagement signal at all
     if (row.days_since_two_way === null) {
       noSignalCount++;
       noSignalValue += parseFloat(row.amount || '0');
       continue;
     }
 
-    // No threshold for this stage
+    // Threshold lookup: stage-specific → global → none
+    const threshold = thresholds[row.stage] ?? globalThreshold;
+
     if (!threshold) {
       healthyCount++;
       healthyValue += parseFloat(row.amount || '0');
@@ -346,7 +409,6 @@ export async function computeOpenDealRisk(
 
     const daysSinceEngagement = parseFloat(row.days_since_two_way);
 
-    // Critical: past threshold
     if (daysSinceEngagement >= threshold.threshold_days) {
       if (critical.length < maxCriticalDeals) {
         critical.push({
@@ -360,9 +422,7 @@ export async function computeOpenDealRisk(
           close_date: row.close_date,
         });
       }
-    }
-    // Warning: approaching threshold
-    else if (daysSinceEngagement >= threshold.warning_days) {
+    } else if (daysSinceEngagement >= threshold.warning_days) {
       warning.push({
         deal_id: row.id,
         name: row.name,
@@ -373,9 +433,7 @@ export async function computeOpenDealRisk(
         threshold_days: threshold.threshold_days,
         close_date: row.close_date,
       });
-    }
-    // Healthy
-    else {
+    } else {
       healthyCount++;
       healthyValue += parseFloat(row.amount || '0');
     }
@@ -415,34 +473,36 @@ export async function writeThresholdsToSystem(
   const stagesWritten: string[] = [];
 
   for (const [stage, threshold] of Object.entries(thresholds)) {
-    const questionId = `stale_threshold_${stage.toLowerCase().replace(/\s+/g, '_')}`;
+    const questionId = `stale_threshold_${stage.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`;
 
-    // Map confidence level to numeric score
     const confidenceScore =
       threshold.confidence === 'HIGH' ? 0.9 : threshold.confidence === 'MEDIUM' ? 0.7 : 0.5;
 
     const answer = {
-      stage: stage,
+      stage,
       threshold_days: threshold.threshold_days,
       warning_days: threshold.warning_days,
+      won_median_days: threshold.won_median_days,
+      lost_median_days: threshold.lost_median_days,
       based_on_deals: threshold.won_deal_count + threshold.lost_deal_count,
+      confidence: threshold.confidence,
     };
 
     await query(
       `INSERT INTO calibration_checklist
         (workspace_id, question_id, domain, question, status, answer, answer_source, confidence, updated_at, created_at)
-       VALUES ($1, $2, 'pipeline', $3, 'INFERRED', $4, 'COMPUTED', $5, NOW(), NOW())
+       VALUES ($1, $2, 'pipeline', $3, 'INFERRED', $4, 'CRM_SCAN', $5, NOW(), NOW())
        ON CONFLICT (workspace_id, question_id)
        DO UPDATE SET
          answer = EXCLUDED.answer,
          status = 'INFERRED',
-         answer_source = 'COMPUTED',
+         answer_source = 'CRM_SCAN',
          confidence = EXCLUDED.confidence,
          updated_at = NOW()`,
       [
         workspaceId,
         questionId,
-        `Engagement threshold for ${stage}`,
+        `Engagement silence threshold for ${stage} (${threshold.threshold_days}d)`,
         JSON.stringify(answer),
         confidenceScore,
       ]
