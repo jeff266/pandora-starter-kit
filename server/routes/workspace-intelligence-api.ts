@@ -15,16 +15,76 @@ import {
   invalidateWorkspaceIntelligence,
 } from '../lib/workspace-intelligence.js';
 import { getQuestionById } from '../lib/calibration-questions.js';
+import { SKILL_MANIFESTS } from '../lib/skill-manifests.js';
 
 const router = Router();
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function humanizeSkillId(skillId: string): string {
+  return skillId
+    .split('-')
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
+/**
+ * Transforms the internal skill_gates Record<id, status> into the array shape
+ * the Forward Deploy UI expects: [{skill_id, skill_name, status, missing_items}]
+ */
+function toSkillGatesArray(
+  skillGates: Record<string, string>
+): Array<{ skill_id: string; skill_name: string; status: 'LIVE' | 'DRAFT' | 'BLOCKED'; missing_items: string[] }> {
+  return Object.entries(skillGates).map(([skillId, status]) => ({
+    skill_id:     skillId,
+    skill_name:   humanizeSkillId(skillId),
+    status:       status as 'LIVE' | 'DRAFT' | 'BLOCKED',
+    missing_items: SKILL_MANIFESTS[skillId]?.required_checklist_items ?? [],
+  }));
+}
+
+/**
+ * Shapes the raw WI object into what the Forward Deploy UI expects:
+ * - skill_gates as an array
+ * - identity block with crm_type
+ * - pipeline.active_stages as [{name}] objects
+ */
+function shapeForUI(wi: any, crm_type: string | null = null): any {
+  const readiness = {
+    ...wi.readiness,
+    skill_gates: toSkillGatesArray(wi.readiness?.skill_gates ?? {}),
+  };
+
+  const active_stages_raw: string[] = wi.pipeline?.active_stages ?? [];
+  const pipeline = {
+    ...wi.pipeline,
+    active_stages: active_stages_raw.map((name: string) => ({ name })),
+  };
+
+  return {
+    ...wi,
+    identity: { crm_type },
+    pipeline,
+    readiness,
+  };
+}
+
 // ── GET /:workspaceId/intelligence ───────────────────────────────────────────
-// Returns the full WorkspaceIntelligence object for the workspace.
+// Returns the full WorkspaceIntelligence object shaped for the Forward Deploy UI.
 router.get('/:workspaceId/intelligence', async (req, res) => {
   try {
     const { workspaceId } = req.params;
     const wi = await resolveWorkspaceIntelligence(workspaceId);
-    res.json({ success: true, data: wi });
+
+    // Look up CRM type from workspace config
+    let crm_type: string | null = null;
+    try {
+      const { configLoader } = await import('../config/workspace-config-loader.js');
+      const config: any = await configLoader.getConfig(workspaceId);
+      crm_type = config?.data_infrastructure?.crm_type ?? config?.crm_type ?? null;
+    } catch { /* config optional */ }
+
+    res.json({ success: true, data: shapeForUI(wi, crm_type) });
   } catch (err: any) {
     console.error('[wi-api] GET intelligence failed:', err.message);
     res.status(500).json({ success: false, error: err.message });
@@ -32,12 +92,18 @@ router.get('/:workspaceId/intelligence', async (req, res) => {
 });
 
 // ── GET /:workspaceId/intelligence/readiness ──────────────────────────────────
-// Returns just the readiness portion (scores + gates + blocking gaps).
+// Returns just the readiness portion with skill_gates as an array.
 router.get('/:workspaceId/intelligence/readiness', async (req, res) => {
   try {
     const { workspaceId } = req.params;
     const wi = await resolveWorkspaceIntelligence(workspaceId);
-    res.json({ success: true, data: wi.readiness });
+    res.json({
+      success: true,
+      data: {
+        ...wi.readiness,
+        skill_gates: toSkillGatesArray(wi.readiness?.skill_gates ?? {}),
+      },
+    });
   } catch (err: any) {
     console.error('[wi-api] GET intelligence/readiness failed:', err.message);
     res.status(500).json({ success: false, error: err.message });
