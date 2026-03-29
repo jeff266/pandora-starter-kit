@@ -76,13 +76,29 @@ router.get('/:workspaceId/intelligence', async (req, res) => {
     const { workspaceId } = req.params;
     const wi = await resolveWorkspaceIntelligence(workspaceId);
 
-    // Look up CRM type from workspace config
+    // Look up CRM type — first from workspace config, then fall back to connections table
     let crm_type: string | null = null;
     try {
       const { configLoader } = await import('../config/workspace-config-loader.js');
       const config: any = await configLoader.getConfig(workspaceId);
       crm_type = config?.data_infrastructure?.crm_type ?? config?.crm_type ?? null;
     } catch { /* config optional */ }
+
+    if (!crm_type) {
+      try {
+        const connRow = await query<{ connector_name: string }>(
+          `SELECT connector_name FROM connections
+           WHERE workspace_id = $1
+             AND connector_name IN ('hubspot', 'salesforce')
+             AND status NOT IN ('error', 'disconnected')
+           LIMIT 1`,
+          [workspaceId]
+        );
+        if (connRow.rows[0]) {
+          crm_type = connRow.rows[0].connector_name === 'hubspot' ? 'HubSpot' : 'Salesforce';
+        }
+      } catch { /* connections lookup optional */ }
+    }
 
     res.json({ success: true, data: shapeForUI(wi, crm_type) });
   } catch (err: any) {

@@ -114,8 +114,9 @@ function Toast({ msg, type, onClose }: { msg: string; type: 'error' | 'success';
 
 // ─── Phase 1: Ingest ─────────────────────────────────────────────────────────
 
-function Phase1Ingest({ wi, onJumpToQuestion }: {
+function Phase1Ingest({ wi, calibration, onJumpToQuestion }: {
   wi: WI | null;
+  calibration: CalibrationData | null;
   onJumpToQuestion: (questionId: string) => void;
 }) {
   const [notes, setNotes] = useState('');
@@ -124,10 +125,16 @@ function Phase1Ingest({ wi, onJumpToQuestion }: {
   const crmType = wi?.identity?.crm_type ?? 'CRM';
   const activeStages = wi?.pipeline?.active_stages ?? [];
 
+  // Look up stage_history_tracked directly from calibration data
+  const stageHistoryQ = calibration?.domains?.pipeline?.questions?.find(
+    q => q.question_id === 'stage_history_tracked'
+  );
+  const stageHistoryOk = stageHistoryQ?.status === 'CONFIRMED' || stageHistoryQ?.status === 'INFERRED';
+
   const discoveries = [
     { ok: !!wi?.identity?.crm_type, label: `CRM Connected — ${crmType}`, questionId: null },
     { ok: activeStages.length > 0, label: `${activeStages.length} active pipeline stages detected`, questionId: 'pipeline_active_stages' },
-    { ok: (wi?.readiness.by_domain?.pipeline?.confirmed ?? 0) > 0, label: 'Stage history available', questionId: 'stage_history_tracked' },
+    { ok: stageHistoryOk, label: 'Stage history available', questionId: 'stage_history_tracked' },
     { ok: false, label: 'No segment field confirmed', questionId: 'primary_segment_field' },
     { ok: false, label: 'No deal type taxonomy confirmed', questionId: 'deal_type_field' },
     { ok: false, label: 'No revenue model configured', questionId: 'revenue_model' },
@@ -1227,7 +1234,7 @@ export default function ForwardDeployTab() {
       {/* Phase content */}
       <div style={{ marginBottom: 32 }}>
         {phase === 1 && (
-          <Phase1Ingest wi={wi} onJumpToQuestion={handleJumpToQuestion} />
+          <Phase1Ingest wi={wi} calibration={calibration} onJumpToQuestion={handleJumpToQuestion} />
         )}
         {phase === 2 && (
           <Phase2Checklist
