@@ -2261,6 +2261,7 @@ Cap tables at 10 rows — add "... and N more" if there are additional results.`
         if (r.is_manager) attrs.push('Manager');
         if (attrs.length) parts.push(`(${attrs.join(' · ')})`);
         if (r.email) parts.push(`<${r.email}>`);
+        if (r.manager_name) parts.push(`→ reports to ${r.manager_name}`);
         return `  ${parts.join(' ')}`;
       }).join('\n')
     : '  No sales roster configured';

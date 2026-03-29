@@ -47,6 +47,7 @@ export interface SalesRep {
   email: string | null;
   role: string | null;
   is_manager: boolean;
+  manager_name: string | null;
 }
 
 export interface ConfirmedDimension {
@@ -434,11 +435,18 @@ async function loadSalesReps(workspaceId: string): Promise<SalesRep[]> {
       email: string | null;
       role: string | null;
       is_manager: boolean;
+      manager_name: string | null;
     }>(
-      `SELECT rep_name AS name, rep_email AS email, pandora_role AS role, is_manager
-       FROM sales_reps
-       WHERE workspace_id = $1
-       ORDER BY is_manager DESC, rep_name ASC`,
+      `SELECT
+         sr.rep_name AS name,
+         sr.rep_email AS email,
+         sr.pandora_role AS role,
+         sr.is_manager,
+         mgr.rep_name AS manager_name
+       FROM sales_reps sr
+       LEFT JOIN sales_reps mgr ON mgr.id = sr.manager_rep_id
+       WHERE sr.workspace_id = $1
+       ORDER BY sr.is_manager DESC, sr.rep_name ASC`,
       [workspaceId]
     );
 
