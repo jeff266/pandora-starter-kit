@@ -3,7 +3,7 @@
  * Manage workflow automation rules and pending actions queue
  */
 
-import { Router, type Request, type Response } from 'express';
+import { Router, type Request, type Response, type NextFunction } from 'express';
 import { query } from '../db.js';
 import { createLogger } from '../utils/logger.js';
 import { requirePermission } from '../middleware/permissions.js';
@@ -146,11 +146,21 @@ router.post('/:workspaceId/workflow-rules',
  * GET /:workspaceId/workflow-rules/:ruleId
  * Get workflow rule detail
  */
+const RULE_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 router.get('/:workspaceId/workflow-rules/:ruleId',
   requirePermission('config.view'),
-  async (req: Request, res: Response): Promise<void> => {
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const { workspaceId, ruleId } = req.params as Record<string, string>;
+
+      // Non-UUID segments (e.g. "pending") belong to dedicated sub-routes
+      // registered after this wildcard. Call next() so Express can reach them
+      // instead of passing a non-UUID string to a Postgres UUID column.
+      if (!RULE_UUID_RE.test(ruleId)) {
+        next();
+        return;
+      }
 
       const result = await query(
         `SELECT * FROM workflow_rules WHERE workspace_id = $1 AND id = $2`,

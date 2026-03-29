@@ -456,7 +456,15 @@ export async function listAgents(
   return result.rows;
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export async function getAgent(agentId: string, workspaceId: string): Promise<Agent | null> {
+  // System agents have string IDs (e.g. 'pipeline-state') that are not UUIDs.
+  // The agents table uses a UUID primary key, so passing a non-UUID would throw
+  // "invalid input syntax for type uuid". Return null immediately for non-UUIDs —
+  // system agents exist only in the in-memory registry, not in the DB.
+  if (!UUID_RE.test(agentId)) return null;
+
   const result = await query<Agent>(
     'SELECT * FROM agents WHERE id=$1 AND workspace_id=$2',
     [agentId, workspaceId]
