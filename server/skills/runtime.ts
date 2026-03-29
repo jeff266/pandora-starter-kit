@@ -145,14 +145,24 @@ export class SkillRuntime {
 
     console.log(`[Skill Runtime] Starting ${skill.id} for workspace ${workspaceId}, runId: ${runId}`);
 
-    // Phase 9: Gate check - evaluate if skill can run based on WorkspaceIntelligence
+    // Phase 9+10: Gate check - evaluate if skill can run based on WorkspaceIntelligence
+    // and live calibration checklist data.
     let gateResult: any = null;
     try {
-      const wi = await resolveWorkspaceIntelligence(workspaceId);
+      const [wi, checklistResult] = await Promise.all([
+        resolveWorkspaceIntelligence(workspaceId),
+        query<{ question_id: string; status: string }>(
+          `SELECT question_id, status FROM calibration_checklist WHERE workspace_id = $1`,
+          [workspaceId]
+        ).catch(() => ({ rows: [] as { question_id: string; status: string }[] })),
+      ]);
+      const checklistRows = checklistResult.rows.map((r) => ({
+        question_id: r.question_id,
+        status: r.status,
+      }));
       const manifest = getSkillManifest(skill.id);
       if (manifest) {
-        // Pass empty checklist array for now - Phase 10 will wire in live checklist data
-        gateResult = evaluateSkillGate(manifest, [], wi);
+        gateResult = evaluateSkillGate(manifest, checklistRows, wi);
 
         if (gateResult.gate === 'BLOCKED') {
           console.log(`[Skill Runtime] Skill ${skill.id} BLOCKED: ${gateResult.missing_required.join(', ')}`);

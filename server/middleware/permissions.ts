@@ -86,16 +86,17 @@ export async function getWorkspaceMember(
  */
 export function requirePermission(permission: keyof PermissionSet) {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    // API key auth carries full workspace admin access — bypass permission check entirely.
+    // The workspace is already validated by requireWorkspaceAccess via the key itself.
+    if (req.authMethod === 'api_key') {
+      return next();
+    }
+
     const workspaceId = req.params.workspaceId as string;
-    
+
     if (!workspaceId) {
       res.status(400).json({ error: 'Missing workspaceId parameter' });
       return;
-    }
-
-    // Check if user is authenticated via API key (bypass permission check for API keys)
-    if (req.authMethod === 'api_key') {
-      return next();
     }
 
     const userId = req.user?.user_id;
@@ -170,16 +171,16 @@ export function requirePermission(permission: keyof PermissionSet) {
  */
 export function requireAnyPermission(...permissions: Array<keyof PermissionSet>) {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    // API key auth carries full workspace admin access — bypass permission check entirely.
+    if (req.authMethod === 'api_key') {
+      return next();
+    }
+
     const workspaceId = req.params.workspaceId as string;
-    
+
     if (!workspaceId) {
       res.status(400).json({ error: 'Missing workspaceId parameter' });
       return;
-    }
-
-    // Check if user is authenticated via API key (bypass permission check for API keys)
-    if (req.authMethod === 'api_key') {
-      return next();
     }
 
     const userId = req.user?.user_id;
@@ -250,8 +251,9 @@ export function requireAnyPermission(...permissions: Array<keyof PermissionSet>)
  */
 export function requireFeature(flagKey: string) {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    const workspaceId = req.params.workspaceId as string;
-    
+    // Resolve workspace ID from URL param or (for API key auth) from the resolved workspace.
+    const workspaceId = (req.params.workspaceId as string) || req.workspace?.id;
+
     if (!workspaceId) {
       res.status(400).json({ error: 'Missing workspaceId parameter' });
       return;
